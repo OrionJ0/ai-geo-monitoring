@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Op } = require('sequelize');
 const {
+  sequelize,
   BrandProject,
   BrandCompetitor,
   DetectionSchedule,
@@ -104,10 +105,50 @@ function canAccess(req, row) {
 async function normalizePromptGroupId(projectId, promptGroupId) {
   if (promptGroupId === undefined || promptGroupId === null || promptGroupId === '') return { value: null };
   const id = Number(promptGroupId);
-  if (!Number.isInteger(id) || id <= 0) return { error: 'Prompt 分组 ID 无效' };
+  if (!Number.isInteger(id) || id <= 0) return { error: '问题集 ID 无效' };
   const group = await PromptGroup.findOne({ where: { id, project_id: projectId } });
-  if (!group) return { error: 'Prompt 分组不存在或不属于该品牌项目' };
+  if (!group) return { error: '问题集不存在或不属于该品牌项目' };
   return { value: id };
+}
+
+function serializeQuestionSet(group) {
+  const row = group?.toJSON ? group.toJSON() : group;
+  const questions = (Array.isArray(row?.trackedPrompts) ? row.trackedPrompts : [])
+    .map((question) => (question?.toJSON ? question.toJSON() : question))
+    .sort((left, right) => Number(left.id || 0) - Number(right.id || 0));
+  return {
+    id: row.id,
+    project_id: row.project_id,
+    name: row.name,
+    description: row.description || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    question_count: questions.length,
+    enabled_question_count: questions.filter((question) => question.enabled !== false).length,
+    questions
+  };
+}
+
+async function loadQuestionSet(projectId, questionSetId, transaction) {
+  return PromptGroup.findOne({
+    where: { id: questionSetId, project_id: projectId },
+    include: [{ model: TrackedPrompt, as: 'trackedPrompts' }],
+    transaction
+  });
+}
+
+async function resolveQuestionSetQuestions(projectId, value, transaction) {
+  const selection = ProjectRunService.normalizeRunPromptIds(value);
+  if (!selection.ids.length) return { ids: [], questions: [] };
+  const questions = await TrackedPrompt.findAll({
+    where: { project_id: projectId, id: { [Op.in]: selection.ids } },
+    order: [['id', 'ASC']],
+    transaction
+  });
+  if (questions.length !== selection.ids.length) {
+    return { error: '选择的问题不存在或不属于该品牌项目' };
+  }
+  return { ids: selection.ids, questions };
 }
 
 async function loadProject(req, res, next) {
@@ -505,21 +546,178 @@ router.delete('/:projectId/competitors/:competitorId', loadProject, async (req, 
   }
 });
 
-router.post('/:projectId/prompt-groups', loadProject, async (req, res) => {
+router.get('/:projectId/question-sets', loadProject, async (req, res) => {
   try {
-    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改 Prompt 分组');
+    const groups = await PromptGroup.findAll({
+      where: { project_id: req.brandProject.id },
+      include: [{ model: TrackedPrompt, as: 'trackedPrompts' }],
+      order: [['updated_at', 'DESC']]
+    });
+    return res.json({ success: true, data: groups.map(serializeQuestionSet) });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: '获取问题集失败' });
+  }
+});
+
+router.post('/:projectId/question-sets', loadProject, async (req, res) => {
+  try {
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题集');
     if (archivedResponse) return archivedResponse;
     const name = String(req.body.name || '').trim();
-    if (!name) return res.status(400).json({ success: false, message: '分组名称不能为空' });
-    const group = await PromptGroup.create({
-      project_id: req.brandProject.id,
-      user_id: projectScopedUser(req).id,
-      name,
-      description: req.body.description ? String(req.body.description).trim() : null
+    if (!name) return res.status(400).json({ success: false, message: '问题集名称不能为空' });
+    const duplicate = await PromptGroup.findOne({ where: { project_id: req.brandProject.id, name } });
+    if (duplicate) return res.status(409).json({ success: false, message: '该项目已存在同名问题集' });
+
+    const createdId = await sequelize.transaction(async (transaction) => {
+      const selection = await resolveQuestionSetQuestions(req.brandProject.id, req.body.question_ids, transaction);
+      if (selection.error) {
+        const validationError = new Error(selection.error);
+        validationError.status = 400;
+        throw validationError;
+      }
+      const group = await PromptGroup.create({
+        project_id: req.brandProject.id,
+        user_id: projectScopedUser(req).id,
+        name,
+        description: req.body.description ? String(req.body.description).trim() : null
+      }, { transaction });
+      if (selection.ids.length) {
+        await TrackedPrompt.update(
+          { prompt_group_id: group.id },
+          { where: { project_id: req.brandProject.id, id: { [Op.in]: selection.ids } }, transaction }
+        );
+      }
+      return group.id;
     });
-    res.json({ success: true, message: 'Prompt 分组已创建', data: group });
+    const group = await loadQuestionSet(req.brandProject.id, createdId);
+    return res.status(201).json({ success: true, message: '问题集已创建', data: serializeQuestionSet(group) });
   } catch (error) {
-    res.status(500).json({ success: false, message: '创建 Prompt 分组失败' });
+    if (error?.status === 400) return res.status(400).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: '创建问题集失败' });
+  }
+});
+
+router.patch('/:projectId/question-sets/:questionSetId', loadProject, async (req, res) => {
+  try {
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题集');
+    if (archivedResponse) return archivedResponse;
+    const questionSetId = Number(req.params.questionSetId);
+    if (!Number.isInteger(questionSetId) || questionSetId <= 0) {
+      return res.status(400).json({ success: false, message: '问题集 ID 无效' });
+    }
+    const group = await PromptGroup.findOne({
+      where: { id: questionSetId, project_id: req.brandProject.id }
+    });
+    if (!group) return res.status(404).json({ success: false, message: '问题集不存在' });
+
+    const payload = {};
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name || '').trim();
+      if (!name) return res.status(400).json({ success: false, message: '问题集名称不能为空' });
+      const duplicate = await PromptGroup.findOne({
+        where: { project_id: req.brandProject.id, name, id: { [Op.ne]: questionSetId } }
+      });
+      if (duplicate) return res.status(409).json({ success: false, message: '该项目已存在同名问题集' });
+      payload.name = name;
+    }
+    if (req.body.description !== undefined) {
+      payload.description = String(req.body.description || '').trim() || null;
+    }
+
+    await sequelize.transaction(async (transaction) => {
+      if (req.body.question_ids !== undefined) {
+        const selection = await resolveQuestionSetQuestions(req.brandProject.id, req.body.question_ids, transaction);
+        if (selection.error) {
+          const validationError = new Error(selection.error);
+          validationError.status = 400;
+          throw validationError;
+        }
+        await TrackedPrompt.update(
+          { prompt_group_id: null },
+          { where: { project_id: req.brandProject.id, prompt_group_id: questionSetId }, transaction }
+        );
+        if (selection.ids.length) {
+          await TrackedPrompt.update(
+            { prompt_group_id: questionSetId },
+            { where: { project_id: req.brandProject.id, id: { [Op.in]: selection.ids } }, transaction }
+          );
+        }
+      }
+      if (Object.keys(payload).length) await group.update(payload, { transaction });
+    });
+
+    const updated = await loadQuestionSet(req.brandProject.id, questionSetId);
+    return res.json({ success: true, message: '问题集已更新', data: serializeQuestionSet(updated) });
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: '更新问题集失败' });
+  }
+});
+
+router.delete('/:projectId/question-sets/:questionSetId', loadProject, async (req, res) => {
+  try {
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题集');
+    if (archivedResponse) return archivedResponse;
+    const questionSetId = Number(req.params.questionSetId);
+    if (!Number.isInteger(questionSetId) || questionSetId <= 0) {
+      return res.status(400).json({ success: false, message: '问题集 ID 无效' });
+    }
+    const group = await PromptGroup.findOne({
+      where: { id: questionSetId, project_id: req.brandProject.id }
+    });
+    if (!group) return res.status(404).json({ success: false, message: '问题集不存在' });
+
+    await sequelize.transaction(async (transaction) => {
+      await TrackedPrompt.update(
+        { prompt_group_id: null },
+        { where: { project_id: req.brandProject.id, prompt_group_id: questionSetId }, transaction }
+      );
+      await group.destroy({ transaction });
+    });
+    return res.json({ success: true, message: '问题集已删除' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: '删除问题集失败' });
+  }
+});
+
+router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (req, res) => {
+  try {
+    if (!ProjectRunService.isRunnableProject(req.brandProject.toJSON())) {
+      return res.status(400).json({ success: false, message: '归档项目不能运行分析' });
+    }
+    const questionSetId = Number(req.params.questionSetId);
+    if (!Number.isInteger(questionSetId) || questionSetId <= 0) {
+      return res.status(400).json({ success: false, message: '问题集 ID 无效' });
+    }
+    const group = await PromptGroup.findOne({
+      where: { id: questionSetId, project_id: req.brandProject.id }
+    });
+    if (!group) return res.status(404).json({ success: false, message: '问题集不存在' });
+
+    const questions = await TrackedPrompt.findAll({
+      where: {
+        project_id: req.brandProject.id,
+        prompt_group_id: questionSetId,
+        enabled: true
+      },
+      order: [['id', 'ASC']]
+    });
+    if (!questions.length) {
+      return res.status(400).json({ success: false, message: '问题集中没有可运行的启用问题' });
+    }
+    const result = await ProjectRunService.enqueueProjectRun({
+      project: req.brandProject,
+      prompts: questions.map((item) => item.toJSON()),
+      platforms: cleanPlatforms(req.brandProject.platforms),
+      user: req.user,
+      promptSelectionExplicit: true
+    });
+    if (!result.ok) {
+      return res.status(result.status || 400).json({ success: false, message: result.message, data: result.data });
+    }
+    return res.status(result.status || 202).json({ success: true, message: result.message, data: result.data });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: '运行问题集失败' });
   }
 });
 
@@ -556,6 +754,12 @@ router.get('/:projectId/prompts', loadProject, async (req, res) => {
       const row = prompt.toJSON();
       return {
         ...row,
+        question_set_id: row.prompt_group_id || null,
+        question_set: row.group ? {
+          id: row.group.id,
+          name: row.group.name,
+          description: row.group.description || null
+        } : null,
         category: ProjectRunService.derivePromptCategory(row)
       };
     });
@@ -642,7 +846,10 @@ router.post('/:projectId/prompts', loadProject, async (req, res) => {
     if (duplicate) {
       return res.status(409).json({ success: false, message: '该项目已存在相同 Prompt', data: { duplicate_id: duplicate.id } });
     }
-    const groupResult = await normalizePromptGroupId(req.brandProject.id, req.body.prompt_group_id);
+    const questionSetId = req.body.question_set_id !== undefined
+      ? req.body.question_set_id
+      : req.body.prompt_group_id;
+    const groupResult = await normalizePromptGroupId(req.brandProject.id, questionSetId);
     if (groupResult.error) return res.status(400).json({ success: false, message: groupResult.error });
     const platformResult = PlatformSelectionService.validateWithinProject(req.body.platforms, req.brandProject.platforms);
     if (!platformResult.ok) return platformValidationError(res, platformResult);
@@ -678,8 +885,11 @@ router.put('/:projectId/prompts/:promptId', loadProject, async (req, res) => {
       }
       payload.question = question;
     }
-    if (req.body.prompt_group_id !== undefined) {
-      const groupResult = await normalizePromptGroupId(req.brandProject.id, req.body.prompt_group_id);
+    if (req.body.question_set_id !== undefined || req.body.prompt_group_id !== undefined) {
+      const questionSetId = req.body.question_set_id !== undefined
+        ? req.body.question_set_id
+        : req.body.prompt_group_id;
+      const groupResult = await normalizePromptGroupId(req.brandProject.id, questionSetId);
       if (groupResult.error) return res.status(400).json({ success: false, message: groupResult.error });
       payload.prompt_group_id = groupResult.value;
     }
