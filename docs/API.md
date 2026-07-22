@@ -70,6 +70,9 @@ Authorization: Bearer <token>
 - `POST /api/seo-audits` 检测一个公开 HTML 页面
   - 请求体：`url` 必填，可省略 `http://` 或 `https://`
   - 返回：新保存的 `auditId`、最终 URL、状态码、响应时间、0–100 基础分、问题统计、优先修复项、六类检查结果与搜索/分享预览
+  - 检查项：每项包含 `title`（检查对象）、`finding`（具体发现）、`status`、`severity`、`value`（检测事实）、`description`（影响）和 `recommendation`（建议）
+  - 内容有效性：`robots.txt` 和 Sitemap 必须含有效内容；Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 与图片 Alt 不会因空标签而通过；`robots.txt` 中声明的自定义 Sitemap 会被实际抓取并校验
+  - 搜索平台标签：识别常见 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不能识别 DNS 或验证文件方式
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：拒绝带用户名/密码的网址、本机和私网 IP、解析到私网的域名，以及重定向到私网的目标；最多跟随 5 次重定向，超时 10 秒，页面响应体上限 2 MB
 - `GET /api/seo-audits` 分页获取当前用户的检测历史摘要
@@ -97,8 +100,8 @@ Authorization: Bearer <token>
     "statusCode": 200,
     "score": 82,
     "summary": {
-      "total": 19,
-      "passed": 15,
+      "total": 21,
+      "passed": 17,
       "issues": 4,
       "critical": 0,
       "high": 1,
