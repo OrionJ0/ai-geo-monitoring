@@ -9,11 +9,13 @@ import {
   ClockCircleOutlined,
   ExclamationCircleFilled,
   GlobalOutlined,
+  HistoryOutlined,
   SafetyCertificateOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import SeoAuditHistoryDrawer from './SeoAuditHistoryDrawer';
 import styles from './seo-audit.module.css';
 
 const SEVERITY_LABELS = {
@@ -69,6 +71,8 @@ export default function SeoAuditPage() {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   const visibleCategories = useMemo(() => {
     if (!report?.categories) return [];
@@ -86,6 +90,7 @@ export default function SeoAuditPage() {
       const response = await axios.post('/api/seo-audits', { url });
       setReport(response?.data?.data || null);
       setFilter('all');
+      setHistoryRefreshKey((value) => value + 1);
       message.success('SEO 检测完成');
     } catch (error) {
       message.error(getApiErrorMessage(error, 'SEO 检测失败，请稍后重试'));
@@ -94,9 +99,24 @@ export default function SeoAuditPage() {
     }
   };
 
+  const openHistoricalReport = (historicalReport) => {
+    if (!historicalReport) return;
+    setReport(historicalReport);
+    setFilter('all');
+    if (historicalReport.finalUrl) form.setFieldValue('url', historicalReport.finalUrl);
+    message.success('已打开历史报告');
+  };
+
   return (
     <main className={styles.page}>
       <section className={styles.hero} aria-labelledby="seo-audit-title">
+        <Button
+          className={styles.historyButton}
+          icon={<HistoryOutlined />}
+          onClick={() => setHistoryOpen(true)}
+        >
+          历史报告
+        </Button>
         <div className={styles.heroCopy}>
           <span className={styles.eyebrow}><SearchOutlined /> 单页关键项诊断</span>
           <h1 id="seo-audit-title">先找出最影响搜索表现的问题</h1>
@@ -131,9 +151,17 @@ export default function SeoAuditPage() {
         </Form>
         <div className={styles.scopeNote}>
           <SafetyCertificateOutlined aria-hidden="true" />
-          当前检测单个公开页面的 19 项关键 SEO 基础项，不抓取登录页，也不会保存页面内容。
+          当前检测单个公开页面的 19 项关键 SEO 基础项；报告会保存在当前账户，不保存抓取的页面正文。
         </div>
       </section>
+
+      <SeoAuditHistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onOpenReport={openHistoricalReport}
+        currentAuditId={report?.auditId}
+        refreshKey={historyRefreshKey}
+      />
 
       {loading && !report && (
         <section className={styles.loadingPanel} aria-live="polite">
@@ -169,7 +197,7 @@ export default function SeoAuditPage() {
         <div className={styles.report} aria-live="polite" aria-busy={loading}>
           <section className={styles.reportMeta}>
             <div>
-              <span>检测页面</span>
+              <span>{report.auditId ? `检测报告 #${report.auditId}` : '检测页面'}</span>
               <a href={report.finalUrl} target="_blank" rel="noreferrer">{report.finalUrl}</a>
             </div>
             <dl>
