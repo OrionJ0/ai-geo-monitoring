@@ -26,6 +26,7 @@ test('GEO side navigation exposes only the new workspace modules plus notice and
     '/geo/projects',
     '/geo/prompts',
     '/geo/project-dashboard',
+    '/geo/seo-audit',
     '/geo/sources',
     '/geo/reports',
     '/geo/alerts',
