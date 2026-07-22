@@ -311,7 +311,7 @@
 .priorityItem {
   position: relative;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 20px;
+  grid-template-columns: 34px minmax(0, 1fr);
   gap: 14px;
   align-items: start;
   padding: 18px 14px 18px 18px;
@@ -341,19 +341,56 @@
 
 .priorityTitle strong {
   color: var(--ink);
-  font-size: 15px;
+  font-size: 17px;
+  letter-spacing: -0.012em;
 }
 
-.priorityItem p {
-  margin: 6px 0 0;
+.prioritySubject,
+.checkSubject {
+  color: #738096;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.priorityTitle {
+  margin-top: 4px;
+}
+
+.priorityFact,
+.checkFact {
+  display: grid;
+  gap: 4px;
+  margin-top: 11px;
+  padding: 9px 11px;
+  border-left: 2px solid #9fb4df;
+  background: #f6f8fc;
+}
+
+.priorityFact > span,
+.checkFact > span {
+  color: #6b7890;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.priorityFact p,
+.checkFact p {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #334155;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.priorityRecommendation {
+  margin: 8px 0 0;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.priorityArrow {
-  margin-top: 3px;
-  color: #9aa7ba;
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .severityBadge {
@@ -530,32 +567,38 @@
 .passedIcon { color: #15803d; }
 .failedIcon { color: #dc2626; }
 
-.checkTitle strong {
-  color: var(--ink);
-  font-size: 14px;
+.passedBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 21px;
+  padding: 2px 7px;
+  border: 1px solid #15803d;
+  border-radius: 3px;
+  background: #f0fdf4;
+  color: #15803d;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 }
 
-.checkValue {
+.checkFinding {
   display: block;
-  overflow: hidden;
-  margin-top: 5px;
-  color: #475569;
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-top: 6px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.45;
 }
 
-.checkRow p {
-  margin: 7px 0 0;
+.checkImpact,
+.checkRow .recommendation {
+  margin: 8px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.55;
 }
 
 .checkRow .recommendation {
-  color: #334155;
-  font-weight: 560;
+  color: #526078;
 }
 
 .emptyFilter {

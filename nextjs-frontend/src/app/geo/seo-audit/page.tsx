@@ -4,7 +4,6 @@
 import React, { useMemo, useState } from 'react';
 import { Button, Form, Input, Progress, Segmented, Spin, message } from 'antd';
 import {
-  ArrowRightOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
   ExclamationCircleFilled,
@@ -31,6 +30,47 @@ const FILTER_OPTIONS = [
   { label: '一般问题', value: 'normal' },
   { label: '已通过', value: 'passed' },
 ];
+
+const LEGACY_FAILED_FINDINGS = {
+  'http-status': '页面无法正常访问',
+  indexability: '页面被禁止索引',
+  https: '页面未使用 HTTPS',
+  'robots-txt': 'robots.txt 缺失或不可用',
+  sitemap: 'Sitemap 缺失或不可用',
+  canonical: 'Canonical 链接缺失',
+  'heading-order': '标题层级存在跳级',
+  'content-depth': '页面正文内容较少',
+  'crawlable-links': '未发现可抓取链接',
+  viewport: 'Viewport 配置缺失或无效',
+  language: '页面语言声明缺失',
+  'structured-data': 'JSON-LD 结构化数据缺失',
+  'open-graph': 'Open Graph 信息不完整',
+  'twitter-card': 'Twitter Card 缺失',
+  'response-time': '服务器响应偏慢',
+  'html-size': 'HTML 体积偏大',
+};
+
+function getCheckFinding(check) {
+  if (check.finding) return check.finding;
+  if (check.status === 'passed') return '符合检查要求';
+
+  if (check.id === 'title') {
+    return /未设置|0\s*字符/.test(check.value || '') ? '页面标题缺失' : '页面标题长度需要优化';
+  }
+  if (check.id === 'meta-description') {
+    return /未设置|0\s*字符/.test(check.value || '') ? 'Meta 描述缺失' : 'Meta 描述长度需要优化';
+  }
+  if (check.id === 'h1') {
+    return /(^|\D)0\s*个/.test(check.value || '') ? '缺少 H1' : 'H1 数量需要优化';
+  }
+  if (check.id === 'image-alt') {
+    const match = String(check.value || '').match(/(\d+)\s*\/\s*(\d+)/);
+    if (match) return `${Math.max(0, Number(match[2]) - Number(match[1]))} 张图片缺少有效 Alt`;
+    return '部分图片缺少有效 Alt';
+  }
+
+  return LEGACY_FAILED_FINDINGS[check.id] || `${check.title}未通过`;
+}
 
 function scoreColor(score) {
   if (score >= 80) return '#15803d';
@@ -151,7 +191,7 @@ export default function SeoAuditPage() {
         </Form>
         <div className={styles.scopeNote}>
           <SafetyCertificateOutlined aria-hidden="true" />
-          当前检测单个公开页面的 19 项关键 SEO 基础项；报告会保存在当前账户，不保存抓取的页面正文。
+          当前检测单个公开页面的关键技术 SEO 项；报告会保存在当前账户，不保存抓取的页面正文。
         </div>
       </section>
 
@@ -226,13 +266,19 @@ export default function SeoAuditPage() {
                     <li key={item.id} className={`${styles.priorityItem} ${styles[`rail_${item.severity}`]}`}>
                       <span className={styles.priorityNumber}>{String(index + 1).padStart(2, '0')}</span>
                       <div>
+                        <span className={styles.prioritySubject}>{item.title}</span>
                         <div className={styles.priorityTitle}>
-                          <strong>{item.title}</strong>
+                          <strong>{getCheckFinding(item)}</strong>
                           <SeverityBadge severity={item.severity} />
                         </div>
-                        <p>{item.recommendation}</p>
+                        <div className={styles.priorityFact}>
+                          <span>检测事实</span>
+                          <p>{item.value || '未返回事实数据'}</p>
+                        </div>
+                        {item.recommendation && (
+                          <p className={styles.priorityRecommendation}>建议：{item.recommendation}</p>
+                        )}
                       </div>
-                      <ArrowRightOutlined className={styles.priorityArrow} aria-hidden="true" />
                     </li>
                   ))}
                 </ol>
@@ -251,7 +297,7 @@ export default function SeoAuditPage() {
                 format={(value) => <span className={styles.scoreValue}>{value}</span>}
               />
               <strong>{scoreCopy(report.score)}</strong>
-              <p>按 19 项基础检查的重要性加权计算</p>
+              <p>按 {report.summary.total} 项基础检查的重要性加权计算</p>
               <div className={styles.scoreStats}>
                 <div><span>{report.summary.passed}</span><small>已通过</small></div>
                 <div><span>{report.summary.critical + report.summary.high}</span><small>优先处理</small></div>
@@ -296,11 +342,19 @@ export default function SeoAuditPage() {
                           : <ExclamationCircleFilled className={styles.failedIcon} aria-label="未通过" />}
                         <div>
                           <div className={styles.checkTitle}>
-                            <strong>{check.title}</strong>
-                            {check.status === 'failed' && <SeverityBadge severity={check.severity} />}
+                            <span className={styles.checkSubject}>{check.title}</span>
+                            {check.status === 'failed'
+                              ? <SeverityBadge severity={check.severity} />
+                              : <span className={styles.passedBadge}>通过</span>}
                           </div>
-                          <span className={styles.checkValue}>{check.value}</span>
-                          <p>{check.description}</p>
+                          <strong className={styles.checkFinding}>
+                            {getCheckFinding(check)}
+                          </strong>
+                          <div className={styles.checkFact}>
+                            <span>检测事实</span>
+                            <p>{check.value || '未返回事实数据'}</p>
+                          </div>
+                          <p className={styles.checkImpact}>影响：{check.description}</p>
                           {check.recommendation && <p className={styles.recommendation}>建议：{check.recommendation}</p>}
                         </div>
                       </div>

@@ -29,3 +29,23 @@ test('SEO audit page exposes paginated history and reopens complete reports', ()
   assert.match(historySource, /get\(`\/api\/seo-audits\/\$\{auditId\}`/);
   assert.match(historySource, /查看报告/);
 });
+
+test('SEO audit results separate the finding, evidence and recommendation', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /getCheckFinding\(check\)/);
+  assert.match(source, /getCheckFinding\(item\)/);
+  assert.match(source, /检测事实/);
+  assert.match(source, /建议：/);
+  assert.match(source, /report\.summary\.total/);
+});
+
+test('legacy SEO reports translate failed check labels into problem findings', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /LEGACY_FAILED_FINDINGS/);
+  assert.match(source, /页面标题长度需要优化/);
+  assert.match(source, /缺少 H1/);
+  assert.match(source, /张图片缺少有效 Alt/);
+  assert.match(source, /JSON-LD 结构化数据缺失/);
+});
