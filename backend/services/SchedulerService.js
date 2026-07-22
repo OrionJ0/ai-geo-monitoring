@@ -50,7 +50,7 @@ async function validateScheduleProject(schedule, repositories = {}) {
     const promptData = prompt?.toJSON ? prompt.toJSON() : prompt;
     if (!promptData || promptData.enabled === false) {
       await schedule.update?.({ enabled: false });
-      return { ok: false, reason: 'Prompt 已停用或不存在' };
+      return { ok: false, reason: '问题已停用或不存在' };
     }
   }
   return { ok: true, project: projectData };

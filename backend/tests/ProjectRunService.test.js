@@ -93,7 +93,7 @@ test('reports selected prompt availability separately from api key availability'
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.equal(result.message, '选择的 Prompt 不存在或已停用');
+  assert.equal(result.message, '选择的问题不存在或已停用');
 });
 
 test('reports prompt and project platform mismatch separately from api key availability', async () => {
@@ -106,7 +106,7 @@ test('reports prompt and project platform mismatch separately from api key avail
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.equal(result.message, 'Prompt 的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置');
+  assert.equal(result.message, '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置');
 });
 
 test('rejects explicit project runs when any selected prompt has no project platform overlap', async () => {
@@ -123,7 +123,7 @@ test('rejects explicit project runs when any selected prompt has no project plat
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.equal(result.message, 'Prompt 的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置');
+  assert.equal(result.message, '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置');
 });
 
 test('builds keyword stats list from brand, aliases and brand product terms', () => {

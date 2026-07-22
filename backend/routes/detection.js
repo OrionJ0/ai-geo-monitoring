@@ -56,9 +56,9 @@ async function resolveProjectContext(req, source) {
     user: req.user,
     source,
     messages: {
-      promptRequiresProject: '使用 Prompt 检测时必须提供 project_id',
+      promptRequiresProject: '使用问题检测时必须提供 project_id',
       archivedProject: '归档项目不能运行检测',
-      disabledPrompt: '停用 Prompt 不能运行检测'
+      disabledPrompt: '停用问题不能运行检测'
     }
   });
 }
@@ -135,7 +135,7 @@ router.post('/create', authRequired, async (req, res) => {
       const platformResult = ScheduleProjectContextService.validatePlatformsWithinContext(
         platforms,
         projectContext,
-        '检测平台必须包含在项目或 Prompt 的监测平台内'
+        '检测平台必须包含在项目或问题的监测平台内'
       );
       if (!platformResult.ok) {
         return res.status(400).json({
@@ -171,7 +171,7 @@ router.post('/create', authRequired, async (req, res) => {
       if (platforms.length === 0) {
         return res.status(400).json({
           success: false,
-          message: projectContext.project_id ? '当前项目或 Prompt 没有可用的监测平台' : '当前没有可用的监测平台，请联系管理员处理'
+          message: projectContext.project_id ? '当前项目或问题没有可用的监测平台' : '当前没有可用的监测平台，请联系管理员处理'
         });
       }
     }

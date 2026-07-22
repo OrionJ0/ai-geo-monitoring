@@ -257,3 +257,43 @@ test('新建单问题时可以选择所属问题集，问题列表返回问题�
   assert.equal(createdQuestion.question_set_id, questionSetId);
   assert.equal(createdQuestion.question_set.name, '单问题归属测试集');
 });
+
+test('旧分组创建路径继续兼容并返回问题集术语', async () => {
+  const response = await requestRoute('post', '/:projectId/prompt-groups', {
+    params: { projectId: project.id },
+    body: { name: '兼容路径问题集', question_ids: [] }
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.payload.success, true);
+  assert.equal(response.payload.message, '问题集已创建');
+  assert.equal(response.payload.data.name, '兼容路径问题集');
+});
+
+test('问题集拒绝混入非法成员 ID 而不是静默忽略', async () => {
+  const before = await PromptGroup.count({ where: { project_id: project.id } });
+  const question = await TrackedPrompt.findOne({ where: { project_id: project.id } });
+  const response = await requestRoute('post', '/:projectId/question-sets', {
+    params: { projectId: project.id },
+    body: {
+      name: '非法成员问题集',
+      question_ids: [question.id, 'invalid-id']
+    }
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.payload.success, false);
+  assert.match(response.payload.message, /问题 ID/);
+  assert.equal(await PromptGroup.count({ where: { project_id: project.id } }), before);
+});
+
+test('问题集名称遵守数据模型的 120 字符边界', async () => {
+  const response = await requestRoute('post', '/:projectId/question-sets', {
+    params: { projectId: project.id },
+    body: { name: '问'.repeat(121), question_ids: [] }
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.payload.success, false);
+  assert.match(response.payload.message, /120/);
+});

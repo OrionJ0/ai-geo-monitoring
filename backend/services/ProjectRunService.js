@@ -15,7 +15,7 @@ const { consumeQuotaDirect } = require('../middleware/quota');
 
 const MAINLAND_PLATFORMS = ['doubao', 'deepseek'];
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
-const PLATFORM_MISMATCH_MESSAGE = 'Prompt 的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置';
+const PLATFORM_MISMATCH_MESSAGE = '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置';
 
 function countKeywordOccurrences(text, keywords) {
   const list = Array.isArray(keywords) ? keywords.filter(Boolean) : [];
@@ -302,12 +302,12 @@ class ProjectRunService {
     const targets = this.buildPromptTargets(prompts, AIPlatformService.getAvailablePlatforms(), projectPlatforms);
     if (!targets.length) {
       if (promptSelectionExplicit && !(Array.isArray(prompts) && prompts.length)) {
-        return { ok: false, status: 400, message: '选择的 Prompt 不存在或已停用' };
+        return { ok: false, status: 400, message: '选择的问题不存在或已停用' };
       }
       if (Array.isArray(prompts) && prompts.length && !this.hasPromptProjectPlatformOverlap(prompts, projectPlatforms)) {
         return { ok: false, status: 400, message: PLATFORM_MISMATCH_MESSAGE };
       }
-      return { ok: false, status: 400, message: '没有可运行的启用 Prompt，或监测平台暂不可用' };
+      return { ok: false, status: 400, message: '没有可运行的启用问题，或监测平台暂不可用' };
     }
 
     const quota = await this.consumeRunQuota(runUser.id, targets.length);

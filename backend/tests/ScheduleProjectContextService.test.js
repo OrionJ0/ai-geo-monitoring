@@ -56,7 +56,7 @@ test('validates detection platforms within the selected project or prompt scope'
   });
 
   assert.equal(invalid.ok, false);
-  assert.match(invalid.message, /项目或 Prompt/);
+  assert.match(invalid.message, /项目或问题/);
 });
 
 test('defaults project detection platforms to available platforms inside the project scope', () => {
@@ -103,7 +103,7 @@ test('rejects schedules for disabled prompts', async () => {
   });
 
   assert.deepEqual(context, {
-    error: { status: 400, message: '停用 Prompt 不能创建或更新定时任务' }
+    error: { status: 400, message: '停用问题不能创建或更新定时任务' }
   });
 });
 

@@ -62,7 +62,7 @@ test('builds prioritized optimization opportunities from prompt, metric and sour
   });
 
   assert.equal(opportunities.some((item) => item.type === '低品牌可见度' && item.prompt_id === 1 && item.priority === 'high'), true);
-  assert.equal(opportunities.some((item) => item.type === '未运行 Prompt' && item.prompt_id === 2 && item.priority === 'medium'), true);
+  assert.equal(opportunities.some((item) => item.type === '未运行问题' && item.prompt_id === 2 && item.priority === 'medium'), true);
   assert.equal(opportunities.some((item) => item.type === '竞品压制' && item.prompt_id === 1 && item.competitor === '马牌'), true);
   assert.equal(opportunities.some((item) => item.type === '负向情绪' && item.prompt_id === 1), true);
   assert.equal(opportunities.some((item) => item.type === '竞品来源缺口' && item.domain === 'competitor.cn'), true);
@@ -145,7 +145,7 @@ test('uses the selected analysis window in unrun prompt evidence', () => {
     metrics: []
   });
 
-  assert.equal(opportunities[0].type, '未运行 Prompt');
+  assert.equal(opportunities[0].type, '未运行问题');
   assert.match(opportunities[0].evidence, /近 7 天/);
 });
 
@@ -161,7 +161,7 @@ test('derives opportunity categories from prompt tags when category is not store
     metrics: []
   });
 
-  assert.equal(opportunities[0].type, '未运行 Prompt');
+  assert.equal(opportunities[0].type, '未运行问题');
   assert.equal(opportunities[0].prompt_category, '购买决策');
 });
 
@@ -221,7 +221,7 @@ test('surfaces failed prompt runs instead of treating them as unrun', () => {
     metrics: []
   });
 
-  assert.equal(opportunities.some((item) => item.type === '未运行 Prompt'), false);
+  assert.equal(opportunities.some((item) => item.type === '未运行问题'), false);
   const failure = opportunities.find((item) => item.type === '运行失败');
   assert.ok(failure);
   assert.equal(failure.priority, 'high');
@@ -241,7 +241,7 @@ test('surfaces completed prompt runs without metrics as missing analysis data', 
     metrics: []
   });
 
-  assert.equal(opportunities.some((item) => item.type === '未运行 Prompt'), false);
+  assert.equal(opportunities.some((item) => item.type === '未运行问题'), false);
   const missing = opportunities.find((item) => item.type === '分析数据缺失');
   assert.ok(missing);
   assert.equal(missing.priority, 'high');

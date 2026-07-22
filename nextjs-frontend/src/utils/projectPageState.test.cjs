@@ -32,9 +32,9 @@ test('project page only lets the latest project run update navigation and loadin
   assert.match(source, /if \(projectRunRequestRef\.current === requestId\) setRunningProjectId\(null\)/);
 });
 
-test('project page distinguishes platform-mismatched prompts from missing prompts', () => {
+test('project page distinguishes platform-mismatched questions from missing questions', () => {
   assert.match(source, /getProjectPromptRunBlockReason/);
-  assert.match(source, /Prompt 的监测平台与项目监测平台不一致/);
+  assert.match(source, /问题的监测平台与项目监测平台不一致/);
   assert.match(source, /请检查品牌项目监测平台设置/);
 });
 

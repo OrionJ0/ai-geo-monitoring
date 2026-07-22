@@ -81,7 +81,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['分类覆盖'],
-    ['分类', 'Prompt 数', '启用 Prompt 数', '运行数', '失败数', '失败率', '有效分析数', '品牌提及率', '平均声量占比（SOV）', '引用率', '推荐率'],
+    ['分类', '问题数', '启用问题数', '运行数', '失败数', '失败率', '有效分析数', '品牌提及率', '平均声量占比（SOV）', '引用率', '推荐率'],
     ...categories.map((item) => [
       item.category || '未分类',
       item.prompt_count || 0,
@@ -126,7 +126,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['Top 引用域名'],
-    ['域名', '来源类型', '覆盖回答', '引用次数', '平台', 'Prompt 分类'],
+    ['域名', '来源类型', '覆盖回答', '引用次数', '平台', '问题分类'],
     ...sourceDomains.map((item) => [
       item.domain || '',
       item.source_type || '未知来源',
@@ -137,7 +137,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['Top 引用 URL'],
-    ['URL', '域名', '来源类型', '覆盖回答', '引用次数', '平台', 'Prompt 分类'],
+    ['URL', '域名', '来源类型', '覆盖回答', '引用次数', '平台', '问题分类'],
     ...sourceUrls.map((item) => [
       item.url || '',
       item.domain || '',
@@ -149,7 +149,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['新增引用域名'],
-    ['域名', '来源类型', '引用次数', '平台', 'Prompt 分类'],
+    ['域名', '来源类型', '引用次数', '平台', '问题分类'],
     ...newDomains.map((item) => [
       item.domain || '',
       item.source_type || '未知来源',
@@ -159,7 +159,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['流失引用域名'],
-    ['域名', '来源类型', '引用次数', '平台', 'Prompt 分类'],
+    ['域名', '来源类型', '引用次数', '平台', '问题分类'],
     ...droppedDomains.map((item) => [
       item.domain || '',
       item.source_type || '未知来源',
@@ -169,7 +169,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['保留引用域名'],
-    ['域名', '来源类型', '引用次数', '平台', 'Prompt 分类'],
+    ['域名', '来源类型', '引用次数', '平台', '问题分类'],
     ...retainedDomains.map((item) => [
       item.domain || '',
       item.source_type || '未知来源',
@@ -179,7 +179,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['新增引用 URL'],
-    ['URL', '域名', '来源类型', '引用次数', '平台', 'Prompt 分类'],
+    ['URL', '域名', '来源类型', '引用次数', '平台', '问题分类'],
     ...newUrls.map((item) => [
       item.url || '',
       item.domain || '',
@@ -190,7 +190,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['流失引用 URL'],
-    ['URL', '域名', '来源类型', '引用次数', '平台', 'Prompt 分类'],
+    ['URL', '域名', '来源类型', '引用次数', '平台', '问题分类'],
     ...droppedUrls.map((item) => [
       item.url || '',
       item.domain || '',
@@ -201,7 +201,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['保留引用 URL'],
-    ['URL', '域名', '来源类型', '引用次数', '平台', 'Prompt 分类'],
+    ['URL', '域名', '来源类型', '引用次数', '平台', '问题分类'],
     ...retainedUrls.map((item) => [
       item.url || '',
       item.domain || '',

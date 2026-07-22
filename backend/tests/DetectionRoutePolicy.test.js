@@ -9,7 +9,7 @@ test('legacy detection route limits explicit platform selections to mainland mon
   assert.match(routeSource, /MAINLAND_MONITORING_PLATFORMS/);
   assert.match(routeSource, /filter\(p => MAINLAND_MONITORING_PLATFORMS\.includes\(p\)\)/);
   assert.match(routeSource, /validatePlatformsWithinContext\(/);
-  assert.match(routeSource, /检测平台必须包含在项目或 Prompt 的监测平台内/);
+  assert.match(routeSource, /检测平台必须包含在项目或问题的监测平台内/);
 });
 
 test('legacy detection route defaults only to mainland monitoring platforms', () => {

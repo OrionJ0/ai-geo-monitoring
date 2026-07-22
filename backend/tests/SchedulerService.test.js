@@ -240,7 +240,7 @@ test('disables prompt schedules when the tracked prompt is disabled', async () =
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.reason, 'Prompt 已停用或不存在');
+  assert.equal(result.reason, '问题已停用或不存在');
   assert.deepEqual(updates, [{ enabled: false }]);
 });
 
@@ -266,7 +266,7 @@ test('advances project monitoring schedule after a failed project run attempt', 
   });
   TrackedPrompt.findAll = async () => [{ toJSON: () => ({ id: 3, question: '静音轮胎怎么选', enabled: true }) }];
   User.findByPk = async () => ({ id: 9, role: 'user' });
-  ProjectRunService.runProject = async () => ({ ok: false, status: 400, message: '没有可运行的启用 Prompt' });
+  ProjectRunService.runProject = async () => ({ ok: false, status: 400, message: '没有可运行的启用问题' });
 
   try {
     const result = await SchedulerService.runProjectNow(2);

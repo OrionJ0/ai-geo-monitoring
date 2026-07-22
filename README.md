@@ -10,8 +10,8 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 ### 项目可见度看板
 ![项目可见度看板](docs/images/readme-dashboard.png)
 
-### Prompt 库管理
-![Prompt 库管理](docs/images/readme-prompts.png)
+### 问题库管理
+![问题库管理](docs/images/readme-prompts.png)
 
 ### 情绪判断与最近指标
 ![情绪判断与最近指标](docs/images/readme-sentiment.png)
@@ -27,9 +27,10 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 - 豆包联网搜索调用与引用来源提取
 - 品牌提及率、Share of Voice、引用率、竞品曝光分析
 - AI 回答情绪判断，支持正向、中性、负向标签与风险项沉淀
-- Prompt 库管理、分类、平台选择与历史结果追踪
+- 问题库管理、分类、平台选择与历史结果追踪
+- 问题集管理：可将多个问题组成集合并同时加入运行队列，同时保留单问题独立运行
 - 单页 SEO 关键项检测：执行 21 项内容有效性检查，按“具体问题、检测事实、小字建议”和严重程度输出修复队列，并按抓取、页面信息、内容、体验、结构化数据和基础性能分类展示；每次成功检测按账户保存，可分页查看并重新打开完整历史报告
-- 引用来源按自有来源、竞品来源、第三方来源聚合分析，并保留域名、URL、平台、Prompt 分类和出现时间
+- 引用来源按自有来源、竞品来源、第三方来源聚合分析，并保留域名、URL、平台、问题分类和出现时间
 - 用户登录、权限、会员等级与额度管理
 - 管理后台：用户、任务、会员、系统配置与运行记录管理
 - 本地 SQLite 自动初始化，生产环境支持外部 Postgres 数据库
@@ -50,7 +51,7 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 - GEO / AEO / AI Search Optimization 数据分析
 - 生成式搜索引擎中的竞品曝光研究
 - AI 平台回答内容、情绪倾向与引用来源的长期追踪
-- Prompt 表现、平台差异与优化机会分析
+- 问题表现、平台差异与优化机会分析
 
 ## 当前架构
 

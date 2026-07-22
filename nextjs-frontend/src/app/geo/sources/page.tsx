@@ -163,7 +163,7 @@ export default function GeoSourcesPage() {
     { title: '引用次数', dataIndex: 'citation_count', width: 100, render: (value) => Number(value || 0), sorter: (a, b) => Number(a.citation_count || 0) - Number(b.citation_count || 0) },
     { title: '覆盖回答', dataIndex: 'response_count', width: 100, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
-    { title: 'Prompt 分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
+    { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
   ];
 
   const urlColumns = [
@@ -183,7 +183,7 @@ export default function GeoSourcesPage() {
     },
     { title: '引用次数', dataIndex: 'citation_count', width: 100, render: (value) => Number(value || 0), sorter: (a, b) => Number(a.citation_count || 0) - Number(b.citation_count || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
-    { title: 'Prompt 分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
+    { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
   ];
 
   const sourceChangeColumns = [
@@ -196,7 +196,7 @@ export default function GeoSourcesPage() {
     },
     { title: '引用次数', dataIndex: 'citation_count', width: 100, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
-    { title: 'Prompt 分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
+    { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
     { title: '最近出现', dataIndex: 'last_seen_at', width: 180, render: formatDate },
   ];
 
@@ -217,13 +217,13 @@ export default function GeoSourcesPage() {
     },
     { title: '引用次数', dataIndex: 'citation_count', width: 100, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
-    { title: 'Prompt 分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
+    { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
     { title: '最近出现', dataIndex: 'last_seen_at', width: 180, render: formatDate },
   ];
 
   const opportunityColumns = [
     { title: '平台', dataIndex: 'platform', width: 110, render: (value) => platformLabel[value] || value || '-' },
-    { title: 'Prompt 分类', dataIndex: 'prompt_category', width: 140, render: (value) => value || '未分类' },
+    { title: '问题分类', dataIndex: 'prompt_category', width: 140, render: (value) => value || '未分类' },
     { title: '域名', dataIndex: 'domain', width: 180, ellipsis: true },
     {
       title: 'URL',

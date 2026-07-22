@@ -50,9 +50,9 @@ test('prompt page resets list filters when switching projects', () => {
   assert.match(source, /setPromptCategoryFilter\('all'\)/);
 });
 
-test('prompt page disables single prompt runs when project and prompt platforms do not overlap', () => {
+test('question library disables single-question runs when project and question platforms do not overlap', () => {
   assert.match(source, /getProjectPromptRunBlockReason/);
-  assert.match(source, /Prompt 的监测平台与项目监测平台不一致/);
+  assert.match(source, /问题的监测平台与项目监测平台不一致/);
   assert.match(source, /请检查品牌项目监测平台设置/);
   assert.match(source, /getPromptRunDisabledReason\(row\)/);
   assert.match(source, /disabled=\{!!getPromptRunDisabledReason\(row\)\}/);

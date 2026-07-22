@@ -78,18 +78,18 @@ class OpportunityInsightService {
             prompt: prompt.question,
             prompt_category: PromptCategoryService.derive(prompt),
             evidence: `近 ${analysisDays} 天运行 ${totalRuns} 次但暂无有效分析数据`,
-            recommendation: '先重新运行该 Prompt，并确认回答内容完整；恢复有效分析后再判断可见度表现'
+            recommendation: '先重新运行该问题，并确认回答内容完整；恢复有效分析后再判断可见度表现'
           });
           continue;
         }
         add({
-          type: '未运行 Prompt',
+          type: '未运行问题',
           priority: 'medium',
           prompt_id: prompt.id,
           prompt: prompt.question,
           prompt_category: PromptCategoryService.derive(prompt),
           evidence: `近 ${analysisDays} 天没有有效分析数据`,
-          recommendation: '先运行该 Prompt，补齐样本后再判断可见度表现'
+          recommendation: '先运行该问题，补齐样本后再判断可见度表现'
         });
         continue;
       }
@@ -104,7 +104,7 @@ class OpportunityInsightService {
           prompt: prompt.question,
           prompt_category: PromptCategoryService.derive(prompt),
           evidence: `近 ${analysisDays} 天仅 ${checks} 次有效分析`,
-          recommendation: '继续运行该 Prompt，至少形成 3 次以上样本后再判断可见度是否稳定'
+          recommendation: '继续运行该问题，至少形成 3 次以上样本后再判断可见度是否稳定'
         });
       }
 
@@ -278,7 +278,7 @@ class OpportunityInsightService {
             prompt_category: group.prompt_category,
             platform,
             evidence: `${this.formatPlatform(platform)}暂无有效分析样本`,
-            recommendation: `检查 ${this.formatPlatform(platform)} 是否已纳入该 Prompt 的运行范围，并补齐该平台样本后再比较平台表现`
+            recommendation: `检查 ${this.formatPlatform(platform)} 是否已纳入该问题的运行范围，并补齐该平台样本后再比较平台表现`
           });
         }
       }

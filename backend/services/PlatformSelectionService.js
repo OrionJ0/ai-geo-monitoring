@@ -36,7 +36,7 @@ class PlatformSelectionService {
         ok: false,
         platforms: [],
         invalid_platforms: invalid,
-        message: `Prompt 监测平台必须包含在项目监测平台内：${allowedPlatforms.map((item) => PLATFORM_LABELS[item]).join('、')}`
+        message: `问题监测平台必须包含在项目监测平台内：${allowedPlatforms.map((item) => PLATFORM_LABELS[item]).join('、')}`
       };
     }
 

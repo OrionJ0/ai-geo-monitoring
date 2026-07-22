@@ -322,8 +322,8 @@ export default function GeoProjectDashboardPage() {
 
   const categoryColumns = [
     { title: '分类', dataIndex: 'category' },
-    { title: 'Prompt 数', dataIndex: 'prompt_count', width: 100, render: (value) => Number(value || 0) },
-    { title: '启用 Prompt', dataIndex: 'enabled_prompt_count', width: 110, render: (value) => Number(value || 0) },
+    { title: '问题数', dataIndex: 'prompt_count', width: 100, render: (value) => Number(value || 0) },
+    { title: '启用问题', dataIndex: 'enabled_prompt_count', width: 110, render: (value) => Number(value || 0) },
     { title: '运行数', dataIndex: 'total_runs', width: 90, render: (value) => Number(value || 0) },
     { title: '失败数', dataIndex: 'failed_runs', width: 90, render: (value) => Number(value || 0) },
     { title: '失败率', dataIndex: 'failure_rate', width: 90, render: (value) => `${percent(value)}%` },
@@ -356,7 +356,7 @@ export default function GeoProjectDashboardPage() {
     { title: '引用次数', dataIndex: 'citation_count', width: 100, render: (value) => Number(value || 0) },
     { title: '覆盖回答', dataIndex: 'response_count', width: 100, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
-    { title: 'Prompt 分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
+    { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
   ];
 
   const sourceChangeColumns = [
@@ -369,7 +369,7 @@ export default function GeoProjectDashboardPage() {
     },
     { title: '引用次数', dataIndex: 'citation_count', width: 100, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
-    { title: 'Prompt 分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
+    { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
     { title: '最近出现', dataIndex: 'last_seen_at', width: 170, render: formatDate },
   ];
 
@@ -391,7 +391,7 @@ export default function GeoProjectDashboardPage() {
     { title: '引用次数', dataIndex: 'citation_count', width: 100, render: (value) => Number(value || 0) },
     { title: '覆盖回答', dataIndex: 'response_count', width: 100, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
-    { title: 'Prompt 分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
+    { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
   ];
 
   const opportunityColumns = [
@@ -569,7 +569,7 @@ export default function GeoProjectDashboardPage() {
             </Card>
           </Col>
           <Col xs={24}>
-            <Card size="small" title="Prompt 库分类覆盖" loading={dashboardLoading}>
+            <Card size="small" title="问题库分类覆盖" loading={dashboardLoading}>
               <Table
                 size="small"
                 rowKey={(row) => row.category}

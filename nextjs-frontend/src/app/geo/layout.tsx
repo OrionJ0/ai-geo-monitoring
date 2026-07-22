@@ -57,7 +57,7 @@ export default function GeoLayout({
   // 面包屑配置
   const breadcrumbMap: Record<string, { path: string; label: string }> = {
     '/projects': { path: `${basePath}/projects`, label: '品牌项目' },
-    '/prompts': { path: `${basePath}/prompts`, label: 'Prompt 库' },
+    '/prompts': { path: `${basePath}/prompts`, label: '问题库' },
     '/project-dashboard': { path: `${basePath}/project-dashboard`, label: '项目看板' },
     '/seo-audit': { path: `${basePath}/seo-audit`, label: 'SEO 检测' },
     '/sources': { path: `${basePath}/sources`, label: '来源分析' },
@@ -77,7 +77,7 @@ export default function GeoLayout({
   // 菜单项配置
   const menuItems = [
     { key: '/projects', label: <Link href="/geo/projects">品牌项目</Link> },
-    { key: '/prompts', label: <Link href="/geo/prompts">Prompt 库</Link> },
+    { key: '/prompts', label: <Link href="/geo/prompts">问题库</Link> },
     { key: '/project-dashboard', label: <Link href="/geo/project-dashboard">项目看板</Link> },
     { key: '/seo-audit', label: <Link href="/geo/seo-audit">SEO 检测</Link> },
     { key: '/sources', label: <Link href="/geo/sources">来源分析</Link> },

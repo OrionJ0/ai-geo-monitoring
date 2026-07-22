@@ -46,6 +46,6 @@ test('report page renders platform and category context for source change tables
 
   assert.match(domainBlock, /title:\s*'平台'/);
   assert.match(domainBlock, /dataIndex:\s*'platforms'/);
-  assert.match(domainBlock, /title:\s*'Prompt 分类'/);
+  assert.match(domainBlock, /title:\s*'问题分类'/);
   assert.match(domainBlock, /dataIndex:\s*'categories'/);
 });

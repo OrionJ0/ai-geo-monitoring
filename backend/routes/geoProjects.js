@@ -138,17 +138,25 @@ async function loadQuestionSet(projectId, questionSetId, transaction) {
 }
 
 async function resolveQuestionSetQuestions(projectId, value, transaction) {
-  const selection = ProjectRunService.normalizeRunPromptIds(value);
-  if (!selection.ids.length) return { ids: [], questions: [] };
+  if (value === undefined || value === null || value === '') return { ids: [], questions: [] };
+  const rawIds = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' ? value.split(/[,，;；\n]/) : [value]);
+  const normalizedIds = rawIds.map((item) => Number(String(item || '').trim()));
+  if (normalizedIds.some((id) => !Number.isInteger(id) || id <= 0)) {
+    return { error: '问题 ID 无效' };
+  }
+  const ids = Array.from(new Set(normalizedIds));
+  if (!ids.length) return { ids: [], questions: [] };
   const questions = await TrackedPrompt.findAll({
-    where: { project_id: projectId, id: { [Op.in]: selection.ids } },
+    where: { project_id: projectId, id: { [Op.in]: ids } },
     order: [['id', 'ASC']],
     transaction
   });
-  if (questions.length !== selection.ids.length) {
+  if (questions.length !== ids.length) {
     return { error: '选择的问题不存在或不属于该品牌项目' };
   }
-  return { ids: selection.ids, questions };
+  return { ids, questions };
 }
 
 async function loadProject(req, res, next) {
@@ -165,14 +173,14 @@ async function loadProject(req, res, next) {
 
 async function batchDeletePrompts(req, res) {
   try {
-    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改 Prompt');
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题');
     if (archivedResponse) return archivedResponse;
     const ids = asArray(req.body.prompt_ids || req.body.ids)
       .map((item) => Number(item))
       .filter((item) => Number.isInteger(item) && item > 0);
     const uniqueIds = Array.from(new Set(ids));
     if (!uniqueIds.length) {
-      return res.status(400).json({ success: false, message: '请选择需要删除的 Prompt' });
+      return res.status(400).json({ success: false, message: '请选择需要删除的问题' });
     }
     const matchedRows = await TrackedPrompt.findAll({
       where: {
@@ -194,11 +202,11 @@ async function batchDeletePrompts(req, res) {
     }
     return res.json({
       success: true,
-      message: `已删除 ${matchedIds.length} 条 Prompt`,
+      message: `已删除 ${matchedIds.length} 个问题`,
       data: { deleted: matchedIds.length, requested: uniqueIds.length }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: '批量删除 Prompt 失败' });
+    return res.status(500).json({ success: false, message: '批量删除问题失败' });
   }
 }
 
@@ -559,12 +567,13 @@ router.get('/:projectId/question-sets', loadProject, async (req, res) => {
   }
 });
 
-router.post('/:projectId/question-sets', loadProject, async (req, res) => {
+async function createQuestionSet(req, res) {
   try {
     const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题集');
     if (archivedResponse) return archivedResponse;
     const name = String(req.body.name || '').trim();
     if (!name) return res.status(400).json({ success: false, message: '问题集名称不能为空' });
+    if (name.length > 120) return res.status(400).json({ success: false, message: '问题集名称不能超过 120 个字符' });
     const duplicate = await PromptGroup.findOne({ where: { project_id: req.brandProject.id, name } });
     if (duplicate) return res.status(409).json({ success: false, message: '该项目已存在同名问题集' });
 
@@ -595,7 +604,10 @@ router.post('/:projectId/question-sets', loadProject, async (req, res) => {
     if (error?.status === 400) return res.status(400).json({ success: false, message: error.message });
     return res.status(500).json({ success: false, message: '创建问题集失败' });
   }
-});
+}
+
+router.post('/:projectId/question-sets', loadProject, createQuestionSet);
+router.post('/:projectId/prompt-groups', loadProject, createQuestionSet);
 
 router.patch('/:projectId/question-sets/:questionSetId', loadProject, async (req, res) => {
   try {
@@ -614,6 +626,7 @@ router.patch('/:projectId/question-sets/:questionSetId', loadProject, async (req
     if (req.body.name !== undefined) {
       const name = String(req.body.name || '').trim();
       if (!name) return res.status(400).json({ success: false, message: '问题集名称不能为空' });
+      if (name.length > 120) return res.status(400).json({ success: false, message: '问题集名称不能超过 120 个字符' });
       const duplicate = await PromptGroup.findOne({
         where: { project_id: req.brandProject.id, name, id: { [Op.ne]: questionSetId } }
       });
@@ -776,17 +789,17 @@ router.get('/:projectId/prompts', loadProject, async (req, res) => {
       }))
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: '获取 Prompt 失败' });
+    res.status(500).json({ success: false, message: '获取问题失败' });
   }
 });
 
 router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
   try {
-    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能生成 Prompt 建议');
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能生成问题建议');
     if (archivedResponse) return archivedResponse;
     const platform = 'deepseek';
     if (!AIPlatformService.platforms.deepseek?.apiKey) {
-      return res.status(400).json({ success: false, message: 'Prompt 建议暂不可用，请联系管理员处理' });
+      return res.status(400).json({ success: false, message: '问题建议暂不可用，请联系管理员处理' });
     }
 
     const [competitors, existingPrompts] = await Promise.all([
@@ -813,17 +826,17 @@ router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
       maxBrandQuestionRatio: 0.15
     });
     if (!generation.success) {
-      return res.status(502).json({ success: false, message: 'Prompt 建议生成失败，请稍后重试' });
+      return res.status(502).json({ success: false, message: '问题建议生成失败，请稍后重试' });
     }
 
     const suggestions = generation.suggestions;
     if (!suggestions.length) {
-      return res.status(502).json({ success: false, message: 'Prompt 建议暂不可用，请稍后重试' });
+      return res.status(502).json({ success: false, message: '问题建议暂不可用，请稍后重试' });
     }
 
     res.json({
       success: true,
-      message: 'Prompt 建议已生成',
+      message: '问题建议已生成',
       data: {
         platform,
         requested_count: requestedCount,
@@ -832,19 +845,19 @@ router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: '生成 Prompt 建议失败' });
+    res.status(500).json({ success: false, message: '生成问题建议失败' });
   }
 });
 
 router.post('/:projectId/prompts', loadProject, async (req, res) => {
   try {
-    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改 Prompt');
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题');
     if (archivedResponse) return archivedResponse;
     const question = String(req.body.question || '').trim();
-    if (!question) return res.status(400).json({ success: false, message: 'Prompt 问题不能为空' });
+    if (!question) return res.status(400).json({ success: false, message: '问题内容不能为空' });
     const duplicate = await TrackedPromptService.findDuplicatePrompt(req.brandProject.id, question);
     if (duplicate) {
-      return res.status(409).json({ success: false, message: '该项目已存在相同 Prompt', data: { duplicate_id: duplicate.id } });
+      return res.status(409).json({ success: false, message: '该项目已存在相同问题', data: { duplicate_id: duplicate.id } });
     }
     const questionSetId = req.body.question_set_id !== undefined
       ? req.body.question_set_id
@@ -863,25 +876,25 @@ router.post('/:projectId/prompts', loadProject, async (req, res) => {
       enabled: req.body.enabled !== false
     });
     await invalidateGeneratedReports(req.brandProject.id);
-    res.json({ success: true, message: 'Prompt 已创建', data: prompt });
+    res.json({ success: true, message: '问题已创建', data: prompt });
   } catch (error) {
-    res.status(500).json({ success: false, message: '创建 Prompt 失败' });
+    res.status(500).json({ success: false, message: '创建问题失败' });
   }
 });
 
 router.put('/:projectId/prompts/:promptId', loadProject, async (req, res) => {
   try {
-    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改 Prompt');
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题');
     if (archivedResponse) return archivedResponse;
     const prompt = await TrackedPrompt.findOne({ where: { id: req.params.promptId, project_id: req.brandProject.id } });
-    if (!prompt) return res.status(404).json({ success: false, message: 'Prompt 不存在' });
+    if (!prompt) return res.status(404).json({ success: false, message: '问题不存在' });
     const payload = {};
     if (req.body.question != null) {
       const question = String(req.body.question || '').trim();
-      if (!question) return res.status(400).json({ success: false, message: 'Prompt 问题不能为空' });
+      if (!question) return res.status(400).json({ success: false, message: '问题内容不能为空' });
       const duplicate = await TrackedPromptService.findDuplicatePrompt(req.brandProject.id, question, prompt.id);
       if (duplicate) {
-        return res.status(409).json({ success: false, message: '该项目已存在相同 Prompt', data: { duplicate_id: duplicate.id } });
+        return res.status(409).json({ success: false, message: '该项目已存在相同问题', data: { duplicate_id: duplicate.id } });
       }
       payload.question = question;
     }
@@ -909,9 +922,9 @@ router.put('/:projectId/prompts/:promptId', loadProject, async (req, res) => {
     await prompt.update(payload);
     if (analysisFieldsChanged) await deletePromptAnalysisData(req.brandProject.id, [prompt.id]);
     else if (promptVisibilityChanged) await invalidateGeneratedReports(req.brandProject.id);
-    res.json({ success: true, message: 'Prompt 已更新', data: prompt });
+    res.json({ success: true, message: '问题已更新', data: prompt });
   } catch (error) {
-    res.status(500).json({ success: false, message: '更新 Prompt 失败' });
+    res.status(500).json({ success: false, message: '更新问题失败' });
   }
 });
 
@@ -920,17 +933,17 @@ router.delete('/:projectId/prompts/batch', loadProject, batchDeletePrompts);
 
 router.delete('/:projectId/prompts/:promptId', loadProject, async (req, res) => {
   try {
-    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改 Prompt');
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题');
     if (archivedResponse) return archivedResponse;
     const promptId = Number(req.params.promptId);
     if (!Number.isInteger(promptId) || promptId <= 0) {
-      return res.status(400).json({ success: false, message: 'Prompt ID 无效' });
+      return res.status(400).json({ success: false, message: '问题 ID 无效' });
     }
     await deletePromptAnalysisData(req.brandProject.id, [promptId]);
     const deleted = await TrackedPrompt.destroy({ where: { id: promptId, project_id: req.brandProject.id } });
-    res.json({ success: true, message: deleted ? 'Prompt 已删除' : 'Prompt 不存在' });
+    res.json({ success: true, message: deleted ? '问题已删除' : '问题不存在' });
   } catch (error) {
-    res.status(500).json({ success: false, message: '删除 Prompt 失败' });
+    res.status(500).json({ success: false, message: '删除问题失败' });
   }
 });
 
@@ -942,13 +955,13 @@ router.post('/:projectId/run', loadProject, async (req, res) => {
     const where = { project_id: req.brandProject.id, enabled: true };
     const promptSelection = ProjectRunService.normalizeRunPromptIds(req.body.prompt_ids);
     if (promptSelection.explicit && !promptSelection.ids.length) {
-      return res.status(400).json({ success: false, message: '请选择需要运行的 Prompt' });
+      return res.status(400).json({ success: false, message: '请选择需要运行的问题' });
     }
     if (promptSelection.ids.length) where.id = { [Op.in]: promptSelection.ids };
 
     const prompts = await TrackedPrompt.findAll({ where, order: [['updated_at', 'DESC']] });
     if (promptSelection.explicit && prompts.length !== promptSelection.ids.length) {
-      return res.status(400).json({ success: false, message: '选择的 Prompt 不存在或已停用' });
+      return res.status(400).json({ success: false, message: '选择的问题不存在或已停用' });
     }
     const result = await ProjectRunService.enqueueProjectRun({
       project: req.brandProject,
@@ -974,7 +987,7 @@ router.post('/:projectId/prompts/:promptId/run', loadProject, async (req, res) =
     const prompt = await TrackedPrompt.findOne({
       where: { id: req.params.promptId, project_id: req.brandProject.id, enabled: true }
     });
-    if (!prompt) return res.status(404).json({ success: false, message: 'Prompt 不存在或已停用' });
+    if (!prompt) return res.status(404).json({ success: false, message: '问题不存在或已停用' });
     const result = await ProjectRunService.runProject({
       project: req.brandProject,
       prompts: [prompt.toJSON()],
@@ -986,14 +999,14 @@ router.post('/:projectId/prompts/:promptId/run', loadProject, async (req, res) =
     }
     return res.json({ success: true, message: result.message, data: result.data });
   } catch (error) {
-    return res.status(500).json({ success: false, message: '运行 Prompt 分析失败' });
+    return res.status(500).json({ success: false, message: '运行问题分析失败' });
   }
 });
 
 router.get('/:projectId/prompts/:promptId/history', loadProject, async (req, res) => {
   try {
     const prompt = await TrackedPrompt.findOne({ where: { id: req.params.promptId, project_id: req.brandProject.id } });
-    if (!prompt) return res.status(404).json({ success: false, message: 'Prompt 不存在' });
+    if (!prompt) return res.status(404).json({ success: false, message: '问题不存在' });
     const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
     const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
     const rows = await QuestionRecord.findAll({
@@ -1011,7 +1024,7 @@ router.get('/:projectId/prompts/:promptId/history', loadProject, async (req, res
     });
     return res.json({ success: true, data: rows });
   } catch (error) {
-    return res.status(500).json({ success: false, message: '获取 Prompt 历史失败' });
+    return res.status(500).json({ success: false, message: '获取问题历史失败' });
   }
 });
 

@@ -54,23 +54,23 @@ test('exports source domain context needed for report review', () => {
     }
   });
 
-  assert.match(csv, /域名,来源类型,覆盖回答,引用次数,平台,Prompt 分类/);
+  assert.match(csv, /域名,来源类型,覆盖回答,引用次数,平台,问题分类/);
   assert.match(csv, /example\.com,自有来源,2,3,豆包、DeepSeek,购买决策、竞品对比/);
-  assert.match(csv, /Top 引用 URL\nURL,域名,来源类型,覆盖回答,引用次数,平台,Prompt 分类/);
+  assert.match(csv, /Top 引用 URL\nURL,域名,来源类型,覆盖回答,引用次数,平台,问题分类/);
   assert.match(csv, /来源类型\n类型,引用次数,覆盖回答,域名数/);
   assert.match(csv, /媒体内容,4,3,2/);
   assert.match(csv, /https:\/\/example\.com\/guide,example\.com,第三方来源,1,2,DeepSeek,购买决策/);
-  assert.match(csv, /新增引用域名\n域名,来源类型,引用次数,平台,Prompt 分类/);
+  assert.match(csv, /新增引用域名\n域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /new\.com,第三方来源,1,DeepSeek,购买决策/);
-  assert.match(csv, /流失引用域名\n域名,来源类型,引用次数,平台,Prompt 分类/);
+  assert.match(csv, /流失引用域名\n域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /old\.com,竞品来源,2,豆包,竞品对比/);
-  assert.match(csv, /保留引用域名\n域名,来源类型,引用次数,平台,Prompt 分类/);
+  assert.match(csv, /保留引用域名\n域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /kept\.com,自有来源,3,豆包、DeepSeek,购买决策/);
-  assert.match(csv, /新增引用 URL\nURL,域名,来源类型,引用次数,平台,Prompt 分类/);
+  assert.match(csv, /新增引用 URL\nURL,域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /https:\/\/new\.com\/page,new\.com,第三方来源,1,DeepSeek,购买决策/);
-  assert.match(csv, /流失引用 URL\nURL,域名,来源类型,引用次数,平台,Prompt 分类/);
+  assert.match(csv, /流失引用 URL\nURL,域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /https:\/\/old\.com\/page,old\.com,竞品来源,2,豆包,竞品对比/);
-  assert.match(csv, /保留引用 URL\nURL,域名,来源类型,引用次数,平台,Prompt 分类/);
+  assert.match(csv, /保留引用 URL\nURL,域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /https:\/\/kept\.com\/page,kept\.com,自有来源,3,豆包、DeepSeek,购买决策/);
 });
 
@@ -148,7 +148,7 @@ test('exports category level run failures in report csv', () => {
     }
   });
 
-  assert.match(csv, /分类,Prompt 数,启用 Prompt 数,运行数,失败数,失败率,有效分析数/);
+  assert.match(csv, /分类,问题数,启用问题数,运行数,失败数,失败率,有效分析数/);
   assert.match(csv, /购买决策,4,3,10,2,20%,8,75%,42\.5%,50%,25%/);
 });
 

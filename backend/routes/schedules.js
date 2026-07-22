@@ -32,13 +32,13 @@ router.post('/', authRequired, async (req, res) => {
         projectContext
       );
       if (!Array.isArray(platforms) || platforms.length === 0) {
-        return res.status(400).json({ success: false, message: projectContext.project_id ? '当前项目或 Prompt 没有可用的监测平台' : '当前没有可用的监测平台，请联系管理员处理' });
+        return res.status(400).json({ success: false, message: projectContext.project_id ? '当前项目或问题没有可用的监测平台' : '当前没有可用的监测平台，请联系管理员处理' });
       }
     } else {
       const platformResult = ScheduleProjectContextService.validatePlatformsWithinContext(
         platforms,
         projectContext,
-        '定时任务平台必须包含在项目或 Prompt 的监测平台内'
+        '定时任务平台必须包含在项目或问题的监测平台内'
       );
       if (!platformResult.ok) {
         return res.status(400).json({ success: false, message: platformResult.message || '定时任务仅支持豆包和 DeepSeek' });
@@ -144,7 +144,7 @@ router.put('/:id', authRequired, async (req, res) => {
       const platformResult = ScheduleProjectContextService.validatePlatformsWithinContext(
         platforms,
         platformContext,
-        '定时任务平台必须包含在项目或 Prompt 的监测平台内'
+        '定时任务平台必须包含在项目或问题的监测平台内'
       );
       if (!platformResult.ok) {
         return res.status(400).json({ success: false, message: platformResult.message || '定时任务仅支持豆包和 DeepSeek' });

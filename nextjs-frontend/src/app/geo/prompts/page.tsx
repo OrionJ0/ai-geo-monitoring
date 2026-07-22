@@ -57,8 +57,8 @@ const periodOptions = [
 ];
 
 const promptRunBlockMessages = {
-  no_enabled_prompt: 'Prompt 已停用，启用后才能运行',
-  platform_mismatch: 'Prompt 的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置'
+  no_enabled_prompt: '问题已停用，启用后才能运行',
+  platform_mismatch: '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置'
 };
 
 const formatDateTimeShort = (value) => {
@@ -91,11 +91,17 @@ export default function GeoPromptsPage() {
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [prompts, setPrompts] = useState([]);
+  const [questionSets, setQuestionSets] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [promptsLoading, setPromptsLoading] = useState(false);
+  const [questionSetsLoading, setQuestionSetsLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(null);
   const [runningPromptId, setRunningPromptId] = useState(null);
+  const [questionSetModalOpen, setQuestionSetModalOpen] = useState(false);
+  const [editingQuestionSet, setEditingQuestionSet] = useState(null);
+  const [savingQuestionSet, setSavingQuestionSet] = useState(false);
+  const [runningQuestionSetId, setRunningQuestionSetId] = useState(null);
   const [selectedPromptIds, setSelectedPromptIds] = useState([]);
   const [promptSearch, setPromptSearch] = useState('');
   const [promptStatusFilter, setPromptStatusFilter] = useState('all');
@@ -111,13 +117,16 @@ export default function GeoPromptsPage() {
   const [generatedSuggestions, setGeneratedSuggestions] = useState([]);
   const [generatorForm] = Form.useForm();
   const [form] = Form.useForm();
+  const [questionSetForm] = Form.useForm();
   const previousProjectIdRef = useRef(null);
   const currentProjectIdRef = useRef(null);
   const promptsRequestRef = useRef(0);
+  const questionSetsRequestRef = useRef(0);
   const generationRequestRef = useRef(0);
   const generatedSaveRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const runRequestRef = useRef(0);
+  const questionSetRunRequestRef = useRef(0);
 
   const selectedProject = useMemo(
     () => projects.find((item) => item.id === selectedProjectId) || null,
@@ -337,26 +346,58 @@ export default function GeoPromptsPage() {
       if (promptsRequestRef.current === requestId) setPrompts(Array.isArray(res?.data?.data) ? res.data.data : []);
     } catch (error) {
       if (promptsRequestRef.current === requestId) {
-        message.error(getApiErrorMessage(error, '获取 Prompt 列表失败'));
+        message.error(getApiErrorMessage(error, '获取问题列表失败'));
       }
     } finally {
       if (promptsRequestRef.current === requestId) setPromptsLoading(false);
     }
   }, [selectedProjectId, days]);
 
+  const fetchQuestionSets = useCallback(async (projectId = selectedProjectId) => {
+    const requestId = questionSetsRequestRef.current + 1;
+    questionSetsRequestRef.current = requestId;
+    if (!projectId) {
+      setQuestionSets([]);
+      setQuestionSetsLoading(false);
+      return;
+    }
+    setQuestionSets([]);
+    setQuestionSetsLoading(true);
+    try {
+      const res = await axios.get(`/api/geo-projects/${projectId}/question-sets`);
+      if (questionSetsRequestRef.current === requestId) {
+        setQuestionSets(Array.isArray(res?.data?.data) ? res.data.data : []);
+      }
+    } catch (error) {
+      if (questionSetsRequestRef.current === requestId) {
+        message.error(getApiErrorMessage(error, '获取问题集失败'));
+      }
+    } finally {
+      if (questionSetsRequestRef.current === requestId) setQuestionSetsLoading(false);
+    }
+  }, [selectedProjectId]);
+
   const isCurrentPromptProject = (projectId) => currentProjectIdRef.current === projectId;
 
   const refreshPromptDataForProject = (projectId) => {
     if (!isCurrentPromptProject(projectId)) return;
     fetchPrompts(projectId);
+    fetchQuestionSets(projectId);
     fetchProjects();
   };
 
   const handleProjectChange = (nextProjectId) => {
     setSelectedProjectId(nextProjectId);
+    setSelectedPromptIds([]);
     setModalOpen(false);
     setEditingPrompt(null);
+    setQuestionSetModalOpen(false);
+    setEditingQuestionSet(null);
+    setSavingQuestionSet(false);
+    setRunningPromptId(null);
+    setRunningQuestionSetId(null);
     form.resetFields();
+    questionSetForm.resetFields();
   };
 
   useEffect(() => {
@@ -379,22 +420,28 @@ export default function GeoPromptsPage() {
       generatedSaveRequestRef.current += 1;
       historyRequestRef.current += 1;
       runRequestRef.current += 1;
+      questionSetRunRequestRef.current += 1;
       setGeneratedSuggestions([]);
       setSavingGenerated(false);
       setHistoryOpen(false);
       setHistoryPrompt(null);
       setHistoryRows([]);
       setHistoryLoading(false);
+      setSavingQuestionSet(false);
+      setRunningPromptId(null);
+      setRunningQuestionSetId(null);
     }
     previousProjectIdRef.current = selectedProjectId;
     fetchPrompts(selectedProjectId, days);
-  }, [selectedProjectId, days, fetchPrompts]);
+    fetchQuestionSets(selectedProjectId);
+  }, [selectedProjectId, days, fetchPrompts, fetchQuestionSets]);
 
   const openCreate = () => {
     setEditingPrompt(null);
     form.setFieldsValue({
       question: '',
       tags: [],
+      question_set_id: null,
       enabled: true,
     });
     setModalOpen(true);
@@ -405,6 +452,7 @@ export default function GeoPromptsPage() {
     form.setFieldsValue({
       question: record.question || '',
       tags: normalizeList(record.tags),
+      question_set_id: record.question_set_id || null,
       enabled: record.enabled !== false,
     });
     setModalOpen(true);
@@ -421,17 +469,18 @@ export default function GeoPromptsPage() {
       const payload = {
         question: String(values.question || '').trim(),
         tags: normalizeList(values.tags),
+        question_set_id: values.question_set_id || null,
         platforms: getProjectPlatforms(),
         enabled: values.enabled !== false,
       };
       if (editingPrompt?.id) {
         await axios.put(`/api/geo-projects/${mutationProjectId}/prompts/${editingPrompt.id}`, payload);
         if (!isCurrentPromptProject(mutationProjectId)) return;
-        message.success('Prompt 已更新');
+        message.success('问题已更新');
       } else {
         await axios.post(`/api/geo-projects/${mutationProjectId}/prompts`, payload);
         if (!isCurrentPromptProject(mutationProjectId)) return;
-        message.success('Prompt 已创建');
+        message.success('问题已创建');
       }
       setModalOpen(false);
       setEditingPrompt(null);
@@ -439,7 +488,111 @@ export default function GeoPromptsPage() {
       refreshPromptDataForProject(mutationProjectId);
     } catch (error) {
       if (error?.errorFields) return;
-      message.error(getApiErrorMessage(error, '保存 Prompt 失败'));
+      message.error(getApiErrorMessage(error, '保存问题失败'));
+    }
+  };
+
+  const openCreateQuestionSet = () => {
+    setEditingQuestionSet(null);
+    questionSetForm.setFieldsValue({
+      name: '',
+      description: '',
+      question_ids: selectedPromptIds.length >= 2 ? selectedPromptIds : []
+    });
+    setQuestionSetModalOpen(true);
+  };
+
+  const openEditQuestionSet = (questionSet) => {
+    setEditingQuestionSet(questionSet);
+    questionSetForm.setFieldsValue({
+      name: questionSet.name || '',
+      description: questionSet.description || '',
+      question_ids: Array.isArray(questionSet.questions)
+        ? questionSet.questions.map((item) => item.id).filter(Boolean)
+        : []
+    });
+    setQuestionSetModalOpen(true);
+  };
+
+  const saveQuestionSet = async () => {
+    if (!selectedProjectId) {
+      message.warning('请先选择品牌项目');
+      return;
+    }
+    const mutationProjectId = selectedProjectId;
+    try {
+      const values = await questionSetForm.validateFields();
+      const payload = {
+        name: String(values.name || '').trim(),
+        description: String(values.description || '').trim(),
+        question_ids: Array.isArray(values.question_ids) ? values.question_ids : []
+      };
+      setSavingQuestionSet(true);
+      if (editingQuestionSet?.id) {
+        await axios.patch(`/api/geo-projects/${mutationProjectId}/question-sets/${editingQuestionSet.id}`, payload);
+        if (!isCurrentPromptProject(mutationProjectId)) return;
+        message.success('问题集已更新');
+      } else {
+        await axios.post(`/api/geo-projects/${mutationProjectId}/question-sets`, payload);
+        if (!isCurrentPromptProject(mutationProjectId)) return;
+        message.success('问题集已创建');
+      }
+      setQuestionSetModalOpen(false);
+      setEditingQuestionSet(null);
+      questionSetForm.resetFields();
+      refreshPromptDataForProject(mutationProjectId);
+    } catch (error) {
+      if (error?.errorFields) return;
+      if (isCurrentPromptProject(mutationProjectId)) {
+        message.error(getApiErrorMessage(error, '保存问题集失败'));
+      }
+    } finally {
+      if (isCurrentPromptProject(mutationProjectId)) setSavingQuestionSet(false);
+    }
+  };
+
+  const deleteQuestionSet = async (questionSet) => {
+    if (!selectedProjectId || !questionSet?.id) return;
+    const mutationProjectId = selectedProjectId;
+    try {
+      await axios.delete(`/api/geo-projects/${mutationProjectId}/question-sets/${questionSet.id}`);
+      if (!isCurrentPromptProject(mutationProjectId)) return;
+      message.success('问题集已删除，集合内问题仍保留在问题库中');
+      refreshPromptDataForProject(mutationProjectId);
+    } catch (error) {
+      if (isCurrentPromptProject(mutationProjectId)) {
+        message.error(getApiErrorMessage(error, '删除问题集失败'));
+      }
+    }
+  };
+
+  const runQuestionSet = async (questionSet) => {
+    if (!selectedProjectId || !questionSet?.id) return;
+    const runProjectId = selectedProjectId;
+    const requestId = questionSetRunRequestRef.current + 1;
+    questionSetRunRequestRef.current = requestId;
+    try {
+      setRunningQuestionSetId(questionSet.id);
+      const res = await axios.post(`/api/geo-projects/${runProjectId}/question-sets/${questionSet.id}/run`);
+      const data = res?.data?.data || {};
+      if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
+        const notice = getRunResultNotice(data);
+        message[notice.type](notice.text);
+        router.push(`/geo/project-dashboard?project_id=${runProjectId}`);
+      }
+    } catch (error) {
+      const data = getApiRunResultData(error);
+      if (data && questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
+        const notice = getRunResultNotice(data);
+        message[notice.type](notice.text);
+        router.push(`/geo/project-dashboard?project_id=${runProjectId}`);
+      } else if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
+        message.error(getApiErrorMessage(error, '运行问题集失败'));
+      }
+    } finally {
+      if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
+        setRunningQuestionSetId(null);
+      }
     }
   };
 
@@ -457,12 +610,12 @@ export default function GeoPromptsPage() {
         enabled: true,
       });
       if (!(generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId))) return;
-      message.success('Prompt 已保存');
+      message.success('问题已保存');
       setGeneratedSuggestions((prev) => prev.filter((item) => item.question !== suggestion.question));
       refreshPromptDataForProject(mutationProjectId);
     } catch (error) {
       if (generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId)) {
-        message.error(getApiErrorMessage(error, '保存生成 Prompt 失败'));
+        message.error(getApiErrorMessage(error, '保存生成问题失败'));
       }
     } finally {
       if (generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId)) setSavingGenerated(false);
@@ -500,8 +653,8 @@ export default function GeoPromptsPage() {
       if (generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId)) setSavingGenerated(false);
     }
     if (!(generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId))) return;
-    if (saved) message.success(`已保存 ${saved} 条 Prompt`);
-    if (duplicated) message.warning(`${duplicated} 条 Prompt 已存在，已跳过`);
+    if (saved) message.success(`已保存 ${saved} 个问题`);
+    if (duplicated) message.warning(`${duplicated} 个问题已存在，已跳过`);
     const failed = generatedSuggestions.length - saved - duplicated;
     if (failed > 0) message.warning(`有 ${failed} 条保存失败`);
     setGeneratedSuggestions((prev) => prev.filter((item) => !completedQuestions.has(item.question)));
@@ -531,12 +684,12 @@ export default function GeoPromptsPage() {
       const suggestions = Array.isArray(res?.data?.data?.suggestions) ? res.data.data.suggestions : [];
       if (generationRequestRef.current === requestId && currentProjectIdRef.current === generationProjectId) {
         setGeneratedSuggestions(suggestions);
-        message.success(`已生成 ${suggestions.length} 条 Prompt 建议`);
+        message.success(`已生成 ${suggestions.length} 个问题建议`);
       }
     } catch (error) {
       if (error?.errorFields) return;
       if (!requestId || (generationRequestRef.current === requestId && currentProjectIdRef.current === generationProjectId)) {
-        message.error(getApiErrorMessage(error, '生成 Prompt 建议失败'));
+        message.error(getApiErrorMessage(error, '生成问题建议失败'));
       }
     } finally {
       if (generationRequestRef.current === requestId && currentProjectIdRef.current === generationProjectId) setGenerating(false);
@@ -549,10 +702,10 @@ export default function GeoPromptsPage() {
     try {
       await axios.delete(`/api/geo-projects/${mutationProjectId}/prompts/${record.id}`);
       if (!isCurrentPromptProject(mutationProjectId)) return;
-      message.success('Prompt 已删除');
+      message.success('问题已删除');
       refreshPromptDataForProject(mutationProjectId);
     } catch (error) {
-      message.error(getApiErrorMessage(error, '删除 Prompt 失败'));
+      message.error(getApiErrorMessage(error, '删除问题失败'));
     }
   };
 
@@ -565,11 +718,11 @@ export default function GeoPromptsPage() {
       });
       if (!isCurrentPromptProject(mutationProjectId)) return;
       const deleted = res?.data?.data?.deleted || 0;
-      message.success(`已删除 ${deleted} 条 Prompt`);
+      message.success(`已删除 ${deleted} 个问题`);
       setSelectedPromptIds([]);
       refreshPromptDataForProject(mutationProjectId);
     } catch (error) {
-      message.error(getApiErrorMessage(error, '批量删除 Prompt 失败'));
+      message.error(getApiErrorMessage(error, '批量删除问题失败'));
     }
   };
 
@@ -583,7 +736,7 @@ export default function GeoPromptsPage() {
     try {
       await axios.put(`/api/geo-projects/${mutationProjectId}/prompts/${record.id}`, { enabled: !record.enabled });
       if (!isCurrentPromptProject(mutationProjectId)) return;
-      message.success(record.enabled ? 'Prompt 已停用' : 'Prompt 已启用');
+      message.success(record.enabled ? '问题已停用' : '问题已启用');
       refreshPromptDataForProject(mutationProjectId);
     } catch (error) {
       message.error(getApiErrorMessage(error, '状态更新失败'));
@@ -616,7 +769,7 @@ export default function GeoPromptsPage() {
         message[notice.type](notice.text);
         router.push(`/geo/project-dashboard?project_id=${runProjectId}`);
       } else if (runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
-        message.error(getApiErrorMessage(error, '运行 Prompt 失败'));
+        message.error(getApiErrorMessage(error, '运行问题失败'));
       }
     } finally {
       if (runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) setRunningPromptId(null);
@@ -641,7 +794,7 @@ export default function GeoPromptsPage() {
       }
     } catch (error) {
       if (historyRequestRef.current === requestId && currentProjectIdRef.current === historyProjectId) {
-        message.error(getApiErrorMessage(error, '获取 Prompt 历史失败'));
+        message.error(getApiErrorMessage(error, '获取问题历史失败'));
       }
     } finally {
       if (historyRequestRef.current === requestId && currentProjectIdRef.current === historyProjectId) {
@@ -657,6 +810,14 @@ export default function GeoPromptsPage() {
       key: 'question',
       width: 420,
       render: (value) => <div style={{ wordBreak: 'break-word', lineHeight: 1.5 }}>{value}</div>
+    },
+    {
+      title: '问题集',
+      key: 'question_set',
+      width: 160,
+      render: (_, row) => row.question_set?.name
+        ? <Tag color="purple">{row.question_set.name}</Tag>
+        : <Text type="secondary">未分组</Text>
     },
     {
       title: '标签',
@@ -777,7 +938,7 @@ export default function GeoPromptsPage() {
             <Button size="small" onClick={() => openPromptHistory(row)}>历史</Button>
             <Button size="small" onClick={() => togglePrompt(row)}>{row.enabled !== false ? '停用' : '启用'}</Button>
             <Button size="small" type="primary" onClick={() => openEdit(row)}>编辑</Button>
-            <Popconfirm title="确认删除该 Prompt？" onConfirm={() => deletePrompt(row)}>
+            <Popconfirm title="确认删除该问题？" onConfirm={() => deletePrompt(row)}>
               <Button size="small" danger>删除</Button>
             </Popconfirm>
           </Space>
@@ -788,7 +949,7 @@ export default function GeoPromptsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-      <Card title="Prompt 库">
+      <Card title="问题库">
         <Row gutter={[12, 12]} align="middle">
           <Col flex="360px">
             <Select
@@ -812,8 +973,8 @@ export default function GeoPromptsPage() {
           </Col>
           <Col flex="auto">
             <Space wrap>
-              <Button size="small" onClick={() => fetchPrompts(selectedProjectId, days)} disabled={!selectedProjectId}>刷新</Button>
-              <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId}>新建 Prompt</Button>
+              <Button size="small" onClick={() => refreshPromptDataForProject(selectedProjectId)} disabled={!selectedProjectId}>刷新</Button>
+              <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId}>新建问题</Button>
               <Text type="secondary">
                 {selectedProject
                   ? `当前项目：${selectedProject.name}｜监测平台：${getProjectPlatforms().map((item) => platformLabels[item]).join('、')}`
@@ -825,7 +986,90 @@ export default function GeoPromptsPage() {
       </Card>
 
       <Card
-        title="生成 Prompt 建议"
+        title="问题集"
+        extra={<Button type="primary" disabled={!selectedProjectId} onClick={openCreateQuestionSet}>新建问题集</Button>}
+      >
+        {selectedProjectId ? (
+          <Table
+            rowKey="id"
+            size="small"
+            loading={questionSetsLoading}
+            dataSource={questionSets}
+            pagination={false}
+            locale={{ emptyText: '暂无问题集，可将两个或更多问题组成问题集后一起运行' }}
+            columns={[
+              {
+                title: '名称',
+                dataIndex: 'name',
+                width: 180,
+                render: (value) => <Text strong>{value}</Text>
+              },
+              {
+                title: '说明',
+                dataIndex: 'description',
+                render: (value) => value || <Text type="secondary">-</Text>
+              },
+              {
+                title: '成员问题',
+                key: 'questions',
+                width: 360,
+                render: (_, questionSet) => {
+                  const members = Array.isArray(questionSet.questions) ? questionSet.questions : [];
+                  return members.length ? (
+                    <Space wrap size={[4, 4]}>
+                      {members.slice(0, 3).map((item) => (
+                        <Tag key={item.id} color={item.enabled === false ? 'default' : 'blue'}>
+                          {String(item.question || '').slice(0, 24)}{String(item.question || '').length > 24 ? '…' : ''}
+                        </Tag>
+                      ))}
+                      {members.length > 3 ? <Text type="secondary">另有 {members.length - 3} 个</Text> : null}
+                    </Space>
+                  ) : <Text type="secondary">暂无成员</Text>;
+                }
+              },
+              {
+                title: '启用情况',
+                key: 'counts',
+                width: 120,
+                render: (_, questionSet) => `${Number(questionSet.enabled_question_count || 0)} / ${Number(questionSet.question_count || 0)}`
+              },
+              {
+                title: '操作',
+                key: 'actions',
+                width: 230,
+                render: (_, questionSet) => (
+                  <Space>
+                    <Tooltip title={Number(questionSet.enabled_question_count || 0) > 0 ? '' : '问题集中没有启用的问题'}>
+                      <span>
+                        <Button
+                          size="small"
+                          loading={runningQuestionSetId === questionSet.id}
+                          disabled={Number(questionSet.enabled_question_count || 0) <= 0}
+                          onClick={() => runQuestionSet(questionSet)}
+                        >
+                          运行问题集
+                        </Button>
+                      </span>
+                    </Tooltip>
+                    <Button size="small" type="primary" onClick={() => openEditQuestionSet(questionSet)}>编辑</Button>
+                    <Popconfirm
+                      title={`删除问题集“${questionSet.name}”？集合内问题会继续保留。`}
+                      onConfirm={() => deleteQuestionSet(questionSet)}
+                    >
+                      <Button size="small" danger>删除问题集</Button>
+                    </Popconfirm>
+                  </Space>
+                )
+              }
+            ]}
+          />
+        ) : (
+          <Empty description="请先选择品牌项目" />
+        )}
+      </Card>
+
+      <Card
+        title="生成问题建议"
         extra={<Button type="primary" loading={generating} disabled={!selectedProjectId || savingGenerated} onClick={generatePrompts}>生成建议</Button>}
       >
         <Form form={generatorForm} layout="inline" initialValues={{ count: 10 }}>
@@ -891,7 +1135,7 @@ export default function GeoPromptsPage() {
         ) : null}
       </Card>
 
-      <Card title="Prompt 列表">
+      <Card title="问题列表">
         {selectedProjectId ? (
           <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
@@ -932,8 +1176,11 @@ export default function GeoPromptsPage() {
                 <Text type="secondary">{`显示 ${filteredPrompts.length} / ${prompts.length} 条`}</Text>
               </Space>
               <Space wrap>
+                <Button type="primary" disabled={selectedPromptIds.length < 2} onClick={openCreateQuestionSet}>
+                  将所选组成问题集
+                </Button>
                 <Popconfirm
-                  title={`确认删除选中的 ${selectedPromptIds.length} 条 Prompt？`}
+                  title={`确认删除选中的 ${selectedPromptIds.length} 个问题？`}
                   disabled={!selectedPromptIds.length}
                   onConfirm={batchDeletePrompts}
                 >
@@ -971,7 +1218,7 @@ export default function GeoPromptsPage() {
       </Card>
 
       <Modal
-        title={editingPrompt ? '编辑 Prompt' : '新建 Prompt'}
+        title={editingPrompt ? '编辑问题' : '新建问题'}
         open={modalOpen}
         onOk={savePrompt}
         onCancel={() => { setModalOpen(false); setEditingPrompt(null); }}
@@ -987,6 +1234,13 @@ export default function GeoPromptsPage() {
           <Form.Item name="tags" label="标签">
             <Select mode="tags" tokenSeparators={[',', '，', ';', '\n']} placeholder="输入标签并回车添加" />
           </Form.Item>
+          <Form.Item name="question_set_id" label="所属问题集">
+            <Select
+              allowClear
+              placeholder="可选，单问题无需加入问题集"
+              options={questionSets.map((item) => ({ label: item.name, value: item.id }))}
+            />
+          </Form.Item>
           <Form.Item name="enabled" label="启用" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="停用" />
           </Form.Item>
@@ -994,7 +1248,54 @@ export default function GeoPromptsPage() {
       </Modal>
 
       <Modal
-        title={historyPrompt ? `Prompt 历史：${historyPrompt.question}` : 'Prompt 历史'}
+        title={editingQuestionSet ? '编辑问题集' : '新建问题集'}
+        open={questionSetModalOpen}
+        onOk={saveQuestionSet}
+        onCancel={() => {
+          setQuestionSetModalOpen(false);
+          setEditingQuestionSet(null);
+          questionSetForm.resetFields();
+        }}
+        confirmLoading={savingQuestionSet}
+        okText="保存"
+        cancelText="取消"
+        forceRender
+        destroyOnHidden
+      >
+        <Form form={questionSetForm} layout="vertical">
+          <Form.Item name="name" label="问题集名称" rules={[{ required: true, message: '请输入问题集名称' }]}>
+            <Input maxLength={120} placeholder="例如：购买决策核心问题" />
+          </Form.Item>
+          <Form.Item name="description" label="说明">
+            <Input.TextArea rows={2} placeholder="说明这组问题的监测目标（可选）" />
+          </Form.Item>
+          <Form.Item
+            name="question_ids"
+            label="成员问题"
+            rules={[
+              { required: true, message: '请选择成员问题' },
+              { type: 'array', min: 2, message: '问题集至少需要两个问题' }
+            ]}
+          >
+            <Select
+              mode="multiple"
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择两个或更多问题"
+              options={prompts.map((item) => ({
+                label: item.question_set?.name
+                  ? `${item.question}（当前：${item.question_set.name}）`
+                  : item.question,
+                value: item.id
+              }))}
+            />
+          </Form.Item>
+          <Text type="secondary">保存后，这些问题可作为一个问题集同时加入运行队列；每个问题仍可单独运行。</Text>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={historyPrompt ? `问题历史：${historyPrompt.question}` : '问题历史'}
         open={historyOpen}
         onCancel={() => { setHistoryOpen(false); setHistoryPrompt(null); setHistoryRows([]); }}
         footer={null}

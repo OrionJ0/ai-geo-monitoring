@@ -134,7 +134,7 @@ test('explicit project runs reject partially unavailable selected prompts', () =
 
   assert.match(block, /promptSelection\.explicit/);
   assert.match(block, /prompts\.length\s*!==\s*promptSelection\.ids\.length/);
-  assert.match(block, /选择的 Prompt 不存在或已停用/);
+  assert.match(block, /选择的问题不存在或已停用/);
 });
 
 test('failed project and prompt runs include run result data for client feedback', () => {

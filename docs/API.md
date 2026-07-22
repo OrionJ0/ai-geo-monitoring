@@ -65,6 +65,22 @@ Authorization: Bearer <token>
 - `DELETE /api/detection/history/:userId` 批量删除历史记录
   - **权限验证**：只能删除自己的记录，管理员可删除所有
 
+## 问题库与问题集（需认证）
+
+- `GET /api/geo-projects/:projectId/prompts` 查询项目问题列表及近期表现
+- `POST /api/geo-projects/:projectId/prompts` 新建单问题
+  - 请求体：`question` 必填；`question_set_id`、`tags`、`platforms`、`enabled` 可选
+- `PUT /api/geo-projects/:projectId/prompts/:promptId` 编辑单问题
+- `DELETE /api/geo-projects/:projectId/prompts/:promptId` 删除单问题
+- `POST /api/geo-projects/:projectId/prompts/:promptId/run` 独立运行一个启用问题
+- `GET /api/geo-projects/:projectId/question-sets` 查询问题集及成员问题
+- `POST /api/geo-projects/:projectId/question-sets` 新建问题集
+  - 请求体：`name` 必填；`description`、`question_ids` 可选
+- `PATCH /api/geo-projects/:projectId/question-sets/:questionSetId` 编辑问题集名称、说明或成员
+- `DELETE /api/geo-projects/:projectId/question-sets/:questionSetId` 删除问题集；成员问题仅解除归属，不会被删除
+- `POST /api/geo-projects/:projectId/question-sets/:questionSetId/run` 将问题集内所有启用问题按可用监测平台加入并发队列
+  - 返回 `202 Accepted` 与队列记录；每个成员问题仍可通过单问题接口独立运行
+
 ## SEO 检测（需认证）
 
 - `POST /api/seo-audits` 检测一个公开 HTML 页面

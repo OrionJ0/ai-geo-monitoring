@@ -24,8 +24,8 @@ const platformLabels = {
 };
 
 const projectRunBlockMessages = {
-  no_enabled_prompt: '该项目暂无启用的 Prompt，请先在 Prompt 库中添加或启用 Prompt',
-  platform_mismatch: 'Prompt 的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置'
+  no_enabled_prompt: '该项目暂无启用的问题，请先在问题库中添加或启用问题',
+  platform_mismatch: '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置'
 };
 
 const websiteRules = [
@@ -168,7 +168,7 @@ export default function GeoProjectsPage() {
     const runnablePromptIds = getRunnableProjectPromptIds(prompts, record.platforms);
     if (!runnablePromptIds.length) {
       const blockReason = getProjectPromptRunBlockReason(prompts, record.platforms);
-      message.warning(projectRunBlockMessages[blockReason] || '该项目暂无可运行的 Prompt');
+      message.warning(projectRunBlockMessages[blockReason] || '该项目暂无可运行的问题');
       return;
     }
     const requestId = projectRunRequestRef.current + 1;
@@ -347,7 +347,7 @@ export default function GeoProjectsPage() {
       },
     },
     {
-      title: 'Prompt',
+      title: '问题',
       key: 'prompts',
       width: 100,
       render: (_, row) => {

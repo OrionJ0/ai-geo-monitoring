@@ -14,10 +14,10 @@ async function resolveProjectContext({ user, source, repositories = {}, messages
   const projectId = normalizeOptionalId(source.project_id);
   const promptId = normalizeOptionalId(source.tracked_prompt_id ?? source.prompt_id);
   if (Number.isNaN(projectId) || Number.isNaN(promptId)) {
-    return { error: { status: 400, message: messages.invalidIds || '项目或 Prompt ID 无效' } };
+    return { error: { status: 400, message: messages.invalidIds || '项目或问题 ID 无效' } };
   }
   if (!projectId && promptId) {
-    return { error: { status: 400, message: messages.promptRequiresProject || '使用 Prompt 创建定时任务时必须提供 project_id' } };
+    return { error: { status: 400, message: messages.promptRequiresProject || '使用问题创建定时任务时必须提供 project_id' } };
   }
   if (!projectId) {
     return {
@@ -40,10 +40,10 @@ async function resolveProjectContext({ user, source, repositories = {}, messages
   let promptData = null;
   if (promptId) {
     const prompt = await PromptRepository.findOne({ where: { id: promptId, project_id: project.id } });
-    if (!prompt) return { error: { status: 404, message: messages.promptNotFound || 'Prompt 不存在或不属于该品牌项目' } };
+    if (!prompt) return { error: { status: 404, message: messages.promptNotFound || '问题不存在或不属于该品牌项目' } };
     promptData = prompt.toJSON ? prompt.toJSON() : prompt;
     if (promptData.enabled === false) {
-      return { error: { status: 400, message: messages.disabledPrompt || '停用 Prompt 不能创建或更新定时任务' } };
+      return { error: { status: 400, message: messages.disabledPrompt || '停用问题不能创建或更新定时任务' } };
     }
   }
 
@@ -63,7 +63,7 @@ async function resolveProjectContext({ user, source, repositories = {}, messages
   };
 }
 
-function validatePlatformsWithinContext(platforms, projectContext, message = '监测平台必须包含在项目或 Prompt 的监测平台内') {
+function validatePlatformsWithinContext(platforms, projectContext, message = '监测平台必须包含在项目或问题的监测平台内') {
   const result = PlatformSelectionService.validate(platforms);
   if (!result.ok) return result;
   if (!projectContext?.project_id) return result;
