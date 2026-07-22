@@ -69,8 +69,14 @@ Authorization: Bearer <token>
 
 - `POST /api/seo-audits` 检测一个公开 HTML 页面
   - 请求体：`url` 必填，可省略 `http://` 或 `https://`
-  - 返回：最终 URL、状态码、响应时间、0–100 基础分、问题统计、优先修复项、六类检查结果与搜索/分享预览
+  - 返回：新保存的 `auditId`、最终 URL、状态码、响应时间、0–100 基础分、问题统计、优先修复项、六类检查结果与搜索/分享预览
+  - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：拒绝带用户名/密码的网址、本机和私网 IP、解析到私网的域名，以及重定向到私网的目标；最多跟随 5 次重定向，超时 10 秒，页面响应体上限 2 MB
+- `GET /api/seo-audits` 分页获取当前用户的检测历史摘要
+  - Query 参数：`page` 默认 1；`pageSize` 默认 10，最大 50
+  - 返回：`items` 与 `pagination`；摘要不包含完整报告正文
+- `GET /api/seo-audits/:id` 获取一条完整历史报告
+  - 权限验证：只能读取当前用户自己的记录；记录不存在或不属于当前用户时统一返回 404
 
 请求示例：
 
@@ -86,6 +92,7 @@ Authorization: Bearer <token>
 {
   "success": true,
   "data": {
+    "auditId": 42,
     "finalUrl": "https://example.com/",
     "statusCode": 200,
     "score": 82,
@@ -100,6 +107,32 @@ Authorization: Bearer <token>
     },
     "priorities": [],
     "categories": []
+  }
+}
+```
+
+历史列表响应摘要：
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": 42,
+        "finalUrl": "https://example.com/",
+        "score": 82,
+        "grade": "good",
+        "summary": { "issues": 4 },
+        "checkedAt": "2026-07-23T00:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "pageSize": 10,
+      "totalItems": 1,
+      "totalPages": 1
+    }
   }
 }
 ```
