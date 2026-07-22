@@ -1,7 +1,7 @@
 # 接口文档
 
 > 统一前缀：`/api`
-> **重要**：除了健康检查、验证码、公共 SEO 和公共通知接口外，其他业务接口都需要身份验证。
+> **重要**：除了健康检查、验证码、公共 SEO 设置和公共通知接口外，其他业务接口都需要身份验证。
 
 ## 认证说明
 
@@ -64,6 +64,57 @@ Authorization: Bearer <token>
   - **权限验证**：只能删除自己的记录，管理员可删除所有
 - `DELETE /api/detection/history/:userId` 批量删除历史记录
   - **权限验证**：只能删除自己的记录，管理员可删除所有
+
+## SEO 检测（需认证）
+
+- `POST /api/seo-audits` 检测一个公开 HTML 页面
+  - 请求体：`url` 必填，可省略 `http://` 或 `https://`
+  - 返回：最终 URL、状态码、响应时间、0–100 基础分、问题统计、优先修复项、六类检查结果与搜索/分享预览
+  - 安全边界：拒绝带用户名/密码的网址、本机和私网 IP、解析到私网的域名，以及重定向到私网的目标；最多跟随 5 次重定向，超时 10 秒，页面响应体上限 2 MB
+
+请求示例：
+
+```json
+{
+  "url": "https://example.com/"
+}
+```
+
+成功响应摘要：
+
+```json
+{
+  "success": true,
+  "data": {
+    "finalUrl": "https://example.com/",
+    "statusCode": 200,
+    "score": 82,
+    "summary": {
+      "total": 19,
+      "passed": 15,
+      "issues": 4,
+      "critical": 0,
+      "high": 1,
+      "medium": 2,
+      "low": 1
+    },
+    "priorities": [],
+    "categories": []
+  }
+}
+```
+
+常见业务错误码：
+
+- `INVALID_URL`：网址格式不正确
+- `UNSUPPORTED_PROTOCOL`：不是 HTTP/HTTPS 地址
+- `URL_CREDENTIALS_NOT_ALLOWED`：网址包含用户名或密码
+- `PRIVATE_NETWORK_URL`：目标或重定向地址属于本机/私网
+- `DNS_LOOKUP_FAILED`：域名无法解析
+- `UPSTREAM_TIMEOUT`：目标网站响应超时
+- `UPSTREAM_UNAVAILABLE`：无法连接目标网站
+- `PAGE_TOO_LARGE`：页面内容超过限制
+- `UNSUPPORTED_CONTENT_TYPE`：目标不是 HTML 页面
 
 ## 定时任务（需认证）
 - `POST /api/schedules` 创建每日定时任务

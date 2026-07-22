@@ -28,6 +28,7 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 - 品牌提及率、Share of Voice、引用率、竞品曝光分析
 - AI 回答情绪判断，支持正向、中性、负向标签与风险项沉淀
 - Prompt 库管理、分类、平台选择与历史结果追踪
+- 单页 SEO 关键项检测：按严重程度输出优先修复队列，并按抓取、页面信息、内容、体验、结构化数据和基础性能分类展示
 - 引用来源按自有来源、竞品来源、第三方来源聚合分析，并保留域名、URL、平台、Prompt 分类和出现时间
 - 用户登录、权限、会员等级与额度管理
 - 管理后台：用户、任务、会员、系统配置与运行记录管理
@@ -93,6 +94,7 @@ npm run dev
 默认地址：
 
 - 前端登录页：`http://localhost:3001`
+- SEO 检测页（登录后）：`http://localhost:3001/geo/seo-audit`
 - 后端：`http://localhost:3002`
 - 健康检查：`http://localhost:3002/api/health`
 
@@ -141,3 +143,4 @@ npm test
 - [环境变量](docs/ENVIRONMENT.md)
 - [部署与运维](docs/DEPLOYMENT.md)
 - [安全加固说明](docs/SECURITY.md)
+- [SEO 检测 MVP 方案与竞品调研](docs/solutions/2026-07-22-seo-audit-mvp.md)
