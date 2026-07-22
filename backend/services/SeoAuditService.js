@@ -13,11 +13,29 @@ const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 
 function normalizeWebsiteUrl(input) {
   const value = String(input || '').trim();
-  if (!value) throw new Error('请输入需要检测的网址');
+  if (!value) {
+    const error = new Error('请输入需要检测的网址');
+    error.code = 'INVALID_URL';
+    error.status = 400;
+    throw error;
+  }
 
   const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
-  const url = new URL(withProtocol);
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('仅支持 HTTP 或 HTTPS 网站');
+  let url;
+  try {
+    url = new URL(withProtocol);
+  } catch {
+    const error = new Error('网址格式不正确');
+    error.code = 'INVALID_URL';
+    error.status = 400;
+    throw error;
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    const error = new Error('仅支持 HTTP 或 HTTPS 网站');
+    error.code = 'UNSUPPORTED_PROTOCOL';
+    error.status = 400;
+    throw error;
+  }
   url.hash = '';
   return url.toString();
 }

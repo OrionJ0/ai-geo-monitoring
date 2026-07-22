@@ -78,6 +78,7 @@ const settingsRoutes = require('./routes/settings');
 const captchaRoutes = require('./routes/captcha');
 const scheduleRoutes = require('./routes/schedules');
 const geoProjectRoutes = require('./routes/geoProjects');
+const seoAuditRoutes = require('./routes/seoAudits');
 const SchedulerService = require('./services/SchedulerService');
 const { authRequired } = require('./middleware/auth');
 
@@ -93,6 +94,7 @@ app.use('/api/membership', authRequired, membershipRoutes);
 // 定时任务接口（需要登录）
 app.use('/api/schedules', scheduleLimiter, authRequired, scheduleRoutes);
 app.use('/api/geo-projects', authRequired, geoProjectRoutes);
+app.use('/api/seo-audits', authRequired, seoAuditRoutes);
 // 设置路由：内部已对管理接口使用 adminRequired；公开接口（如 /seo、/notice）无需统一鉴权
 app.use('/api/settings', settingsRoutes);
 
