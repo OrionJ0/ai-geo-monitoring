@@ -92,7 +92,7 @@ npm run dev
 
 默认地址：
 
-- 前端：`http://localhost:3001`
+- 前端登录页：`http://localhost:3001`
 - 后端：`http://localhost:3002`
 - 健康检查：`http://localhost:3002/api/health`
 

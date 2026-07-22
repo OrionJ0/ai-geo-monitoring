@@ -44,8 +44,8 @@ npm start        # Start production
 ```
 src/app/
 ├── layout.tsx           # Root layout with AntdRegistry
-├── page.tsx            # Homepage (landing)
-├── login/              # Authentication
+├── page.tsx            # 默认登录入口（复用 /login 页面）
+├── login/              # 登录页兼容入口
 ├── register/
 ├── geo/                # Main GEO functionality
 │   ├── layout.tsx      # GEO-specific layout with Header
@@ -79,8 +79,9 @@ src/app/
   - `sequential()`: Sequential execution (concurrency = 1)
   - `sequentialWithDelay()`: Sequential with delays (100ms default) to avoid rate limits
   - **Use case**: Batch operations like deleting multiple records
-- **`src/components/Header.jsx`**: Shared header component with user menu
-- **`src/components/Footer.jsx`**: Shared footer component
+- **`src/components/Login.jsx`**: `/`、`/login` 以及受保护布局共用的登录表单
+- **`src/app/geo/layout.tsx`**: GEO 工作台导航与登录态保护
+- **`src/app/admin/layout.tsx`**: 管理后台导航、权限与登录态保护
 
 ### Backend Structure
 ```
@@ -191,7 +192,7 @@ backend/
 1. Create `src/app/[route]/page.tsx`
 2. Add `'use client'` directive if using React state/effects
 3. Import necessary components and utilities
-4. Add to navigation if needed (update Header or layout)
+4. Add to navigation if needed (update the relevant route layout)
 
 ### Debugging API Issues
 1. Check browser DevTools Network tab

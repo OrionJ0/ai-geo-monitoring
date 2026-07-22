@@ -149,7 +149,7 @@ export default function Register({ onLogin }) {
             <Button type="primary" htmlType="submit" block>注册</Button>
           </Form.Item>
           <Form.Item>
-            <Button block onClick={() => router.push('/geo')}>返回登录</Button>
+            <Button block onClick={() => router.push('/')}>返回登录</Button>
           </Form.Item>
         </Form>
       </Card>

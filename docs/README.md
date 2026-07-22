@@ -10,7 +10,7 @@
   - `cd ../nextjs-frontend && npm install`
 - 统一启动前后端：
   - 在项目根目录执行 `npm run dev`
-  - Next.js 前端默认运行在 `http://localhost:3001`
+  - Next.js 前端登录页默认运行在 `http://localhost:3001`
   - 后端 API 默认运行在 `http://localhost:3002`
   - 健康检查：`GET http://localhost:3002/api/health`
 - 单独启动：

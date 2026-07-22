@@ -17,7 +17,7 @@ cd nextjs-frontend
 npm run dev -- --webpack -p 3001
 ```
 
-默认访问地址：`http://localhost:3001`。
+默认登录页地址：`http://localhost:3001`。
 
 ## Environment
 

@@ -67,9 +67,6 @@ export default function Login({ onLogin, showRegister = true }) {
           <Form.Item>
             <Button type="primary" htmlType="submit" block>登录</Button>
           </Form.Item>
-          <Form.Item>
-            <Button block onClick={() => router.push('/')}>返回首页</Button>
-          </Form.Item>
           {showRegister && (
             <Form.Item>
               <Button block onClick={() => router.push('/register')}>没有账户？注册</Button>
