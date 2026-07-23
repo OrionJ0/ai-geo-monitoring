@@ -134,6 +134,7 @@ test('v4 单页和全站报告只使用技术健康分作为主指标并展示�
   assert.match(healthSource, /展示与增强/);
   assert.match(healthSource, /主要瓶颈/);
   assert.doesNotMatch(pageSource, /SEO 基础分/);
+  assert.doesNotMatch(pageSource, /技术健康度/);
   assert.doesNotMatch(siteSource, /技术健康度/);
 });
 

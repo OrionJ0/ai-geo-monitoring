@@ -575,7 +575,7 @@ export default function SeoAuditPage() {
 
           <footer className={styles.methodNote}>
             <ClockCircleOutlined aria-hidden="true" />
-            <span>这是输入 URL 的单页技术检测；技术健康度不是 Google、Bing 或百度官方评分，不包含真实 Core Web Vitals、关键词排名或外链数据库。</span>
+            <span>这是输入 URL 的单页技术检测；技术健康分不是 Google、Bing 或百度官方评分，不包含真实 Core Web Vitals、关键词排名或外链数据库。</span>
           </footer>
         </div>
       )}
