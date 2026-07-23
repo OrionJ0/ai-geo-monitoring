@@ -88,5 +88,5 @@
 
 ## Handoff
 
-- PRD path: `docs/active-2026-07-23-003-dashboard-metric-hierarchy/prd.md`
-- Recommended next step: 按本 PRD 直接实施项目看板指标分级，并通过现有前端入口验收。
+- PRD path: `docs/closed-2026-07-23-003-dashboard-metric-hierarchy/prd.md`
+- Delivery status: 已完成项目看板指标分级，并通过自动化测试、生产构建及桌面端和移动端入口验收。

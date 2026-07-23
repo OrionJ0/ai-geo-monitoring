@@ -2,13 +2,15 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { InfoCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { Column, Line } from '@ant-design/plots';
 import { shouldRenderMetricChart } from '@/utils/dashboardChartState.cjs';
 import { getBrandSentimentDisplay } from '@/utils/historyAnalysisDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
+import styles from './project-dashboard.module.css';
 
 const { Text, Title } = Typography;
 
@@ -70,6 +72,17 @@ function renderTags(values, fallbackMap = {}) {
   return (
     <Space size={[4, 4]} wrap>
       {list.map((item) => <Tag key={item}>{fallbackMap[item] || item}</Tag>)}
+    </Space>
+  );
+}
+
+function metricTitle(label, explanation) {
+  return (
+    <Space size={6}>
+      <span>{label}</span>
+      <Tooltip title={explanation}>
+        <InfoCircleOutlined tabIndex={0} aria-label={`${label}计算口径`} style={{ color: '#7b8ba5' }} />
+      </Tooltip>
     </Space>
   );
 }
@@ -423,8 +436,8 @@ export default function GeoProjectDashboardPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+    <div className={styles.page}>
+      <Space orientation="vertical" size={16} className={styles.pageStack}>
         <Row align="middle" justify="space-between" gutter={[16, 12]}>
           <Col>
             <Title level={3} style={{ margin: 0 }}>项目可见度看板</Title>
@@ -454,77 +467,100 @@ export default function GeoProjectDashboardPage() {
           <Alert type="info" showIcon title="暂无品牌项目" description="请先创建品牌项目后查看项目可见度看板。" />
         ) : null}
 
-        <Row gutter={[12, 12]}>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="总运行数" value={summary.total_runs ?? summary.total_checks ?? 0} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="有效分析数" value={summary.total_checks || 0} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="品牌提及率" value={percent(summary.brand_mention_rate)} suffix="%" loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="平均声量占比（SOV）" value={percent(summary.avg_share_of_voice)} suffix="%" loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="失败数" value={summary.failed_runs || 0} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="竞品提及次数" value={competitors.reduce((sum, item) => sum + Number(item.mentions || 0), 0)} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="引用率" value={percent(summary.citation_rate)} suffix="%" loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="自有来源覆盖率" value={percent(summary.owned_citation_rate)} suffix="%" loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="推荐率" value={percent(summary.recommendation_rate)} suffix="%" loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="平均品牌排名" value={formatRank(summary.avg_brand_rank)} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="总引用来源" value={sourceSummary.total_citations || 0} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="来源域名数" value={sourceSummary.source_domain_count || 0} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="新增引用域名" value={newSourceDomains.length} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="流失引用域名" value={droppedSourceDomains.length} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="保留引用域名" value={retainedSourceDomains.length} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="新增引用 URL" value={newSourceUrls.length} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="流失引用 URL" value={droppedSourceUrls.length} loading={dashboardLoading} /></Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="保留引用 URL" value={retainedSourceUrls.length} loading={dashboardLoading} /></Card>
-          </Col>
-        </Row>
+        <section aria-labelledby="core-metrics-title" className={`${styles.metricSection} ${styles.coreSection}`}>
+          <div className={styles.sectionHeader}>
+            <Text className={styles.sectionEyebrow}>优先查看</Text>
+            <Title level={4} id="core-metrics-title" className={styles.sectionTitle}>核心表现</Title>
+            <Text className={styles.sectionDescription}>优先查看品牌在 AI 回答中的整体可见度表现。</Text>
+          </div>
+          <Row gutter={[12, 12]}>
+            <Col xs={24} sm={12} lg={6}>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('品牌提及率', '提及品牌的有效回答数 ÷ 有效分析数')} value={percent(summary.brand_mention_rate)} suffix="%" loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('平均声量占比（SOV）', '逐条回答的品牌可见度得分占比平均值；可见度得分由提及次数、首次出现位置和明确推荐表达共同计算')} value={percent(summary.avg_share_of_voice)} suffix="%" loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('推荐率', '品牌名称附近命中“推荐、首选、优先选择”等明确表达的有效回答数 ÷ 有效分析数')} value={percent(summary.recommendation_rate)} suffix="%" loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('平均品牌排名', '品牌在回答中相对已配置竞品的首次出现位置平均值，仅统计品牌出现的回答')} value={formatRank(summary.avg_brand_rank)} loading={dashboardLoading} /></Card>
+            </Col>
+          </Row>
+        </section>
 
-        <Row gutter={[12, 12]}>
-          <Col xs={24}>
-            <Card size="small" title="优化机会" loading={dashboardLoading}>
-              <Table
-                size="small"
-                rowKey={(row) => row.key || `${row.type}-${row.prompt_id || ''}-${row.platform || ''}-${row.domain || ''}-${row.competitor || ''}`}
-                columns={opportunityColumns}
-                dataSource={opportunities}
-                pagination={{ pageSize: 6, showSizeChanger: false }}
-                scroll={{ x: 1170 }}
-                locale={{ emptyText: '暂无需要优先处理的优化机会' }}
-              />
-            </Card>
-          </Col>
+        <section aria-labelledby="run-quality-title" className={styles.metricSection}>
+          <div className={styles.sectionHeader}>
+            <Text className={styles.sectionEyebrow}>数据基础</Text>
+            <Title level={4} id="run-quality-title" className={styles.sectionTitle}>运行质量</Title>
+            <Text className={styles.sectionDescription}>用于判断本周期数据是否拥有足够的有效运行基础。</Text>
+          </div>
+          <Row gutter={[12, 12]}>
+            <Col xs={24} sm={8}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="总运行数" value={summary.total_runs ?? summary.total_checks ?? 0} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="有效分析数" value={summary.total_checks || 0} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="失败数" value={summary.failed_runs || 0} loading={dashboardLoading} /></Card>
+            </Col>
+          </Row>
+        </section>
+
+        <section aria-labelledby="source-performance-title" className={styles.metricSection}>
+          <div className={styles.sectionHeader}>
+            <Text className={styles.sectionEyebrow}>引用健康</Text>
+            <Title level={4} id="source-performance-title" className={styles.sectionTitle}>来源表现</Title>
+            <Text className={styles.sectionDescription}>查看回答是否带有引用，以及自有来源在引用中的覆盖情况。</Text>
+          </div>
+          <Row gutter={[12, 12]}>
+            <Col xs={24} sm={12} lg={6}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="引用率" value={percent(summary.citation_rate)} suffix="%" loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="自有来源覆盖率" value={percent(summary.owned_citation_rate)} suffix="%" loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="总引用来源" value={sourceSummary.total_citations || 0} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="来源域名数" value={sourceSummary.source_domain_count || 0} loading={dashboardLoading} /></Card>
+            </Col>
+          </Row>
+        </section>
+
+        <section aria-labelledby="diagnosis-title" className={`${styles.metricSection} ${styles.diagnosisSection}`}>
+          <div className={styles.sectionHeader}>
+            <Text className={styles.sectionEyebrow}>解释原因</Text>
+            <Title level={4} id="diagnosis-title" className={styles.sectionTitle}>变化与诊断</Title>
+            <Text className={styles.sectionDescription}>结合来源变化、平台、问题分类和竞品明细解释核心表现。</Text>
+          </div>
+          <Row gutter={[12, 12]} className={styles.diagnosticRows}>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="竞品提及次数" value={competitors.reduce((sum, item) => sum + Number(item.mentions || 0), 0)} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="新增引用域名" value={newSourceDomains.length} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="流失引用域名" value={droppedSourceDomains.length} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="保留引用域名" value={retainedSourceDomains.length} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="新增引用 URL" value={newSourceUrls.length} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="流失引用 URL" value={droppedSourceUrls.length} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="保留引用 URL" value={retainedSourceUrls.length} loading={dashboardLoading} /></Card>
+            </Col>
+          </Row>
+
+          <Row gutter={[12, 12]} className={styles.diagnosticRows}>
           <Col xs={24} xl={14}>
             <Card size="small" title="趋势" loading={dashboardLoading}>
               {shouldShowTrendChart ? (
@@ -657,9 +693,9 @@ export default function GeoProjectDashboardPage() {
               />
             </Card>
           </Col>
-        </Row>
+          </Row>
 
-        <Row gutter={[12, 12]}>
+          <Row gutter={[12, 12]} className={styles.diagnosticRows}>
           <Col xs={24} xl={10}>
             <Card size="small" title="竞品提及" loading={dashboardLoading}>
               <Table
@@ -684,7 +720,27 @@ export default function GeoProjectDashboardPage() {
               />
             </Card>
           </Col>
-        </Row>
+          </Row>
+        </section>
+
+        <section aria-labelledby="action-title" className={`${styles.metricSection} ${styles.actionSection}`}>
+          <div className={styles.sectionHeader}>
+            <Text className={styles.sectionEyebrow}>安排动作</Text>
+            <Title level={4} id="action-title" className={styles.sectionTitle}>行动建议</Title>
+            <Text className={styles.sectionDescription}>根据本周期的低可见度、来源缺口和竞品表现安排下一步优化。</Text>
+          </div>
+          <Card size="small" title="优化机会" loading={dashboardLoading}>
+            <Table
+              size="small"
+              rowKey={(row) => row.key || `${row.type}-${row.prompt_id || ''}-${row.platform || ''}-${row.domain || ''}-${row.competitor || ''}`}
+              columns={opportunityColumns}
+              dataSource={opportunities}
+              pagination={{ pageSize: 6, showSizeChanger: false }}
+              scroll={{ x: 1170 }}
+              locale={{ emptyText: '暂无需要优先处理的优化机会' }}
+            />
+          </Card>
+        </section>
       </Space>
     </div>
   );

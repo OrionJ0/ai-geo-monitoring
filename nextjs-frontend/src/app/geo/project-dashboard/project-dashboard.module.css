@@ -1,0 +1,160 @@
+.page {
+  min-height: 100%;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 92% 2%, rgba(47, 107, 255, 0.08), transparent 24rem),
+    #f6f8fb;
+}
+
+.pageStack {
+  width: 100%;
+}
+
+.metricSection {
+  position: relative;
+  overflow: hidden;
+  padding: 20px;
+  border: 1px solid #e1e8f2;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.metricSection::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: #cbd7e8;
+  content: '';
+}
+
+.coreSection {
+  border-color: #cddcfa;
+  background: linear-gradient(135deg, #f7faff 0%, #ffffff 56%, #f3f7ff 100%);
+  box-shadow: 0 12px 32px rgba(28, 64, 125, 0.08);
+}
+
+.coreSection::before {
+  width: 6px;
+  background: #2f6bff;
+}
+
+.diagnosisSection {
+  background: #f8fafc;
+}
+
+.actionSection {
+  border-color: #d8e3f5;
+}
+
+.actionSection::before {
+  background: #6487bd;
+}
+
+.sectionHeader {
+  margin-bottom: 16px;
+}
+
+.sectionEyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: #42618d;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.sectionTitle {
+  margin: 0 !important;
+  color: #172b4d !important;
+  letter-spacing: -0.02em;
+}
+
+.sectionDescription {
+  display: block;
+  max-width: 720px;
+  margin-top: 4px;
+  color: #66758b;
+  line-height: 1.6;
+}
+
+.coreMetricCard,
+.supportMetricCard,
+.diagnosticMetricCard {
+  height: 100%;
+}
+
+.coreMetricCard {
+  position: relative;
+  overflow: hidden;
+  border-color: #d8e4f8;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 20px rgba(34, 71, 133, 0.06);
+}
+
+.coreMetricCard::after {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, #2f6bff, #74a1ff);
+  content: '';
+}
+
+.coreMetricCard :global(.ant-statistic-content) {
+  color: #17366d;
+  font-size: 30px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+.supportMetricCard {
+  border-color: #e6ebf2;
+  background: #fbfcfe;
+}
+
+.supportMetricCard :global(.ant-statistic-content) {
+  color: #263b5b;
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnosticMetricCard {
+  border-color: #e4e9f0;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.diagnosticMetricCard :global(.ant-statistic-title) {
+  min-height: 22px;
+  color: #68768b;
+  font-size: 12px;
+}
+
+.diagnosticMetricCard :global(.ant-statistic-content) {
+  color: #344563;
+  font-size: 21px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnosticRows {
+  margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 16px 12px 24px;
+  }
+
+  .metricSection {
+    padding: 16px 14px;
+    border-radius: 12px;
+  }
+
+  .coreMetricCard :global(.ant-statistic-content) {
+    font-size: 27px;
+  }
+
+  .sectionDescription {
+    font-size: 13px;
+  }
+}
