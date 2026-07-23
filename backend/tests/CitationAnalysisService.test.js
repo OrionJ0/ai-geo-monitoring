@@ -21,12 +21,46 @@ test('extracts Responses API web_search_call action sources', () => {
     competitors: []
   });
 
-  assert.equal(result.citation_count, 1);
-  assert.equal(result.sources[0].url, 'https://news.example.com/campus?id=1');
-  assert.equal(result.sources[0].title, '教育周界案例');
+  assert.equal(result.citation_count, 0);
+  assert.deepEqual(result.sources, []);
+  assert.deepEqual(result.source_groups.retrieval_sources, [{
+    url: 'https://news.example.com/campus?id=1',
+    domain: 'news.example.com',
+    title: '教育周界案例',
+    owned: false,
+    competitor_owned: false
+  }]);
 });
 
-test('extracts unique citation sources from response text and metadata', () => {
+test('separates explicit citations, response links, retrieval candidates and analysis supplemental sources', () => {
+  const result = CitationAnalysisService.extractSources({
+    responseText: '正文链接：https://response.example.com/article',
+    aiResponse: {
+      citations: [{ url: 'https://cited.example.com/report', title: '明确引用' }],
+      web_search: [{ url: 'https://retrieved.example.com/result', title: '检索候选' }]
+    },
+    analysisSources: [{ url: 'https://analysis.example.com/evidence', title: '分析补充' }],
+    brand: { website: 'https://cited.example.com' },
+    competitors: []
+  });
+
+  assert.equal(result.citation_count, 1);
+  assert.equal(result.owned_citation_count, 1);
+  assert.deepEqual(result.sources.map((item) => item.url), [
+    'https://cited.example.com/report'
+  ]);
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.url), [
+    'https://response.example.com/article'
+  ]);
+  assert.deepEqual(result.source_groups.retrieval_sources.map((item) => item.url), [
+    'https://retrieved.example.com/result'
+  ]);
+  assert.deepEqual(result.source_groups.analysis_sources.map((item) => item.url), [
+    'https://analysis.example.com/evidence'
+  ]);
+});
+
+test('deduplicates explicit citations separately from response links', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '参考 https://www.michelin.com.cn/tyres 和 https://example.com/a?x=1。',
     aiResponse: {
@@ -39,13 +73,16 @@ test('extracts unique citation sources from response text and metadata', () => {
     competitors: [{ website: 'https://competitor.cn' }]
   });
 
-  assert.equal(result.sources.length, 3);
+  assert.equal(result.sources.length, 2);
   assert.deepEqual(result.sources.map((item) => item.domain), [
     'michelin.com.cn',
-    'example.com',
     'competitor.cn'
   ]);
-  assert.equal(result.citation_count, 3);
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.domain), [
+    'michelin.com.cn',
+    'example.com'
+  ]);
+  assert.equal(result.citation_count, 2);
   assert.equal(result.owned_citation_count, 1);
   assert.equal(result.competitor_citation_count, 1);
 });
@@ -60,6 +97,12 @@ test('returns empty citation summary for responses without links', () => {
 
   assert.deepEqual(result, {
     sources: [],
+    source_groups: {
+      explicit_citations: [],
+      response_links: [],
+      retrieval_sources: [],
+      analysis_sources: []
+    },
     citation_count: 0,
     owned_citation_count: 0,
     competitor_citation_count: 0
@@ -82,7 +125,7 @@ test('does not treat technology names with dotted suffixes as citation urls', ()
   assert.equal(result.citation_count, 0);
 });
 
-test('matches owned and competitor domains regardless of leading www', () => {
+test('matches response-link ownership regardless of leading www without counting links as citations', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '参考 https://michelin.com.cn/tyres 和 https://www.competitor.cn/article',
     aiResponse: {},
@@ -90,8 +133,10 @@ test('matches owned and competitor domains regardless of leading www', () => {
     competitors: [{ website: 'https://competitor.cn' }]
   });
 
-  assert.equal(result.owned_citation_count, 1);
-  assert.equal(result.competitor_citation_count, 1);
+  assert.equal(result.owned_citation_count, 0);
+  assert.equal(result.competitor_citation_count, 0);
+  assert.equal(result.source_groups.response_links.filter((item) => item.owned).length, 1);
+  assert.equal(result.source_groups.response_links.filter((item) => item.competitor_owned).length, 1);
 });
 
 test('extracts domain-only citation metadata when urls are unavailable', () => {
@@ -158,7 +203,7 @@ test('extracts bare citation urls from structured metadata fields', () => {
   assert.equal(result.competitor_citation_count, 1);
 });
 
-test('extracts bare citation urls after Chinese and ASCII source colons', () => {
+test('extracts bare response links after Chinese and ASCII source colons', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '来源：brand.cn/guide\n参考: competitor.cn/article',
     aiResponse: {},
@@ -166,15 +211,14 @@ test('extracts bare citation urls after Chinese and ASCII source colons', () => 
     competitors: [{ website: 'https://competitor.cn' }]
   });
 
-  assert.deepEqual(result.sources.map((item) => item.url), [
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.url), [
     'https://brand.cn/guide',
     'https://competitor.cn/article'
   ]);
-  assert.equal(result.owned_citation_count, 1);
-  assert.equal(result.competitor_citation_count, 1);
+  assert.equal(result.citation_count, 0);
 });
 
-test('extracts citation urls from common web-search metadata fields', () => {
+test('classifies common web-search metadata fields as retrieval sources', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '',
     aiResponse: {
@@ -187,13 +231,13 @@ test('extracts citation urls from common web-search metadata fields', () => {
     competitors: [{ website: 'https://competitor.cn' }]
   });
 
-  assert.deepEqual(result.sources, [
+  assert.deepEqual(result.source_groups.retrieval_sources, [
     { url: 'https://brand.cn/a', domain: 'brand.cn', owned: true, competitor_owned: false },
     { url: 'https://competitor.cn/b', domain: 'competitor.cn', owned: false, competitor_owned: true },
     { url: 'https://media.cn/report', domain: 'media.cn', owned: false, competitor_owned: false },
     { url: '', domain: 'zhihu.com', owned: false, competitor_owned: false }
   ]);
-  assert.equal(result.citation_count, 4);
+  assert.equal(result.citation_count, 0);
 });
 
 test('extracts citation urls from common source and reference metadata fields', () => {
@@ -267,7 +311,6 @@ test('extracts citation urls from annotation metadata fields', () => {
       url: 'https://brand.cn/article',
       domain: 'brand.cn',
       title: '品牌资料',
-      source_origin: 'web_search',
       owned: true,
       competitor_owned: false
     }
@@ -308,7 +351,6 @@ test('extracts citation urls from response output content annotations', () => {
     {
       url: 'https://brand.cn/report',
       domain: 'brand.cn',
-      source_origin: 'web_search',
       owned: true,
       competitor_owned: false
     }
@@ -350,7 +392,6 @@ test('marks Ark web search url citations with origin metadata', () => {
       url: 'https://brand.cn/report',
       domain: 'brand.cn',
       title: '品牌资料',
-      source_origin: 'web_search',
       owned: true,
       competitor_owned: false
     }
@@ -378,6 +419,7 @@ test('does not double count metadata domain fields when a citation url is presen
     {
       url: 'https://michelin.com.cn/tyres',
       domain: 'michelin.com.cn',
+      title: '品牌官网',
       owned: true,
       competitor_owned: false
     }
@@ -410,7 +452,7 @@ test('does not double count domain-only metadata when the same response already 
   assert.equal(result.competitor_citation_count, 1);
 });
 
-test('preserves meaningful URL query parameters and removes tracking parameters', () => {
+test('preserves meaningful response-link query parameters and removes tracking parameters', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: [
       '参考 https://example.com/article?id=1&utm_source=ai',
@@ -423,15 +465,15 @@ test('preserves meaningful URL query parameters and removes tracking parameters'
     competitors: []
   });
 
-  assert.deepEqual(result.sources.map((item) => item.url), [
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.url), [
     'https://example.com/article?id=1',
     'https://example.com/article?id=2',
     'https://example.com/article'
   ]);
-  assert.equal(result.citation_count, 3);
+  assert.equal(result.citation_count, 0);
 });
 
-test('removes common ad and share tracking parameters from citation urls', () => {
+test('removes common ad and share tracking parameters from response links', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: [
       '参考 https://example.com/article?id=1&gclid=abc',
@@ -444,13 +486,13 @@ test('removes common ad and share tracking parameters from citation urls', () =>
     competitors: []
   });
 
-  assert.deepEqual(result.sources.map((item) => item.url), [
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.url), [
     'https://example.com/article?id=1'
   ]);
-  assert.equal(result.citation_count, 1);
+  assert.equal(result.citation_count, 0);
 });
 
-test('deduplicates citation urls across leading www variants before metrics are stored', () => {
+test('deduplicates response links across leading www variants before evidence is stored', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: [
       '参考 https://www.example.com/article?id=1&utm_source=ai',
@@ -461,7 +503,7 @@ test('deduplicates citation urls across leading www variants before metrics are 
     competitors: []
   });
 
-  assert.deepEqual(result.sources, [
+  assert.deepEqual(result.source_groups.response_links, [
     {
       url: 'https://example.com/article?id=1',
       domain: 'example.com',
@@ -469,10 +511,10 @@ test('deduplicates citation urls across leading www variants before metrics are 
       competitor_owned: false
     }
   ]);
-  assert.equal(result.citation_count, 1);
+  assert.equal(result.citation_count, 0);
 });
 
-test('strips common trailing sentence punctuation from extracted URLs', () => {
+test('strips common trailing sentence punctuation from response links', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '参考 https://example.com/article?id=1. 也可以看 https://example.com/list, 以及 https://example.com/help!',
     aiResponse: {},
@@ -480,14 +522,14 @@ test('strips common trailing sentence punctuation from extracted URLs', () => {
     competitors: []
   });
 
-  assert.deepEqual(result.sources.map((item) => item.url), [
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.url), [
     'https://example.com/article?id=1',
     'https://example.com/list',
     'https://example.com/help'
   ]);
 });
 
-test('strips Chinese closing quotes and book-title marks from extracted URLs', () => {
+test('strips Chinese closing quotes and book-title marks from response links', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '参考“https://example.com/article?id=1”，以及《https://competitor.cn/report》。另见：https://brand.cn/help”',
     aiResponse: {},
@@ -495,16 +537,15 @@ test('strips Chinese closing quotes and book-title marks from extracted URLs', (
     competitors: [{ website: 'https://competitor.cn' }]
   });
 
-  assert.deepEqual(result.sources.map((item) => item.url), [
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.url), [
     'https://example.com/article?id=1',
     'https://competitor.cn/report',
     'https://brand.cn/help'
   ]);
-  assert.equal(result.owned_citation_count, 1);
-  assert.equal(result.competitor_citation_count, 1);
+  assert.equal(result.citation_count, 0);
 });
 
-test('extracts bare citation urls from AI response text', () => {
+test('extracts bare links from AI response text without counting them as explicit citations', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '参考 www.michelin.com.cn/tyres 和 competitor.cn/article?id=2，以及 zhihu.com/question/1。',
     aiResponse: {},
@@ -512,16 +553,15 @@ test('extracts bare citation urls from AI response text', () => {
     competitors: [{ website: 'https://competitor.cn' }]
   });
 
-  assert.deepEqual(result.sources.map((item) => item.url), [
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.url), [
     'https://michelin.com.cn/tyres',
     'https://competitor.cn/article?id=2',
     'https://zhihu.com/question/1'
   ]);
-  assert.equal(result.owned_citation_count, 1);
-  assert.equal(result.competitor_citation_count, 1);
+  assert.equal(result.citation_count, 0);
 });
 
-test('extracts punycode citation domains from AI response text', () => {
+test('extracts punycode domains from AI response text as response links', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '参考 xn--fiqs8s.cn/report 和 https://www.xn--fiqs8s.cn/help。',
     aiResponse: {},
@@ -529,7 +569,7 @@ test('extracts punycode citation domains from AI response text', () => {
     competitors: []
   });
 
-  assert.deepEqual(result.sources.map((item) => item.url), [
+  assert.deepEqual(result.source_groups.response_links.map((item) => item.url), [
     'https://xn--fiqs8s.cn/report',
     'https://xn--fiqs8s.cn/help'
   ]);

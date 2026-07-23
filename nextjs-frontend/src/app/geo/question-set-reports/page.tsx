@@ -42,6 +42,19 @@ import styles from './question-set-reports.module.css';
 const { Paragraph, Text, Title } = Typography;
 
 type Project = { id: number; name: string; status?: string; website?: string };
+type CitationSource = {
+  url?: string;
+  domain?: string;
+  title?: string;
+  owned?: boolean;
+  competitor_owned?: boolean;
+};
+type CitationSourceGroups = {
+  explicit_citations?: CitationSource[];
+  response_links?: CitationSource[];
+  retrieval_sources?: CitationSource[];
+  analysis_sources?: CitationSource[];
+};
 type ReportSummary = {
   total?: number;
   completed?: number;
@@ -123,7 +136,9 @@ type ReportRow = {
       count?: number;
       official_count?: number;
       official_website_cited?: boolean;
-      sources?: Array<{ url?: string; domain?: string; owned?: boolean }>;
+      sources?: CitationSource[];
+      source_groups?: CitationSourceGroups;
+      semantics_version?: string;
     };
   };
   analysis_evidence?: {
@@ -134,7 +149,7 @@ type ReportRow = {
     };
   };
   competitor_mentions?: Array<{ id?: number | null; name?: string; mentioned?: boolean }>;
-  citation_sources?: Array<{ url?: string; domain?: string; title?: string; owned?: boolean }>;
+  citation_sources?: CitationSource[];
 };
 type RunReport = {
   id: number;
@@ -1035,7 +1050,7 @@ export default function QuestionSetReportsPage() {
                           <Paragraph className={styles.answerText}>{row.answer || '暂无回答内容'}</Paragraph>
                           {Array.isArray(row.citation_sources) && row.citation_sources.length ? (
                             <Space orientation="vertical" size={4}>
-                              <Text className={styles.answerLabel}>引用来源</Text>
+                              <Text className={styles.answerLabel}>明确引用来源（计入核心 KPI）</Text>
                               {row.citation_sources.map((source, index) => source.url ? (
                                 <Space key={`${source.url}-${index}`} size={6}>
                                   {source.owned ? <Tag color="green">品牌官网</Tag> : null}
@@ -1045,6 +1060,67 @@ export default function QuestionSetReportsPage() {
                                 </Space>
                               ) : null)}
                             </Space>
+                          ) : null}
+                          {row.analysis_structure?.citations?.source_groups ? (
+                            <Collapse
+                              size="small"
+                              items={[
+                                {
+                                  key: 'response-links',
+                                  label: `回答正文链接（不计入 KPI）· ${
+                                    row.analysis_structure.citations.source_groups.response_links?.length || 0
+                                  }`,
+                                  children: (
+                                    <Space orientation="vertical" size={4}>
+                                      {(row.analysis_structure.citations.source_groups.response_links || [])
+                                        .slice(0, 20)
+                                        .map((source, index) => source.url ? (
+                                          <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer">
+                                            {source.title || source.domain || source.url}
+                                          </a>
+                                        ) : null)}
+                                    </Space>
+                                  ),
+                                },
+                                {
+                                  key: 'retrieval-sources',
+                                  label: `平台检索候选（不计入 KPI）· ${
+                                    row.analysis_structure.citations.source_groups.retrieval_sources?.length || 0
+                                  }`,
+                                  children: (
+                                    <Space orientation="vertical" size={4}>
+                                      {(row.analysis_structure.citations.source_groups.retrieval_sources || [])
+                                        .slice(0, 20)
+                                        .map((source, index) => source.url ? (
+                                          <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer">
+                                            {source.title || source.domain || source.url}
+                                          </a>
+                                        ) : null)}
+                                      {(row.analysis_structure.citations.source_groups.retrieval_sources?.length || 0) > 20
+                                        ? <Text type="secondary">仅展示前 20 条候选来源</Text>
+                                        : null}
+                                    </Space>
+                                  ),
+                                },
+                                {
+                                  key: 'analysis-sources',
+                                  label: `分析模型补充来源（不计入 KPI）· ${
+                                    row.analysis_structure.citations.source_groups.analysis_sources?.length || 0
+                                  }`,
+                                  children: (
+                                    <Space orientation="vertical" size={4}>
+                                      {(row.analysis_structure.citations.source_groups.analysis_sources || [])
+                                        .slice(0, 20)
+                                        .map((source, index) => source.url ? (
+                                          <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer">
+                                            {source.title || source.domain || source.url}
+                                          </a>
+                                        ) : null)}
+                                    </Space>
+                                  ),
+                                },
+                              ]}
+                            />
                           ) : null}
                         </div>
                       ),

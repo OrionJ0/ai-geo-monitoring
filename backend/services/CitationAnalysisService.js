@@ -1,4 +1,11 @@
 class CitationAnalysisService {
+  SOURCE_ROLES = Object.freeze({
+    explicit: 'explicit_citation',
+    response: 'response_link',
+    retrieval: 'retrieval_candidate',
+    analysis: 'analysis_supplemental'
+  });
+
   NON_DOMAIN_TLDS = new Set([
     'js'
   ]);
@@ -112,9 +119,10 @@ class CitationAnalysisService {
 
   metadataForSource(value, context = {}) {
     const metadata = {};
+    if (context.source_role) metadata.source_role = context.source_role;
     if (context.source_origin) metadata.source_origin = context.source_origin;
     if (context.title) metadata.title = context.title;
-    if (context.source_origin === 'web_search' && typeof value?.title === 'string' && value.title.trim()) {
+    if (typeof value?.title === 'string' && value.title.trim()) {
       metadata.title = value.title.trim();
     }
     return metadata;
@@ -123,6 +131,7 @@ class CitationAnalysisService {
   collectMetadataSources(value, sources = [], context = {}) {
     if (!value) return sources;
     if (typeof value === 'string') {
+      if (!context.collect_direct) return sources;
       const url = this.normalizeCandidateUrl(value);
       const metadata = this.metadataForSource(null, context);
       if (url) sources.push({ url, ...metadata });
@@ -130,62 +139,105 @@ class CitationAnalysisService {
       return sources;
     }
     if (Array.isArray(value)) {
-      value.forEach((item) => this.collectMetadataSources(item, sources, context));
+      value.forEach((item) => this.collectMetadataSources(item, sources, {
+        ...context,
+        collect_direct: true
+      }));
       return sources;
     }
     if (typeof value === 'object') {
+      const inheritedRole = value.source_role
+        || context.source_role
+        || (value.source_origin === 'web_search' ? this.SOURCE_ROLES.retrieval : '');
+      const directContext = {
+        ...context,
+        source_role: inheritedRole || context.source_role,
+        source_origin: value.source_origin || context.source_origin,
+        collect_direct: context.collect_direct
+      };
       if (/web[_-]?search/iu.test(String(value.type || '')) && value.action) {
-        this.collectMetadataSources(value.action, sources, { ...context, source_origin: 'web_search' });
-      }
-      if (value.type === 'url_citation' && value.url_citation) {
-        this.collectMetadataSources(value.url_citation, sources, { ...context, source_origin: 'web_search' });
-      }
-      let hasUrlField = false;
-      ['url', 'link', 'source', 'source_url', 'sourceUrl', 'reference_url', 'referenceUrl', 'display_url', 'displayUrl', 'web_url', 'webUrl', 'href'].forEach((key) => {
-        if (typeof value[key] === 'string') {
-          hasUrlField = hasUrlField || !!this.normalizeCandidateUrl(value[key]);
-          this.collectMetadataSources(value[key], sources, this.metadataForSource(value, context));
-        }
-      });
-      if (!hasUrlField) {
-        ['domain', 'source_domain', 'sourceDomain', 'display_domain', 'displayDomain', 'hostname', 'host'].forEach((key) => {
-          if (typeof value[key] === 'string' && !/^https?:\/\//i.test(value[key])) {
-            const domain = this.normalizeDomain(value[key]);
-            if (this.isValidDomain(domain)) sources.push({ url: '', domain, ...this.metadataForSource(value, context) });
-          }
+        this.collectMetadataSources(value.action, sources, {
+          source_role: this.SOURCE_ROLES.retrieval,
+          source_origin: 'web_search',
+          collect_direct: true
         });
       }
+      if (value.type === 'url_citation' && value.url_citation) {
+        this.collectMetadataSources(value.url_citation, sources, {
+          source_role: this.SOURCE_ROLES.explicit,
+          source_origin: 'citation_metadata',
+          collect_direct: true
+        });
+      }
+      let hasUrlField = false;
+      if (directContext.collect_direct && directContext.source_role) {
+        ['url', 'link', 'source', 'source_url', 'sourceUrl', 'reference_url', 'referenceUrl', 'display_url', 'displayUrl', 'web_url', 'webUrl', 'href'].forEach((key) => {
+          if (typeof value[key] !== 'string') return;
+          hasUrlField = hasUrlField || !!this.normalizeCandidateUrl(value[key]);
+          this.collectMetadataSources(value[key], sources, {
+            ...directContext,
+            ...this.metadataForSource(value, directContext),
+            collect_direct: true
+          });
+        });
+        if (!hasUrlField) {
+          ['domain', 'source_domain', 'sourceDomain', 'display_domain', 'displayDomain', 'hostname', 'host'].forEach((key) => {
+            if (typeof value[key] === 'string' && !/^https?:\/\//i.test(value[key])) {
+              const domain = this.normalizeDomain(value[key]);
+              if (this.isValidDomain(domain)) {
+                sources.push({ url: '', domain, ...this.metadataForSource(value, directContext) });
+              }
+            }
+          });
+        }
+        if (typeof value.content === 'string') {
+          this.collectMetadataSources(value.content, sources, {
+            ...directContext,
+            ...this.metadataForSource(value, directContext),
+            collect_direct: true
+          });
+        }
+      }
+
+      ['citations', 'references', 'annotations', 'url_citation', 'urlCitation'].forEach((key) => {
+        if (value[key]) {
+          this.collectMetadataSources(value[key], sources, {
+            source_role: this.SOURCE_ROLES.explicit,
+            source_origin: 'citation_metadata',
+            collect_direct: true
+          });
+        }
+      });
       [
-        'citations',
-        'references',
         'sources',
         'source_urls',
         'sourceUrls',
         'search_results',
         'searchResults',
         'web_search',
-        'webSearch',
-        'source',
-        'action',
-        'output',
-        'content',
-        'choices',
-        'message',
-        'annotations',
-        'url_citation',
-        'urlCitation'
+        'webSearch'
       ].forEach((key) => {
-        if (value[key]) this.collectMetadataSources(value[key], sources, context);
+        if (value[key]) {
+          this.collectMetadataSources(value[key], sources, {
+            source_role: this.SOURCE_ROLES.retrieval,
+            source_origin: 'web_search',
+            collect_direct: true
+          });
+        }
+      });
+      ['action', 'output', 'choices', 'message', 'content'].forEach((key) => {
+        if (value[key] && typeof value[key] !== 'string') {
+          this.collectMetadataSources(value[key], sources, {
+            ...directContext,
+            collect_direct: false
+          });
+        }
       });
     }
     return sources;
   }
 
-  extractSources({ responseText, aiResponse, brand, competitors }) {
-    const rawSources = [
-      ...this.extractUrlsFromText(responseText).map((url) => ({ url })),
-      ...this.collectMetadataSources(aiResponse)
-    ];
+  normalizeSources(rawSources, brand, competitors) {
     const brandDomain = this.normalizeDomain(brand?.website);
     const competitorDomains = (Array.isArray(competitors) ? competitors : [])
       .map((item) => this.normalizeDomain(item?.website))
@@ -202,7 +254,6 @@ class CitationAnalysisService {
           const normalizedUrl = this.normalizeUrl(url);
           const parsed = new URL(normalizedUrl);
           const metadata = {};
-          if (source.source_origin) metadata.source_origin = source.source_origin;
           if (source.title) metadata.title = source.title;
           return {
             url: normalizedUrl,
@@ -214,7 +265,6 @@ class CitationAnalysisService {
         }
       })
       .filter((source) => source?.domain)
-      .filter(Boolean)
       .filter((source) => this.isValidDomain(source.domain))
       .filter((source) => {
         const key = source.url ? source.url.toLowerCase() : `domain:${source.domain.toLowerCase()}`;
@@ -228,16 +278,59 @@ class CitationAnalysisService {
         .map((source) => this.canonicalDomain(source.domain))
         .filter(Boolean)
     );
-    const sources = normalizedSources
+    return normalizedSources
       .filter((source) => source.url || !urlDomains.has(this.canonicalDomain(source.domain)))
       .map((source) => ({
         ...source,
         owned: this.sameOrSubdomain(source.domain, brandDomain),
         competitor_owned: competitorDomains.some((domain) => this.sameOrSubdomain(source.domain, domain))
       }));
+  }
+
+  extractSources({ responseText, aiResponse, analysisSources = [], brand, competitors }) {
+    const groupedRawSources = {
+      explicit_citations: [],
+      response_links: this.extractUrlsFromText(responseText).map((url) => ({ url })),
+      retrieval_sources: [],
+      analysis_sources: []
+    };
+    const providerEvidence = Array.isArray(aiResponse)
+      ? aiResponse.map((source) => ({
+          ...source,
+          source_role: source?.source_role
+            || (source?.source_origin === 'web_search'
+              ? this.SOURCE_ROLES.retrieval
+              : this.SOURCE_ROLES.explicit)
+        }))
+      : aiResponse;
+    this.collectMetadataSources(providerEvidence).forEach((source) => {
+      const role = source.source_role
+        || (source.source_origin === 'web_search'
+          ? this.SOURCE_ROLES.retrieval
+          : this.SOURCE_ROLES.explicit);
+      if (role === this.SOURCE_ROLES.retrieval) {
+        groupedRawSources.retrieval_sources.push(source);
+      } else {
+        groupedRawSources.explicit_citations.push(source);
+      }
+    });
+    this.collectMetadataSources(analysisSources, [], {
+      source_role: this.SOURCE_ROLES.analysis,
+      source_origin: 'analysis_model',
+      collect_direct: true
+    }).forEach((source) => groupedRawSources.analysis_sources.push(source));
+
+    const sourceGroups = Object.fromEntries(
+      Object.entries(groupedRawSources).map(([key, values]) => [
+        key,
+        this.normalizeSources(values, brand, competitors)
+      ])
+    );
+    const sources = sourceGroups.explicit_citations;
 
     return {
       sources,
+      source_groups: sourceGroups,
       citation_count: sources.length,
       owned_citation_count: sources.filter((item) => item.owned).length,
       competitor_citation_count: sources.filter((item) => item.competitor_owned).length

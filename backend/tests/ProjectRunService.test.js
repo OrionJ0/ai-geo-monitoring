@@ -459,12 +459,31 @@ test('builds complete visibility metric payload for any project detection path',
     assert.equal(payload.analysis_platform, 'analysis-ai');
     assert.equal(payload.analysis_model, 'analysis-model');
     assert.equal(payload.analysis_structure.citations.count, 1);
+    assert.equal(payload.analysis_structure.citations.semantics_version, 'explicit-citation-v1');
     assert.equal(payload.analysis_structure.citations.official_website_cited, true);
     assert.equal(payload.analysis_structure.citations.sources[0].domain, 'michelin.com.cn');
+    assert.deepEqual(
+      payload.analysis_structure.citations.source_groups.response_links.map((source) => source.url),
+      ['https://michelin.com.cn/tire?id=1']
+    );
     assert.deepEqual(payload.analysis_evidence, {});
   } finally {
     AIResponseAnalysisService.analyze = originalAnalyze;
   }
+});
+
+test('keeps provider retrieval candidates out of stored citation metrics', () => {
+  const snapshot = ProjectRunService.snapshotProviderCitations({
+    citations: [{ url: 'https://cited.example.com/report' }],
+    web_search: [{ url: 'https://retrieved.example.com/result' }],
+    search_results: [{ url: 'https://retrieved.example.com/other' }]
+  });
+
+  assert.deepEqual(snapshot.map((source) => source.source_role), [
+    'explicit_citation',
+    'retrieval_candidate',
+    'retrieval_candidate'
+  ]);
 });
 
 test('uses the structured analysis result when the target brand is absent', async () => {

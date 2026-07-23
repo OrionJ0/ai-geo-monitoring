@@ -193,7 +193,8 @@ function normalizeProviderCitations(value) {
         ...(item.url ? { url: String(item.url).slice(0, 2048) } : {}),
         ...(item.domain ? { domain: String(item.domain).slice(0, 253) } : {}),
         ...(item.title ? { title: String(item.title).slice(0, 500) } : {}),
-        ...(item.source_origin ? { source_origin: String(item.source_origin).slice(0, 40) } : {})
+        ...(item.source_origin ? { source_origin: String(item.source_origin).slice(0, 40) } : {}),
+        ...(item.source_role ? { source_role: String(item.source_role).slice(0, 40) } : {})
       };
       if (!citation.url && !citation.domain) return null;
       const key = `${citation.url || ''}|${citation.domain || ''}|${citation.title || ''}`;
@@ -318,11 +319,13 @@ class ProjectRunService {
       ? {
         ...analysis.analysis_structure,
         citations: {
+          semantics_version: 'explicit-citation-v1',
           count: citationAnalysis.citation_count,
           official_count: citationAnalysis.owned_citation_count,
           competitor_count: citationAnalysis.competitor_citation_count,
           official_website_cited: citationAnalysis.owned_citation_count > 0,
-          sources: citationAnalysis.sources
+          sources: citationAnalysis.sources,
+          source_groups: citationAnalysis.source_groups
         }
       }
       : {};
