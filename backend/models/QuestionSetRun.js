@@ -12,7 +12,9 @@ const QuestionSetRun = sequelize.define('QuestionSetRun', {
   record_ids: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
   imported_rows: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
   started_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
-  completed_at: { type: DataTypes.DATE, allowNull: true }
+  completed_at: { type: DataTypes.DATE, allowNull: true },
+  paused_at: { type: DataTypes.DATE, allowNull: true },
+  revision: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
 }, {
   tableName: 'question_set_runs',
   timestamps: true,

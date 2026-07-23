@@ -158,8 +158,8 @@ export default function AdminSettingsPage() {
       <Tabs
         defaultActiveKey="ai-platforms"
         items={[
-          { key: 'ai-platforms', label: 'AI 平台', children: <AIPlatformSettings refreshSignal={refreshSignal} /> },
-          { key: 'ai-analysis', label: 'AI 分析 API', children: <AIAnalysisSettings /> },
+          { key: 'ai-platforms', label: 'AI 平台', children: <AIPlatformSettings refreshSignal={refreshSignal} />, destroyOnHidden: false },
+          { key: 'ai-analysis', label: 'AI 分析 API', children: <AIAnalysisSettings />, destroyOnHidden: false },
           { key: 'runtime', label: '运行设置', children: runtimeSettings, forceRender: true },
           { key: 'seo', label: '站点 SEO', children: seoSettings, forceRender: true },
         ]}

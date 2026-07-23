@@ -90,9 +90,17 @@ Authorization: Bearer <token>
   - 返回运行来源、当前状态、本次汇总和分页信息，不在列表中返回逐条回答
 - `GET /api/geo-projects/:projectId/question-set-runs/:runId` 获取一次问题集运行的独立报告
   - 报告只聚合该运行关联的任务，包含本次汇总与逐问题逐平台结果
+- `POST /api/geo-projects/:projectId/question-set-runs/:runId/retry-failed` 重新提交原生运行中的失败项
+  - 请求体可传 `idempotency_key`（8–128 位字母、数字、点、下划线、冒号或连字符），也可使用 `Idempotency-Key` 请求头；同一运行和同一键只创建一批重试记录
+  - 返回 `202 Accepted`；结构化分析失败且已保存完整原回答时，只调用独立分析 API，不再调用监测平台且不消耗检测配额
+  - 监测调用失败、原回答缺失等其他失败项，使用设置中心当前的监测平台模型、平台专用参数和全局运行参数，不复用失败时的旧模型配置
+  - 只替换该报告中的失败槽位，样本总数不变；旧失败记录保留在数据库中，新记录通过 `result_summary.retry.previous_record_id` 关联上一尝试
+  - 运行中、正在重试、没有失败项或导入报告返回 `409 Conflict`；当前不可用的平台会跳过，全部不可用时返回 `400 Bad Request`
+  - 重试只按实际重新调用监测平台的数量原子扣减检测配额；配额不足时整批事务回滚，不留下待处理记录
+  - 返回 `analysis_only_count`、`full_monitoring_count`、`quota_consumed`、`retry_batch_id` 和 `idempotent_replay`
 - `GET /api/geo-projects/:projectId/question-set-runs/:runId/export` 导出一次问题集运行报告
   - 返回 UTF-8 BOM 的 `text/csv` 文件，schema 为 `question_set_run_v1`
-  - 固定单表结构，一行对应一个问题与一个平台结果；数组字段使用 JSON 单元格保存以支持无损回导
+  - 固定单表结构，一行对应一个问题与一个平台结果；数组字段、失败阶段、分析诊断和重试链路使用 JSON 单元格保存以支持无损回导
 - `POST /api/geo-projects/:projectId/question-set-runs/import` 导入标准问题集报告 CSV
   - 请求：原始 CSV 文本，`Content-Type: text/csv`，最大 5MB、5000 条数据行
   - 校验：schema 版本、必要列、字段类型、JSON 数组和引用链接协议；仅允许 HTTP/HTTPS 引用链接
@@ -242,9 +250,10 @@ Authorization: Bearer <token>
   - `GET /api/settings` 获取允许的系统设置项
   - `PUT /api/settings` 更新设置
   - `GET /api/settings/analysis-api` 获取当前 AI 结构化分析平台与独立模型
-  - `GET /api/settings/analysis-api/prompt` 获取正式运行使用的版本化分析提示词模板与期望 JSON 结构
+  - `GET /api/settings/analysis-api/prompt` 获取正式运行使用的版本化分析提示词模板、期望 JSON 结构与独立调用参数 `request_profile`
   - `PUT /api/settings/analysis-api` 通过 `{ "platform_code": "deepseek", "model_name": "deepseek-v4-pro" }` 分别选择已启用且配置完整的平台和分析模型
   - `POST /api/settings/analysis-api/test` 提交品牌、别名和一段原回答，临时返回测试输入、证据结构、程序派生结果和 API 原始输出；测试内容不落库
+  - 分析调用固定关闭联网，使用独立的温度、输出 Token、超时和尝试次数；这些值不继承或修改监测平台的同名参数
 - 公开接口（无需认证）：
   - `GET /api/settings/seo` 获取公共 SEO 设置
   - `GET /api/settings/notice` 获取系统通知

@@ -24,7 +24,7 @@
 - `DEPLOYMENT.md`：部署与运维建议
 - `SECURITY.md`：安全加固说明与最佳实践
 - `closed-2026-07-23-002-ai-platform-settings/`：全局 AI 平台设置中心、临时模型目录、分析结构化协议与 OpenAI 兼容协议收敛的已完成需求
-- `closed-2026-07-23-004-question-set-run-reports/`：问题集独立运行报告、AI 实体/关系结构化指标、标准 CSV 往返与 A4 竖版 PDF 的已完成需求
+- `active-2026-07-23-004-question-set-run-reports/`：问题集独立运行报告、AI 实体/关系结构化指标、失败重试可靠性、标准 CSV 往返与 A4 竖版 PDF 的当前修复需求
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 

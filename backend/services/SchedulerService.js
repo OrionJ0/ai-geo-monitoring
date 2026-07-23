@@ -1,4 +1,12 @@
-const { BrandProject, DetectionSchedule, QuestionRecord, ResultDetail, TrackedPrompt, User } = require('../models');
+const {
+  BrandProject,
+  DetectionSchedule,
+  QuestionRecord,
+  QuestionSetRetryBatch,
+  ResultDetail,
+  TrackedPrompt,
+  User
+} = require('../models');
 const { Op } = require('sequelize');
 const AIPlatformService = require('./AIPlatformService');
 const ResultParserService = require('./ResultParserService');
@@ -217,6 +225,7 @@ async function submitDetectionForSchedule(schedule, options = {}) {
       await ResultDetail.create({
         question_record_id: rec.id,
         ai_response_original: originalText,
+        provider_citations: ProjectRunService.snapshotProviderCitations(result.data),
         parsing_status: 'completed'
       });
 
@@ -295,7 +304,10 @@ class SchedulerService {
     if (this._started) return;
     this._started = true;
     await this.refresh();
-    await this.recoverStalePendingRecords();
+    await this.recoverStalePendingRecords({
+      includeUnclaimed: true,
+      maxAgeMs: 1
+    });
     this._timer = setInterval(() => this.tick().catch(() => { }), 30 * 1000);
   }
 
@@ -432,15 +444,43 @@ class SchedulerService {
       : 15 * 60 * 1000;
     const now = options.now ? new Date(options.now) : new Date();
     const cutoff = new Date(now.getTime() - maxAgeMs);
-    const [count] = await QuestionRecord.update(
-      {
-        status: 'failed',
-        error_message: '分析任务中断，请重新运行'
-      },
+    const RecordRepository = options.QuestionRecord || QuestionRecord;
+    const staleTimeField = options.includeUnclaimed === true
+      ? 'created_at'
+      : 'execution_started_at';
+    const staleRecords = await RecordRepository.findAll({
+      where: {
+        status: 'pending',
+        [staleTimeField]: { [Op.lt]: cutoff }
+      }
+    });
+    await Promise.all(staleRecords.map((record) => record.update({
+      status: 'failed',
+      error_message: '分析任务中断，请重新运行',
+      execution_token: null,
+      execution_started_at: null,
+      result_summary: {
+        ...(record.result_summary && typeof record.result_summary === 'object'
+          ? record.result_summary
+          : {}),
+        failure: {
+          stage: 'execution_interrupted',
+          error_code: 'stale_pending_recovered'
+        }
+      }
+    })));
+    const count = staleRecords.length;
+    const BatchRepository = options.QuestionSetRetryBatch || QuestionSetRetryBatch;
+    await BatchRepository.update(
+      { status: 'failed' },
       {
         where: {
-          status: 'pending',
-          created_at: { [Op.lt]: cutoff }
+          status: {
+            [Op.in]: options.includeUnclaimed === true
+              ? ['queued', 'running']
+              : ['running']
+          },
+          updated_at: { [Op.lt]: cutoff }
         }
       }
     );

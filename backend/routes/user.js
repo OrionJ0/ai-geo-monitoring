@@ -130,11 +130,18 @@ router.post('/login', loginLimiter, async (req, res) => {
     await user.update({ last_login: new Date() });
 
     // 生成JWT token
+    // 确认会员是否过期，过期的按 free 写入 token
+    let effectiveLevel = user.membership_level || 'free';
+    if (effectiveLevel !== 'free' && user.membership_expires_at && new Date(user.membership_expires_at) < new Date()) {
+      effectiveLevel = 'free';
+    }
     const token = jwt.sign(
-      { 
-        userId: user.id, 
+      {
+        userId: user.id,
         username: user.username,
-        role: user.role 
+        role: user.role,
+        level: effectiveLevel,
+        membershipExpiresAt: user.membership_expires_at || null,
       },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }

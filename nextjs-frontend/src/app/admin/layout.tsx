@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Button, Menu, message } from 'antd';
 import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import Login from '@/components/Login';
 import { setAuthToken, clearAuth } from '@/lib/axiosConfig';
@@ -56,20 +57,20 @@ export default function AdminLayout({
   // 获取当前选中的菜单项
   const pathname = usePathname();
 
+  // 使用 <Link> 替代 router.push()，让 Next.js 在菜单可见时就预编译目标路由
   const menuItems = [
-    { key: 'dashboard', label: '数据仪表' },
-    { key: 'history', label: '历史记录' },
-    { key: 'users', label: '用户管理' },
-    { key: 'memberships', label: '会员设置' },
-    { key: 'settings', label: '设置中心' },
-    { key: 'notice', label: '通知管理' },
-    { key: 'health', label: '系统健康' },
+    { key: 'dashboard', label: <Link href="/admin">数据仪表</Link> },
+    { key: 'history', label: <Link href="/admin/history">历史记录</Link> },
+    { key: 'users', label: <Link href="/admin/users">用户管理</Link> },
+    { key: 'memberships', label: <Link href="/admin/memberships">会员设置</Link> },
+    { key: 'settings', label: <Link href="/admin/settings">设置中心</Link> },
+    { key: 'notice', label: <Link href="/admin/notice">通知管理</Link> },
+    { key: 'health', label: <Link href="/admin/health">系统健康</Link> },
   ];
 
   let selectedKey = 'dashboard';
 
   if (pathname.startsWith('/admin/')) {
-    // 提取 /admin/ 后面的部分，如 /admin/memberships -> memberships
     const pathWithoutPrefix = pathname.replace('/admin/', '');
     const firstSegment = pathWithoutPrefix.split('/')[0];
     if (firstSegment && menuItems.some(item => item.key === firstSegment)) {
@@ -78,14 +79,6 @@ export default function AdminLayout({
   } else if (pathname === '/admin') {
     selectedKey = 'dashboard';
   }
-
-  const handleMenuClick = ({ key }: { key: string }) => {
-    if (key === 'dashboard') {
-      router.push('/admin');
-    } else {
-      router.push(`/admin/${key}`);
-    }
-  };
 
   // 加载中
   if (loading) {
@@ -134,7 +127,6 @@ export default function AdminLayout({
             selectedKeys={[selectedKey]}
             style={{ height: '100%', borderRight: 0 }}
             items={menuItems}
-            onClick={handleMenuClick}
           />
         </Sider>
         <Content style={{ padding: 24 }}>

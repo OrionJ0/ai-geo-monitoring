@@ -14,6 +14,7 @@ try {
 
 const ERROR_MESSAGES = Object.freeze({
   authentication_failed: '平台认证失败，请管理员检查 API Key。',
+  provider_quota_exhausted: '平台账户额度不足，请补充额度后重试。',
   rate_limited: '平台请求过于频繁，请稍后重试。',
   timeout: '平台请求超时，请稍后重试或调整超时设置。',
   network_error: '无法连接监测平台，请检查网络或代理设置。',
@@ -25,6 +26,16 @@ const ERROR_MESSAGES = Object.freeze({
   missing_base_url: '平台未配置 Base URL。',
   missing_model: '平台未配置默认模型。'
 });
+
+const PROVIDER_QUOTA_ERROR_CODES = new Set([
+  'allocationquota.freetieronly',
+  'arrearage',
+  'balance_not_enough',
+  'billing_not_active',
+  'insufficient_quota',
+  'quota_exceeded',
+  'quota_exhausted'
+]);
 
 const PROTECTED_REQUEST_OPTION_KEYS = new Set([
   'model',
@@ -104,6 +115,8 @@ function extractResponseText(adapterType, data) {
 function normalizeRequestError(error) {
   const status = Number(error?.response?.status || 0);
   const code = String(error?.code || '').toUpperCase();
+  const providerCode = String(providerErrorDetails(error).code || '').trim().toLowerCase();
+  if (PROVIDER_QUOTA_ERROR_CODES.has(providerCode)) return 'provider_quota_exhausted';
   if (status === 401 || status === 403) return 'authentication_failed';
   if (status === 429) return 'rate_limited';
   if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') return 'timeout';
@@ -122,7 +135,7 @@ function providerErrorDetails(error) {
     || (typeof data === 'string' ? data : '')
     || ''
   ).replace(/\s+/gu, ' ').trim().slice(0, 500);
-  const code = String(providerError.code || providerError.type || '').trim().slice(0, 100);
+  const code = String(providerError.code || providerError.type || data?.code || '').trim().slice(0, 100);
   return {
     status: Number(error?.response?.status || 0) || null,
     code: code || null,
@@ -206,8 +219,14 @@ class AIPlatformRequestService {
     }
 
     const settings = options.runtimeSettings || await this.settingsService.getSettings();
-    const timeoutSeconds = config.request_timeout_seconds || settings.ai_default_timeout_seconds;
-    const maxTokens = config.max_tokens || settings.ai_default_max_tokens;
+    const timeoutOverride = Number(options.timeoutSeconds);
+    const maxTokensOverride = Number(options.maxTokens);
+    const timeoutSeconds = Number.isFinite(timeoutOverride) && timeoutOverride > 0
+      ? Math.floor(timeoutOverride)
+      : (config.request_timeout_seconds || settings.ai_default_timeout_seconds);
+    const maxTokens = Number.isFinite(maxTokensOverride) && maxTokensOverride > 0
+      ? Math.floor(maxTokensOverride)
+      : (config.max_tokens || settings.ai_default_max_tokens);
     const retryCount = options.retryCount ?? settings.ai_retry_count;
     const requestConfig = options.requestOptions === undefined
       ? config
@@ -248,14 +267,16 @@ class AIPlatformRequestService {
         const providerError = providerErrorDetails(error);
         lastFailure = {
           ...this.failure(platform, errorCode),
-          provider_error: providerError
+          provider_error: {
+            status: providerError.status,
+            code: providerError.code
+          }
         };
         console.error('AI 平台调用失败:', {
           platform,
           error_code: errorCode,
           status: providerError.status || undefined,
           provider_code: providerError.code || undefined,
-          provider_message: providerError.message || undefined,
           network_code: String(error?.code || '').slice(0, 40) || undefined
         });
         const retryable = ['rate_limited', 'timeout', 'network_error', 'provider_error'].includes(errorCode);

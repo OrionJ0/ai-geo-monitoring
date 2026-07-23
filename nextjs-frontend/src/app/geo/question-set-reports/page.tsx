@@ -5,7 +5,9 @@ import {
   Alert,
   Button,
   Collapse,
+  Descriptions,
   Empty,
+  Popconfirm,
   Progress,
   Select,
   Space,
@@ -17,12 +19,14 @@ import {
   message,
 } from 'antd';
 import {
+  CaretRightOutlined,
   DownloadOutlined,
   FilePdfOutlined,
   FileSearchOutlined,
   HistoryOutlined,
   ImportOutlined,
   LoadingOutlined,
+  PauseCircleOutlined,
   QuestionCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -64,6 +68,31 @@ type ReportRow = {
   model_name?: string;
   status: string;
   error_message?: string;
+  failure?: {
+    stage?: string;
+    error_code?: string;
+  } | null;
+  retry?: {
+    previous_record_id?: number | null;
+    attempt?: number;
+    kind?: 'analysis_only' | 'full_monitoring' | string;
+  } | null;
+  analysis_diagnostics?: {
+    status?: string;
+    error_code?: string;
+    error_detail?: string;
+    stage?: string;
+    attempt_count?: number;
+    platform?: string;
+    model?: string;
+    finish_reason?: string;
+    output_length?: number;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
+  } | null;
   answer?: string;
   has_metrics?: boolean;
   brand_mentioned?: boolean;
@@ -113,9 +142,10 @@ type RunReport = {
   question_set_id?: number | null;
   question_set_name: string;
   source: 'native' | 'imported';
-  status: 'running' | 'completed' | 'partial' | 'failed';
+  status: 'running' | 'completed' | 'partial' | 'failed' | 'paused';
   started_at?: string;
   completed_at?: string | null;
+  paused_at?: string | null;
   created_at?: string;
   summary: ReportSummary;
   rows?: ReportRow[];
@@ -125,6 +155,7 @@ const HISTORY_PAGE_SIZE = 20;
 
 const statusMeta = {
   running: { label: '运行中', color: 'processing' },
+  paused: { label: '已暂停', color: 'warning' },
   completed: { label: '已完成', color: 'success' },
   partial: { label: '部分完成', color: 'warning' },
   failed: { label: '失败', color: 'error' },
@@ -165,10 +196,15 @@ function safeFilename(value: string) {
 
 function reportStatusTag(status: RunReport['status']) {
   const meta = statusMeta[status] || statusMeta.running;
+  const icon = status === 'running'
+    ? <LoadingOutlined spin />
+    : status === 'paused'
+      ? <PauseCircleOutlined />
+      : undefined;
   return (
     <Tag
       color={meta.color}
-      icon={status === 'running' ? <LoadingOutlined spin /> : undefined}
+      icon={icon}
     >
       {meta.label}
     </Tag>
@@ -221,6 +257,7 @@ export default function QuestionSetReportsPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
   const [pdfLayout, setPdfLayout] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -369,7 +406,7 @@ export default function QuestionSetReportsPage() {
   }, [projectId, runId]);
 
   useEffect(() => {
-    if (!projectId || !runId || report?.status !== 'running') return undefined;
+    if (!projectId || !runId || (report?.status !== 'running' && report?.status !== 'paused')) return undefined;
     const timer = window.setInterval(() => {
       loadReport(projectId, runId, true);
       if (historyOpen) loadHistory(projectId, historyPage, historyQuestionSetId);
@@ -444,6 +481,49 @@ export default function QuestionSetReportsPage() {
     } finally {
       setPdfLayout(false);
       setPdfExporting(false);
+    }
+  };
+
+  const pauseRun = async () => {
+    if (!projectId || !report) return;
+    try {
+      await axios.post(`/api/geo-projects/${projectId}/question-set-runs/${report.id}/pause`);
+      message.success('已发送暂停信号，运行会在当前任务完成后暂停');
+      loadReport(projectId, report.id, true);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '暂停运行失败'));
+    }
+  };
+
+  const resumeRun = async () => {
+    if (!projectId || !report) return;
+    try {
+      await axios.post(`/api/geo-projects/${projectId}/question-set-runs/${report.id}/resume`);
+      message.success('运行已恢复');
+      loadReport(projectId, report.id, true);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '恢复运行失败'));
+    }
+  };
+
+  const retryFailedRows = async () => {
+    if (!projectId || !report) return;
+    setRetrying(true);
+    try {
+      const idempotencyKey = window.crypto.randomUUID();
+      const response = await axios.post(
+        `/api/geo-projects/${projectId}/question-set-runs/${report.id}/retry-failed`,
+        { idempotency_key: idempotencyKey },
+      );
+      message.success(response?.data?.message || '失败项已重新提交');
+      await Promise.all([
+        loadReport(projectId, report.id, true),
+        loadHistory(projectId, historyPage, historyQuestionSetId),
+      ]);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '重试失败项失败'));
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -635,6 +715,39 @@ export default function QuestionSetReportsPage() {
                     </Text>
                   </div>
                   <Space wrap className={styles.reportActions} data-pdf-exclude="true">
+                    {report.source === 'native'
+                      && report.status !== 'running'
+                      && report.status !== 'paused'
+                      && Number(summary.failed || 0) > 0 ? (
+                        <Popconfirm
+                          title={`重试 ${summary.failed || 0} 条失败项？`}
+                          description="已有完整原回答的分析失败项只会重做结构化分析；其余失败项才会使用当前设置中心的监测模型和参数重新调用。不可用平台会跳过。"
+                          okText="确认重试"
+                          cancelText="取消"
+                          onConfirm={retryFailedRows}
+                        >
+                          <Button icon={<ReloadOutlined />} loading={retrying}>
+                            重试失败项（{summary.failed || 0}）
+                          </Button>
+                        </Popconfirm>
+                      ) : null}
+                    {report.status === 'running' ? (
+                      <Button
+                        icon={<PauseCircleOutlined />}
+                        onClick={pauseRun}
+                      >
+                        暂停
+                      </Button>
+                    ) : null}
+                    {report.status === 'paused' ? (
+                      <Button
+                        type="primary"
+                        icon={<CaretRightOutlined />}
+                        onClick={resumeRun}
+                      >
+                        继续运行
+                      </Button>
+                    ) : null}
                     <Button icon={<FilePdfOutlined />} loading={pdfExporting} onClick={exportPdf}>导出 PDF</Button>
                     <Button icon={<DownloadOutlined />} onClick={exportReport}>导出标准 CSV</Button>
                   </Space>
@@ -646,6 +759,16 @@ export default function QuestionSetReportsPage() {
                     showIcon
                     title="问题集仍在运行，报告会自动更新"
                     description={<Progress percent={progress} size="small" />}
+                    className={styles.runningAlert}
+                  />
+                ) : null}
+
+                {report.status === 'paused' ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    title="运行已暂停"
+                    description={`已完成 ${summary.completed || 0} / ${summary.failed || 0} 条，剩余 ${summary.pending || 0} 条待处理。点击"继续运行"恢复。`}
                     className={styles.runningAlert}
                   />
                 ) : null}
@@ -767,6 +890,71 @@ export default function QuestionSetReportsPage() {
                       expandedRowRender: (row) => (
                         <div className={styles.answerPanel}>
                           {row.error_message ? <Alert type="error" showIcon title={row.error_message} /> : null}
+                          {row.analysis_diagnostics ? (
+                            <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} bordered>
+                              <Descriptions.Item label="错误代码">
+                                {row.analysis_diagnostics.error_code || '-'}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="失败阶段">
+                                {row.analysis_diagnostics.stage || '-'}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="尝试次数">
+                                {row.analysis_diagnostics.attempt_count ?? '-'}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="分析模型">
+                                {[row.analysis_diagnostics.platform, row.analysis_diagnostics.model]
+                                  .filter(Boolean)
+                                  .join(' · ') || '-'}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="结束原因">
+                                {row.analysis_diagnostics.finish_reason || '-'}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="输出长度">
+                                {row.analysis_diagnostics.output_length == null
+                                  ? '-'
+                                  : `${row.analysis_diagnostics.output_length} 字符`}
+                              </Descriptions.Item>
+                              {row.analysis_diagnostics.error_detail ? (
+                                <Descriptions.Item label="校验详情" span={3}>
+                                  {row.analysis_diagnostics.error_detail}
+                                </Descriptions.Item>
+                              ) : null}
+                              {row.analysis_diagnostics.usage?.total_tokens != null ? (
+                                <Descriptions.Item label="Token 用量" span={3}>
+                                  输入 {row.analysis_diagnostics.usage.prompt_tokens ?? '-'} ·
+                                  输出 {row.analysis_diagnostics.usage.completion_tokens ?? '-'} ·
+                                  总计 {row.analysis_diagnostics.usage.total_tokens}
+                                </Descriptions.Item>
+                              ) : null}
+                            </Descriptions>
+                          ) : null}
+                          {row.failure || row.retry ? (
+                            <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} bordered>
+                              {row.failure ? (
+                                <>
+                                  <Descriptions.Item label="失败链路">
+                                    {row.failure.stage || '-'}
+                                  </Descriptions.Item>
+                                  <Descriptions.Item label="链路错误代码">
+                                    {row.failure.error_code || '-'}
+                                  </Descriptions.Item>
+                                </>
+                              ) : null}
+                              {row.retry ? (
+                                <>
+                                  <Descriptions.Item label="重试方式">
+                                    {row.retry.kind === 'analysis_only' ? '仅重做结构化分析' : '重新调用监测平台'}
+                                  </Descriptions.Item>
+                                  <Descriptions.Item label="重试次数">
+                                    {row.retry.attempt ?? '-'}
+                                  </Descriptions.Item>
+                                  <Descriptions.Item label="上一条记录">
+                                    {row.retry.previous_record_id ?? '-'}
+                                  </Descriptions.Item>
+                                </>
+                              ) : null}
+                            </Descriptions>
+                          ) : null}
                           {row.has_metrics ? (
                             <Space wrap size={6}>
                               <Text className={styles.answerLabel}>分析方式</Text>
@@ -863,6 +1051,8 @@ export default function QuestionSetReportsPage() {
                       rowExpandable: (row) => Boolean(
                         row.answer
                         || row.error_message
+                        || row.failure
+                        || row.retry
                         || row.citation_sources?.length
                         || row.has_metrics
                       ),

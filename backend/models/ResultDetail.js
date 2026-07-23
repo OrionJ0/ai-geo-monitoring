@@ -20,6 +20,12 @@ const ResultDetail = sequelize.define('ResultDetail', {
     allowNull: false,
     comment: 'AI回复原文'
   },
+  provider_citations: {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: [],
+    comment: '监测平台响应中的引用元数据快照，用于分析重试'
+  },
   parsing_status: {
     type: DataTypes.ENUM('pending', 'completed', 'failed'),
     defaultValue: 'pending'

@@ -1,9 +1,18 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, message, Empty } from 'antd';
-import { Line, Pie } from '@ant-design/plots';
-import axios from 'axios';
+import dynamic from 'next/dynamic';
+import { Card, Row, Col, Statistic, message, Empty, Spin } from 'antd';
+import axios from '@/lib/axiosConfig';
+
+const PlatformPieChart = dynamic(() => import('./PlatformPieChart'), {
+  ssr: false,
+  loading: () => <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>,
+});
+const TrendLineChart = dynamic(() => import('./TrendLineChart'), {
+  ssr: false,
+  loading: () => <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>,
+});
 
 export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(false);
@@ -87,15 +96,7 @@ export default function AdminDashboardPage() {
         <Col xs={24} md={12}>
           <Card loading={loading} title="今日平台分布">
             {(stats.platform_distribution_today || []).length > 0 ? (
-              <Pie
-                data={stats.platform_distribution_today}
-                angleField="count"
-                colorField="platform"
-                radius={0.9}
-                label={{ text: 'platform', position: 'outside' }}
-                tooltip={{ fields: ['platform', 'count'] }}
-                interactions={[{ type: 'element-active' }]}
-              />
+              <PlatformPieChart data={stats.platform_distribution_today} />
             ) : (
               <Empty description="暂无数据" />
             )}
@@ -104,14 +105,7 @@ export default function AdminDashboardPage() {
         <Col xs={24} md={12}>
           <Card loading={loading} title="近7天检测趋势">
             {(stats.trend_7d || []).length > 0 ? (
-              <Line
-                data={stats.trend_7d}
-                xField="date"
-                yField="count"
-                smooth
-                point={{ size: 4 }}
-                tooltip={{ showMarkers: true }}
-              />
+              <TrendLineChart data={stats.trend_7d} />
             ) : (
               <Empty description="暂无数据" />
             )}

@@ -13,8 +13,12 @@ const {
   sequelize,
   User,
   BrandProject,
-  QuestionSetRun
+  QuestionRecord,
+  QuestionSetRun,
+  ResultDetail
 } = require('../models');
+const AIPlatformService = require('../services/AIPlatformService');
+const ProjectRunService = require('../services/ProjectRunService');
 
 let user;
 let project;
@@ -73,7 +77,7 @@ test.before(async () => {
     name: '广拓',
     aliases: [],
     primary_keywords: [],
-    platforms: ['deepseek'],
+    platforms: ['deepseek', 'qwen'],
     status: 'active'
   });
   run = await QuestionSetRun.create({
@@ -196,4 +200,422 @@ test('用户可以从报告接口导出标准 CSV 并安全回导', async () => 
   assert.equal(invalidResponse.statusCode, 422);
   assert.equal(invalidResponse.payload.error.code, 'MISSING_COLUMNS');
   assert.equal(await QuestionSetRun.count({ where: { project_id: project.id } }), beforeInvalidImport);
+});
+
+test('用户可以在原报告中重试失败项且重复提交不会创建第二批任务', async () => {
+  const failedRecord = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: 77,
+    platform: 'qwen',
+    platform_name: '千问',
+    model_name: 'qwen-old-model',
+    question: '哪些周界报警厂家比较靠谱？',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'failed',
+    error_message: '监测平台调用失败，请稍后重试'
+  });
+  const nativeRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: 88,
+    question_set_name: '失败项重试测试',
+    source: 'native',
+    record_ids: [failedRecord.id],
+    imported_rows: [{
+      record_id: failedRecord.id,
+      question: failedRecord.question,
+      platform: 'qwen',
+      status: 'failed'
+    }],
+    completed_at: new Date()
+  });
+
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  const originalSchedule = ProjectRunService.schedulePreparedRun;
+  let scheduledContext = null;
+  let quotaCalls = 0;
+  let scheduleCalls = 0;
+
+  AIPlatformService.getPlatformAvailability = async () => [{
+    code: 'qwen',
+    platform_name: '千问',
+    model_name: 'qwen-current-model',
+    available: true,
+    reason: null,
+    config: { code: 'qwen', default_model: 'qwen-current-model', temperature: 0.3 }
+  }];
+  ProjectRunService.getRuntimeSettings = async () => ({ ai_run_concurrency: 2 });
+  ProjectRunService.consumeRunQuota = async () => {
+    quotaCalls += 1;
+    return { ok: true, used: 1, limit: 100 };
+  };
+  ProjectRunService.schedulePreparedRun = (context) => {
+    scheduleCalls += 1;
+    scheduledContext = context;
+  };
+
+  try {
+    const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: project.id, runId: nativeRun.id },
+      body: { idempotency_key: 'retry-batch-qwen-001' }
+    });
+
+    assert.equal(response.statusCode, 202);
+    assert.equal(response.payload.success, true);
+    assert.equal(response.payload.data.retried_count, 1);
+    assert.equal(scheduledContext.entries.length, 1);
+    assert.equal(scheduledContext.entries[0].target.model_name, 'qwen-current-model');
+    assert.equal(scheduledContext.entries[0].target.platformConfig.temperature, 0.3);
+
+    await nativeRun.reload();
+    assert.equal(nativeRun.record_ids.length, 1);
+    assert.notEqual(nativeRun.record_ids[0], failedRecord.id);
+    assert.deepEqual(nativeRun.imported_rows, []);
+    assert.equal(nativeRun.completed_at, null);
+
+    const retryRecord = await QuestionRecord.findByPk(nativeRun.record_ids[0]);
+    assert.equal(retryRecord.status, 'pending');
+    assert.equal(retryRecord.model_name, 'qwen-current-model');
+    assert.equal(retryRecord.result_summary.retry.previous_record_id, failedRecord.id);
+    await failedRecord.reload();
+    assert.equal(failedRecord.status, 'failed');
+    await retryRecord.update({ status: 'failed', error_message: '再次失败' });
+
+    const duplicate = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: project.id, runId: nativeRun.id },
+      body: { idempotency_key: 'retry-batch-qwen-001' }
+    });
+    assert.equal(duplicate.statusCode, 202);
+    assert.equal(duplicate.payload.data.idempotent_replay, true);
+    assert.deepEqual(duplicate.payload.data.record_ids, response.payload.data.record_ids);
+    assert.equal(quotaCalls, 1);
+    assert.equal(scheduleCalls, 1);
+  } finally {
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
+    ProjectRunService.consumeRunQuota = originalConsumeQuota;
+    ProjectRunService.schedulePreparedRun = originalSchedule;
+  }
+});
+
+test('结构化分析失败时复用原回答且不重新消耗监测配额', async () => {
+  const failedRecord = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: 78,
+    platform: 'qwen',
+    platform_name: '千问',
+    model_name: 'qwen-monitoring-model',
+    question: '哪些周界报警厂家比较靠谱？',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'failed',
+    error_message: 'AI 结构化分析失败，本条未计入有效样本',
+    result_summary: {
+      failure: {
+        stage: 'analysis_validation',
+        error_code: 'invalid_analysis_output'
+      },
+      analysis: {
+        status: 'failed',
+        stage: 'parse_or_validate',
+        error_code: 'invalid_analysis_output'
+      }
+    }
+  });
+  await ResultDetail.create({
+    question_record_id: failedRecord.id,
+    ai_response_original: '海康威视、上海广拓和大华股份都可以作为候选。',
+    provider_citations: [{
+      url: 'https://example.com/qwen-source',
+      title: '千问检索来源',
+      source_origin: 'web_search'
+    }],
+    parsing_status: 'completed'
+  });
+  const nativeRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: 89,
+    question_set_name: '仅重试结构化分析',
+    source: 'native',
+    record_ids: [failedRecord.id],
+    completed_at: new Date()
+  });
+
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  const originalSchedule = ProjectRunService.schedulePreparedRun;
+  let quotaCalls = 0;
+  let scheduledContext = null;
+  ProjectRunService.consumeRunQuota = async () => {
+    quotaCalls += 1;
+    return { ok: true };
+  };
+  ProjectRunService.schedulePreparedRun = (context) => {
+    scheduledContext = context;
+  };
+
+  try {
+    const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: project.id, runId: nativeRun.id }
+    });
+
+    assert.equal(response.statusCode, 202);
+    assert.equal(response.payload.data.analysis_only_count, 1);
+    assert.equal(response.payload.data.full_monitoring_count, 0);
+    assert.equal(response.payload.data.quota_consumed, 0);
+    assert.equal(quotaCalls, 0);
+    assert.equal(scheduledContext.entries[0].retryMode, 'analysis_only');
+    assert.equal(
+      scheduledContext.entries[0].responseText,
+      '海康威视、上海广拓和大华股份都可以作为候选。'
+    );
+    assert.deepEqual(scheduledContext.entries[0].providerCitations, [{
+      url: 'https://example.com/qwen-source',
+      title: '千问检索来源',
+      source_origin: 'web_search'
+    }]);
+
+    await nativeRun.reload();
+    const retryRecord = await QuestionRecord.findByPk(nativeRun.record_ids[0]);
+    assert.equal(retryRecord.result_summary.retry.kind, 'analysis_only');
+    const copiedDetail = await ResultDetail.findOne({
+      where: { question_record_id: retryRecord.id }
+    });
+    assert.equal(copiedDetail.ai_response_original, '海康威视、上海广拓和大华股份都可以作为候选。');
+    assert.deepEqual(copiedDetail.provider_citations, [{
+      url: 'https://example.com/qwen-source',
+      title: '千问检索来源',
+      source_origin: 'web_search'
+    }]);
+  } finally {
+    ProjectRunService.consumeRunQuota = originalConsumeQuota;
+    ProjectRunService.schedulePreparedRun = originalSchedule;
+  }
+});
+
+test('导入报告不可重试，非法运行 ID 会被拒绝', async () => {
+  const importedResponse = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+    params: { projectId: project.id, runId: run.id }
+  });
+  assert.equal(importedResponse.statusCode, 409);
+  assert.match(importedResponse.payload.message, /导入报告/);
+
+  const invalidResponse = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+    params: { projectId: project.id, runId: 'invalid' }
+  });
+  assert.equal(invalidResponse.statusCode, 400);
+});
+
+test('重试配额不足时恢复原报告且不留下待处理记录', async () => {
+  const failedRecord = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: 91,
+    platform: 'qwen',
+    platform_name: '千问',
+    model_name: 'qwen-old-model',
+    question: '配额回滚测试问题',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'failed',
+    error_message: '监测平台调用失败，请稍后重试'
+  });
+  const cachedRows = [{
+    record_id: failedRecord.id,
+    question: failedRecord.question,
+    platform: 'qwen',
+    status: 'failed'
+  }];
+  const completedAt = new Date('2026-07-23T08:00:00.000Z');
+  const nativeRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: 92,
+    question_set_name: '配额回滚测试',
+    source: 'native',
+    record_ids: [failedRecord.id],
+    imported_rows: cachedRows,
+    completed_at: completedAt
+  });
+
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  const originalSchedule = ProjectRunService.schedulePreparedRun;
+  let scheduled = false;
+
+  AIPlatformService.getPlatformAvailability = async () => [{
+    code: 'qwen',
+    platform_name: '千问',
+    model_name: 'qwen-current-model',
+    available: true,
+    reason: null,
+    config: { code: 'qwen', default_model: 'qwen-current-model' }
+  }];
+  ProjectRunService.getRuntimeSettings = async () => ({ ai_run_concurrency: 2 });
+  ProjectRunService.consumeRunQuota = async () => ({ ok: false, reason: 'exceeded' });
+  ProjectRunService.schedulePreparedRun = () => {
+    scheduled = true;
+  };
+
+  try {
+    const beforeCount = await QuestionRecord.count({ where: { project_id: project.id } });
+    const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: project.id, runId: nativeRun.id }
+    });
+
+    assert.equal(response.statusCode, 403);
+    assert.match(response.payload.message, /次数不足/);
+    assert.equal(scheduled, false);
+    assert.equal(await QuestionRecord.count({ where: { project_id: project.id } }), beforeCount);
+
+    await nativeRun.reload();
+    assert.deepEqual(nativeRun.record_ids, [failedRecord.id]);
+    assert.deepEqual(nativeRun.imported_rows, cachedRows);
+    assert.equal(nativeRun.completed_at.toISOString(), completedAt.toISOString());
+  } finally {
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
+    ProjectRunService.consumeRunQuota = originalConsumeQuota;
+    ProjectRunService.schedulePreparedRun = originalSchedule;
+  }
+});
+
+test('完整监测重试不会调用已移出当前项目范围的平台', async () => {
+  const scopedProject = await BrandProject.create({
+    user_id: user.id,
+    name: '平台范围测试',
+    aliases: [],
+    primary_keywords: [],
+    platforms: ['deepseek'],
+    status: 'active'
+  });
+  const failedRecord = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: scopedProject.id,
+    tracked_prompt_id: 92,
+    platform: 'qwen',
+    platform_name: '千问',
+    model_name: 'qwen-old-model',
+    question: '平台范围测试问题',
+    brand: scopedProject.name,
+    brand_keywords: scopedProject.name,
+    status: 'failed',
+    error_message: '平台账户额度不足，请补充额度后重试。',
+    result_summary: {
+      failure: {
+        stage: 'monitoring_request',
+        error_code: 'provider_quota_exhausted'
+      }
+    }
+  });
+  const nativeRun = await QuestionSetRun.create({
+    project_id: scopedProject.id,
+    user_id: user.id,
+    question_set_id: 93,
+    question_set_name: '平台范围测试',
+    source: 'native',
+    record_ids: [failedRecord.id],
+    completed_at: new Date()
+  });
+
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  let quotaCalls = 0;
+  ProjectRunService.consumeRunQuota = async () => {
+    quotaCalls += 1;
+    return { ok: true };
+  };
+
+  try {
+    const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: scopedProject.id, runId: nativeRun.id }
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.payload.data.error_code, 'all_retry_platforms_unavailable');
+    assert.equal(response.payload.data.skipped_platforms[0].reason, 'outside_project_scope');
+    assert.equal(quotaCalls, 0);
+  } finally {
+    ProjectRunService.consumeRunQuota = originalConsumeQuota;
+  }
+});
+
+test('不能从另一个项目重试不属于它的运行报告', async () => {
+  const otherProject = await BrandProject.create({
+    user_id: user.id,
+    name: '其他项目',
+    aliases: [],
+    primary_keywords: [],
+    platforms: ['qwen'],
+    status: 'active'
+  });
+
+  const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+    params: { projectId: otherProject.id, runId: run.id }
+  });
+
+  assert.equal(response.statusCode, 404);
+  assert.match(response.payload.message, /运行报告不存在/);
+});
+
+test('暂停和恢复接口不能操作另一个项目的问题集运行', async () => {
+  const otherProject = await BrandProject.create({
+    user_id: user.id,
+    name: '暂停隔离项目',
+    aliases: [],
+    primary_keywords: [],
+    platforms: ['qwen'],
+    status: 'active'
+  });
+  const pending = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: otherProject.id,
+    platform: 'qwen',
+    question: '隔离测试',
+    brand: otherProject.name,
+    brand_keywords: otherProject.name,
+    status: 'pending'
+  });
+  const otherRun = await QuestionSetRun.create({
+    project_id: otherProject.id,
+    user_id: user.id,
+    question_set_name: '隔离测试',
+    source: 'native',
+    record_ids: [pending.id]
+  });
+
+  const pauseResponse = await requestRoute('post', '/:projectId/question-set-runs/:runId/pause', {
+    params: { projectId: project.id, runId: otherRun.id }
+  });
+  assert.equal(pauseResponse.statusCode, 404);
+
+  await otherRun.update({ paused_at: new Date() });
+  const resumeResponse = await requestRoute('post', '/:projectId/question-set-runs/:runId/resume', {
+    params: { projectId: project.id, runId: otherRun.id }
+  });
+  assert.equal(resumeResponse.statusCode, 404);
+});
+
+test('重试接口不会把未知后端异常或数据库细节返回给浏览器', async () => {
+  const originalRetry = ProjectRunService.retryFailedQuestionSetRun;
+  ProjectRunService.retryFailedQuestionSetRun = async () => {
+    throw new Error('SQLITE_CONSTRAINT: secret internal row payload');
+  };
+
+  try {
+    const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: project.id, runId: 99999 },
+      body: { idempotency_key: 'safe-error-test-001' }
+    });
+    assert.equal(response.statusCode, 500);
+    assert.equal(response.payload.message, '重试失败项失败');
+    assert.doesNotMatch(JSON.stringify(response.payload), /SQLITE|secret|row payload/);
+  } finally {
+    ProjectRunService.retryFailedQuestionSetRun = originalRetry;
+  }
 });

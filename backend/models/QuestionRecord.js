@@ -59,6 +59,14 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
     type: DataTypes.ENUM('pending', 'completed', 'failed'),
     defaultValue: 'pending'
   },
+  execution_token: {
+    type: DataTypes.STRING(64),
+    allowNull: true
+  },
+  execution_started_at: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
   error_message: {
     type: DataTypes.TEXT
   }

@@ -87,7 +87,24 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     brand: project.name,
     brand_keywords: project.name,
     status: 'failed',
-    error_message: '监测平台调用失败，请稍后重试'
+    error_message: 'AI 结构化分析失败，本条未计入有效样本',
+    result_summary: {
+      keyword_counts: [],
+      failure: {
+        stage: 'analysis_validation',
+        error_code: 'invalid_analysis_output'
+      },
+      analysis: {
+        status: 'failed',
+        error_code: 'invalid_analysis_output',
+        stage: 'parse_or_validate',
+        attempt_count: 2,
+        platform: 'deepseek',
+        model: 'deepseek-v4-pro',
+        finish_reason: 'stop',
+        output_length: 321
+      }
+    }
   });
   await ResultDetail.create({
     question_record_id: completed.id,
@@ -153,12 +170,79 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     domain: 'www.gato.com.cn',
     owned: true
   }]);
-  assert.equal(report.rows[1].error_message, '监测平台调用失败，请稍后重试');
+  assert.equal(report.rows[1].error_message, 'AI 结构化分析失败，本条未计入有效样本');
+  assert.deepEqual(report.rows[1].failure, {
+    stage: 'analysis_validation',
+    error_code: 'invalid_analysis_output'
+  });
+  assert.deepEqual(report.rows[1].analysis_diagnostics, {
+    status: 'failed',
+    error_code: 'invalid_analysis_output',
+    stage: 'parse_or_validate',
+    attempt_count: 2,
+    platform: 'deepseek',
+    model: 'deepseek-v4-pro',
+    finish_reason: 'stop',
+    output_length: 321
+  });
+
+  await run.reload();
+  assert.deepEqual(run.imported_rows, []);
+  assert.equal(run.completed_at, null);
+  const finalized = await QuestionSetRunService.finalizeNativeRun({
+    projectId: project.id,
+    runId: run.id
+  });
+  assert.equal(finalized, true);
+  await run.reload();
+  assert.equal(run.imported_rows.length, 2);
+  assert.ok(run.completed_at);
 
   await QuestionRecord.destroy({ where: { id: [completed.id, failed.id] } });
   const durableReport = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
   assert.equal(durableReport.rows.length, 2);
   assert.equal(durableReport.rows[0].answer, '广拓可以作为周界报警方案的候选。');
+});
+
+test('旧执行器生成的终态快照不能覆盖已进入新一轮重试的运行', async () => {
+  const record = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    platform: 'deepseek',
+    question: '并发终态测试',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'completed'
+  });
+  const run = await QuestionSetRunService.createNativeRun({
+    project,
+    questionSet,
+    user,
+    runData: { record_ids: [record.id] }
+  });
+  const originalGetNativeRows = QuestionSetRunService.getNativeRows;
+  QuestionSetRunService.getNativeRows = async (...args) => {
+    const rows = await originalGetNativeRows.apply(QuestionSetRunService, args);
+    await QuestionSetRun.increment('revision', { where: { id: run.id } });
+    return rows;
+  };
+
+  try {
+    const finalized = await QuestionSetRunService.finalizeNativeRun({
+      projectId: project.id,
+      runId: run.id
+    });
+    assert.equal(finalized, false);
+    await run.reload();
+    assert.deepEqual(run.imported_rows, []);
+    assert.equal(run.completed_at, null);
+    assert.equal(run.revision, 1);
+  } finally {
+    QuestionSetRunService.getNativeRows = originalGetNativeRows;
+    await run.destroy();
+    await record.destroy();
+  }
 });
 
 test('标准 CSV 导出后可以重新导入为内容等价的只读历史报告', async () => {
@@ -185,6 +269,8 @@ test('标准 CSV 导出后可以重新导入为内容等价的只读历史报告
   assert.equal(restored.rows[0].analysis_method, original.rows[0].analysis_method);
   assert.equal(restored.rows[0].analysis_model, original.rows[0].analysis_model);
   assert.deepEqual(restored.rows[0].analysis_evidence, original.rows[0].analysis_evidence);
+  assert.deepEqual(restored.rows[1].failure, original.rows[1].failure);
+  assert.deepEqual(restored.rows[1].analysis_diagnostics, original.rows[1].analysis_diagnostics);
   assert.equal(restored.summary.brand_mention_rate, original.summary.brand_mention_rate);
   assert.equal(restored.summary.owned_citation_rate, original.summary.owned_citation_rate);
   assert.equal(restored.summary.total_owned_citations, original.summary.total_owned_citations);

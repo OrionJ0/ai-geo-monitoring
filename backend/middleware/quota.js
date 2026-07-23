@@ -1,4 +1,9 @@
 const { MembershipPlan, UsageCounter, User } = require('../models');
+const { Op, literal } = require('sequelize');
+
+// 内存缓存 MembershipPlan（极少变动），避免每次请求都查 DB
+const planCache = new Map(); // key: level, value: { plan, ts }
+const PLAN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
 
 function startOfPeriod(date, period) {
   const d = new Date(date);
@@ -11,22 +16,44 @@ function startOfPeriod(date, period) {
   return d;
 }
 
+async function getPlanForLevel(level) {
+  const cached = planCache.get(level);
+  if (cached && Date.now() - cached.ts < PLAN_CACHE_TTL_MS) {
+    return cached.plan;
+  }
+  const plan = await MembershipPlan.findOne({ where: { level } });
+  planCache.set(level, { plan, ts: Date.now() });
+  return plan;
+}
+
+// 从 JWT 的 level 获取配额上限（不查 User 表，auth 中间件已从 token 解析 level）
+function getLimitFromUser(req, feature) {
+  const level = (req.user && req.user.level) || 'free';
+  // 检查 token 中的 membershipExpiresAt 是否已过期
+  const expiresAt = req.user && req.user.membershipExpiresAt;
+  const effectiveLevel = (level !== 'free' && expiresAt && new Date(expiresAt) < new Date()) ? 'free' : level;
+  return getLimitForLevel(effectiveLevel, feature);
+}
+
+async function getLimitForLevel(level, feature) {
+  const plan = await getPlanForLevel(level);
+  if (!plan) return 0;
+  if (feature === 'detection') return plan.detection_daily_limit;
+  return 0;
+}
+
+// 需要查 User 表的降级路径（用于 bulkConsumeQuota/consumeQuotaDirect 等非请求场景）
 async function getLimitForUser(userId, feature) {
   const user = await User.findByPk(userId);
   let level = user?.membership_level || 'free';
 
-  // 验证会员是否过期
   if (level !== 'free' && user?.membership_expires_at) {
     if (new Date(user.membership_expires_at) < new Date()) {
-      // 会员已过期，降级为免费用户
       level = 'free';
     }
   }
 
-  const plan = await MembershipPlan.findOne({ where: { level } });
-  if (!plan) return 0;
-  if (feature === 'detection') return plan.detection_daily_limit;
-  return 0;
+  return getLimitForLevel(level, feature);
 }
 
 function getPeriodForFeature(feature) {
@@ -34,15 +61,14 @@ function getPeriodForFeature(feature) {
   return 'daily';
 }
 
-// 检查并消耗配额
+// 检查并消耗配额（常规请求路径：使用 JWT 中的 level，不查 User 表）
 function checkQuota(feature) {
   return async function (req, res, next) {
     try {
-      // 兼容通过鉴权中间件设置的 req.user，以及历史代码中的 req.userId
       const userId = (req.user && req.user.id) || req.userId;
       if (!userId) return res.status(401).json({ success: false, message: '未登录' });
       const period = getPeriodForFeature(feature);
-      const limit = await getLimitForUser(userId, feature);
+      const limit = await getLimitFromUser(req, feature);
       if (!limit || limit <= 0) {
         return res.status(403).json({ success: false, message: '当前会员等级不允许使用该功能' });
       }
@@ -55,7 +81,6 @@ function checkQuota(feature) {
         try {
           counter = await UsageCounter.create({ user_id: userId, feature, period, used_count: 0, period_start: shouldStart });
         } catch (e) {
-          // 处理并发下的唯一约束冲突：回退查找现有记录
           const isUnique = String(e?.name || '').toLowerCase().includes('unique');
           if (isUnique) {
             counter = await UsageCounter.findOne({ where: { user_id: userId, feature, period } });
@@ -64,14 +89,12 @@ function checkQuota(feature) {
           }
         }
       } else {
-        // 若周期已过，重置计数
         const currentPeriodStart = startOfPeriod(counter.period_start, period);
         if (currentPeriodStart.getTime() !== shouldStart.getTime()) {
           await counter.update({ used_count: 0, period_start: shouldStart });
         }
       }
 
-      // 使用原子操作检查并递增，避免竞态条件
       if (counter.used_count >= limit) {
         const msgMap = {
           detection: '今日可用检测次数已用完'
@@ -79,7 +102,6 @@ function checkQuota(feature) {
         return res.status(403).json({ success: false, message: msgMap[feature] || '配额已用完' });
       }
 
-      // 使用 increment 进行原子递增
       await counter.increment('used_count', { by: 1 });
       next();
     } catch (error) {
@@ -95,14 +117,12 @@ function resolveQuotaUserId(req, opts = {}) {
   return opts.userId || (req.user && req.user.id) || req.userId;
 }
 
-// 批量消耗配额（在路由内部按需调用），例如一次请求创建多个任务
-// 返回 true 表示已成功扣减；若失败会直接写入响应并返回 false
+// 批量消耗配额（在路由内部按需调用）
 async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
   try {
     const userId = resolveQuotaUserId(req, opts);
     if (!userId) {
       if (opts.sse) {
-        // SSE 错误返回
         if (!res.headersSent) {
           res.setHeader('Content-Type', 'text/event-stream');
           res.setHeader('Cache-Control', 'no-cache');
@@ -117,7 +137,12 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
       return false;
     }
     const period = getPeriodForFeature(feature);
-    const limit = await getLimitForUser(userId, feature);
+
+    // 优先使用 req.user.level（JWT 路径），降级到查 DB
+    const limit = req.user?.level
+      ? await getLimitFromUser(req, feature)
+      : await getLimitForUser(userId, feature);
+
     if (!limit || limit <= 0) {
       if (opts.sse) {
         if (!res.headersSent) {
@@ -156,7 +181,6 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
       }
     }
 
-    // 检查配额是否足够
     const nextCount = (counter.used_count || 0) + Number(amount || 0);
     if (nextCount > limit) {
       const msgMap = {
@@ -177,7 +201,6 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
       return false;
     }
 
-    // 使用原子操作递增，避免竞态条件
     await counter.increment('used_count', { by: Number(amount || 0) });
     return true;
   } catch (error) {
@@ -202,26 +225,40 @@ module.exports.bulkConsumeQuota = bulkConsumeQuota;
 module.exports.resolveQuotaUserId = resolveQuotaUserId;
 
 // 非路由场景下的直接配额消耗（供定时任务使用）
-// 返回 { ok: boolean, used: number, limit: number, reason?: string }
-async function consumeQuotaDirect(userId, feature, amount) {
+async function consumeQuotaDirect(userId, feature, amount, options = {}) {
   try {
+    const requestedAmount = Number(amount);
+    if (!Number.isInteger(requestedAmount) || requestedAmount < 0) {
+      return { ok: false, used: 0, limit: 0, reason: 'invalid_amount' };
+    }
     const period = getPeriodForFeature(feature);
     const limit = await getLimitForUser(userId, feature);
     if (!limit || limit <= 0) {
       return { ok: false, used: 0, limit, reason: 'not_allowed' };
     }
 
-    let counter = await UsageCounter.findOne({ where: { user_id: userId, feature, period } });
+    const transaction = options.transaction;
+    const queryOptions = transaction ? { transaction } : {};
+    let counter = await UsageCounter.findOne({
+      where: { user_id: userId, feature, period },
+      ...queryOptions
+    });
     const now = new Date();
     const shouldStart = startOfPeriod(now, period);
 
     if (!counter) {
       try {
-        counter = await UsageCounter.create({ user_id: userId, feature, period, used_count: 0, period_start: shouldStart });
+        counter = await UsageCounter.create(
+          { user_id: userId, feature, period, used_count: 0, period_start: shouldStart },
+          queryOptions
+        );
       } catch (e) {
         const isUnique = String(e?.name || '').toLowerCase().includes('unique');
         if (isUnique) {
-          counter = await UsageCounter.findOne({ where: { user_id: userId, feature, period } });
+          counter = await UsageCounter.findOne({
+            where: { user_id: userId, feature, period },
+            ...queryOptions
+          });
         } else {
           throw e;
         }
@@ -229,16 +266,38 @@ async function consumeQuotaDirect(userId, feature, amount) {
     } else {
       const currentPeriodStart = startOfPeriod(counter.period_start, period);
       if (currentPeriodStart.getTime() !== shouldStart.getTime()) {
-        await counter.update({ used_count: 0, period_start: shouldStart });
+        await UsageCounter.update(
+          { used_count: 0, period_start: shouldStart },
+          {
+            where: {
+              id: counter.id,
+              period_start: { [Op.lt]: shouldStart }
+            },
+            ...queryOptions
+          }
+        );
       }
     }
 
-    const nextCount = (counter.used_count || 0) + Number(amount || 0);
-    if (nextCount > limit) {
-      return { ok: false, used: counter.used_count || 0, limit, reason: 'exceeded' };
+    if (requestedAmount === 0) {
+      const current = await UsageCounter.findByPk(counter.id, queryOptions);
+      return { ok: true, used: current?.used_count || 0, limit };
     }
-    await counter.update({ used_count: nextCount });
-    return { ok: true, used: nextCount, limit };
+    const [updatedRows] = await UsageCounter.update(
+      { used_count: literal(`used_count + ${requestedAmount}`) },
+      {
+        where: {
+          id: counter.id,
+          used_count: { [Op.lte]: limit - requestedAmount }
+        },
+        ...queryOptions
+      }
+    );
+    const current = await UsageCounter.findByPk(counter.id, queryOptions);
+    if (updatedRows !== 1) {
+      return { ok: false, used: current?.used_count || 0, limit, reason: 'exceeded' };
+    }
+    return { ok: true, used: current?.used_count || 0, limit };
   } catch (error) {
     console.error('consumeQuotaDirect 失败:', error);
     return { ok: false, used: 0, limit: 0, reason: 'error' };

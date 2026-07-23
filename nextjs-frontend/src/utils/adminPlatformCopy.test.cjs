@@ -14,5 +14,7 @@ test('admin platform settings mask an existing API key and reveal it only throug
   assert.match(source, /handleApiKeyVisibilityChange/);
   assert.doesNotMatch(source, /显示现有密钥/);
   assert.doesNotMatch(source, /末四位/);
+  assert.doesNotMatch(source, /disabled=\{revealingKey\}/);
+  assert.doesNotMatch(source, /正在读取完整密钥/);
   assert.doesNotMatch(source, /value=\{[^}]*api_key/);
 });

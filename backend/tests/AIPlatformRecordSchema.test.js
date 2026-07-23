@@ -37,6 +37,22 @@ test('AI platform records persist request parameters and independent web-search 
   assert.ok(platform.last_web_search_test_message);
 });
 
+test('question-set retry records persist execution leases, citation snapshots and run revisions', async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const questionRecord = await queryInterface.describeTable('question_records');
+  const resultDetail = await queryInterface.describeTable('result_details');
+  const questionSetRun = await queryInterface.describeTable('question_set_runs');
+  const retryBatch = await queryInterface.describeTable('question_set_retry_batches');
+
+  assert.ok(questionRecord.execution_token);
+  assert.ok(questionRecord.execution_started_at);
+  assert.ok(resultDetail.provider_citations);
+  assert.ok(questionSetRun.revision);
+  assert.ok(questionSetRun.paused_at);
+  assert.ok(retryBatch.idempotency_key);
+  assert.ok(retryBatch.status);
+});
+
 test('postgres startup migration detects Sequelize user-defined enum descriptions', () => {
   const appSource = fs.readFileSync(path.resolve(__dirname, '../app.js'), 'utf8');
 

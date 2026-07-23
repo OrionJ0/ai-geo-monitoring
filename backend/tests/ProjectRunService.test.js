@@ -158,10 +158,57 @@ test('derives prompt categories from common user question intents', () => {
   assert.equal(ProjectRunService.derivePromptCategory({ question: 'DeepSeek 和豆包哪个更适合内容团队' }), '竞品对比');
 });
 
-test('marks a completed AI response as failed when metric generation fails', async () => {
-  const originalCreateMetric = ProjectRunService.createVisibilityMetric;
+test('commits the visibility metric and completed record in one transaction', async () => {
+  const originalBuildPayload = ProjectRunService.buildVisibilityMetricPayload;
+  const originalPersistMetric = ProjectRunService.persistVisibilityMetric;
+  const originalRunInTransaction = ProjectRunService.runInTransaction;
+  const transaction = { id: 'analysis-transaction' };
   const updates = [];
-  ProjectRunService.createVisibilityMetric = async () => {
+  let persistedTransaction;
+  ProjectRunService.buildVisibilityMetricPayload = async () => ({ project_id: 2 });
+  ProjectRunService.persistVisibilityMetric = async (input) => {
+    persistedTransaction = input.transaction;
+    return { id: 99 };
+  };
+  ProjectRunService.runInTransaction = async (work) => work(transaction);
+
+  try {
+    const result = await ProjectRunService.finalizeSuccessfulRecord({
+      record: {
+        id: 12,
+        result_summary: {
+          retry: { previous_record_id: 8, attempt: 1 }
+        },
+        update: async (payload, options) => updates.push({ payload, options })
+      },
+      responseText: '广拓值得关注',
+      aiResponse: {},
+      project: { id: 2, name: '广拓' },
+      competitors: [],
+      prompt: { id: 3, question: '周界报警怎么选' },
+      keywords: ['广拓']
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(persistedTransaction, transaction);
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].payload.status, 'completed');
+    assert.deepEqual(updates[0].payload.result_summary.retry, {
+      previous_record_id: 8,
+      attempt: 1
+    });
+    assert.equal(updates[0].options.transaction, transaction);
+  } finally {
+    ProjectRunService.buildVisibilityMetricPayload = originalBuildPayload;
+    ProjectRunService.persistVisibilityMetric = originalPersistMetric;
+    ProjectRunService.runInTransaction = originalRunInTransaction;
+  }
+});
+
+test('marks a completed AI response as failed when metric generation fails', async () => {
+  const originalBuildPayload = ProjectRunService.buildVisibilityMetricPayload;
+  const updates = [];
+  ProjectRunService.buildVisibilityMetricPayload = async () => {
     throw new Error('metric write failed');
   };
 
@@ -186,21 +233,36 @@ test('marks a completed AI response as failed when metric generation fails', asy
     assert.equal(updates[0].error_message, '指标生成失败，请稍后重试');
     assert.equal(result.error, '指标生成失败，请稍后重试');
   } finally {
-    ProjectRunService.createVisibilityMetric = originalCreateMetric;
+    ProjectRunService.buildVisibilityMetricPayload = originalBuildPayload;
   }
 });
 
 test('explains that invalid AI structure is excluded instead of falling back to rules', async () => {
-  const originalCreateMetric = ProjectRunService.createVisibilityMetric;
+  const originalBuildPayload = ProjectRunService.buildVisibilityMetricPayload;
   const updates = [];
-  ProjectRunService.createVisibilityMetric = async () => {
-    throw new AIResponseAnalysisError('证据不在原回答中');
+  ProjectRunService.buildVisibilityMetricPayload = async () => {
+    throw new AIResponseAnalysisError(
+      '证据不在原回答中',
+      'invalid_analysis_output',
+      {
+        stage: 'parse_or_validate',
+        attempt_count: 2,
+        platform: 'deepseek',
+        model: 'deepseek-v4-pro',
+        finish_reason: 'stop',
+        output_length: 321,
+        usage: { prompt_tokens: 120, completion_tokens: 18, total_tokens: 138 }
+      }
+    );
   };
 
   try {
     const result = await ProjectRunService.finalizeSuccessfulRecord({
       record: {
         id: 13,
+        result_summary: {
+          retry: { previous_record_id: 9, attempt: 2 }
+        },
         update: async (payload) => updates.push(payload)
       },
       responseText: '原始回答仍然保留',
@@ -215,17 +277,45 @@ test('explains that invalid AI structure is excluded instead of falling back to 
     assert.equal(result.error, 'AI 结构化分析失败，本条未计入有效样本');
     assert.deepEqual(updates[0], {
       status: 'failed',
-      error_message: 'AI 结构化分析失败，本条未计入有效样本'
+      error_message: 'AI 结构化分析失败，本条未计入有效样本',
+      result_summary: {
+        retry: {
+          previous_record_id: 9,
+          attempt: 2
+        },
+        failure: {
+          stage: 'analysis_validation',
+          error_code: 'invalid_analysis_output'
+        },
+        keyword_counts: [],
+        analysis: {
+          status: 'failed',
+          error_code: 'invalid_analysis_output',
+          error_detail: '证据不在原回答中',
+          stage: 'parse_or_validate',
+          attempt_count: 2,
+          platform: 'deepseek',
+          model: 'deepseek-v4-pro',
+          finish_reason: 'stop',
+          output_length: 321,
+          usage: { prompt_tokens: 120, completion_tokens: 18, total_tokens: 138 }
+        }
+      }
     });
+    assert.equal(updates[0].result_summary.analysis.raw_output, undefined);
   } finally {
-    ProjectRunService.createVisibilityMetric = originalCreateMetric;
+    ProjectRunService.buildVisibilityMetricPayload = originalBuildPayload;
   }
 });
 
 test('deduplicates overlapping brand keywords in record keyword counts', async () => {
-  const originalCreateMetric = ProjectRunService.createVisibilityMetric;
+  const originalBuildPayload = ProjectRunService.buildVisibilityMetricPayload;
+  const originalPersistMetric = ProjectRunService.persistVisibilityMetric;
+  const originalRunInTransaction = ProjectRunService.runInTransaction;
   const updates = [];
-  ProjectRunService.createVisibilityMetric = async () => ({ id: 99 });
+  ProjectRunService.buildVisibilityMetricPayload = async () => ({ project_id: 2 });
+  ProjectRunService.persistVisibilityMetric = async () => ({ id: 99 });
+  ProjectRunService.runInTransaction = async (work) => work({ id: 'keyword-transaction' });
 
   try {
     const result = await ProjectRunService.finalizeSuccessfulRecord({
@@ -249,14 +339,20 @@ test('deduplicates overlapping brand keywords in record keyword counts', async (
       { keyword: '豆包大模型', count: 1 }
     ]);
   } finally {
-    ProjectRunService.createVisibilityMetric = originalCreateMetric;
+    ProjectRunService.buildVisibilityMetricPayload = originalBuildPayload;
+    ProjectRunService.persistVisibilityMetric = originalPersistMetric;
+    ProjectRunService.runInTransaction = originalRunInTransaction;
   }
 });
 
 test('counts compact brand spellings in record keyword counts without exposing compact keywords', async () => {
-  const originalCreateMetric = ProjectRunService.createVisibilityMetric;
+  const originalBuildPayload = ProjectRunService.buildVisibilityMetricPayload;
+  const originalPersistMetric = ProjectRunService.persistVisibilityMetric;
+  const originalRunInTransaction = ProjectRunService.runInTransaction;
   const updates = [];
-  ProjectRunService.createVisibilityMetric = async () => ({ id: 99 });
+  ProjectRunService.buildVisibilityMetricPayload = async () => ({ project_id: 2 });
+  ProjectRunService.persistVisibilityMetric = async () => ({ id: 99 });
+  ProjectRunService.runInTransaction = async (work) => work({ id: 'keyword-transaction' });
 
   try {
     const result = await ProjectRunService.finalizeSuccessfulRecord({
@@ -280,7 +376,9 @@ test('counts compact brand spellings in record keyword counts without exposing c
       { keyword: 'Goodie AI', count: 1 }
     ]);
   } finally {
-    ProjectRunService.createVisibilityMetric = originalCreateMetric;
+    ProjectRunService.buildVisibilityMetricPayload = originalBuildPayload;
+    ProjectRunService.persistVisibilityMetric = originalPersistMetric;
+    ProjectRunService.runInTransaction = originalRunInTransaction;
   }
 });
 
@@ -323,11 +421,12 @@ test('builds complete visibility metric payload for any project detection path',
         tracked_prompt_id: 3
       },
       responseText: '米其林静音轮胎值得推荐。参考 https://www.michelin.com.cn/tire?id=1',
-      aiResponse: {
+      aiResponse: {},
+      providerCitations: ProjectRunService.snapshotProviderCitations({
         citations: [
           { url: 'https://www.michelin.com.cn/tire?id=1', title: '米其林官网' }
         ]
-      },
+      }),
       project: {
         id: 2,
         name: '米其林',
@@ -522,6 +621,85 @@ test('creates run records for every project run target before execution', async 
   }
 });
 
+test('同一待处理记录被重复调度时只允许一个执行者调用平台', async () => {
+  const originalRunTarget = ProjectRunService.runTarget;
+  let callCount = 0;
+  let releaseFirst;
+  const firstStarted = new Promise((resolve) => {
+    ProjectRunService.runTarget = async () => {
+      callCount += 1;
+      if (callCount > 1) return { status: 'completed' };
+      resolve();
+      await new Promise((release) => {
+        releaseFirst = release;
+      });
+      return { status: 'completed' };
+    };
+  });
+  const entry = {
+    target: {
+      prompt: { id: 8, question: '重复调度测试' },
+      platform: 'qwen'
+    },
+    record: { id: 880 }
+  };
+
+  try {
+    const first = ProjectRunService.runPreparedTargets({
+      entries: [entry],
+      targets: [entry.target],
+      runUser: { id: 9 },
+      projectData: { id: 2 },
+      competitors: [],
+      keywords: [],
+      runtimeSettings: {},
+      concurrency: 1
+    });
+    await firstStarted;
+    const second = ProjectRunService.runPreparedTargets({
+      entries: [entry],
+      targets: [entry.target],
+      runUser: { id: 9 },
+      projectData: { id: 2 },
+      competitors: [],
+      keywords: [],
+      runtimeSettings: {},
+      concurrency: 1
+    });
+    releaseFirst();
+    const [, secondResults] = await Promise.all([first, second]);
+
+    assert.equal(callCount, 1);
+    assert.equal(secondResults[0].skipped_reason, 'already_running');
+  } finally {
+    ProjectRunService.runTarget = originalRunTarget;
+  }
+});
+
+test('数据库执行租约只抢占仍为 pending 且尚未被其他进程领取的记录', async () => {
+  const originalUpdate = QuestionRecord.update;
+  const calls = [];
+  QuestionRecord.update = async (...args) => {
+    calls.push(args);
+    return [calls.length === 1 ? 1 : 0];
+  };
+
+  try {
+    const first = await ProjectRunService.claimRecordExecution(881);
+    const second = await ProjectRunService.claimRecordExecution(881);
+
+    assert.equal(first.claimed, true);
+    assert.equal(second.claimed, false);
+    assert.equal(calls[0][1].where.id, 881);
+    assert.equal(calls[0][1].where.status, 'pending');
+    assert.equal(calls[0][1].where.execution_token, null);
+    assert.match(calls[0][0].execution_token, /^[0-9a-f-]{36}$/);
+    assert.ok(calls[0][0].execution_started_at instanceof Date);
+  } finally {
+    QuestionRecord.update = originalUpdate;
+  }
+});
+
 test('runs a prepared project run target without creating a duplicate question record', async () => {
   const originalCreateRecord = QuestionRecord.create;
   const originalQueryPlatform = AIPlatformService.queryPlatform;
@@ -560,7 +738,13 @@ test('runs a prepared project run target without creating a duplicate question r
     });
     assert.deepEqual(updates[0], {
       status: 'failed',
-      error_message: '监测平台调用失败，请稍后重试'
+      error_message: '监测平台调用失败，请稍后重试',
+      result_summary: {
+        failure: {
+          stage: 'monitoring_request',
+          error_code: 'provider_error'
+        }
+      }
     });
   } finally {
     QuestionRecord.create = originalCreateRecord;
@@ -755,7 +939,59 @@ test('marks a project run target failed with a safe message when platform return
     assert.equal(updates.length, 1);
     assert.deepEqual(updates[0], {
       status: 'failed',
-      error_message: '监测平台调用失败，请稍后重试'
+      error_message: '监测平台调用失败，请稍后重试',
+      result_summary: {
+        failure: {
+          stage: 'monitoring_request',
+          error_code: 'provider_error'
+        }
+      }
+    });
+  } finally {
+    QuestionRecord.create = originalCreateRecord;
+    AIPlatformService.queryPlatform = originalQueryPlatform;
+  }
+});
+
+test('persists a monitoring-stage failure code so retry can choose the correct path', async () => {
+  const originalCreateRecord = QuestionRecord.create;
+  const originalQueryPlatform = AIPlatformService.queryPlatform;
+  const updates = [];
+
+  QuestionRecord.create = async () => ({
+    id: 23,
+    result_summary: {},
+    update: async (payload) => updates.push(payload)
+  });
+  AIPlatformService.queryPlatform = async () => ({
+    success: false,
+    error_code: 'provider_quota_exhausted',
+    error: '平台账户额度不足，请补充额度后重试。'
+  });
+
+  try {
+    const result = await ProjectRunService.runTarget({
+      target: {
+        prompt: { id: 4, question: '静音轮胎怎么选' },
+        platform: 'qwen'
+      },
+      runUser: { id: 9 },
+      projectData: { id: 2, name: '米其林' },
+      competitors: [],
+      keywords: ['米其林']
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error, '平台账户额度不足，请补充额度后重试。');
+    assert.deepEqual(updates[0], {
+      status: 'failed',
+      error_message: '平台账户额度不足，请补充额度后重试。',
+      result_summary: {
+        failure: {
+          stage: 'monitoring_request',
+          error_code: 'provider_quota_exhausted'
+        }
+      }
     });
   } finally {
     QuestionRecord.create = originalCreateRecord;

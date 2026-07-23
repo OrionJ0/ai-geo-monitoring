@@ -30,7 +30,13 @@ module.exports = {
         return res.status(500).json({ success: false, message: '服务器配置错误' });
       }
       const payload = jwt.verify(token, secret);
-      req.user = { id: payload.userId, username: payload.username, role: payload.role };
+      req.user = {
+        id: payload.userId,
+        username: payload.username,
+        role: payload.role,
+        level: payload.level || 'free',
+        membershipExpiresAt: payload.membershipExpiresAt || null,
+      };
       return next();
     } catch (error) {
       return res.status(401).json({ success: false, message: '未授权：令牌无效或已过期' });
@@ -50,7 +56,13 @@ module.exports = {
         return res.status(500).json({ success: false, message: '服务器配置错误' });
       }
       const payload = jwt.verify(token, secret);
-      req.user = { id: payload.userId, username: payload.username, role: payload.role };
+      req.user = {
+        id: payload.userId,
+        username: payload.username,
+        role: payload.role,
+        level: payload.level || 'free',
+        membershipExpiresAt: payload.membershipExpiresAt || null,
+      };
       if (req.user.role !== 'admin') {
         return res.status(403).json({ success: false, message: '禁止访问：需要管理员权限' });
       }

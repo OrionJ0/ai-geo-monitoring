@@ -149,30 +149,94 @@ test('scheduled query exceptions mark created records as failed', () => {
 });
 
 test('recovers stale pending project records as failed', async () => {
-  const originalUpdate = QuestionRecord.update;
-  const calls = [];
-  QuestionRecord.update = async (...args) => {
-    calls.push(args);
-    return [2];
+  const batchCalls = [];
+  const recordUpdates = [];
+  const retryMetadata = {
+    retry: {
+      previous_record_id: 17,
+      attempt: 2,
+      kind: 'analysis_only'
+    }
   };
+  const recovered = await SchedulerService.recoverStalePendingRecords({
+    now: new Date('2026-05-19T13:30:00.000Z'),
+    maxAgeMs: 20 * 60 * 1000,
+    includeUnclaimed: true,
+    QuestionRecord: {
+      findAll: async (options) => {
+        assert.equal(options.where.status, 'pending');
+        assert.ok(options.where.created_at);
+        return [
+          {
+            result_summary: retryMetadata,
+            update: async (payload) => recordUpdates.push(payload)
+          },
+          {
+            result_summary: null,
+            update: async (payload) => recordUpdates.push(payload)
+          }
+        ];
+      }
+    },
+    QuestionSetRetryBatch: {
+      update: async (...args) => {
+        batchCalls.push(args);
+        return [1];
+      }
+    }
+  });
 
-  try {
-    const recovered = await SchedulerService.recoverStalePendingRecords({
-      now: new Date('2026-05-19T13:30:00.000Z'),
-      maxAgeMs: 20 * 60 * 1000
-    });
+  assert.equal(recovered, 2);
+  assert.equal(recordUpdates.length, 2);
+  assert.deepEqual(recordUpdates[0], {
+    status: 'failed',
+    error_message: '分析任务中断，请重新运行',
+    execution_token: null,
+    execution_started_at: null,
+    result_summary: {
+      ...retryMetadata,
+      failure: {
+        stage: 'execution_interrupted',
+        error_code: 'stale_pending_recovered'
+      }
+    }
+  });
+  assert.deepEqual(recordUpdates[1], {
+    status: 'failed',
+    error_message: '分析任务中断，请重新运行',
+    execution_token: null,
+    execution_started_at: null,
+    result_summary: {
+      failure: {
+        stage: 'execution_interrupted',
+        error_code: 'stale_pending_recovered'
+      }
+    }
+  });
+  assert.equal(batchCalls.length, 1);
+  assert.equal(batchCalls[0][0].status, 'failed');
+  assert.ok(batchCalls[0][1].where.updated_at);
+});
 
-    assert.equal(recovered, 2);
-    assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0][0], {
-      status: 'failed',
-      error_message: '分析任务中断，请重新运行'
-    });
-    assert.equal(calls[0][1].where.status, 'pending');
-    assert.ok(calls[0][1].where.created_at);
-  } finally {
-    QuestionRecord.update = originalUpdate;
-  }
+test('periodic recovery only expires claimed executions, not old records still waiting in a long queue', async () => {
+  let observedWhere = null;
+  const recovered = await SchedulerService.recoverStalePendingRecords({
+    now: new Date('2026-05-19T13:30:00.000Z'),
+    maxAgeMs: 20 * 60 * 1000,
+    QuestionRecord: {
+      findAll: async (options) => {
+        observedWhere = options.where;
+        return [];
+      }
+    },
+    QuestionSetRetryBatch: {
+      update: async () => [0]
+    }
+  });
+
+  assert.equal(recovered, 0);
+  assert.ok(observedWhere.execution_started_at);
+  assert.equal(observedWhere.created_at, undefined);
 });
 
 test('manual scheduled runs only succeed when at least one platform completes', () => {

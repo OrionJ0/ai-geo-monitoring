@@ -254,6 +254,42 @@ test('allows internal analysis calls to omit monitoring-only request parameters'
   assert.equal('search_options' in requestBody, false);
 });
 
+test('allows an analysis call to override token and timeout limits without mutating platform settings', async () => {
+  let request;
+  const row = {
+    id: 4,
+    code: 'deepseek',
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'deepseek-v4-pro',
+    request_timeout_seconds: 15,
+    max_tokens: 1024,
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (_url, body, options) => {
+      request = { body, options };
+      return { data: { choices: [{ message: { content: '{}' } }] }, headers: {} };
+    }
+  });
+
+  const result = await service.queryConfig(row, '结构化回答', {
+    requestOptions: {},
+    maxTokens: 8192,
+    timeoutSeconds: 120
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(request.body.max_tokens, 8192);
+  assert.equal(request.options.timeout, 120000);
+  assert.equal(row.max_tokens, 1024);
+  assert.equal(row.request_timeout_seconds, 15);
+});
+
 test('preserves model fields when overriding request options on a Sequelize-like config row', async () => {
   let requestBody;
   const values = {
@@ -412,6 +448,51 @@ test('normalizes provider failures without exposing raw provider data', async ()
   assert.equal(result.error_code, 'authentication_failed');
   assert.equal(result.error, '平台认证失败，请管理员检查 API Key。');
   assert.equal(JSON.stringify(result).includes('must-not-leak'), false);
+});
+
+test('classifies exhausted provider quota without retrying or exposing the provider message', async () => {
+  let calls = 0;
+  const row = {
+    id: 4,
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/compatible-mode/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'qwen3.7-plus',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async () => {
+      calls += 1;
+      const error = new Error('request failed');
+      error.response = {
+        status: 429,
+        data: {
+          error: {
+            code: 'insufficient_quota',
+            message: 'account balance and private diagnostic details'
+          }
+        },
+        headers: {}
+      };
+      throw error;
+    }
+  });
+
+  const result = await service.queryPlatform('qwen', '测试问题', { retryCount: 3 });
+
+  assert.equal(calls, 1);
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'provider_quota_exhausted');
+  assert.equal(result.error, '平台账户额度不足，请补充额度后重试。');
+  assert.deepEqual(result.provider_error, {
+    status: 429,
+    code: 'insufficient_quota'
+  });
+  assert.equal(JSON.stringify(result).includes('private diagnostic details'), false);
 });
 
 test('tests disabled platforms without changing their enabled state', async () => {

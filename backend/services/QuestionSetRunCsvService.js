@@ -39,7 +39,12 @@ const ANALYSIS_HEADERS = [
   'analysis_structure_json',
   'analysis_evidence_json'
 ];
-const HEADERS = [...REQUIRED_HEADERS, ...ANALYSIS_HEADERS];
+const DIAGNOSTIC_HEADERS = [
+  'failure_json',
+  'retry_json',
+  'analysis_diagnostics_json'
+];
+const HEADERS = [...REQUIRED_HEADERS, ...ANALYSIS_HEADERS, ...DIAGNOSTIC_HEADERS];
 
 class CsvValidationError extends Error {
   constructor(code, message) {
@@ -113,6 +118,15 @@ function buildCsv(report) {
     JSON.stringify(
       row.analysis_evidence && typeof row.analysis_evidence === 'object' && !Array.isArray(row.analysis_evidence)
         ? row.analysis_evidence
+        : {}
+    ),
+    JSON.stringify(row.failure && typeof row.failure === 'object' && !Array.isArray(row.failure) ? row.failure : {}),
+    JSON.stringify(row.retry && typeof row.retry === 'object' && !Array.isArray(row.retry) ? row.retry : {}),
+    JSON.stringify(
+      row.analysis_diagnostics
+        && typeof row.analysis_diagnostics === 'object'
+        && !Array.isArray(row.analysis_diagnostics)
+        ? row.analysis_diagnostics
         : {}
     )
   ]);
@@ -194,6 +208,11 @@ function parseJsonObject(value, column, line) {
   } catch {
     throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 ${column} 不是有效 JSON 对象`);
   }
+}
+
+function parseOptionalJsonObject(value, column, line) {
+  const parsed = parseJsonObject(value, column, line);
+  return Object.keys(parsed).length ? parsed : null;
 }
 
 function parseCitationSources(value, line) {
@@ -316,7 +335,14 @@ function parseCsv(csv) {
         'analysis_structure_json',
         line
       ),
-      analysis_evidence: parseJsonObject(valueAt(row, 'analysis_evidence_json'), 'analysis_evidence_json', line)
+      analysis_evidence: parseJsonObject(valueAt(row, 'analysis_evidence_json'), 'analysis_evidence_json', line),
+      failure: parseOptionalJsonObject(valueAt(row, 'failure_json'), 'failure_json', line),
+      retry: parseOptionalJsonObject(valueAt(row, 'retry_json'), 'retry_json', line),
+      analysis_diagnostics: parseOptionalJsonObject(
+        valueAt(row, 'analysis_diagnostics_json'),
+        'analysis_diagnostics_json',
+        line
+      )
     };
   });
 

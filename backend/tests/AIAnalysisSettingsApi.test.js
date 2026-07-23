@@ -96,6 +96,10 @@ test('returns the versioned runtime analysis prompt template to administrators',
   assert.equal(response.json.data.version, 'ai_structured_v2');
   assert.match(response.json.data.template, /\{\{目标品牌\}\}/);
   assert.match(response.json.data.template, /全部品牌或公司实体/);
+  assert.equal(response.json.data.request_profile.max_tokens, 8192);
+  assert.equal(response.json.data.request_profile.timeout_seconds, 120);
+  assert.equal(response.json.data.request_profile.max_attempts, 2);
+  assert.equal(response.json.data.request_profile.web_search, false);
   assert.doesNotMatch(response.json.data.template, /逐字原文/);
 });
 

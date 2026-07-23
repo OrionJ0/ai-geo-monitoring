@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ReloadOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -23,7 +24,7 @@ import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 
 const { Text } = Typography;
-const MASKED_API_KEY = '****';
+const MASKED_API_KEY = '********************************';
 
 type TestStatus = 'untested' | 'success' | 'failed';
 type WebSearchTestStatus = TestStatus | 'inconclusive';
@@ -102,7 +103,6 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
   const [platforms, setPlatforms] = useState<PlatformRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [revealingKey, setRevealingKey] = useState(false);
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [preserveExistingApiKey, setPreserveExistingApiKey] = useState(false);
   const [testingId, setTestingId] = useState<number | null>(null);
@@ -113,12 +113,16 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
   } | null>(null);
   const [editing, setEditing] = useState<PlatformRecord | null>(null);
   const [open, setOpen] = useState(false);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [modelLoading, setModelLoading] = useState(false);
   const [form] = Form.useForm<PlatformFormValues>();
   const apiKeyRevealRequest = useRef(0);
+  const apiKeyRevealPending = useRef(false);
 
   const resetApiKeyEditor = (preserveExisting = false) => {
     apiKeyRevealRequest.current += 1;
-    setRevealingKey(false);
+    apiKeyRevealPending.current = false;
     setApiKeyVisible(false);
     setPreserveExistingApiKey(preserveExisting);
   };
@@ -141,6 +145,8 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
 
   const openCreate = () => {
     setEditing(null);
+    setModelDropdownOpen(false);
+    setModelOptions([]);
     resetApiKeyEditor();
     form.setFieldsValue({
       code: '',
@@ -159,6 +165,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
 
   const openEdit = (platform: PlatformRecord) => {
     setEditing(platform);
+    setModelDropdownOpen(false);
     resetApiKeyEditor(platform.configured);
     form.setFieldsValue({
       code: platform.code,
@@ -173,13 +180,55 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       enabled: platform.enabled,
     });
     setOpen(true);
+    if (platform.configured) {
+      void loadModels(platform.id, platform.default_model);
+    } else {
+      setModelOptions(platform.default_model ? [platform.default_model] : []);
+    }
+  };
+
+  const loadModels = useCallback(async (
+    platformId: number,
+    fallbackModel = '',
+    notifyResult = false,
+  ) => {
+    setModelLoading(true);
+    setModelOptions(fallbackModel ? [fallbackModel] : []);
+    try {
+      const response = await axios.get(`/api/admin/ai-platforms/${platformId}/models`);
+      const models: string[] = Array.isArray(response?.data?.data?.models)
+        ? response.data.data.models.map((item: unknown) => String(item || '').trim()).filter(Boolean)
+        : [];
+      setModelOptions(Array.from(new Set([fallbackModel, ...models].filter(Boolean))));
+      if (notifyResult) {
+        message.success(`已从平台读取 ${models.length} 个模型，列表不会保存`);
+        setModelDropdownOpen(true);
+      }
+    } catch (error) {
+      message.warning(getApiErrorMessage(error, '未能获取模型列表，仍可使用当前默认模型'));
+    } finally {
+      setModelLoading(false);
+    }
+  }, []);
+
+  const refreshModels = () => {
+    if (!editing) {
+      message.warning('保存平台后即可刷新模型列表');
+      return;
+    }
+    if (!editing.configured) {
+      message.warning('请先配置 API Key 和 Base URL');
+      return;
+    }
+    const currentModel = String(form.getFieldValue('default_model') || editing.default_model || '');
+    void loadModels(editing.id, currentModel, true);
   };
 
   const revealApiKey = async (platform: PlatformRecord) => {
-    if (revealingKey) return;
+    if (apiKeyRevealPending.current) return;
     const requestId = apiKeyRevealRequest.current + 1;
     apiKeyRevealRequest.current = requestId;
-    setRevealingKey(true);
+    apiKeyRevealPending.current = true;
     try {
       const response = await axios.get(`/api/admin/ai-platforms/${platform.id}/api-key`);
       if (apiKeyRevealRequest.current !== requestId) return;
@@ -192,7 +241,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       message.error(getApiErrorMessage(error, '读取 API Key 失败'));
     } finally {
       if (apiKeyRevealRequest.current === requestId) {
-        setRevealingKey(false);
+        apiKeyRevealPending.current = false;
       }
     }
   };
@@ -454,7 +503,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
         type="info"
         showIcon
         title="平台统一使用 OpenAI 兼容协议"
-        description="系统不会自动导入 .env 中的 AI API 配置。调用类型只保留 Chat Completions 与 Responses 两种协议，不再按豆包、千问等供应商命名；此处维护接口参数和当前默认模型，模型目录只在“AI 分析 API”中临时刷新。"
+        description="系统不会自动导入 .env 中的 AI API 配置。调用类型只保留 Chat Completions 与 Responses 两种协议，不再按豆包、千问等供应商命名；编辑平台时可在模型下拉框中刷新供应商模型列表，列表不会保存。"
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Space>
@@ -516,25 +565,50 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
             <Input placeholder="https://api.example.com/v1" />
           </Form.Item>
           <Form.Item
-            name="default_model"
             label="默认模型"
-            extra="这里维护平台当前默认模型，不刷新模型目录；如需从供应商读取可选模型，请到“AI 分析 API”页签。"
-            rules={[{ required: true, message: '请输入默认模型' }]}
+            extra={(
+              <Space orientation="vertical" size={0}>
+                <span>可从供应商接口临时读取可用模型；系统仅保存最终选择的模型名称，不缓存模型列表。</span>
+              </Space>
+            )}
           >
-            <Input placeholder="例如 doubao-seed-2-1-turbo-260628" />
+            <Space.Compact block>
+              <Form.Item
+                name="default_model"
+                noStyle
+                rules={[{ required: true, message: '请选择或输入默认模型' }]}
+              >
+                <Select
+                  showSearch
+                  open={modelDropdownOpen}
+                  onOpenChange={setModelDropdownOpen}
+                  optionFilterProp="label"
+                  loading={modelLoading}
+                  placeholder="选择或输入模型名称"
+                  mode={undefined}
+                  style={{ width: '100%' }}
+                  options={modelOptions.map((model) => ({ value: model, label: model }))}
+                />
+              </Form.Item>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={modelLoading}
+                disabled={!editing}
+                onClick={refreshModels}
+              >
+                刷新模型
+              </Button>
+            </Space.Compact>
           </Form.Item>
           <Form.Item
             name="api_key"
             label="API Key"
             extra={editing?.configured
-              ? (revealingKey
-                  ? '正在读取完整密钥…'
-                  : '已配置；点击眼睛查看完整密钥，直接输入新值可替换现有密钥。')
+              ? '已配置；点击眼睛查看完整密钥，直接输入新值可替换现有密钥。'
               : '当前未配置；可以先保存，之后再补充'}
           >
             <Input.Password
               autoComplete="new-password"
-              disabled={revealingKey}
               placeholder="请输入 API Key"
               visibilityToggle={{
                 visible: apiKeyVisible,

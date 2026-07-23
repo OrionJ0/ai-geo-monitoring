@@ -63,6 +63,9 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.match(source, /候选顺序/);
   assert.match(source, /待核验事实声明/);
   assert.match(source, /analysis_structure/);
+  assert.match(source, /analysis_diagnostics/);
+  assert.match(source, /错误代码/);
+  assert.match(source, /输出长度/);
   assert.match(source, /官网引用率/);
   assert.match(source, /summary\.owned_citation_rate/);
   assert.match(source, /summary\.total_owned_citations/);
@@ -122,6 +125,20 @@ test('问题集报告支持标准 CSV 导入导出并轮询运行中的报告', 
   assert.match(source, /scroll=\{\{ x: pdfLayout \? 880 : 1080 \}\}/);
   assert.match(drawer, /<Pagination/);
   assert.match(source, /pagination\?\.totalItems/);
+});
+
+test('原生问题集报告可以确认后重试失败项', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /retry-failed/);
+  assert.match(source, /重试失败项/);
+  assert.match(source, /Popconfirm/);
+  assert.match(source, /当前设置中心的监测模型和参数/);
+  assert.match(source, /window\.crypto\.randomUUID\(\)/);
+  assert.match(source, /idempotency_key/);
+  assert.match(source, /已有完整原回答/);
+  assert.match(source, /summary\.failed/);
+  assert.match(source, /setRetrying/);
 });
 
 test('运行中的报告和逐模型结果使用旋转图标提示仍在处理', () => {

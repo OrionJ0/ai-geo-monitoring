@@ -20,7 +20,10 @@ test('admin settings is the single settings center with an analysis API tab', ()
     2,
     'inactive form tabs must stay mounted before setFieldsValue runs',
   );
-  assert.match(layoutSource, /key: 'settings', label: '设置中心'/);
+  assert.match(
+    layoutSource,
+    /key: 'settings', label: <Link href="\/admin\/settings">设置中心<\/Link>/,
+  );
   assert.doesNotMatch(layoutSource, /key: 'platforms'|平台自检/);
 });
 
@@ -34,6 +37,11 @@ test('analysis API settings select a configured platform and an independent mode
   assert.match(analysisSource, /name="model_name"\s+noStyle/);
   assert.match(analysisSource, /分析平台/);
   assert.match(analysisSource, /分析模型/);
+  assert.match(analysisSource, /request_profile/);
+  assert.match(analysisSource, /分析专用调用参数/);
+  assert.match(analysisSource, /最大输出 Token/);
+  assert.match(analysisSource, /请求超时/);
+  assert.match(analysisSource, /不会修改监测平台参数/);
   assert.match(analysisSource, /测试输入/);
   assert.match(analysisSource, /分析模型原始 JSON 输出/);
   assert.match(analysisSource, /当前分析提示词/);
@@ -53,14 +61,16 @@ test('platform settings use the management API for every explicit operation', ()
   assert.match(platformSource, /\/enabled/);
   assert.match(platformSource, /\/api-key/);
   assert.match(platformSource, /\/api-key`/);
-  assert.doesNotMatch(platformSource, /\/models/);
+  assert.match(platformSource, /\/ai-platforms\/\$\{platformId\}\/models/);
+  assert.match(platformSource, /刷新模型/);
   assert.match(platformSource, /name="default_model"/);
   assert.match(platformSource, /title: '接口参数'/);
   assert.match(platformSource, /title: '当前模型'/);
   assert.doesNotMatch(platformSource, /AutoComplete|loadPlatformModels/);
   assert.match(platformSource, /\/test/);
   assert.match(platformSource, /\/test-web-search/);
-  assert.match(platformSource, /const MASKED_API_KEY = '\*\*\*\*'/);
+  const maskedApiKey = platformSource.match(/const MASKED_API_KEY = '(\*+)'/)?.[1];
+  assert.equal(maskedApiKey?.length, 32);
   assert.match(platformSource, /visibilityToggle=\{\{/);
   assert.match(platformSource, /onVisibleChange: handleApiKeyVisibilityChange/);
   assert.match(platformSource, /preserveExistingApiKey \? '' : values\.api_key\?\.trim\(\)/);

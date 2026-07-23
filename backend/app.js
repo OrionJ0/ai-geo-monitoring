@@ -213,6 +213,25 @@ async function ensureGeoMonitoringColumns() {
 
   await ensureColumn('alert_rules', 'last_trigger_value', { type: DataTypes.FLOAT, allowNull: true });
   await ensureColumn('alert_rules', 'last_trigger_message', { type: DataTypes.TEXT, allowNull: true });
+  await ensureColumn('question_set_runs', 'paused_at', { type: DataTypes.DATE, allowNull: true });
+  await ensureColumn('question_set_runs', 'revision', {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0
+  });
+  await ensureColumn('result_details', 'provider_citations', {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: []
+  });
+  await ensureColumn('question_records', 'execution_token', {
+    type: DataTypes.STRING(64),
+    allowNull: true
+  });
+  await ensureColumn('question_records', 'execution_started_at', {
+    type: DataTypes.DATE,
+    allowNull: true
+  });
 }
 
 async function ensureDynamicPlatformColumns() {

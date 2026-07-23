@@ -17,6 +17,7 @@ const SeoAuditRecord = require('./SeoAuditRecord');
 const SeoAuditJob = require('./SeoAuditJob');
 const AIPlatformConfig = require('./AIPlatformConfig');
 const QuestionSetRun = require('./QuestionSetRun');
+const QuestionSetRetryBatch = require('./QuestionSetRetryBatch');
 
 // 定义关联关系
 User.hasMany(QuestionRecord, {
@@ -82,6 +83,15 @@ User.hasMany(SeoAuditJob, { foreignKey: 'user_id', as: 'seoAuditJobs' });
 SeoAuditJob.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 SeoAuditJob.belongsTo(SeoAuditRecord, { foreignKey: 'audit_record_id', as: 'auditRecord' });
 
+QuestionSetRun.hasMany(QuestionSetRetryBatch, {
+  foreignKey: 'question_set_run_id',
+  as: 'retryBatches'
+});
+QuestionSetRetryBatch.belongsTo(QuestionSetRun, {
+  foreignKey: 'question_set_run_id',
+  as: 'questionSetRun'
+});
+
 const models = {
   sequelize,
   User,
@@ -101,7 +111,8 @@ const models = {
   SeoAuditRecord,
   SeoAuditJob,
   AIPlatformConfig,
-  QuestionSetRun
+  QuestionSetRun,
+  QuestionSetRetryBatch
 };
 
 module.exports = models;

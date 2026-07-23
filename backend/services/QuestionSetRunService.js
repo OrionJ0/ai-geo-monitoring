@@ -33,11 +33,44 @@ function ownedCitationCount(row) {
   return sources.filter((source) => source?.owned === true).length;
 }
 
-function deriveStatus(rows) {
+function normalizeAnalysisDiagnostics(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const result = {};
+  ['status', 'error_code', 'error_detail', 'stage', 'platform', 'model', 'finish_reason'].forEach((field) => {
+    if (value[field] !== undefined && value[field] !== null) {
+      result[field] = String(value[field]).slice(0, 300);
+    }
+  });
+  ['attempt_count', 'output_length'].forEach((field) => {
+    const number = Number(value[field]);
+    if (Number.isFinite(number) && number >= 0) result[field] = number;
+  });
+  const usage = {};
+  ['prompt_tokens', 'completion_tokens', 'total_tokens'].forEach((field) => {
+    const number = Number(value?.usage?.[field]);
+    if (Number.isFinite(number) && number >= 0) usage[field] = number;
+  });
+  if (Object.keys(usage).length) result.usage = usage;
+  return Object.keys(result).length ? result : null;
+}
+
+function normalizeFailure(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const stage = String(value.stage || '').trim().slice(0, 80);
+  const errorCode = String(value.error_code || '').trim().slice(0, 80);
+  if (!stage || !errorCode) return null;
+  return {
+    stage,
+    error_code: errorCode
+  };
+}
+
+function deriveStatus(rows, pausedAt = null) {
   const total = rows.length;
   const pending = rows.filter((row) => row.status === 'pending').length;
   const completed = rows.filter((row) => row.status === 'completed').length;
   const failed = rows.filter((row) => row.status === 'failed').length;
+  if (pausedAt && pending > 0) return 'paused';
   if (pending > 0 || total === 0) return 'running';
   if (completed === total) return 'completed';
   if (failed === total) return 'failed';
@@ -77,6 +110,15 @@ function normalizeNativeRow(record) {
   const row = plain(record);
   const detail = plain(row.resultDetail) || {};
   const metric = plain(row.visibilityMetric) || null;
+  const analysisDiagnostics = normalizeAnalysisDiagnostics(row.result_summary?.analysis);
+  const failure = normalizeFailure(row.result_summary?.failure);
+  const retry = row.result_summary?.retry && typeof row.result_summary.retry === 'object'
+    ? {
+        previous_record_id: Number(row.result_summary.retry.previous_record_id) || null,
+        attempt: Number(row.result_summary.retry.attempt) || 0,
+        kind: String(row.result_summary.retry.kind || '').slice(0, 40)
+      }
+    : null;
   return {
     record_id: row.id,
     question_id: row.tracked_prompt_id,
@@ -87,6 +129,9 @@ function normalizeNativeRow(record) {
     model_name: row.model_name || '',
     status: row.status || 'pending',
     error_message: row.error_message || '',
+    failure,
+    retry,
+    analysis_diagnostics: analysisDiagnostics,
     answer: detail.ai_response_original || '',
     has_metrics: Boolean(metric),
     brand_mentioned: Boolean(metric?.brand_mentioned),
@@ -174,15 +219,8 @@ class QuestionSetRunService {
       const hasCompetitorBaseline = Array.isArray(row?.competitor_mentions) && row.competitor_mentions.length > 0;
       return hasCompetitorBaseline ? row : { ...row, brand_rank: null };
     });
-    const status = deriveStatus(rows);
-    const expectedRows = Array.isArray(run.record_ids) ? run.record_ids.length : 0;
-    if (run.source === 'native' && !cachedRows.length && status !== 'running' && rows.length === expectedRows && rows.length) {
-      const completedAt = new Date();
-      if (typeof stored.update === 'function') {
-        await stored.update({ imported_rows: rows, completed_at: completedAt });
-      }
-      run.completed_at = completedAt;
-    }
+    const pausedAt = run.paused_at || null;
+    const status = deriveStatus(rows, pausedAt);
     return {
       id: run.id,
       project_id: run.project_id,
@@ -193,11 +231,45 @@ class QuestionSetRunService {
       status,
       started_at: run.started_at,
       completed_at: run.completed_at,
+      paused_at: pausedAt,
       created_at: run.created_at,
       updated_at: run.updated_at,
       summary: summarize(rows),
       rows
     };
+  }
+
+  async finalizeNativeRun({ projectId, runId, repositories = {} }) {
+    const Run = repositories.QuestionSetRun || QuestionSetRun;
+    const stored = await this.findRun({ projectId, runId, repositories });
+    if (!stored) return false;
+    const run = plain(stored);
+    if (run.source !== 'native') return false;
+    const revision = Number(run.revision) || 0;
+    const rows = await this.getNativeRows(run, repositories);
+    const expectedRows = Array.isArray(run.record_ids) ? run.record_ids.length : 0;
+    const status = deriveStatus(rows, run.paused_at || null);
+    if (
+      status === 'running'
+      || status === 'paused'
+      || !rows.length
+      || rows.length !== expectedRows
+    ) return false;
+    const [updatedRows] = await Run.update(
+      {
+        imported_rows: rows,
+        completed_at: new Date(),
+        paused_at: null
+      },
+      {
+        where: {
+          id: run.id,
+          project_id: run.project_id,
+          revision
+        }
+      }
+    );
+    return updatedRows === 1;
   }
 
   async listReports({ projectId, questionSetId, page = 1, pageSize = 20, repositories = {} }) {

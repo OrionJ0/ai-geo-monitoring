@@ -15,6 +15,7 @@ import {
   ArrowRightOutlined,
   HistoryOutlined,
   LoadingOutlined,
+  PauseCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import styles from './question-set-reports.module.css';
@@ -25,7 +26,7 @@ export type QuestionSetRunHistoryItem = {
   id: number;
   question_set_name: string;
   source: 'native' | 'imported';
-  status: 'running' | 'completed' | 'partial' | 'failed';
+  status: 'running' | 'completed' | 'partial' | 'failed' | 'paused';
   started_at?: string;
   created_at?: string;
   summary?: {
@@ -59,6 +60,7 @@ type Props = {
 
 const statusMeta = {
   running: { label: '运行中', color: 'processing' },
+  paused: { label: '已暂停', color: 'warning' },
   completed: { label: '已完成', color: 'success' },
   partial: { label: '部分完成', color: 'warning' },
   failed: { label: '失败', color: 'error' },
@@ -158,7 +160,13 @@ export default function QuestionSetRunHistoryDrawer({
                   </div>
                   <Tag
                     color={status.color}
-                    icon={item.status === 'running' ? <LoadingOutlined spin /> : undefined}
+                    icon={
+                      item.status === 'running'
+                        ? <LoadingOutlined spin />
+                        : item.status === 'paused'
+                          ? <PauseCircleOutlined />
+                          : undefined
+                    }
                   >
                     {status.label}
                   </Tag>

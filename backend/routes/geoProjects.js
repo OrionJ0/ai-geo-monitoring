@@ -755,6 +755,15 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
       });
     }
     const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
+
+    // 先创建 QuestionSetRun 记录（record_ids 后续更新），以便 worker 暂停检查
+    const questionSetRun = await QuestionSetRunService.createNativeRun({
+      project: req.brandProject,
+      questionSet: group,
+      user: req.user,
+      runData: { record_ids: [] }
+    });
+
     const result = await ProjectRunService.enqueueProjectRun({
       project: req.brandProject,
       prompts: questions.map((item) => ({
@@ -763,17 +772,16 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
       })),
       platforms: projectPlatforms,
       user: req.user,
-      promptSelectionExplicit: true
+      promptSelectionExplicit: true,
+      questionSetRunId: questionSetRun.id
     });
     if (!result.ok) {
+      // 运行失败时清理空的 run 记录
+      await questionSetRun.destroy().catch(() => {});
       return res.status(result.status || 400).json({ success: false, message: result.message, data: result.data });
     }
-    const questionSetRun = await QuestionSetRunService.createNativeRun({
-      project: req.brandProject,
-      questionSet: group,
-      user: req.user,
-      runData: result.data
-    });
+    // 更新 record_ids
+    await questionSetRun.update({ record_ids: result.data.record_ids });
     return res.status(result.status || 202).json({
       success: true,
       message: result.message,
@@ -878,6 +886,81 @@ router.get('/:projectId/question-set-runs/:runId', loadProject, async (req, res)
     return res.json({ success: true, data: report });
   } catch (error) {
     return res.status(500).json({ success: false, message: '获取问题集运行报告失败' });
+  }
+});
+
+router.post('/:projectId/question-set-runs/:runId/retry-failed', loadProject, async (req, res) => {
+  try {
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能重试失败项');
+    if (archivedResponse) return archivedResponse;
+    const runId = Number(req.params.runId);
+    if (!Number.isInteger(runId) || runId <= 0) {
+      return res.status(400).json({ success: false, message: '运行报告 ID 无效' });
+    }
+    const result = await ProjectRunService.retryFailedQuestionSetRun({
+      project: req.brandProject,
+      runId,
+      user: req.user,
+      idempotencyKey: req.body?.idempotency_key || req.get?.('Idempotency-Key')
+    });
+    return res.status(result.status).json({
+      success: true,
+      message: result.message,
+      data: result.data
+    });
+  } catch (error) {
+    const requestedStatus = Number(error?.status);
+    const isSafeClientError = Number.isInteger(requestedStatus)
+      && requestedStatus >= 400
+      && requestedStatus < 500;
+    const status = isSafeClientError ? requestedStatus : 500;
+    return res.status(status).json({
+      success: false,
+      message: isSafeClientError && error?.message ? error.message : '重试失败项失败',
+      ...(isSafeClientError && error?.data ? { data: error.data } : {})
+    });
+  }
+});
+
+// 暂停问题集运行
+router.post('/:projectId/question-set-runs/:runId/pause', loadProject, async (req, res) => {
+  try {
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能暂停运行');
+    if (archivedResponse) return archivedResponse;
+    const runId = Number(req.params.runId);
+    if (!Number.isInteger(runId) || runId <= 0) {
+      return res.status(400).json({ success: false, message: '运行报告 ID 无效' });
+    }
+    const result = await ProjectRunService.pauseRun(runId, req.brandProject.id);
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    const requestedStatus = Number(error?.status);
+    const safe = Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus < 500;
+    return res.status(safe ? requestedStatus : 500).json({
+      success: false,
+      message: safe && error?.message ? error.message : '暂停运行失败'
+    });
+  }
+});
+
+// 恢复问题集运行
+router.post('/:projectId/question-set-runs/:runId/resume', loadProject, async (req, res) => {
+  try {
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能恢复运行');
+    if (archivedResponse) return archivedResponse;
+    const runId = Number(req.params.runId);
+    if (!Number.isInteger(runId) || runId <= 0) {
+      return res.status(400).json({ success: false, message: '运行报告 ID 无效' });
+    }
+    const result = await ProjectRunService.resumeRun(runId, req.brandProject.id);
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    const requestedStatus = Number(error?.status);
+    const safe = Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus < 500;
+    return res.status(safe ? requestedStatus : 500).json({
+      success: false,
+      message: safe && error?.message ? error.message : '恢复运行失败'
+    });
   }
 });
 

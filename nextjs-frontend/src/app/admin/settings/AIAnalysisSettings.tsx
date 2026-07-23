@@ -36,6 +36,15 @@ type PromptDefinition = {
   template: string;
   runtime_fields: string[];
   expected_output: Record<string, unknown>;
+  request_profile: {
+    temperature: number;
+    max_tokens: number;
+    timeout_seconds: number;
+    max_attempts: number;
+    web_search: boolean;
+    json_mode: string;
+    deepseek_thinking: string;
+  };
 };
 
 type AnalysisConfig = {
@@ -82,6 +91,25 @@ function adapterLabel(adapterType?: PlatformRecord['adapter_type']) {
   return adapterType === 'openai_responses'
     ? 'OpenAI 兼容 · Responses'
     : 'OpenAI 兼容 · Chat Completions';
+}
+
+function jsonModeLabel(
+  platform?: PlatformRecord,
+  profile?: PromptDefinition['request_profile'],
+) {
+  if (!platform) return '-';
+  return platform.adapter_type === 'openai_chat_completions'
+    && profile?.json_mode === 'chat_completions_only'
+    ? '强制 JSON Object'
+    : '提示词约束（Responses）';
+}
+
+function thinkingModeLabel(
+  platform?: PlatformRecord,
+  profile?: PromptDefinition['request_profile'],
+) {
+  if (platform?.code !== 'deepseek') return '不适用';
+  return profile?.deepseek_thinking === 'disabled' ? '关闭' : '按平台配置';
 }
 
 export default function AIAnalysisSettings() {
@@ -241,7 +269,7 @@ export default function AIAnalysisSettings() {
         type="info"
         showIcon
         title="AI 只做结构化抽取，指标由程序统一计算"
-        description="分析 API 返回回答中的全部品牌和公司、目标品牌/竞品实体映射、逐次提及、候选顺序、明确推荐关系和待核验事实声明，不直接返回次数、排名、比例或分数。结构化结果只保留用于校验的短实体词，不重复整句原文；引用数据不由分析模型生成，而是从监测平台原始响应中直接提取。"
+        description="分析 API 返回回答中的全部品牌和公司、目标品牌/竞品实体映射、原文短实体词、候选顺序、明确推荐关系和待核验事实声明，不直接返回次数、排名、比例或分数。提及次数和顺序由服务端扫描原回答确定；结构化结果不重复整句原文，引用数据不由分析模型生成，而是从监测平台原始响应中直接提取。"
       />
 
       <Card
@@ -329,6 +357,37 @@ export default function AIAnalysisSettings() {
               当前调用类型：{adapterLabel(selectedPlatform.adapter_type)}。平台名称不决定协议，系统按这里的平台配置调用。
             </Paragraph>
           ) : null}
+          <Title level={5}>分析专用调用参数</Title>
+          <Paragraph type="secondary">
+            这组参数只用于结构化分析，不会修改监测平台参数或平台默认配置。
+          </Paragraph>
+          <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} bordered>
+            <Descriptions.Item label="温度">
+              {promptDefinition?.request_profile?.temperature ?? '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="最大输出 Token">
+              {promptDefinition?.request_profile?.max_tokens ?? '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="请求超时">
+              {promptDefinition?.request_profile?.timeout_seconds
+                ? `${promptDefinition.request_profile.timeout_seconds} 秒`
+                : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="最多尝试">
+              {promptDefinition?.request_profile?.max_attempts
+                ? `${promptDefinition.request_profile.max_attempts} 次（含首次）`
+                : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="结构化输出">
+              {jsonModeLabel(selectedPlatform, promptDefinition?.request_profile)}
+            </Descriptions.Item>
+            <Descriptions.Item label="联网搜索">
+              {promptDefinition?.request_profile?.web_search === false ? '关闭' : '按平台配置'}
+            </Descriptions.Item>
+            <Descriptions.Item label="DeepSeek 思考模式">
+              {thinkingModeLabel(selectedPlatform, promptDefinition?.request_profile)}
+            </Descriptions.Item>
+          </Descriptions>
           <Space>
             <Button type="primary" loading={saving} onClick={save}>保存分析 API</Button>
             <Button loading={loading} onClick={load}>恢复当前值</Button>
