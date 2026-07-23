@@ -315,7 +315,7 @@ test('v4 配置会拒绝不可维护的阻断阈值与重复爬虫 key', () => {
   );
 });
 
-test('问题优先级先列阻断，再按阶段和阶段内实际扣分排列', () => {
+test('问题优先级先列阻断，再按技术阶段排列', () => {
   const result = calculateTechnicalHealth({
     instances: [
       instance('http-status', 'failed'),
@@ -342,6 +342,58 @@ test('问题优先级先列阻断，再按阶段和阶段内实际扣分排列',
   assert.equal(result.priorities[0].kind, 'blocker');
   assert.equal(result.priorities[1].stage, 'access');
   assert.equal(result.priorities[2].stage, 'content');
+});
+
+test('同一阶段按严重级别优先于实际扣分排列', () => {
+  const rules = {
+    checks: {
+      'high-risk': { severity: 'high', weight: 1 },
+      'medium-risk': { severity: 'medium', weight: 4 }
+    }
+  };
+  const scoreConfig = {
+    version: 'test-v4-severity-order',
+    homepageWeight: 3,
+    informationalRuleIds: [],
+    siteScopedRuleIds: [],
+    stages: [{
+      key: 'content',
+      label: '内容理解',
+      budget: 100,
+      ruleIds: ['high-risk', 'medium-risk']
+    }]
+  };
+  const failedInstance = (id) => ({
+    url: 'https://example.com/',
+    isHomepage: true,
+    check: {
+      id,
+      title: id,
+      finding: `${id} failed`,
+      status: 'failed',
+      severity: rules.checks[id].severity,
+      weight: rules.checks[id].weight,
+      value: 'failed',
+      category: 'technical',
+      recommendation: `修复 ${id}`
+    }
+  });
+
+  const result = calculateTechnicalHealth({
+    instances: [
+      failedInstance('high-risk'),
+      failedInstance('medium-risk')
+    ],
+    rules,
+    scoreConfig
+  });
+
+  const deductionById = new Map(result.issues.map((issue) => [issue.id, issue.deduction]));
+  assert.equal(deductionById.get('high-risk') < deductionById.get('medium-risk'), true);
+  assert.deepEqual(
+    result.priorities.map(({ id }) => id),
+    ['high-risk', 'medium-risk']
+  );
 });
 
 test('首页明确 noindex 会形成可解释的索引阻断', () => {

@@ -2,6 +2,13 @@ function roundScore(value) {
   return Number(value.toFixed(4));
 }
 
+const SEVERITY_PRIORITY = Object.freeze({
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3
+});
+
 function statusFromScore(score) {
   if (score >= 90) return 'excellent';
   if (score >= 80) return 'healthy';
@@ -223,6 +230,8 @@ function calculateTechnicalHealth({
       const leftStage = scoreConfig.stages.findIndex((stage) => stage.key === left.stage);
       const rightStage = scoreConfig.stages.findIndex((stage) => stage.key === right.stage);
       return leftStage - rightStage
+        || (SEVERITY_PRIORITY[left.severity] ?? Number.MAX_SAFE_INTEGER)
+          - (SEVERITY_PRIORITY[right.severity] ?? Number.MAX_SAFE_INTEGER)
         || right.deduction - left.deduction
         || Number(right.affectsHomepage) - Number(left.affectsHomepage)
         || right.coverage - left.coverage
