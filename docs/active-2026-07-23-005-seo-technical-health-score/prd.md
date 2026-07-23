@@ -241,6 +241,6 @@
 
 ## Handoff
 
-- PRD path: `docs/draft-2026-07-23-005-seo-technical-health-score/prd.md`
-- Status: draft，尚未进入实现。
+- PRD path: `docs/active-2026-07-23-005-seo-technical-health-score/prd.md`
+- Status: active，已进入实现与验证。
 - Recommended next step: 先进行产品/SEO 规则评审，再使用 `$to-tech-spec` 明确评分数据契约和迁移边界，使用 `$to-visual-design-spec` 定义报告信息层级，最后用 `$to-issues` 拆分实现与验收切片。
