@@ -76,15 +76,38 @@ export default function TechnicalHealthOverview({ report }) {
   const blockers = isV4 && Array.isArray(health.blockers) ? health.blockers : [];
   const unknownReasons = isV4 && Array.isArray(health.unknownReasons) ? health.unknownReasons : [];
   const bottleneck = isV4 ? health.bottleneck : null;
+  const hasScore = report.score !== null
+    && report.score !== undefined
+    && Number.isFinite(Number(report.score));
+  const scorePercent = hasScore
+    ? Math.max(0, Math.min(100, Number(report.score)))
+    : 0;
 
   return (
     <section className={styles.healthOverview} aria-labelledby="technical-health-title">
       <div className={`${styles.healthScoreCard} ${styles[`healthTone_${tone}`]}`}>
         <span className={styles.sectionKicker}>唯一主指标</span>
         <h2 id="technical-health-title">技术健康分</h2>
-        <div className={styles.healthScoreLine}>
-          <strong>{report.score === null || report.score === undefined ? '—' : report.score}</strong>
-          {report.score !== null && report.score !== undefined && <span>/ 100</span>}
+        <div
+          className={styles.healthScoreRing}
+          role="img"
+          aria-label={hasScore ? `技术健康分 ${report.score} 分，满分 100 分` : '技术健康分暂无数据'}
+        >
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <circle className={styles.healthScoreRingTrack} cx="60" cy="60" r="52" pathLength="100" />
+            <circle
+              className={styles.healthScoreRingValue}
+              cx="60"
+              cy="60"
+              r="52"
+              pathLength="100"
+              style={{ strokeDashoffset: 100 - scorePercent }}
+            />
+          </svg>
+          <div className={styles.healthScoreLine}>
+            <strong>{hasScore ? report.score : '—'}</strong>
+            {hasScore && <span>/ 100</span>}
+          </div>
         </div>
         <span className={styles.healthStatus}>{STATUS_LABELS[status] || '旧版评分'}</span>
         {isV4 ? (
@@ -94,7 +117,7 @@ export default function TechnicalHealthOverview({ report }) {
               : '四个技术阶段均未形成明确瓶颈'}
           </p>
         ) : (
-          <p>旧版评分仅按原报告展示，不会用 v4 静默重算。</p>
+          <p className={styles.healthLegacyNote}>旧版报告，不含阶段分。</p>
         )}
         {health?.rawScore !== null && health?.rawScore !== undefined && (
           <small>原始分 {Number(health.rawScore).toFixed(2)}</small>

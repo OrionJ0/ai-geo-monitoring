@@ -441,91 +441,124 @@
 }
 
 .healthScoreCard {
+  --score-ring-color: #3158d4;
   position: relative;
   display: flex;
+  align-items: center;
   flex-direction: column;
   justify-content: center;
   min-height: 340px;
   padding: 34px;
   overflow: hidden;
   border-right: 1px solid var(--line);
-  background: #101827;
-  color: #fff;
+  background: #fff;
+  color: var(--ink);
+  text-align: center;
 }
 
-.healthScoreCard::after {
-  content: '';
-  position: absolute;
-  right: -44px;
-  bottom: -60px;
-  width: 180px;
-  height: 180px;
-  border: 28px solid rgba(255, 255, 255, 0.05);
-  border-radius: 50%;
-}
-
-.healthScoreCard .sectionKicker { color: #a9bce9; }
+.healthScoreCard .sectionKicker { color: var(--blue); }
 
 .healthScoreCard h2 {
-  margin: 8px 0 22px;
-  color: #fff;
+  margin: 7px 0 20px;
+  color: var(--ink);
   font-size: 18px;
   letter-spacing: -0.02em;
 }
 
-.healthScoreLine {
+.healthScoreRing {
   position: relative;
-  z-index: 1;
+  width: 176px;
+  height: 176px;
+}
+
+.healthScoreRing svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.healthScoreRingTrack,
+.healthScoreRingValue {
+  fill: none;
+  stroke-width: 8;
+}
+
+.healthScoreRingTrack {
+  stroke: #e8edf5;
+}
+
+.healthScoreRingValue {
+  stroke: var(--score-ring-color);
+  stroke-dasharray: 100;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 500ms ease;
+}
+
+.healthScoreLine {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: baseline;
+  justify-content: center;
   gap: 8px;
+  padding-top: 70px;
 }
 
 .healthScoreLine strong {
+  color: var(--ink);
   font-family: var(--font-geist-mono), monospace;
-  font-size: clamp(62px, 7vw, 92px);
+  font-size: 44px;
   font-weight: 750;
-  line-height: 0.9;
-  letter-spacing: -0.07em;
+  line-height: 1;
+  letter-spacing: -0.055em;
 }
 
 .healthScoreLine span {
-  color: #9aa9c1;
+  color: #7b8799;
   font-family: var(--font-geist-mono), monospace;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .healthStatus {
-  align-self: flex-start;
-  margin-top: 22px;
-  padding: 5px 9px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
+  margin-top: 16px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--score-ring-color) 10%, white);
+  color: var(--score-ring-color);
   font-size: 12px;
   font-weight: 750;
 }
 
-.healthTone_danger .healthStatus { color: #fca5a5; }
-.healthTone_warning .healthStatus { color: #fcd34d; }
-.healthTone_success .healthStatus { color: #86efac; }
-.healthTone_unknown .healthStatus { color: #cbd5e1; }
+.healthTone_danger { --score-ring-color: #dc2626; }
+.healthTone_warning { --score-ring-color: #d97706; }
+.healthTone_success { --score-ring-color: #15803d; }
+.healthTone_unknown { --score-ring-color: #64748b; }
 
 .healthScoreCard p {
-  position: relative;
-  z-index: 1;
-  margin: 18px 0 0;
-  color: #c5cfdd;
+  max-width: 230px;
+  margin: 12px 0 0;
+  color: #667085;
   font-size: 12px;
   line-height: 1.6;
 }
 
-.healthScoreCard p b { color: #fff; }
+.healthScoreCard p b { color: var(--ink); }
+
+.healthScoreCard p.healthLegacyNote {
+  white-space: nowrap;
+}
 
 .healthScoreCard > small {
   margin-top: 7px;
-  color: #8391a6;
+  color: #8b95a7;
   font-family: var(--font-geist-mono), monospace;
   font-size: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .healthScoreRingValue { transition: none; }
 }
 
 .healthEvidence {

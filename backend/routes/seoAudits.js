@@ -3,6 +3,19 @@ const { createSeoAuditService } = require('../services/SeoAuditService');
 const { createSeoAuditHistoryService } = require('../services/SeoAuditHistoryService');
 const { createSeoAuditJobService } = require('../services/SeoAuditJobService');
 const SeoAuditExchangeService = require('../services/SeoAuditExchangeService');
+const { defaultSeoHealthScoreConfig } = require('../config/seoAuditRules');
+
+function createRuntimeInfoHandler({
+  scoreVersion = defaultSeoHealthScoreConfig.version,
+  scoreModel = 'technical-health-v4'
+} = {}) {
+  return function runtimeInfoHandler(req, res) {
+    return res.json({
+      success: true,
+      data: { scoreVersion, scoreModel }
+    });
+  };
+}
 
 function createAuditHandler({
   service = createSeoAuditService(),
@@ -164,6 +177,7 @@ router.post('/import', express.text({
   type: ['text/csv', 'application/csv', 'text/plain'],
   limit: '10mb'
 }), createImportHandler());
+router.get('/runtime', createRuntimeInfoHandler());
 router.get('/', createListHandler());
 router.get('/jobs/:jobId', createJobDetailHandler());
 router.get('/:id/export', createExportHandler());
@@ -172,6 +186,7 @@ router.get('/:id', createDetailHandler());
 module.exports = router;
 module.exports.createAuditHandler = createAuditHandler;
 module.exports.createSiteAuditHandler = createSiteAuditHandler;
+module.exports.createRuntimeInfoHandler = createRuntimeInfoHandler;
 module.exports.createJobDetailHandler = createJobDetailHandler;
 module.exports.createListHandler = createListHandler;
 module.exports.createDetailHandler = createDetailHandler;

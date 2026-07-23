@@ -64,6 +64,14 @@ test('SEO audit page defaults to full-site mode and polls persisted asynchronous
   assert.match(source, /localStorage/);
 });
 
+test('SEO audit checks the live backend score contract before creating a report', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /get\('\/api\/seo-audits\/runtime'/);
+  assert.match(source, /2026-07-23-v4/);
+  assert.match(source, /后端评分服务仍为旧版/);
+});
+
 test('SEO audit page renders crawl progress and a site-level report contract', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 
@@ -136,6 +144,16 @@ test('v4 单页和全站报告只使用技术健康分作为主指标并展示�
   assert.doesNotMatch(pageSource, /SEO 基础分/);
   assert.doesNotMatch(pageSource, /技术健康度/);
   assert.doesNotMatch(siteSource, /技术健康度/);
+});
+
+test('技术健康分使用白底圆环并以紧凑文案标记旧报告', () => {
+  const healthSource = fs.readFileSync(healthOverviewPath, 'utf8');
+
+  assert.match(healthSource, /healthScoreRing/);
+  assert.match(healthSource, /<svg/);
+  assert.match(healthSource, /\/ 100/);
+  assert.match(healthSource, /旧版报告，不含阶段分。/);
+  assert.doesNotMatch(healthSource, /旧版评分仅按原报告展示，不会用 v4 静默重算。/);
 });
 
 test('v4 问题项展示阶段、覆盖率、具体事实、实际扣分和小字建议', () => {

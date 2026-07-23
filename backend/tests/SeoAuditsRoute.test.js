@@ -5,6 +5,7 @@ const {
   createAuditHandler,
   createSiteAuditHandler,
   createJobDetailHandler,
+  createRuntimeInfoHandler,
   createListHandler,
   createDetailHandler,
   createExportHandler,
@@ -216,6 +217,20 @@ test('POST site handler creates an asynchronous audit job', async () => {
     data: { id: 51, status: 'queued', progress: { phase: 'queued' } }
   });
   assert.deepEqual(received, [{ userId: 7, url: 'example.com' }]);
+});
+
+test('SEO runtime endpoint exposes the active score contract', () => {
+  const response = createResponse();
+
+  createRuntimeInfoHandler()({}, response);
+
+  assert.deepEqual(response.payload, {
+    success: true,
+    data: {
+      scoreVersion: '2026-07-23-v4',
+      scoreModel: 'technical-health-v4'
+    }
+  });
 });
 
 test('GET job handler returns only a job owned by the current user', async () => {

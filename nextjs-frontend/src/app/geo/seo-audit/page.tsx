@@ -25,6 +25,8 @@ import TechnicalHealthOverview from './TechnicalHealthOverview';
 import styles from './seo-audit.module.css';
 
 const ACTIVE_JOB_KEY = 'goodie-seo-active-job';
+const EXPECTED_SCORE_VERSION = '2026-07-23-v4';
+const EXPECTED_SCORE_MODEL = 'technical-health-v4';
 
 const SEVERITY_LABELS = {
   critical: '严重',
@@ -112,6 +114,34 @@ function waitForNextPoll() {
   return new Promise((resolve) => setTimeout(resolve, 1200));
 }
 
+async function ensureCurrentScoreRuntime() {
+  let runtime;
+  try {
+    const response = await axios.get('/api/seo-audits/runtime');
+    runtime = response?.data?.data;
+  } catch (error) {
+    if (error?.response?.status === 401) throw error;
+    const runtimeError = new Error(
+      error?.response?.status === 404
+        ? '后端评分服务仍为旧版，请重启后端后重试'
+        : '无法确认后端评分版本，请检查后端服务后重试'
+    );
+    runtimeError.userMessage = runtimeError.message;
+    throw runtimeError;
+  }
+
+  if (
+    runtime?.scoreVersion === EXPECTED_SCORE_VERSION
+    && runtime?.scoreModel === EXPECTED_SCORE_MODEL
+  ) {
+    return;
+  }
+
+  const error = new Error('后端评分服务仍为旧版，请重启后端后重试');
+  error.userMessage = error.message;
+  throw error;
+}
+
 export default function SeoAuditPage() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -192,6 +222,7 @@ export default function SeoAuditPage() {
     setLoading(true);
     setJob(null);
     try {
+      await ensureCurrentScoreRuntime();
       if (mode === 'site') {
         const response = await axios.post('/api/seo-audits/site', { url });
         const createdJob = response?.data?.data;
@@ -209,7 +240,7 @@ export default function SeoAuditPage() {
       }
       setFilter('all');
     } catch (error) {
-      message.error(getApiErrorMessage(error, 'SEO 检测失败，请稍后重试'));
+      message.error(getApiErrorMessage(error, error?.userMessage || 'SEO 检测失败，请稍后重试'));
     } finally {
       if (pollRef.current === pollId) setLoading(false);
     }
