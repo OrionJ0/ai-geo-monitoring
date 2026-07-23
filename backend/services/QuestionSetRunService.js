@@ -5,6 +5,7 @@ const {
   ResultDetail,
   VisibilityMetric
 } = require('../models');
+const QuestionSetRunCsvService = require('./QuestionSetRunCsvService');
 
 const SCHEMA_VERSION = 'question_set_run_v1';
 
@@ -127,9 +128,18 @@ class QuestionSetRunService {
     const stored = await this.findRun({ projectId, runId, repositories });
     if (!stored) return null;
     const run = plain(stored);
-    const rows = run.source === 'imported'
-      ? (Array.isArray(run.imported_rows) ? run.imported_rows : [])
+    const cachedRows = Array.isArray(run.imported_rows) ? run.imported_rows : [];
+    const rows = run.source === 'imported' || cachedRows.length
+      ? cachedRows
       : await this.getNativeRows(run, repositories);
+    const status = deriveStatus(rows);
+    if (run.source === 'native' && !cachedRows.length && status !== 'running' && rows.length) {
+      const completedAt = new Date();
+      if (typeof stored.update === 'function') {
+        await stored.update({ imported_rows: rows, completed_at: completedAt });
+      }
+      run.completed_at = completedAt;
+    }
     return {
       id: run.id,
       project_id: run.project_id,
@@ -137,7 +147,7 @@ class QuestionSetRunService {
       question_set_name: run.question_set_name,
       source: run.source,
       schema_version: run.schema_version,
-      status: deriveStatus(rows),
+      status,
       started_at: run.started_at,
       completed_at: run.completed_at,
       created_at: run.created_at,
@@ -145,6 +155,57 @@ class QuestionSetRunService {
       summary: summarize(rows),
       rows
     };
+  }
+
+  async listReports({ projectId, page = 1, pageSize = 20, repositories = {} }) {
+    const Run = repositories.QuestionSetRun || QuestionSetRun;
+    const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const safePageSize = Math.min(100, Math.max(1, Number.parseInt(pageSize, 10) || 20));
+    const result = await Run.findAndCountAll({
+      where: { project_id: projectId },
+      order: [['created_at', 'DESC'], ['id', 'DESC']],
+      limit: safePageSize,
+      offset: (safePage - 1) * safePageSize
+    });
+    const reports = await Promise.all(result.rows.map((item) => this.getReport({
+      projectId,
+      runId: item.id,
+      repositories
+    })));
+    return {
+      data: reports.map(({ rows, ...report }) => report),
+      pagination: {
+        page: safePage,
+        pageSize: safePageSize,
+        totalItems: result.count,
+        totalPages: Math.ceil(result.count / safePageSize)
+      }
+    };
+  }
+
+  async exportCsv({ projectId, runId, repositories = {} }) {
+    const report = await this.getReport({ projectId, runId, repositories });
+    if (!report) return null;
+    return QuestionSetRunCsvService.buildCsv(report);
+  }
+
+  async importCsv({ project, user, csv, repositories = {} }) {
+    const Run = repositories.QuestionSetRun || QuestionSetRun;
+    const projectRow = plain(project);
+    const userRow = plain(user);
+    const parsed = QuestionSetRunCsvService.parseCsv(csv);
+    return Run.create({
+      project_id: projectRow.id,
+      user_id: userRow.id,
+      question_set_id: null,
+      question_set_name: parsed.questionSetName,
+      source: 'imported',
+      schema_version: parsed.schemaVersion,
+      record_ids: [],
+      imported_rows: parsed.rows,
+      started_at: parsed.startedAt,
+      completed_at: parsed.completedAt
+    });
   }
 }
 

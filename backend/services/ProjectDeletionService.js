@@ -9,7 +9,8 @@ const {
   ResultDetail,
   VisibilityMetric,
   AlertRule,
-  ReportSnapshot
+  ReportSnapshot,
+  QuestionSetRun
 } = require('../models');
 
 class ProjectDeletionService {
@@ -42,6 +43,7 @@ class ProjectDeletionService {
     const MetricRepository = repositories.VisibilityMetric || VisibilityMetric;
     const AlertRepository = repositories.AlertRule || AlertRule;
     const ReportRepository = repositories.ReportSnapshot || ReportSnapshot;
+    const QuestionSetRunRepository = repositories.QuestionSetRun || QuestionSetRun;
 
     const records = await RecordRepository.findAll({
       where: { project_id: projectId },
@@ -67,6 +69,7 @@ class ProjectDeletionService {
 
     const schedules = await ScheduleRepository.destroy({ where: { project_id: projectId } });
     const reports = await ReportRepository.destroy({ where: { project_id: projectId } });
+    const questionSetRuns = await QuestionSetRunRepository.destroy({ where: { project_id: projectId } });
     const alerts = await AlertRepository.destroy({ where: { project_id: projectId } });
     const prompts = await PromptRepository.destroy({ where: { project_id: projectId } });
     const groups = await PromptGroupRepository.destroy({ where: { project_id: projectId } });
@@ -82,6 +85,7 @@ class ProjectDeletionService {
         prompts,
         alerts,
         reports,
+        questionSetRuns,
         schedules,
         records: deletedRecords,
         details,

@@ -33,6 +33,8 @@ const ProjectArchiveService = require('../services/ProjectArchiveService');
 const ProjectDeletionService = require('../services/ProjectDeletionService');
 const ProjectLifecycleService = require('../services/ProjectLifecycleService');
 const ProjectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
+const QuestionSetRunService = require('../services/QuestionSetRunService');
+const { CsvValidationError } = require('../services/QuestionSetRunCsvService');
 
 function asArray(value) {
   return ProjectFieldNormalizationService.normalizeList(value);
@@ -728,9 +730,103 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
     if (!result.ok) {
       return res.status(result.status || 400).json({ success: false, message: result.message, data: result.data });
     }
-    return res.status(result.status || 202).json({ success: true, message: result.message, data: result.data });
+    const questionSetRun = await QuestionSetRunService.createNativeRun({
+      project: req.brandProject,
+      questionSet: group,
+      user: req.user,
+      runData: result.data
+    });
+    return res.status(result.status || 202).json({
+      success: true,
+      message: result.message,
+      data: {
+        ...result.data,
+        question_set_run_id: questionSetRun.id,
+        report_url: `/geo/question-set-reports?project_id=${req.brandProject.id}&run_id=${questionSetRun.id}`
+      }
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: '运行问题集失败' });
+  }
+});
+
+router.get('/:projectId/question-set-runs', loadProject, async (req, res) => {
+  try {
+    const result = await QuestionSetRunService.listReports({
+      projectId: req.brandProject.id,
+      page: req.query.page,
+      pageSize: req.query.pageSize
+    });
+    return res.json({ success: true, data: result.data, pagination: result.pagination });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: '获取问题集运行历史失败' });
+  }
+});
+
+router.get('/:projectId/question-set-runs/:runId/export', loadProject, async (req, res) => {
+  try {
+    const runId = Number(req.params.runId);
+    if (!Number.isInteger(runId) || runId <= 0) {
+      return res.status(400).json({ success: false, message: '运行报告 ID 无效' });
+    }
+    const report = await QuestionSetRunService.getReport({
+      projectId: req.brandProject.id,
+      runId
+    });
+    if (!report) return res.status(404).json({ success: false, message: '运行报告不存在' });
+    const csv = await QuestionSetRunService.exportCsv({
+      projectId: req.brandProject.id,
+      runId
+    });
+    const filename = `${report.question_set_name || 'question-set-report'}-${runId}.csv`;
+    res.type('text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    return res.send(csv);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: '导出问题集运行报告失败' });
+  }
+});
+
+router.post('/:projectId/question-set-runs/import', loadProject, async (req, res) => {
+  try {
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能导入运行报告');
+    if (archivedResponse) return archivedResponse;
+    const imported = await QuestionSetRunService.importCsv({
+      project: req.brandProject,
+      user: req.user,
+      csv: req.body?.csv
+    });
+    const report = await QuestionSetRunService.getReport({
+      projectId: req.brandProject.id,
+      runId: imported.id
+    });
+    return res.status(201).json({ success: true, message: '问题集运行报告已导入', data: report });
+  } catch (error) {
+    if (error instanceof CsvValidationError) {
+      return res.status(422).json({
+        success: false,
+        message: error.message,
+        error: { code: error.code, message: error.message }
+      });
+    }
+    return res.status(500).json({ success: false, message: '导入问题集运行报告失败' });
+  }
+});
+
+router.get('/:projectId/question-set-runs/:runId', loadProject, async (req, res) => {
+  try {
+    const runId = Number(req.params.runId);
+    if (!Number.isInteger(runId) || runId <= 0) {
+      return res.status(400).json({ success: false, message: '运行报告 ID 无效' });
+    }
+    const report = await QuestionSetRunService.getReport({
+      projectId: req.brandProject.id,
+      runId
+    });
+    if (!report) return res.status(404).json({ success: false, message: '运行报告不存在' });
+    return res.json({ success: true, data: report });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: '获取问题集运行报告失败' });
   }
 });
 

@@ -15,7 +15,8 @@ const {
   User,
   BrandProject,
   PromptGroup,
-  TrackedPrompt
+  TrackedPrompt,
+  QuestionSetRun
 } = require('../models');
 
 let project;
@@ -191,7 +192,7 @@ test('问题集内的启用问题可以一起入队，单问题仍可独立运�
       ok: true,
       status: 202,
       message: '问题集分析已加入队列',
-      data: { status: 'queued', total: options.prompts.length }
+      data: { status: 'queued', total: options.prompts.length, record_ids: [101] }
     };
   };
   ProjectRunService.runProject = async (options) => {
@@ -213,6 +214,9 @@ test('问题集内的启用问题可以一起入队，单问题仍可独立运�
     assert.equal(calls[0].type, 'set');
     assert.deepEqual(calls[0].options.prompts.map((item) => item.id), [questions[0].id]);
     assert.equal(calls[0].options.promptSelectionExplicit, true);
+    assert.ok(Number(setRunResponse.payload.data.question_set_run_id) > 0);
+    assert.match(setRunResponse.payload.data.report_url, /\/geo\/question-set-reports\?/);
+    assert.equal(await QuestionSetRun.count({ where: { question_set_id: questionSetId } }), 1);
 
     const singleRunResponse = await requestRoute('post', '/:projectId/prompts/:promptId/run', {
       params: { projectId: project.id, promptId: questions[0].id }
