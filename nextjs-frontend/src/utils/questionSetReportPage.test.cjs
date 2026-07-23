@@ -73,6 +73,16 @@ test('问题集报告支持标准 CSV 导入导出并轮询运行中的报告', 
   assert.match(source, /pagination\?\.totalItems/);
 });
 
+test('运行中的报告和逐模型结果使用旋转图标提示仍在处理', () => {
+  const page = fs.readFileSync(pagePath, 'utf8');
+  const drawer = fs.readFileSync(historyDrawerPath, 'utf8');
+
+  assert.match(page, /LoadingOutlined/);
+  assert.match(page, /<LoadingOutlined spin \/>/);
+  assert.match(page, /进行中/);
+  assert.match(drawer, /<LoadingOutlined spin \/>/);
+});
+
 test('问题集报告成为问题库后的主入口，旧汇总入口下沉且运行后进入独立报告', () => {
   const layout = fs.readFileSync(layoutPath, 'utf8');
   const prompts = fs.readFileSync(promptPagePath, 'utf8');

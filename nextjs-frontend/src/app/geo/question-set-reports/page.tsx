@@ -19,6 +19,7 @@ import {
   FileSearchOutlined,
   HistoryOutlined,
   ImportOutlined,
+  LoadingOutlined,
   PrinterOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -124,7 +125,14 @@ function safeFilename(value: string) {
 
 function reportStatusTag(status: RunReport['status']) {
   const meta = statusMeta[status] || statusMeta.running;
-  return <Tag color={meta.color}>{meta.label}</Tag>;
+  return (
+    <Tag
+      color={meta.color}
+      icon={status === 'running' ? <LoadingOutlined spin /> : undefined}
+    >
+      {meta.label}
+    </Tag>
+  );
 }
 
 export default function QuestionSetReportsPage() {
@@ -400,7 +408,9 @@ export default function QuestionSetReportsPage() {
       width: 90,
       render: (value: string) => value === 'completed'
         ? <Tag color="success">完成</Tag>
-        : value === 'failed' ? <Tag color="error">失败</Tag> : <Tag color="processing">等待</Tag>,
+        : value === 'failed'
+          ? <Tag color="error">失败</Tag>
+          : <Tag color="processing" icon={<LoadingOutlined spin />}>进行中</Tag>,
     },
     {
       title: '品牌表现',
@@ -546,7 +556,7 @@ export default function QuestionSetReportsPage() {
                 <section className={styles.resultsSection} aria-labelledby="run-results-title">
                   <div className={styles.resultsHeading}>
                     <div>
-                      <Text className={styles.panelKicker}>一行一个问题 × 平台</Text>
+                      <Text className={styles.panelKicker}>每个问题 × 全部项目模型</Text>
                       <Title level={4} id="run-results-title">逐问题结果</Title>
                     </div>
                     <Text type="secondary">有效分析 {summary.valid_analyses || 0} · 引用 {summary.total_citations || 0}</Text>

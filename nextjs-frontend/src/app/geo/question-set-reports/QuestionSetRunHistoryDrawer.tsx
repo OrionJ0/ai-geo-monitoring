@@ -14,6 +14,7 @@ import {
 import {
   ArrowRightOutlined,
   HistoryOutlined,
+  LoadingOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import styles from './question-set-reports.module.css';
@@ -155,7 +156,12 @@ export default function QuestionSetRunHistoryDrawer({
                     </Text>
                     <h3>{item.question_set_name}</h3>
                   </div>
-                  <Tag color={status.color}>{status.label}</Tag>
+                  <Tag
+                    color={status.color}
+                    icon={item.status === 'running' ? <LoadingOutlined spin /> : undefined}
+                  >
+                    {status.label}
+                  </Tag>
                 </header>
                 <footer>
                   <div>
