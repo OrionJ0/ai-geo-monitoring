@@ -114,5 +114,5 @@
 
 ## Handoff
 
-- PRD path: `docs/draft-2026-07-23-001-seo-site-audit/prd.md`
+- PRD path: `docs/active-2026-07-23-001-seo-site-audit/prd.md`
 - Recommended next step: 按本 PRD 使用 TDD 依次完成规则配置、单页规则、全站服务、异步 API、历史兼容与前端验收。

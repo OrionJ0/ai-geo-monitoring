@@ -191,6 +191,7 @@ test('reports non-empty search engine verification tags as page evidence only', 
           <title>这是一个长度合理的示例页面标题</title>
           <meta name="google-site-verification" content="google-token">
           <meta name="msvalidate.01" content="bing-token">
+          <meta name="baidu-site-verification" content="baidu-token">
         </head><body><h1>示例页面</h1></body></html>`
       };
     },
@@ -206,7 +207,7 @@ test('reports non-empty search engine verification tags as page evidence only', 
     .find((check) => check.id === 'search-verification');
 
   assert.equal(verification.status, 'passed');
-  assert.equal(verification.finding, '发现 2 个搜索平台验证标签');
+  assert.equal(verification.finding, 'Google、Bing、百度验证标签完整');
   assert.match(verification.value, /Google Search Console/);
   assert.match(verification.value, /Bing Webmaster Tools/);
   assert.match(verification.description, /不能证明平台后台当前已验证/);
@@ -224,4 +225,103 @@ test('gives every failed check a concrete finding distinct from its recommendati
     && check.finding !== check.title
     && check.finding !== check.recommendation
   )), true);
+});
+
+test('reports non-empty meta keywords as a low-weight SEO check', async () => {
+  const siteClient = createSiteClient();
+  const originalFetchPage = siteClient.fetchPage;
+  siteClient.fetchPage = async (url) => {
+    const response = await originalFetchPage(url);
+    return {
+      ...response,
+      html: response.html.replace(
+        '<meta name="viewport"',
+        '<meta name="keywords" content="技术 SEO, 网站诊断, 搜索优化"><meta name="viewport"'
+      )
+    };
+  };
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
+  const keywords = report.categories
+    .flatMap((category) => category.checks)
+    .find((check) => check.id === 'meta-keywords');
+
+  assert.equal(keywords.status, 'passed');
+  assert.equal(keywords.weight, 1);
+  assert.equal(keywords.finding, 'Keywords 标签内容有效');
+  assert.match(keywords.value, /3 个关键词/);
+  assert.deepEqual(report.page.keywords, ['技术 SEO', '网站诊断', '搜索优化']);
+});
+
+test('uses the injected versioned rule configuration for weights and scoring', async () => {
+  const { defaultSeoAuditRules } = require('../config/seoAuditRules');
+  const customRules = {
+    ...defaultSeoAuditRules,
+    version: 'test-heavy-title-v1',
+    checks: {
+      ...defaultSeoAuditRules.checks,
+      title: { ...defaultSeoAuditRules.checks.title, weight: 80 }
+    }
+  };
+  const defaultReport = await createSeoAuditService({ siteClient: createSiteClient() }).audit('https://example.com/');
+  const customReport = await createSeoAuditService({ siteClient: createSiteClient(), ruleConfig: customRules }).audit('https://example.com/');
+  const customTitle = customReport.categories.flatMap((category) => category.checks).find((check) => check.id === 'title');
+
+  assert.equal(customReport.scoreVersion, 'test-heavy-title-v1');
+  assert.equal(customTitle.weight, 80);
+  assert.equal(customReport.summary.totalWeight, 191);
+  assert.equal(customReport.score < defaultReport.score, true);
+});
+
+test('rejects an incomplete rule configuration before an audit starts', () => {
+  const { defaultSeoAuditRules } = require('../config/seoAuditRules');
+  const { title: _removedTitle, ...checksWithoutTitle } = defaultSeoAuditRules.checks;
+
+  assert.throws(
+    () => createSeoAuditService({
+      siteClient: createSiteClient(),
+      ruleConfig: { ...defaultSeoAuditRules, checks: checksWithoutTitle }
+    }),
+    /SEO 规则配置缺少检查项 title/
+  );
+});
+
+test('checks Google, Bing and Baidu verification tags on the site homepage for subpage audits', async () => {
+  const fetchedUrls = [];
+  const siteClient = {
+    async fetchPage(url) {
+      fetchedUrls.push(url);
+      const isHomepage = new URL(url).pathname === '/';
+      return {
+        requestedUrl: url,
+        finalUrl: url,
+        statusCode: 200,
+        durationMs: 80,
+        headers: { 'content-type': 'text/html' },
+        html: isHomepage
+          ? `<html><head>
+              <meta name="google-site-verification" content="google-token">
+              <meta name="msvalidate.01" content="bing-token">
+              <meta name="baidu-site-verification" content="baidu-token">
+            </head><body><h1>首页</h1></body></html>`
+          : '<html><head><title>这是一个长度合理的产品页面标题</title></head><body><h1>产品页</h1></body></html>'
+      };
+    },
+    async probe(url) {
+      if (url.endsWith('/robots.txt')) return { statusCode: 200, body: 'User-agent: *\nAllow: /' };
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/products/one');
+  const verification = report.categories.flatMap((category) => category.checks)
+    .find((check) => check.id === 'search-verification');
+
+  assert.equal(fetchedUrls.includes('https://example.com/'), true);
+  assert.equal(verification.status, 'passed');
+  assert.deepEqual(report.platforms.map(({ key, status }) => ({ key, status })), [
+    { key: 'google', status: 'detected' },
+    { key: 'bing', status: 'detected' },
+    { key: 'baidu', status: 'detected' }
+  ]);
 });
