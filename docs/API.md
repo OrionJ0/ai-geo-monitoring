@@ -79,6 +79,7 @@ Authorization: Bearer <token>
 - `PATCH /api/geo-projects/:projectId/question-sets/:questionSetId` 编辑问题集名称、说明或成员
 - `DELETE /api/geo-projects/:projectId/question-sets/:questionSetId` 删除问题集；成员问题仅解除归属，不会被删除
 - `POST /api/geo-projects/:projectId/question-sets/:questionSetId/run` 将问题集内所有启用问题按可用监测平台加入并发队列
+  - 每个启用问题都使用当前项目配置的全部可用模型；单问题自身保存的平台范围不会限制问题集运行
   - 返回 `202 Accepted`、队列记录、`question_set_run_id` 和 `report_url`；每个成员问题仍可通过单问题接口独立运行
 - `GET /api/geo-projects/:projectId/question-set-runs` 分页查询当前项目的问题集运行历史
   - Query 参数：`page` 默认 1；`pageSize` 默认 20，最大 100；`questionSetId` 可选，仅返回指定问题集的历史
