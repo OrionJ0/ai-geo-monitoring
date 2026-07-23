@@ -578,14 +578,17 @@ export default function GeoPromptsPage() {
       if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
         const notice = getRunResultNotice(data);
         message[notice.type](notice.text);
-        router.push(`/geo/project-dashboard?project_id=${runProjectId}`);
+        const reportUrl = data.report_url || (data.question_set_run_id
+          ? `/geo/question-set-reports?project_id=${runProjectId}&run_id=${data.question_set_run_id}`
+          : null);
+        if (reportUrl) router.push(reportUrl);
       }
     } catch (error) {
       const data = getApiRunResultData(error);
       if (data && questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
         const notice = getRunResultNotice(data);
         message[notice.type](notice.text);
-        router.push(`/geo/project-dashboard?project_id=${runProjectId}`);
+        if (data.report_url) router.push(data.report_url);
       } else if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
         message.error(getApiErrorMessage(error, '运行问题集失败'));
       }

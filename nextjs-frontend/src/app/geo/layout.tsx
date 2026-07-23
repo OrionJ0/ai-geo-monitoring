@@ -58,6 +58,7 @@ export default function GeoLayout({
   const breadcrumbMap: Record<string, { path: string; label: string }> = {
     '/projects': { path: `${basePath}/projects`, label: '品牌项目' },
     '/prompts': { path: `${basePath}/prompts`, label: '问题库' },
+    '/question-set-reports': { path: `${basePath}/question-set-reports`, label: '问题集报告' },
     '/project-dashboard': { path: `${basePath}/project-dashboard`, label: '项目看板' },
     '/seo-audit': { path: `${basePath}/seo-audit`, label: 'SEO 检测' },
     '/sources': { path: `${basePath}/sources`, label: '来源分析' },
@@ -78,13 +79,20 @@ export default function GeoLayout({
   const menuItems = [
     { key: '/projects', label: <Link href="/geo/projects">品牌项目</Link> },
     { key: '/prompts', label: <Link href="/geo/prompts">问题库</Link> },
-    { key: '/project-dashboard', label: <Link href="/geo/project-dashboard">项目看板</Link> },
+    { key: '/question-set-reports', label: <Link href="/geo/question-set-reports">问题集报告</Link> },
     { key: '/seo-audit', label: <Link href="/geo/seo-audit">SEO 检测</Link> },
-    { key: '/sources', label: <Link href="/geo/sources">来源分析</Link> },
-    { key: '/reports', label: <Link href="/geo/reports">报告中心</Link> },
     { key: '/alerts', label: <Link href="/geo/alerts">告警设置</Link> },
     { key: '/notice', label: <Link href="/geo/notice">系统通知</Link> },
     { key: '/profile', label: <Link href="/geo/profile">个人中心</Link> },
+    {
+      key: 'secondary-analysis',
+      label: '更多分析',
+      children: [
+        { key: '/project-dashboard', label: <Link href="/geo/project-dashboard">项目看板</Link> },
+        { key: '/sources', label: <Link href="/geo/sources">来源分析</Link> },
+        { key: '/reports', label: <Link href="/geo/reports">报告中心</Link> },
+      ],
+    },
   ];
 
   // 未登录时显示登录页面（条件渲染必须在所有 Hooks 之后）

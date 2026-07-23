@@ -91,14 +91,6 @@
   box-shadow: 0 8px 20px rgba(34, 71, 133, 0.06);
 }
 
-.coreMetricCard::after {
-  position: absolute;
-  inset: 0 0 auto;
-  height: 3px;
-  background: linear-gradient(90deg, #2f6bff, #74a1ff);
-  content: '';
-}
-
 .coreMetricCard :global(.ant-statistic-content) {
   color: #17366d;
   font-size: 30px;

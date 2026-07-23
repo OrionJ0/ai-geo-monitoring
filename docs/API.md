@@ -79,7 +79,19 @@ Authorization: Bearer <token>
 - `PATCH /api/geo-projects/:projectId/question-sets/:questionSetId` 编辑问题集名称、说明或成员
 - `DELETE /api/geo-projects/:projectId/question-sets/:questionSetId` 删除问题集；成员问题仅解除归属，不会被删除
 - `POST /api/geo-projects/:projectId/question-sets/:questionSetId/run` 将问题集内所有启用问题按可用监测平台加入并发队列
-  - 返回 `202 Accepted` 与队列记录；每个成员问题仍可通过单问题接口独立运行
+  - 返回 `202 Accepted`、队列记录、`question_set_run_id` 和 `report_url`；每个成员问题仍可通过单问题接口独立运行
+- `GET /api/geo-projects/:projectId/question-set-runs` 分页查询当前项目的问题集运行历史
+  - Query 参数：`page` 默认 1；`pageSize` 默认 20，最大 100
+  - 返回运行来源、当前状态、本次汇总和分页信息，不在列表中返回逐条回答
+- `GET /api/geo-projects/:projectId/question-set-runs/:runId` 获取一次问题集运行的独立报告
+  - 报告只聚合该运行关联的任务，包含本次汇总与逐问题逐平台结果
+- `GET /api/geo-projects/:projectId/question-set-runs/:runId/export` 导出一次问题集运行报告
+  - 返回 UTF-8 BOM 的 `text/csv` 文件，schema 为 `question_set_run_v1`
+  - 固定单表结构，一行对应一个问题与一个平台结果；数组字段使用 JSON 单元格保存以支持无损回导
+- `POST /api/geo-projects/:projectId/question-set-runs/import` 导入标准问题集报告 CSV
+  - 请求：原始 CSV 文本，`Content-Type: text/csv`，最大 5MB、5000 条数据行
+  - 校验：schema 版本、必要列、字段类型、JSON 数组和引用链接协议；仅允许 HTTP/HTTPS 引用链接
+  - 返回：`201 Created` 和只读导入报告；不会创建或覆盖问题、问题集，也不会计入项目汇总指标
 
 ## SEO 检测（需认证）
 
