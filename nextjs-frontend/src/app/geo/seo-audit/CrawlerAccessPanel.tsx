@@ -82,7 +82,9 @@ export default function CrawlerAccessPanel({ access }) {
                     <StatusIcon status={crawler.status} />
                     <div>
                       <a href={crawler.docsUrl} target="_blank" rel="noreferrer">{crawler.label}</a>
-                      <code>User-agent: {crawler.token}</code>
+                      <code>
+                        {crawler.robotsPolicy === 'control-token' ? 'robots token' : 'User-agent'}: {crawler.token}
+                      </code>
                     </div>
                   </div>
                   <div className={styles.crawlerDecision}>

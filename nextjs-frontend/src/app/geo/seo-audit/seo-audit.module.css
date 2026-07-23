@@ -784,7 +784,7 @@
 
 .crawlerRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(130px, 0.8fr);
+  grid-template-columns: minmax(0, 1fr) minmax(165px, 0.9fr);
   gap: 14px;
   align-items: center;
   min-height: 74px;
@@ -827,7 +827,7 @@
 .crawler_allowed .crawlerDecision strong { color: #15803d; }
 .crawler_blocked .crawlerDecision strong { color: #b42318; }
 .crawler_unknown .crawlerDecision strong { color: #9a6700; }
-.crawlerDecision small { overflow-wrap: anywhere; color: #738096; font-family: var(--font-geist-mono), monospace; font-size: 9px; line-height: 1.45; }
+.crawlerDecision small { max-width: 195px; overflow-wrap: anywhere; color: #738096; font-family: var(--font-geist-mono), monospace; font-size: 9px; line-height: 1.45; }
 
 .pageLedger {
   padding: 28px 30px;
