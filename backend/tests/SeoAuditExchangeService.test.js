@@ -61,6 +61,18 @@ test('标准 CSV 以固定长表列导出，并可恢复内容等价的 SEO 报�
   assert.deepEqual(parsed.report, source);
 });
 
+test('旧版单页历史缺少 mode 时仍可导出并规范化为 page', () => {
+  const legacy = pageReport();
+  delete legacy.mode;
+
+  const parsed = SeoAuditExchangeService.parseCsv(
+    SeoAuditExchangeService.buildCsv(legacy)
+  );
+
+  assert.equal(parsed.report.mode, 'page');
+  assert.deepEqual(parsed.report, { ...legacy, mode: 'page' });
+});
+
 test('回导报告保留原检测时间并创建新的导入时间', () => {
   const parsed = { sourceAuditId: 42, report: pageReport() };
 

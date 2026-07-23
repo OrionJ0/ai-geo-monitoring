@@ -166,10 +166,25 @@ function buildRows(report, exportedAt) {
   return rows;
 }
 
+function normalizeExportReport(report) {
+  if (
+    report
+    && typeof report === 'object'
+    && !Array.isArray(report)
+    && !report.mode
+    && Array.isArray(report.categories)
+  ) {
+    return { ...report, mode: 'page' };
+  }
+  return report;
+}
+
 function buildCsv(report) {
-  validateReport(report);
+  const normalizedReport = normalizeExportReport(report);
+  validateReport(normalizedReport);
   const exportedAt = new Date().toISOString();
-  const rows = buildRows(report, exportedAt).map((row) => HEADERS.map((header) => row[header] ?? ''));
+  const rows = buildRows(normalizedReport, exportedAt)
+    .map((row) => HEADERS.map((header) => row[header] ?? ''));
   return `\uFEFF${[HEADERS, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')}`;
 }
 
