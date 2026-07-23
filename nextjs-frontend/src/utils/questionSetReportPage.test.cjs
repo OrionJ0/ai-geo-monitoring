@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const pagePath = path.resolve(__dirname, '../app/geo/question-set-reports/page.tsx');
+const historyDrawerPath = path.resolve(__dirname, '../app/geo/question-set-reports/QuestionSetRunHistoryDrawer.tsx');
 const layoutPath = path.resolve(__dirname, '../app/geo/layout.tsx');
 const promptPagePath = path.resolve(__dirname, '../app/geo/prompts/page.tsx');
 const dashboardCssPath = path.resolve(__dirname, '../app/geo/project-dashboard/project-dashboard.module.css');
@@ -21,8 +22,36 @@ test('问题集报告页面以运行历史和单次逐条结果为中心', () =>
   assert.match(source, /dataSource=\{report\.rows/);
 });
 
+test('问题集运行历史从右侧抽屉打开，主页面只保留单次报告', () => {
+  assert.equal(fs.existsSync(historyDrawerPath), true, '问题集历史抽屉组件应存在');
+  const page = fs.readFileSync(pagePath, 'utf8');
+  const drawer = fs.readFileSync(historyDrawerPath, 'utf8');
+
+  assert.match(page, /HistoryOutlined/);
+  assert.match(page, /QuestionSetRunHistoryDrawer/);
+  assert.match(page, /历史报告/);
+  assert.doesNotMatch(page, /<Col/);
+  assert.doesNotMatch(page, /historyPanel/);
+  assert.match(drawer, /<Drawer/);
+  assert.match(drawer, /placement="right"/);
+});
+
+test('历史抽屉可以搜索并按问题集筛选完整历史', () => {
+  const page = fs.readFileSync(pagePath, 'utf8');
+  const drawer = fs.readFileSync(historyDrawerPath, 'utf8');
+
+  assert.match(page, /\/question-sets/);
+  assert.match(page, /questionSetId: targetQuestionSetId/);
+  assert.match(page, /historyQuestionSetId/);
+  assert.match(drawer, /showSearch/);
+  assert.match(drawer, /optionFilterProp="label"/);
+  assert.match(drawer, /placeholder="全部问题集"/);
+  assert.match(drawer, /onQuestionSetChange/);
+});
+
 test('问题集报告支持标准 CSV 导入导出并轮询运行中的报告', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
+  const drawer = fs.readFileSync(historyDrawerPath, 'utf8');
 
   assert.match(source, /question-set-runs\/\$\{report\.id\}\/export/);
   assert.match(source, /question-set-runs\/import/);
@@ -32,7 +61,7 @@ test('问题集报告支持标准 CSV 导入导出并轮询运行中的报告', 
   assert.match(source, /导入报告/);
   assert.match(source, /window\.print\(\)/);
   assert.match(source, /打印 \/ 导出 PDF/);
-  assert.match(source, /<Pagination/);
+  assert.match(drawer, /<Pagination/);
   assert.match(source, /pagination\?\.totalItems/);
 });
 

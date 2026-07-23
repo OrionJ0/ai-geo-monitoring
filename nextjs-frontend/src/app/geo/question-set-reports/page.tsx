@@ -4,11 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
-  Col,
   Empty,
-  Pagination,
   Progress,
-  Row,
   Select,
   Space,
   Table,
@@ -20,6 +17,7 @@ import {
 import {
   DownloadOutlined,
   FileSearchOutlined,
+  HistoryOutlined,
   ImportOutlined,
   PrinterOutlined,
   ReloadOutlined,
@@ -27,6 +25,9 @@ import {
 import axios from 'axios';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
+import QuestionSetRunHistoryDrawer, {
+  type QuestionSetOption,
+} from './QuestionSetRunHistoryDrawer';
 import styles from './question-set-reports.module.css';
 
 const { Paragraph, Text, Title } = Typography;
@@ -132,6 +133,8 @@ export default function QuestionSetReportsPage() {
   const [history, setHistory] = useState<RunReport[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
+  const [questionSets, setQuestionSets] = useState<QuestionSetOption[]>([]);
+  const [historyQuestionSetId, setHistoryQuestionSetId] = useState<number>();
   const [runId, setRunId] = useState<number>();
   const [report, setReport] = useState<RunReport | null>(null);
   const [projectLoading, setProjectLoading] = useState(false);
@@ -139,7 +142,9 @@ export default function QuestionSetReportsPage() {
   const [reportLoading, setReportLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const historyRequest = useRef(0);
+  const questionSetRequest = useRef(0);
   const reportRequest = useRef(0);
   const preferredIds = useRef<{ projectId?: number; runId?: number }>({});
 
@@ -169,8 +174,9 @@ export default function QuestionSetReportsPage() {
 
   const loadHistory = useCallback(async (
     targetProjectId?: number,
-    preferredRunId?: number,
     targetPage = 1,
+    targetQuestionSetId?: number,
+    preferredRunId?: number,
     selectFirst = false,
   ) => {
     const requestId = historyRequest.current + 1;
@@ -184,7 +190,11 @@ export default function QuestionSetReportsPage() {
     setHistoryLoading(true);
     try {
       const response = await axios.get(`/api/geo-projects/${targetProjectId}/question-set-runs`, {
-        params: { page: targetPage, pageSize: HISTORY_PAGE_SIZE },
+        params: {
+          page: targetPage,
+          pageSize: HISTORY_PAGE_SIZE,
+          questionSetId: targetQuestionSetId,
+        },
       });
       if (historyRequest.current !== requestId) return;
       const rows = extractList(response) as RunReport[];
@@ -193,19 +203,38 @@ export default function QuestionSetReportsPage() {
       setHistoryPage(targetPage);
       setHistoryTotal(Number(pagination?.totalItems) || rows.length);
       setRunId((current) => {
-        if (selectFirst) return rows[0]?.id;
         if (preferredRunId) return preferredRunId;
-        return rows.some((item) => item.id === current) ? current : rows[0]?.id;
+        if (selectFirst) return rows[0]?.id;
+        return current;
       });
     } catch (error) {
       if (historyRequest.current === requestId) {
         setHistory([]);
         setHistoryTotal(0);
-        setRunId(undefined);
+        if (selectFirst) setRunId(undefined);
         message.error(getApiErrorMessage(error, '获取问题集运行历史失败'));
       }
     } finally {
       if (historyRequest.current === requestId) setHistoryLoading(false);
+    }
+  }, []);
+
+  const loadQuestionSets = useCallback(async (targetProjectId?: number) => {
+    const requestId = questionSetRequest.current + 1;
+    questionSetRequest.current = requestId;
+    if (!targetProjectId) {
+      setQuestionSets([]);
+      return;
+    }
+    try {
+      const response = await axios.get(`/api/geo-projects/${targetProjectId}/question-sets`);
+      if (questionSetRequest.current !== requestId) return;
+      setQuestionSets(extractList(response) as QuestionSetOption[]);
+    } catch (error) {
+      if (questionSetRequest.current === requestId) {
+        setQuestionSets([]);
+        message.error(getApiErrorMessage(error, '获取问题集列表失败'));
+      }
     }
   }, []);
 
@@ -238,9 +267,11 @@ export default function QuestionSetReportsPage() {
   useEffect(() => {
     setReport(null);
     setHistoryPage(1);
-    loadHistory(projectId, preferredIds.current.runId, 1);
+    setHistoryQuestionSetId(undefined);
+    loadHistory(projectId, 1, undefined, preferredIds.current.runId, true);
+    loadQuestionSets(projectId);
     preferredIds.current.runId = undefined;
-  }, [projectId, loadHistory]);
+  }, [projectId, loadHistory, loadQuestionSets]);
 
   useEffect(() => {
     loadReport(projectId, runId);
@@ -258,10 +289,19 @@ export default function QuestionSetReportsPage() {
     if (!projectId || !runId || report?.status !== 'running') return undefined;
     const timer = window.setInterval(() => {
       loadReport(projectId, runId, true);
-      loadHistory(projectId, runId, historyPage);
+      if (historyOpen) loadHistory(projectId, historyPage, historyQuestionSetId);
     }, 4000);
     return () => window.clearInterval(timer);
-  }, [projectId, runId, report?.status, historyPage, loadHistory, loadReport]);
+  }, [
+    projectId,
+    runId,
+    report?.status,
+    historyOpen,
+    historyPage,
+    historyQuestionSetId,
+    loadHistory,
+    loadReport,
+  ]);
 
   const selectedProject = useMemo(
     () => projects.find((item) => item.id === projectId),
@@ -320,7 +360,8 @@ export default function QuestionSetReportsPage() {
       );
       const imported = response?.data?.data as RunReport;
       message.success('问题集运行报告已导入');
-      await loadHistory(projectId, imported.id, 1);
+      setHistoryQuestionSetId(undefined);
+      await loadHistory(projectId, 1);
       selectRun(imported.id);
     } catch (error) {
       message.error(getApiErrorMessage(error, '导入问题集报告失败'));
@@ -414,11 +455,18 @@ export default function QuestionSetReportsPage() {
             <Button icon={<ImportOutlined />} loading={importing} disabled={!projectId}>导入 CSV</Button>
           </Upload>
           <Button
+            icon={<HistoryOutlined />}
+            disabled={!projectId}
+            onClick={() => setHistoryOpen(true)}
+          >
+            历史报告
+          </Button>
+          <Button
             icon={<ReloadOutlined />}
             loading={historyLoading || reportLoading}
             disabled={!projectId}
             onClick={() => {
-              loadHistory(projectId, runId, historyPage);
+              loadHistory(projectId, historyPage, historyQuestionSetId);
               loadReport(projectId, runId);
             }}
           >
@@ -427,59 +475,31 @@ export default function QuestionSetReportsPage() {
         </Space>
       </div>
 
-      <Row gutter={[16, 16]} align="stretch">
-        <Col xs={24} xl={7}>
-          <aside className={styles.historyPanel} aria-labelledby="run-history-title">
-            <div className={styles.panelHeading}>
-              <div>
-                <Text className={styles.panelKicker}>按时间倒序</Text>
-                <Title level={4} id="run-history-title">运行历史</Title>
-              </div>
-              <Text type="secondary">共 {historyTotal} 次</Text>
-            </div>
-            {!projectId ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择项目" />
-            ) : history.length ? (
-              <>
-                <div className={styles.historyList} aria-busy={historyLoading}>
-                  {history.map((item) => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      className={`${styles.historyItem} ${item.id === runId ? styles.historyItemActive : ''}`}
-                      onClick={() => selectRun(item.id)}
-                    >
-                      <span className={styles.historyMarker} />
-                      <span className={styles.historyContent}>
-                        <span className={styles.historyTitle}>{item.question_set_name}</span>
-                        <span className={styles.historyMeta}>{formatDate(item.started_at || item.created_at)}</span>
-                        <span className={styles.historyFooter}>
-                          {reportStatusTag(item.status)}
-                          {item.source === 'imported' ? <Tag>导入</Tag> : <Tag variant="filled">系统运行</Tag>}
-                          <Text type="secondary">{item.summary?.total || 0} 项</Text>
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <Pagination
-                  className={styles.historyPagination}
-                  current={historyPage}
-                  pageSize={HISTORY_PAGE_SIZE}
-                  total={historyTotal}
-                  showSizeChanger={false}
-                  hideOnSinglePage
-                  onChange={(page) => loadHistory(projectId, undefined, page, true)}
-                />
-              </>
-            ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无问题集运行报告" />
-            )}
-          </aside>
-        </Col>
+      <QuestionSetRunHistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        items={history}
+        loading={historyLoading}
+        currentRunId={runId}
+        page={historyPage}
+        pageSize={HISTORY_PAGE_SIZE}
+        total={historyTotal}
+        questionSets={questionSets}
+        selectedQuestionSetId={historyQuestionSetId}
+        onQuestionSetChange={(nextQuestionSetId) => {
+          setHistoryQuestionSetId(nextQuestionSetId);
+          setHistory([]);
+          loadHistory(projectId, 1, nextQuestionSetId);
+        }}
+        onPageChange={(page) => loadHistory(projectId, page, historyQuestionSetId)}
+        onRefresh={() => loadHistory(projectId, historyPage, historyQuestionSetId)}
+        onOpenReport={(nextRunId) => {
+          selectRun(nextRunId);
+          setHistoryOpen(false);
+        }}
+      />
 
-        <Col xs={24} xl={17}>
-          <main className={styles.reportSheet} aria-busy={reportLoading}>
+      <main className={styles.reportSheet} aria-busy={reportLoading}>
             {!report ? (
               <Empty
                 image={<FileSearchOutlined className={styles.emptyIcon} />}
@@ -563,9 +583,7 @@ export default function QuestionSetReportsPage() {
                 </section>
               </>
             )}
-          </main>
-        </Col>
-      </Row>
+      </main>
     </div>
   );
 }
