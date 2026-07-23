@@ -1,7 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createAuditHandler, createListHandler, createDetailHandler } = require('../routes/seoAudits');
+const {
+  createAuditHandler,
+  createSiteAuditHandler,
+  createJobDetailHandler,
+  createListHandler,
+  createDetailHandler
+} = require('../routes/seoAudits');
 
 function createResponse() {
   return {
@@ -112,4 +118,45 @@ test('GET detail handler returns an owned report and hides unowned records', asy
   await handler({ user: { id: 8 }, params: { id: '23' } }, hiddenResponse);
   assert.equal(hiddenResponse.statusCode, 404);
   assert.deepEqual(hiddenResponse.payload, { success: false, message: 'SEO 检测历史不存在' });
+});
+
+test('POST site handler creates an asynchronous audit job', async () => {
+  const received = [];
+  const jobService = {
+    async create(userId, url) {
+      received.push({ userId, url });
+      return { id: 51, status: 'queued', progress: { phase: 'queued' } };
+    }
+  };
+  const response = createResponse();
+
+  await createSiteAuditHandler({ jobService })({
+    user: { id: 7 },
+    body: { url: 'example.com' }
+  }, response);
+
+  assert.equal(response.statusCode, 202);
+  assert.deepEqual(response.payload, {
+    success: true,
+    data: { id: 51, status: 'queued', progress: { phase: 'queued' } }
+  });
+  assert.deepEqual(received, [{ userId: 7, url: 'example.com' }]);
+});
+
+test('GET job handler returns only a job owned by the current user', async () => {
+  const jobService = {
+    async get(userId, jobId) {
+      return userId === 7 && jobId === 51 ? { id: 51, status: 'running' } : null;
+    }
+  };
+  const handler = createJobDetailHandler({ jobService });
+  const ownedResponse = createResponse();
+  await handler({ user: { id: 7 }, params: { jobId: '51' } }, ownedResponse);
+  assert.equal(ownedResponse.statusCode, 200);
+  assert.equal(ownedResponse.payload.data.status, 'running');
+
+  const hiddenResponse = createResponse();
+  await handler({ user: { id: 8 }, params: { jobId: '51' } }, hiddenResponse);
+  assert.equal(hiddenResponse.statusCode, 404);
+  assert.deepEqual(hiddenResponse.payload, { success: false, message: 'SEO 检测任务不存在' });
 });

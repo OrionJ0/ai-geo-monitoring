@@ -14,6 +14,13 @@ function plainRow(row) {
 
 function summarize(row) {
   const value = plainRow(row);
+  const summary = {
+    ...(value.summary || {}),
+    mode: value.summary?.mode || 'page',
+    pages: value.summary?.pages || 1,
+    failedPages: value.summary?.failedPages || 0,
+    truncated: Boolean(value.summary?.truncated)
+  };
   return {
     id: value.id,
     requestedUrl: value.requested_url,
@@ -22,7 +29,7 @@ function summarize(row) {
     durationMs: value.duration_ms,
     score: value.score,
     grade: value.grade,
-    summary: value.summary || {},
+    summary,
     checkedAt: new Date(value.checked_at).toISOString()
   };
 }
@@ -30,6 +37,13 @@ function summarize(row) {
 function createSeoAuditHistoryService({ model = SeoAuditRecord } = {}) {
   return {
     async save(userId, report) {
+      const summary = {
+        ...(report.summary || {}),
+        mode: report.mode || 'page',
+        pages: report.site?.auditedPages || 1,
+        failedPages: report.site?.failedPages || 0,
+        truncated: Boolean(report.site?.truncated)
+      };
       return model.create({
         user_id: userId,
         requested_url: report.requestedUrl,
@@ -38,7 +52,7 @@ function createSeoAuditHistoryService({ model = SeoAuditRecord } = {}) {
         duration_ms: report.durationMs,
         score: report.score,
         grade: report.grade,
-        summary: report.summary,
+        summary,
         report,
         checked_at: report.checkedAt
       });

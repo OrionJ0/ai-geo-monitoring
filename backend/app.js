@@ -80,6 +80,7 @@ const scheduleRoutes = require('./routes/schedules');
 const geoProjectRoutes = require('./routes/geoProjects');
 const seoAuditRoutes = require('./routes/seoAudits');
 const SchedulerService = require('./services/SchedulerService');
+const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
 const { authRequired } = require('./middleware/auth');
 
 // 用户登录与公开用户接口保持在 /api/users 下（登录无需鉴权）
@@ -388,6 +389,12 @@ async function ensureDefaultSettings() {
     await ensureDefaultUser();
     await ensureDefaultPlans();
     await ensureDefaultSettings();
+    try {
+      const recoveredSeoAudits = await createSeoAuditJobService().recoverInterruptedJobs();
+      if (recoveredSeoAudits > 0) console.log(`已恢复 ${recoveredSeoAudits} 个全站 SEO 检测任务`);
+    } catch (e) {
+      console.warn('恢复全站 SEO 检测任务失败:', e.message);
+    }
     // 启动定时调度器
     try {
       await SchedulerService.start();

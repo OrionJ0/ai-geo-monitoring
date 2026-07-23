@@ -42,9 +42,44 @@ test('lists only the requested user audit summaries with stable pagination', asy
     durationMs: 320,
     score: 82,
     grade: 'good',
-    summary: { total: 19, issues: 3 },
+    summary: { total: 19, issues: 3, mode: 'page', pages: 1, failedPages: 0, truncated: false },
     checkedAt: '2026-07-23T01:00:00.000Z'
   });
+});
+
+test('stores site audit mode and page coverage in the history summary', async () => {
+  let created;
+  const model = {
+    async create(values) {
+      created = values;
+      return { id: 31, ...values };
+    }
+  };
+  const service = createSeoAuditHistoryService({ model });
+  const report = {
+    mode: 'site',
+    requestedUrl: 'https://example.com/',
+    finalUrl: 'https://example.com/',
+    statusCode: 200,
+    durationMs: 5000,
+    score: 76,
+    grade: 'good',
+    checkedAt: '2026-07-23T01:00:00.000Z',
+    summary: { total: 100, issues: 4 },
+    site: { auditedPages: 8, failedPages: 1, truncated: true }
+  };
+
+  await service.save(7, report);
+
+  assert.deepEqual(created.summary, {
+    total: 100,
+    issues: 4,
+    mode: 'site',
+    pages: 8,
+    failedPages: 1,
+    truncated: true
+  });
+  assert.equal(created.report, report);
 });
 
 test('loads a complete report only inside the requested user scope', async () => {

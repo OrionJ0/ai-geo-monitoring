@@ -14,6 +14,7 @@ const VisibilityMetric = require('./VisibilityMetric');
 const AlertRule = require('./AlertRule');
 const ReportSnapshot = require('./ReportSnapshot');
 const SeoAuditRecord = require('./SeoAuditRecord');
+const SeoAuditJob = require('./SeoAuditJob');
 
 // 定义关联关系
 User.hasMany(QuestionRecord, {
@@ -75,6 +76,9 @@ ReportSnapshot.belongsTo(BrandProject, { foreignKey: 'project_id', as: 'project'
 
 User.hasMany(SeoAuditRecord, { foreignKey: 'user_id', as: 'seoAuditRecords' });
 SeoAuditRecord.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+User.hasMany(SeoAuditJob, { foreignKey: 'user_id', as: 'seoAuditJobs' });
+SeoAuditJob.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+SeoAuditJob.belongsTo(SeoAuditRecord, { foreignKey: 'audit_record_id', as: 'auditRecord' });
 
 const models = {
   sequelize,
@@ -92,7 +96,8 @@ const models = {
   VisibilityMetric,
   AlertRule,
   ReportSnapshot,
-  SeoAuditRecord
+  SeoAuditRecord,
+  SeoAuditJob
 };
 
 module.exports = models;
