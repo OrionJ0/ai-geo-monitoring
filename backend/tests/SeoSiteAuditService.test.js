@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createSeoSiteAuditService } = require('../services/SeoSiteAuditService');
+const { defaultSeoAuditRules } = require('../config/seoAuditRules');
 
 function htmlPage(url, links = []) {
   return {
@@ -133,4 +134,14 @@ test('respects page limit, reports truncation and emits crawl progress', async (
   assert.equal(calls.pages.get('https://example.com/'), 1);
   assert.equal(calls.probes.get('https://example.com/robots.txt'), 1);
   assert.equal(calls.probes.get('https://example.com/sitemap.xml'), 1);
+});
+
+test('rejects invalid crawl configuration before creating an audit', () => {
+  assert.throws(() => createSeoSiteAuditService({
+    siteClient: {},
+    ruleConfig: {
+      ...defaultSeoAuditRules,
+      crawl: { ...defaultSeoAuditRules.crawl, pageLimit: 0 }
+    }
+  }), /SEO 抓取配置 pageLimit 必须是正整数/);
 });

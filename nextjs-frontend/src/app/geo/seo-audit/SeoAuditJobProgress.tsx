@@ -53,6 +53,9 @@ export default function SeoAuditJobProgress({ job, progress = {} }) {
         <div><dt>失败页面</dt><dd>{failed}</dd></div>
         <div><dt>检测上限</dt><dd>200</dd></div>
       </dl>
+      {phase === 'failed' && job?.error?.message && (
+        <div className={styles.jobError} role="alert">{job.error.message}</div>
+      )}
       <p>任务已保存在当前账户。离开或刷新页面后，系统会通过任务编号继续读取进度。</p>
     </section>
   );

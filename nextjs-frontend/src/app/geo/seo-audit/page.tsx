@@ -143,8 +143,14 @@ export default function SeoAuditPage() {
         const nextJob = response?.data?.data;
         if (!nextJob || pollRef.current !== pollId) return null;
         setJob(nextJob);
-        if (nextJob.status === 'completed' && nextJob.report) {
+        if (nextJob.status === 'completed') {
           window.localStorage.removeItem(ACTIVE_JOB_KEY);
+          if (!nextJob.report) {
+            const failedJob = { ...nextJob, status: 'failed', error: { message: '检测已结束，但完整报告不存在' } };
+            setJob(failedJob);
+            message.error(failedJob.error.message);
+            return null;
+          }
           setReport(nextJob.report);
           setHistoryRefreshKey((value) => value + 1);
           message.success(restored ? '已恢复完成的全站检测报告' : '全站 SEO 检测完成');
@@ -293,7 +299,7 @@ export default function SeoAuditPage() {
         refreshKey={historyRefreshKey}
       />
 
-      {loading && !report && mode === 'site' && job && (
+      {!report && mode === 'site' && job && (loading || job.status === 'failed') && (
         <SeoAuditJobProgress job={job} progress={job.progress} />
       )}
 
@@ -307,7 +313,7 @@ export default function SeoAuditPage() {
         </section>
       )}
 
-      {!loading && !report && (
+      {!loading && !report && !job && (
         <section className={styles.startPanel} aria-label="检测范围">
           <article>
             <span>01</span>

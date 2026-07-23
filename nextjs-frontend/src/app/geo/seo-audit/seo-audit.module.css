@@ -287,6 +287,15 @@
 .jobStats dd { margin: 0; color: var(--ink); font-family: var(--font-geist-mono), monospace; font-size: 20px; font-weight: 700; }
 .jobPanel > p { margin: 14px 0 0; color: var(--muted); font-size: 11px; }
 
+.jobError {
+  margin-top: 14px;
+  padding: 11px 13px;
+  border-left: 3px solid #dc2626;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 12px;
+}
+
 .startPanel {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
