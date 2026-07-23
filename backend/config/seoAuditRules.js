@@ -1,5 +1,5 @@
 const defaultSeoAuditRules = Object.freeze({
-  version: '2026-07-23-v2',
+  version: '2026-07-23-v3',
   crawl: Object.freeze({
     pageLimit: 200,
     concurrency: 3,
@@ -37,7 +37,7 @@ const defaultSeoAuditRules = Object.freeze({
     https: { severity: 'high', weight: 7 },
     'robots-txt': { severity: 'high', weight: 7 },
     'crawler-access': { severity: 'high', weight: 7 },
-    sitemap: { severity: 'medium', weight: 4 },
+    sitemap: { severity: 'high', weight: 7 },
     'search-verification': { severity: 'low', weight: 1 },
     title: { severity: 'high', weight: 8 },
     'meta-description': { severity: 'high', weight: 8 },

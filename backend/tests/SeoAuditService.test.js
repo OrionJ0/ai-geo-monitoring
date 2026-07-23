@@ -92,6 +92,9 @@ test('does not treat empty robots and sitemap responses as healthy', async () =>
   assert.equal(robots.finding, 'robots.txt 内容为空');
   assert.equal(sitemap.status, 'failed');
   assert.equal(sitemap.finding, 'Sitemap 内容为空');
+  assert.equal(sitemap.severity, 'high');
+  assert.equal(sitemap.weight, 7);
+  assert.equal(report.scoreVersion, '2026-07-23-v3');
 });
 
 test('validates a sitemap declared in robots.txt instead of trusting the declaration alone', async () => {
@@ -309,7 +312,7 @@ test('uses the injected versioned rule configuration for weights and scoring', a
 
   assert.equal(customReport.scoreVersion, 'test-heavy-title-v1');
   assert.equal(customTitle.weight, 80);
-  assert.equal(customReport.summary.totalWeight, 198);
+  assert.equal(customReport.summary.totalWeight, 201);
   assert.equal(customReport.score < defaultReport.score, true);
 });
 
