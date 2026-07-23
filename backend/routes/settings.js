@@ -4,6 +4,10 @@ const { Setting } = require('../models');
 const { adminRequired } = require('../middleware/auth');
 const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
 const { AI_RUNTIME_SETTING_DEFINITIONS } = require('../services/AIRuntimeSettingsService');
+const AIAnalysisConfigService = require('../services/AIAnalysisConfigService');
+const { AIAnalysisConfigError } = require('../services/AIAnalysisConfigService');
+const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
+const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
 
 // 允许的设置项及校验
 const allowedKeys = {
@@ -35,6 +39,80 @@ const allowedKeys = {
     Object.keys(AI_RUNTIME_SETTING_DEFINITIONS).map((key) => [key, (val) => AIRuntimeSettingsService.isValid(key, val)])
   )
 };
+
+function analysisError(res, error, fallbackMessage) {
+  const isKnown = error instanceof AIAnalysisConfigError || error instanceof AIResponseAnalysisError;
+  return res.status(isKnown ? (error.status || 400) : 500).json({
+    success: false,
+    message: isKnown ? error.message : fallbackMessage,
+    data: { error_code: isKnown ? error.code : 'analysis_api_error' }
+  });
+}
+
+router.get('/analysis-api', adminRequired, async (_req, res) => {
+  try {
+    const config = await AIAnalysisConfigService.getPublicConfig();
+    return res.json({ success: true, data: config });
+  } catch (error) {
+    return analysisError(res, error, '获取 AI 分析 API 配置失败');
+  }
+});
+
+router.get('/analysis-api/prompt', adminRequired, async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    success: true,
+    data: AIResponseAnalysisService.getPromptDefinition()
+  });
+});
+
+router.put('/analysis-api', adminRequired, async (req, res) => {
+  try {
+    const config = await AIAnalysisConfigService.setConfig({
+      platform_code: req.body?.platform_code,
+      model_name: req.body?.model_name
+    });
+    return res.json({ success: true, message: 'AI 分析 API 已更新', data: config });
+  } catch (error) {
+    return analysisError(res, error, '更新 AI 分析 API 配置失败');
+  }
+});
+
+router.post('/analysis-api/test', adminRequired, async (req, res) => {
+  const brandName = String(req.body?.brand_name || '').trim();
+  const responseText = String(req.body?.response_text || '').trim();
+  const brandAliases = (Array.isArray(req.body?.brand_aliases) ? req.body.brand_aliases : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!brandName || brandName.length > 100) {
+    return res.status(400).json({ success: false, message: '品牌名称不能为空且不能超过 100 个字符' });
+  }
+  if (!responseText || responseText.length > 12000) {
+    return res.status(400).json({ success: false, message: '测试回答不能为空且不能超过 12000 个字符' });
+  }
+  try {
+    const output = await AIResponseAnalysisService.analyze({
+      responseText,
+      brand: { name: brandName, aliases: brandAliases },
+      competitors: [],
+      includeRawOutput: true
+    });
+    return res.json({
+      success: true,
+      data: {
+        input: {
+          brand_name: brandName,
+          brand_aliases: brandAliases,
+          response_text: responseText
+        },
+        output
+      }
+    });
+  } catch (error) {
+    return analysisError(res, error, 'AI 分析 API 测试失败');
+  }
+});
 
 // 获取所有设置（仅返回允许的键）
 router.get('/', adminRequired, async (req, res) => {

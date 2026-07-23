@@ -9,6 +9,7 @@ process.env.DB_STORAGE = path.join(databaseDir, 'test.sqlite');
 delete process.env.DATABASE_URL;
 
 const router = require('../routes/geoProjects');
+const AIPlatformService = require('../services/AIPlatformService');
 const ProjectRunService = require('../services/ProjectRunService');
 const {
   sequelize,
@@ -21,6 +22,7 @@ const {
 
 let project;
 let user;
+const originalGetAvailablePlatforms = AIPlatformService.getAvailablePlatforms;
 
 async function requestRoute(method, routePath, { params = {}, body = {}, query = {} } = {}) {
   const layer = router.stack.find((item) => item.route?.path === routePath && item.route.methods?.[method]);
@@ -48,6 +50,7 @@ async function requestRoute(method, routePath, { params = {}, body = {}, query =
 }
 
 test.before(async () => {
+  AIPlatformService.getAvailablePlatforms = async () => ['doubao', 'deepseek'];
   await sequelize.sync({ force: true });
   user = await User.create({
     username: 'question-set-user',
@@ -83,6 +86,10 @@ test.before(async () => {
     }
   ]);
 
+});
+
+test.after(() => {
+  AIPlatformService.getAvailablePlatforms = originalGetAvailablePlatforms;
 });
 
 test.after(async () => {

@@ -1,17 +1,29 @@
 const { AIPlatformConfig } = require('../models');
+const { Op } = require('sequelize');
 const { encryptSecret, decryptSecret } = require('./SecretEncryptionService');
 const { validatePlatformUrl } = require('./PlatformUrlPolicyService');
 
-const ADAPTER_TYPES = new Set(['doubao_responses', 'openai_chat_completions']);
+const ADAPTER_TYPES = new Set(['openai_responses', 'openai_chat_completions']);
 const TEST_STATUSES = new Set(['untested', 'success', 'failed']);
+const WEB_SEARCH_TEST_STATUSES = new Set(['untested', 'success', 'failed', 'inconclusive']);
+const REQUEST_OPTIONS_MAX_BYTES = 16 * 1024;
+const PROTECTED_REQUEST_OPTION_KEYS = new Set([
+  'model',
+  'messages',
+  'input',
+  'stream',
+  'max_tokens',
+  'max_output_tokens'
+]);
+const UNSAFE_JSON_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 const PRESET_PLATFORMS = Object.freeze([
   Object.freeze({
     code: 'doubao',
     name: '豆包',
-    adapter_type: 'doubao_responses',
-    base_url: 'https://ark.cn-beijing.volces.com/api/v3/responses',
-    default_model: 'doubao-seed-1-6-250615',
+    adapter_type: 'openai_responses',
+    base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+    default_model: 'doubao-seed-2-1-turbo-260628',
     enabled: true,
     builtin: true
   }),
@@ -49,6 +61,45 @@ function normalizeNullableInteger(value, fieldName, min, max) {
     throw new PlatformConfigError(`${fieldName}必须是 ${min}–${max} 之间的整数`);
   }
   return number;
+}
+
+function normalizeRequestOptions(value) {
+  if (value === null || value === undefined || value === '') return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new PlatformConfigError('请求参数必须是 JSON 对象');
+  }
+
+  for (const key of Object.keys(value)) {
+    if (PROTECTED_REQUEST_OPTION_KEYS.has(key)) {
+      throw new PlatformConfigError(`请求参数不能覆盖系统字段 ${key}`);
+    }
+  }
+
+  const visit = (node) => {
+    if (node === null) return;
+    if (typeof node === 'number' && !Number.isFinite(node)) {
+      throw new PlatformConfigError('请求参数只能包含有效 JSON 值');
+    }
+    if (typeof node !== 'object') return;
+    for (const key of Object.keys(node)) {
+      if (UNSAFE_JSON_KEYS.has(key)) {
+        throw new PlatformConfigError(`请求参数不能包含不安全字段 ${key}`);
+      }
+      visit(node[key]);
+    }
+  };
+  visit(value);
+
+  let serialized;
+  try {
+    serialized = JSON.stringify(value);
+  } catch (_) {
+    throw new PlatformConfigError('请求参数必须是有效 JSON 对象');
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > REQUEST_OPTIONS_MAX_BYTES) {
+    throw new PlatformConfigError('请求参数不能超过 16 KiB');
+  }
+  return JSON.parse(serialized);
 }
 
 function isConfigured(row) {
@@ -101,11 +152,29 @@ class AIPlatformConfigService {
   }
 
   async ensurePresets() {
+    const legacyRows = await this.model.findAll({
+      where: { adapter_type: 'doubao_responses' }
+    });
+    for (const row of legacyRows) {
+      await row.update({
+        adapter_type: 'openai_responses',
+        ...this.untestedState()
+      });
+    }
+
     for (const preset of PRESET_PLATFORMS) {
-      await this.model.findOrCreate({
+      const [row] = await this.model.findOrCreate({
         where: { code: preset.code },
         defaults: preset
       });
+      const requestOptions = row.request_options || {};
+      const isObsoleteDoubaoPreset = preset.code === 'doubao'
+        && JSON.stringify(requestOptions) === JSON.stringify({
+          tools: [{ type: 'web_search', max_keyword: 2 }]
+        });
+      if (isObsoleteDoubaoPreset) {
+        await row.update({ request_options: {}, ...this.untestedState() });
+      }
     }
   }
 
@@ -118,6 +187,16 @@ class AIPlatformConfigService {
   async listCatalog() {
     const rows = await this.model.findAll({ where: { archived_at: null }, order: [['builtin', 'DESC'], ['id', 'ASC']] });
     return rows.map(toCatalogView);
+  }
+
+  async listPlatformRows(codes = null, { includeArchived = true } = {}) {
+    const normalizedCodes = Array.isArray(codes)
+      ? Array.from(new Set(codes.map((code) => String(code || '').trim().toLowerCase()).filter(Boolean)))
+      : null;
+    const where = {};
+    if (normalizedCodes) where.code = { [Op.in]: normalizedCodes };
+    if (!includeArchived) where.archived_at = null;
+    return this.model.findAll({ where, order: [['id', 'ASC']] });
   }
 
   async getPlatform(id, { includeArchived = false } = {}) {
@@ -172,6 +251,7 @@ class AIPlatformConfigService {
       'default_model',
       'request_timeout_seconds',
       'max_tokens',
+      'request_options',
       'enabled',
       'encrypted_api_key',
       'api_key_last4'
@@ -180,9 +260,14 @@ class AIPlatformConfigService {
       if (Object.prototype.hasOwnProperty.call(values, key)) updates[key] = values[key];
     }
 
-    const criticalFields = ['adapter_type', 'base_url', 'default_model', 'encrypted_api_key'];
+    const criticalFields = ['adapter_type', 'base_url', 'default_model', 'encrypted_api_key', 'request_options'];
     const criticalChanged = criticalFields.some((key) => (
-      Object.prototype.hasOwnProperty.call(updates, key) && updates[key] !== row[key]
+      Object.prototype.hasOwnProperty.call(updates, key)
+      && (
+        key === 'request_options'
+          ? JSON.stringify(updates[key] || {}) !== JSON.stringify(row[key] || {})
+          : updates[key] !== row[key]
+      )
     ));
     if (criticalChanged) Object.assign(updates, this.untestedState());
 
@@ -206,9 +291,17 @@ class AIPlatformConfigService {
     return toAdminView(row);
   }
 
-  async archivePlatform(id) {
+  async revealApiKey(id) {
     const row = await this.getPlatform(id);
-    if (row.builtin) throw new PlatformConfigError('预置平台不能归档');
+    return {
+      api_key: this.decryptApiKey(row),
+      api_key_last4: row.api_key_last4
+    };
+  }
+
+  async deletePlatform(id) {
+    const row = await this.getPlatform(id);
+    if (row.builtin) throw new PlatformConfigError('预置平台不能删除');
     await row.update({ archived_at: new Date(), enabled: false });
     return toAdminView(row);
   }
@@ -242,6 +335,7 @@ class AIPlatformConfigService {
     if (has('max_tokens')) {
       values.max_tokens = normalizeNullableInteger(payload.max_tokens, '最大 Token', 256, 32768);
     }
+    if (has('request_options')) values.request_options = normalizeRequestOptions(payload.request_options);
     if (has('enabled')) values.enabled = Boolean(payload.enabled);
 
     const apiKey = String(payload.api_key ?? '');
@@ -269,7 +363,11 @@ class AIPlatformConfigService {
       test_status: 'untested',
       last_tested_at: null,
       last_test_error_code: null,
-      last_test_message: null
+      last_test_message: null,
+      web_search_test_status: 'untested',
+      last_web_search_tested_at: null,
+      last_web_search_test_error_code: null,
+      last_web_search_test_message: null
     };
   }
 
@@ -285,6 +383,23 @@ class AIPlatformConfigService {
     });
     return toAdminView(row);
   }
+
+  async saveWebSearchTestResult(id, result) {
+    const row = await this.getPlatform(id);
+    const status = String(result?.status || (result?.success ? 'success' : 'failed'));
+    if (!WEB_SEARCH_TEST_STATUSES.has(status) || status === 'untested') {
+      throw new PlatformConfigError('联网测试状态无效');
+    }
+    await row.update({
+      web_search_test_status: status,
+      last_web_search_tested_at: new Date(),
+      last_web_search_test_error_code: status === 'success'
+        ? null
+        : String(result?.error_code || (status === 'inconclusive' ? 'search_evidence_missing' : 'provider_error')).slice(0, 50),
+      last_web_search_test_message: String(result?.message || '联网能力测试已完成').slice(0, 255)
+    });
+    return toAdminView(row);
+  }
 }
 
 const service = new AIPlatformConfigService();
@@ -296,3 +411,5 @@ module.exports.PRESET_PLATFORMS = PRESET_PLATFORMS;
 module.exports.toAdminView = toAdminView;
 module.exports.toCatalogView = toCatalogView;
 module.exports.getUnavailableReason = getUnavailableReason;
+module.exports.normalizeRequestOptions = normalizeRequestOptions;
+module.exports.REQUEST_OPTIONS_MAX_BYTES = REQUEST_OPTIONS_MAX_BYTES;

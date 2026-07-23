@@ -35,6 +35,10 @@ async function api(router, method, routePath, { role, body = {}, params = {} } =
     json(payload) {
       this.payload = payload;
       return this;
+    },
+    set(name, value) {
+      this.headers = { ...(this.headers || {}), [name]: value };
+      return this;
     }
   };
   const middleware = router.stack.filter((item) => !item.route).map((item) => item.handle);
@@ -44,7 +48,7 @@ async function api(router, method, routePath, { role, body = {}, params = {} } =
     await handlers[index](req, response, () => dispatch(index + 1));
   };
   await dispatch(0);
-  return { status: response.statusCode, json: response.payload };
+  return { status: response.statusCode, json: response.payload, headers: response.headers || {} };
 }
 
 test.before(async () => {
@@ -92,6 +96,45 @@ test('creates and updates a platform without returning its API key', async () =>
   assert.equal(updated.json.data.configured, true);
 });
 
+test('reveals a configured API key only to an administrator and marks the response no-store', async () => {
+  const platform = await AIPlatformConfig.findOne({ where: { code: 'example-ai' } });
+
+  assert.equal((await api(adminRouter, 'GET', '/:id/api-key', {
+    role: 'user',
+    params: { id: platform.id }
+  })).status, 403);
+
+  const response = await api(adminRouter, 'GET', '/:id/api-key', {
+    role: 'admin',
+    params: { id: platform.id }
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.json.data.api_key, 'sk-api-route-secret');
+  assert.equal(response.headers['Cache-Control'], 'no-store');
+});
+
+test('returns selectable models for one configured platform', async () => {
+  const platform = await AIPlatformConfig.findOne({ where: { code: 'example-ai' } });
+  const original = AIPlatformRequestService.listModels;
+  AIPlatformRequestService.listModels = async () => ({
+    success: true,
+    models: ['example-model', 'example-model-pro'],
+    current_model: 'example-model'
+  });
+
+  try {
+    const response = await api(adminRouter, 'GET', '/:id/models', {
+      role: 'admin',
+      params: { id: platform.id }
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.json.data.models, ['example-model', 'example-model-pro']);
+  } finally {
+    AIPlatformRequestService.listModels = original;
+  }
+});
+
 test('returns a non-sensitive platform catalog to authenticated users', async () => {
   const response = await api(catalogRouter, 'GET', '/', { role: 'user' });
 
@@ -122,6 +165,19 @@ test('clears API keys through a dedicated endpoint', async () => {
   assert.equal(platform.encrypted_api_key, null);
 });
 
+test('changes enabled state independently through the patch endpoint', async () => {
+  const platform = await AIPlatformConfig.findOne({ where: { code: 'example-ai' } });
+  const response = await api(adminRouter, 'PATCH', '/:id/enabled', {
+    role: 'admin',
+    params: { id: platform.id },
+    body: { enabled: false }
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.json.data.enabled, false);
+  assert.equal(response.json.data.configured, false);
+});
+
 test('runs an optional connection test without changing enabled state', async () => {
   const deepseek = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
   await deepseek.update({ enabled: false });
@@ -141,5 +197,29 @@ test('runs an optional connection test without changing enabled state', async ()
     assert.equal(response.json.data.platform.enabled, false);
   } finally {
     AIPlatformRequestService.testConnection = original;
+  }
+});
+
+test('runs an independent web-search capability test', async () => {
+  const deepseek = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+  const original = AIPlatformRequestService.testWebSearch;
+  AIPlatformRequestService.testWebSearch = async () => ({
+    platform: { id: deepseek.id, code: 'deepseek', web_search_test_status: 'inconclusive' },
+    web_search: {
+      success: false,
+      status: 'inconclusive',
+      message: '模型调用成功，但响应中没有可验证的联网搜索证据'
+    }
+  });
+
+  try {
+    const response = await api(adminRouter, 'POST', '/:id/test-web-search', {
+      role: 'admin',
+      params: { id: deepseek.id }
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.json.data.web_search.status, 'inconclusive');
+  } finally {
+    AIPlatformRequestService.testWebSearch = original;
   }
 });

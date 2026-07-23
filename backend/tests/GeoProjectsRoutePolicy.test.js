@@ -27,7 +27,8 @@ test('geo project route imports report snapshots used by cleanup helpers', () =>
 test('project creation validates supported platforms without requiring an existing project', () => {
   const block = routeBlock('post', '/');
 
-  assert.match(block, /PlatformSelectionService\.validate\(req\.body\.platforms\)/);
+  assert.match(block, /PlatformSelectionService\.validate\(req\.body\.platforms,\s*\{[\s\S]*availablePlatforms:\s*selectablePlatforms/);
+  assert.match(block, /await getSelectablePlatformCodes\(\)/);
   assert.doesNotMatch(block, /validateWithinProject\(req\.body\.platforms/);
 });
 
@@ -35,8 +36,8 @@ test('prompt create and update validate platforms within the selected project', 
   const createBlock = routeBlock('post', '/:projectId/prompts');
   const updateBlock = routeBlock('put', '/:projectId/prompts/:promptId');
 
-  assert.match(createBlock, /validateWithinProject\(req\.body\.platforms,\s*req\.brandProject\.platforms\)/);
-  assert.match(updateBlock, /validateWithinProject\(req\.body\.platforms,\s*req\.brandProject\.platforms\)/);
+  assert.match(createBlock, /validateWithinProject\([\s\S]*req\.body\.platforms,[\s\S]*req\.brandProject\.platforms,[\s\S]*selectablePlatforms/);
+  assert.match(updateBlock, /validateWithinProject\([\s\S]*req\.body\.platforms,[\s\S]*req\.brandProject\.platforms,[\s\S]*selectablePlatforms/);
 });
 
 test('restoring an archived project checks duplicate active project identity first', () => {

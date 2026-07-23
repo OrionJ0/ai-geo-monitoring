@@ -7,7 +7,7 @@ const { BrandProject, DetectionSchedule, QuestionRecord, TrackedPrompt, User } =
 const ProjectRunService = require('../services/ProjectRunService');
 const SchedulerService = require('../services/SchedulerService');
 
-test('normalizes project monitoring settings for mainland platforms', () => {
+test('normalizes project monitoring settings for dynamic platform codes', () => {
   const payload = SchedulerService.normalizeProjectMonitoring({
     monitoring_enabled: true,
     monitoring_time: '8:5',
@@ -16,10 +16,10 @@ test('normalizes project monitoring settings for mainland platforms', () => {
 
   assert.equal(payload.monitoring_enabled, true);
   assert.equal(payload.monitoring_time, '08:05');
-  assert.deepEqual(payload.platforms, ['deepseek', 'doubao']);
+  assert.deepEqual(payload.platforms, ['deepseek', 'kimi', 'doubao']);
 });
 
-test('normalizes legacy project schedule platforms within the project platform scope', () => {
+test('normalizes schedule platforms within the dynamic project platform scope', () => {
   assert.deepEqual(
     SchedulerService.normalizeSchedulePlatforms(['doubao', 'deepseek', 'kimi'], {
       id: 2,
@@ -36,7 +36,7 @@ test('normalizes legacy project schedule platforms within the project platform s
   );
   assert.deepEqual(
     SchedulerService.normalizeSchedulePlatforms(['doubao', 'kimi']),
-    ['doubao']
+    ['doubao', 'kimi']
   );
 });
 
@@ -93,8 +93,52 @@ test('scheduled detections guard empty AI responses before creating result detai
 test('scheduled platform failures store safe error messages', () => {
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
 
-  assert.match(source, /SAFE_PLATFORM_FAILURE_MESSAGE/);
+  assert.match(source, /safePlatformFailureMessage\(result\)/);
   assert.doesNotMatch(source, /error_message:\s*result\.error/);
+});
+
+test('scheduled runs do not consume quota or create records when all platforms are unavailable', async () => {
+  let quotaCalls = 0;
+  let settingsCalls = 0;
+  const result = await SchedulerService.submitDetectionForSchedule({
+    user_id: 9,
+    question: '静音轮胎怎么选',
+    platforms: ['custom-ai'],
+    highlight_keywords: []
+  }, {
+    projectValidated: true,
+    aiPlatformService: {
+      getPlatformAvailability: async () => [{
+        code: 'custom-ai',
+        platform_name: '自定义平台',
+        available: false,
+        reason: 'missing_api_key'
+      }]
+    },
+    settingsService: {
+      getSettings: async () => {
+        settingsCalls += 1;
+        return {};
+      }
+    },
+    consumeQuota: async () => {
+      quotaCalls += 1;
+      return { ok: true };
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'all_platforms_unavailable');
+  assert.equal(result.attempted, 0);
+  assert.equal(result.advance_schedule, true);
+  assert.equal(quotaCalls, 0);
+  assert.equal(settingsCalls, 0);
+  assert.deepEqual(result.skipped_platforms, [{
+    platform: 'custom-ai',
+    name: '自定义平台',
+    reason: 'missing_api_key',
+    message: '自定义平台未配置 API Key'
+  }]);
 });
 
 test('scheduled query exceptions mark created records as failed', () => {
@@ -135,16 +179,17 @@ test('manual scheduled runs only succeed when at least one platform completes', 
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
 
   assert.match(source, /let completed = 0/);
-  assert.match(source, /return \{ ok: completed > 0, completed, failed, attempted \}/);
+  assert.match(source, /return \{ ok: completed > 0, completed, failed, attempted, skipped_platforms: skippedPlatforms \}/);
+  assert.match(source, /const result = await this\.runNowWithResult\(scheduleId\)/);
   assert.match(source, /const result = await submitDetectionForSchedule\(s, \{ projectValidated: true, project: guard\.project \}\)/);
-  assert.match(source, /if \(!result\?\.ok\) return false/);
+  assert.match(source, /if \(!result\?\.ok\) \{/);
 });
 
 test('automatic scheduled runs advance after attempted platform failures', () => {
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
 
   assert.match(source, /const result = await submitDetectionForSchedule\(s\)/);
-  assert.match(source, /if \(!result\?\.ok && !result\?\.attempted\) continue/);
+  assert.match(source, /if \(!result\?\.ok && !result\?\.attempted && !result\?\.advance_schedule\) continue/);
   assert.match(source, /await s\.update\(\{ last_run_at: now, next_run_at: next \}\)/);
 });
 
@@ -201,6 +246,7 @@ test('does not auto advance an archived project schedule during tick', async () 
   const originalFindSchedules = DetectionSchedule.findAll;
   const originalFindProjects = BrandProject.findAll;
   const originalFindProject = BrandProject.findByPk;
+  const originalRecover = SchedulerService.recoverStalePendingRecords;
   const updates = [];
 
   DetectionSchedule.findAll = async () => [{
@@ -212,6 +258,7 @@ test('does not auto advance an archived project schedule during tick', async () 
   }];
   BrandProject.findAll = async () => [];
   BrandProject.findByPk = async () => ({ id: 2, status: 'archived' });
+  SchedulerService.recoverStalePendingRecords = async () => 0;
 
   try {
     await SchedulerService.tick();
@@ -221,6 +268,7 @@ test('does not auto advance an archived project schedule during tick', async () 
     DetectionSchedule.findAll = originalFindSchedules;
     BrandProject.findAll = originalFindProjects;
     BrandProject.findByPk = originalFindProject;
+    SchedulerService.recoverStalePendingRecords = originalRecover;
   }
 });
 

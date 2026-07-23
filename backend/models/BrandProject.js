@@ -9,7 +9,7 @@ const BrandProject = sequelize.define('BrandProject', {
   website: { type: DataTypes.STRING(255), allowNull: true },
   industry: { type: DataTypes.STRING(120), allowNull: true },
   primary_keywords: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
-  platforms: { type: DataTypes.JSON, allowNull: false, defaultValue: ['doubao', 'deepseek'] },
+  platforms: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
   monitoring_enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   monitoring_time: { type: DataTypes.STRING(5), allowNull: false, defaultValue: '09:00' },
   monitoring_last_run_at: { type: DataTypes.DATE, allowNull: true },

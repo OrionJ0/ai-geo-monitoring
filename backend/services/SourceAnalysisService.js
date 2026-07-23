@@ -56,7 +56,7 @@ class SourceAnalysisService {
     const matchedRule = SOURCE_TYPE_RULES.find((rule) =>
       rule.domains.some((root) => this.sameOrSubdomain(domain, root))
     );
-    return matchedRule?.type || '第三方来源';
+    return matchedRule?.type || '其他第三方来源';
   }
 
   normalizeSource(source, context = {}) {

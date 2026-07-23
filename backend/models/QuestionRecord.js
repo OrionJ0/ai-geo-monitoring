@@ -24,8 +24,16 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
     allowNull: true
   },
   platform: {
-    type: DataTypes.ENUM('doubao', 'deepseek', 'kimi', 'qianwen'),
+    type: DataTypes.STRING(50),
     allowNull: false
+  },
+  platform_name: {
+    type: DataTypes.STRING(100),
+    allowNull: true
+  },
+  model_name: {
+    type: DataTypes.STRING(255),
+    allowNull: true
   },
   brand: {
     type: DataTypes.STRING,

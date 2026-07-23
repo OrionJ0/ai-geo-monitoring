@@ -1,92 +1,91 @@
-const MAINLAND_PLATFORMS = ['doubao', 'deepseek'];
-const PLATFORM_LABELS = {
-  doubao: '豆包',
-  deepseek: 'DeepSeek'
-};
-
 function asArray(value) {
-  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
-  if (typeof value === 'string') return value.split(/[,，;\n]/).map((item) => item.trim()).filter(Boolean);
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') return value.split(/[,，;；\n]/);
   return [];
 }
 
+function normalize(value) {
+  return Array.from(new Set(
+    asArray(value)
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter(Boolean)
+  ));
+}
+
+function hasValidCodeFormat(code) {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(code) && code.length >= 2 && code.length <= 50;
+}
+
 class PlatformSelectionService {
-  getSupportedPlatforms() {
-    return [...MAINLAND_PLATFORMS];
-  }
-
   normalize(value) {
-    const result = this.validate(value);
-    return result.ok ? result.platforms : MAINLAND_PLATFORMS;
+    return normalize(value);
   }
 
-  validateWithinProject(value, projectPlatforms) {
-    const projectResult = this.validate(projectPlatforms);
-    const allowedPlatforms = projectResult.ok && projectResult.platforms.length
-      ? projectResult.platforms
-      : [...MAINLAND_PLATFORMS];
-    const raw = asArray(value);
-    const result = this.validate(raw.length ? raw : allowedPlatforms);
-    if (!result.ok) return result;
-
-    const allowed = new Set(allowedPlatforms);
-    const invalid = result.platforms.filter((item) => !allowed.has(item));
+  validate(value, options = {}) {
+    const restrictToAvailable = Object.prototype.hasOwnProperty.call(options, 'availablePlatforms');
+    const availablePlatforms = normalize(options.availablePlatforms);
+    const available = new Set(availablePlatforms);
+    const raw = normalize(value);
+    const defaults = normalize(
+      options.defaultPlatforms !== undefined ? options.defaultPlatforms : availablePlatforms
+    );
+    const selected = raw.length ? raw : defaults;
+    const invalid = selected.filter((platform) => (
+      !hasValidCodeFormat(platform)
+      || (restrictToAvailable && !available.has(platform))
+    ));
     if (invalid.length) {
       return {
         ok: false,
         platforms: [],
         invalid_platforms: invalid,
-        message: `问题监测平台必须包含在项目监测平台内：${allowedPlatforms.map((item) => PLATFORM_LABELS[item]).join('、')}`
+        message: `监测平台当前不可选择：${invalid.join('、')}`
       };
     }
+    return { ok: true, platforms: selected, invalid_platforms: [] };
+  }
 
+  validateWithinProject(value, projectPlatforms, availablePlatforms = projectPlatforms) {
+    const selectable = normalize(availablePlatforms);
+    const projectList = normalize(projectPlatforms).filter((platform) => (
+      !selectable.length || selectable.includes(platform)
+    ));
+    const result = this.validate(value, {
+      availablePlatforms: selectable,
+      defaultPlatforms: projectList
+    });
+    if (!result.ok) return result;
+
+    const allowed = new Set(projectList);
+    const invalid = result.platforms.filter((platform) => !allowed.has(platform));
+    if (invalid.length) {
+      return {
+        ok: false,
+        platforms: [],
+        invalid_platforms: invalid,
+        message: `问题监测平台必须包含在项目监测平台内：${projectList.join('、')}`
+      };
+    }
     return result;
   }
 
-  reconcilePromptPlatforms(promptPlatforms, projectPlatforms) {
-    const projectResult = this.validate(projectPlatforms);
-    const allowedPlatforms = projectResult.ok && projectResult.platforms.length
-      ? projectResult.platforms
-      : [...MAINLAND_PLATFORMS];
-    const allowed = new Set(allowedPlatforms);
-    const retained = Array.from(new Set(asArray(promptPlatforms).map((item) => item.toLowerCase())))
-      .filter((item) => MAINLAND_PLATFORMS.includes(item) && allowed.has(item));
-    return retained.length ? retained : allowedPlatforms;
-  }
-
-  validate(value) {
-    const raw = asArray(value).map((item) => item.toLowerCase());
-    if (!raw.length) {
-      return { ok: true, platforms: [...MAINLAND_PLATFORMS], invalid_platforms: [] };
-    }
-
-    const unique = Array.from(new Set(raw));
-    const invalid = unique.filter((item) => !MAINLAND_PLATFORMS.includes(item));
-    if (invalid.length) {
-      return {
-        ok: false,
-        platforms: [],
-        invalid_platforms: invalid,
-        message: `监测平台仅支持${MAINLAND_PLATFORMS.map((item) => PLATFORM_LABELS[item]).join('、')}`
-      };
-    }
-
-    return { ok: true, platforms: unique, invalid_platforms: [] };
-  }
-
-  buildSupportedStatus(platformConfigs = {}) {
-    return MAINLAND_PLATFORMS.map((key) => {
-      const cfg = platformConfigs[key] || {};
-      const ok = Boolean(cfg.apiKey);
-      return {
-        platform: key,
-        name: cfg.name || PLATFORM_LABELS[key] || key,
-        apiUrl: cfg.apiUrl,
-        ok,
-        message: ok ? '平台服务凭证已配置' : '平台服务凭证未配置'
-      };
+  validateProjectUpdate(value, currentProjectPlatforms, availablePlatforms) {
+    const current = normalize(currentProjectPlatforms);
+    const selectable = normalize(availablePlatforms);
+    return this.validate(value, {
+      availablePlatforms: Array.from(new Set([...selectable, ...current])),
+      defaultPlatforms: current
     });
+  }
+
+  reconcilePromptPlatforms(promptPlatforms, projectPlatforms) {
+    const allowedPlatforms = normalize(projectPlatforms);
+    const allowed = new Set(allowedPlatforms);
+    const retained = normalize(promptPlatforms).filter((platform) => allowed.has(platform));
+    return retained.length ? retained : allowedPlatforms;
   }
 }
 
 module.exports = new PlatformSelectionService();
+module.exports.normalizePlatformCodes = normalize;
+module.exports.hasValidCodeFormat = hasValidCodeFormat;

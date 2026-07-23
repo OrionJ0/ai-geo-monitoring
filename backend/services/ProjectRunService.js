@@ -7,15 +7,53 @@ const {
 const AIPlatformService = require('./AIPlatformService');
 const ResultParserService = require('./ResultParserService');
 const VisibilityAnalysisService = require('./VisibilityAnalysisService');
-const SentimentAnalysisService = require('./SentimentAnalysisService');
+const AIResponseAnalysisService = require('./AIResponseAnalysisService');
+const { AIResponseAnalysisError } = require('./AIResponseAnalysisService');
+const { AIAnalysisConfigError } = require('./AIAnalysisConfigService');
 const CitationAnalysisService = require('./CitationAnalysisService');
 const AlertEvaluationService = require('./AlertEvaluationService');
 const PromptCategoryService = require('./PromptCategoryService');
+const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
+const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
 
-const MAINLAND_PLATFORMS = ['doubao', 'deepseek'];
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
-const PLATFORM_MISMATCH_MESSAGE = '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置';
+const PLATFORM_MISMATCH_MESSAGE = '问题选择的平台不在当前项目的监测范围内。';
+
+function runtimePlatformFailureMessage(result) {
+  return AI_PLATFORM_ERROR_MESSAGES[result?.error_code] || SAFE_PLATFORM_FAILURE_MESSAGE;
+}
+
+function metricFailureMessage(error) {
+  if (error instanceof AIAnalysisConfigError && error.code === 'analysis_api_not_configured') {
+    return 'AI 分析 API 未配置，本条未计入有效样本';
+  }
+  if (error instanceof AIAnalysisConfigError || error instanceof AIResponseAnalysisError) {
+    return 'AI 结构化分析失败，本条未计入有效样本';
+  }
+  return '指标生成失败，请稍后重试';
+}
+
+function normalizePlatformCodes(value) {
+  return Array.from(new Set(
+    (Array.isArray(value) ? value : [])
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter(Boolean)
+  ));
+}
+
+function skippedPlatformMessage(item) {
+  const name = item?.platform_name || item?.name || item?.code || '监测平台';
+  const messages = {
+    missing_api_key: `${name}未配置 API Key`,
+    disabled: `${name}已被管理员停用`,
+    missing_base_url: `${name}未配置接口地址`,
+    missing_model: `${name}未配置默认模型`,
+    archived: `${name}已归档`,
+    config_unavailable: `${name}配置暂不可用`
+  };
+  return messages[item?.reason] || `${name}暂不可用`;
+}
 
 function countKeywordOccurrences(text, keywords) {
   const list = Array.isArray(keywords) ? keywords.filter(Boolean) : [];
@@ -72,13 +110,9 @@ class ProjectRunService {
     };
   }
 
-  buildPromptTargets(prompts, availablePlatforms = AIPlatformService.getAvailablePlatforms(), projectPlatforms = MAINLAND_PLATFORMS) {
-    const available = new Set((Array.isArray(availablePlatforms) ? availablePlatforms : [])
-      .map((item) => String(item).trim().toLowerCase())
-      .filter((item) => MAINLAND_PLATFORMS.includes(item)));
-    const projectPlatformList = (Array.isArray(projectPlatforms) && projectPlatforms.length ? projectPlatforms : MAINLAND_PLATFORMS)
-      .map((item) => String(item || '').trim().toLowerCase())
-      .filter((item) => MAINLAND_PLATFORMS.includes(item));
+  buildPromptTargets(prompts, availablePlatforms = [], projectPlatforms = []) {
+    const available = new Set(normalizePlatformCodes(availablePlatforms));
+    const projectPlatformList = normalizePlatformCodes(projectPlatforms);
 
     const rows = Array.isArray(prompts) ? prompts : [];
     return rows
@@ -87,19 +121,15 @@ class ProjectRunService {
         const promptPlatformList = Array.isArray(prompt.platforms) && prompt.platforms.length
           ? prompt.platforms
           : projectPlatformList;
-        const promptPlatforms = new Set(promptPlatformList
-          .map((item) => String(item || '').trim().toLowerCase())
-          .filter((item) => MAINLAND_PLATFORMS.includes(item)));
+        const promptPlatforms = new Set(normalizePlatformCodes(promptPlatformList));
         return Array.from(new Set(projectPlatformList
           .filter((item) => available.has(item) && promptPlatforms.has(item))))
           .map((platform) => ({ prompt, platform }));
       });
   }
 
-  hasPromptProjectPlatformOverlap(prompts, projectPlatforms = MAINLAND_PLATFORMS) {
-    const projectPlatformList = (Array.isArray(projectPlatforms) && projectPlatforms.length ? projectPlatforms : MAINLAND_PLATFORMS)
-      .map((item) => String(item || '').trim().toLowerCase())
-      .filter((item) => MAINLAND_PLATFORMS.includes(item));
+  hasPromptProjectPlatformOverlap(prompts, projectPlatforms = []) {
+    const projectPlatformList = normalizePlatformCodes(projectPlatforms);
     const projectPlatformSet = new Set(projectPlatformList);
     return (Array.isArray(prompts) ? prompts : [])
       .filter((prompt) => prompt && prompt.enabled !== false)
@@ -107,14 +137,11 @@ class ProjectRunService {
         const promptPlatformList = Array.isArray(prompt.platforms) && prompt.platforms.length
           ? prompt.platforms
           : projectPlatformList;
-        return promptPlatformList
-          .map((item) => String(item || '').trim().toLowerCase())
-          .filter((item) => MAINLAND_PLATFORMS.includes(item))
-          .some((item) => projectPlatformSet.has(item));
+        return normalizePlatformCodes(promptPlatformList).some((item) => projectPlatformSet.has(item));
       });
   }
 
-  hasEveryPromptProjectPlatformOverlap(prompts, projectPlatforms = MAINLAND_PLATFORMS) {
+  hasEveryPromptProjectPlatformOverlap(prompts, projectPlatforms = []) {
     const enabledPrompts = (Array.isArray(prompts) ? prompts : [])
       .filter((prompt) => prompt && prompt.enabled !== false);
     if (!enabledPrompts.length) return false;
@@ -130,24 +157,31 @@ class ProjectRunService {
     const competitorData = Array.isArray(competitors)
       ? competitors.map((item) => (item.toJSON ? item.toJSON() : item))
       : [];
-    const analysis = VisibilityAnalysisService.analyzeResponse({
+    const analysis = await AIResponseAnalysisService.analyze({
       responseText,
       brand: projectData,
       competitors: competitorData
     });
-    const sentimentAnalysis = analysis.brand_mentioned
-      ? await SentimentAnalysisService.analyzeWithDeepSeek({
-          responseText,
-          brand: projectData,
-          competitors: competitorData
-        })
-      : { sentiment: 'neutral' };
     const citationAnalysis = CitationAnalysisService.extractSources({
       responseText,
       aiResponse,
       brand: projectData,
       competitors: competitorData
     });
+    const analysisStructure = analysis.analysis_structure
+      && typeof analysis.analysis_structure === 'object'
+      && !Array.isArray(analysis.analysis_structure)
+      ? {
+        ...analysis.analysis_structure,
+        citations: {
+          count: citationAnalysis.citation_count,
+          official_count: citationAnalysis.owned_citation_count,
+          competitor_count: citationAnalysis.competitor_citation_count,
+          official_website_cited: citationAnalysis.owned_citation_count > 0,
+          sources: citationAnalysis.sources
+        }
+      }
+      : {};
     return {
       project_id: projectData.id,
       prompt_id: record.tracked_prompt_id || null,
@@ -166,9 +200,14 @@ class ProjectRunService {
       competitor_citation_count: citationAnalysis.competitor_citation_count,
       citation_sources: citationAnalysis.sources,
       prompt_category: this.derivePromptCategory(prompt),
-      sentiment: sentimentAnalysis.sentiment,
-      sentiment_reason: sentimentAnalysis.reason || null,
-      sentiment_risk_terms: Array.isArray(sentimentAnalysis.risk_terms) ? sentimentAnalysis.risk_terms : []
+      sentiment: analysis.sentiment,
+      sentiment_reason: analysis.sentiment_reason || null,
+      sentiment_risk_terms: Array.isArray(analysis.sentiment_risk_terms) ? analysis.sentiment_risk_terms : [],
+      analysis_method: analysis.analysis_method,
+      analysis_platform: analysis.analysis_platform,
+      analysis_model: analysis.analysis_model,
+      analysis_structure: analysisStructure,
+      analysis_evidence: {}
     };
   }
 
@@ -205,7 +244,7 @@ class ProjectRunService {
         keyword_counts: keywordCounts
       };
     } catch (error) {
-      const message = '指标生成失败，请稍后重试';
+      const message = metricFailureMessage(error);
       await record.update({ status: 'failed', error_message: message });
       return {
         ok: false,
@@ -235,6 +274,8 @@ class ProjectRunService {
       project_id: projectData.id,
       tracked_prompt_id: prompt.id,
       platform: target.platform,
+      platform_name: target.platform_name || target.platform,
+      model_name: target.model_name || null,
       question: prompt.question,
       brand: projectData.name,
       brand_keywords: keywords.join(','),
@@ -251,17 +292,22 @@ class ProjectRunService {
     return rows;
   }
 
-  getProjectRunConcurrency() {
-    const configured = Number.parseInt(process.env.PROJECT_RUN_CONCURRENCY || '', 10);
+  async getRuntimeSettings() {
+    return AIRuntimeSettingsService.getSettings();
+  }
+
+  getProjectRunConcurrency(runtimeSettings = {}) {
+    const configured = Number(runtimeSettings.ai_run_concurrency);
     if (Number.isInteger(configured) && configured > 0) return Math.min(configured, 5);
     return 2;
   }
 
-  async runPreparedTargets({ entries, runUser, projectData, competitors, keywords, concurrency = this.getProjectRunConcurrency() }) {
+  async runPreparedTargets({ entries, runUser, projectData, competitors, keywords, runtimeSettings, concurrency }) {
     const rows = Array.isArray(entries) ? entries : [];
     const results = new Array(rows.length);
     let nextIndex = 0;
-    const workerCount = Math.max(1, Math.min(Number(concurrency) || 1, rows.length || 1));
+    const configuredConcurrency = concurrency || this.getProjectRunConcurrency(runtimeSettings);
+    const workerCount = Math.max(1, Math.min(Number(configuredConcurrency) || 1, rows.length || 1));
 
     const runNext = async () => {
       while (nextIndex < rows.length) {
@@ -274,7 +320,8 @@ class ProjectRunService {
           runUser,
           projectData,
           competitors,
-          keywords
+          keywords,
+          runtimeSettings
         });
       }
     };
@@ -293,22 +340,66 @@ class ProjectRunService {
     if (!this.isRunnableProject(projectData)) {
       return { ok: false, status: 400, message: '归档项目不能运行分析' };
     }
-    const projectPlatforms = Array.isArray(platforms) && platforms.length
-      ? platforms
-      : (Array.isArray(projectData.platforms) && projectData.platforms.length ? projectData.platforms : MAINLAND_PLATFORMS);
-    if (promptSelectionExplicit && Array.isArray(prompts) && prompts.length && !this.hasEveryPromptProjectPlatformOverlap(prompts, projectPlatforms)) {
-      return { ok: false, status: 400, message: PLATFORM_MISMATCH_MESSAGE };
+    const enabledPrompts = (Array.isArray(prompts) ? prompts : []).filter((prompt) => prompt && prompt.enabled !== false);
+    if (!enabledPrompts.length) {
+      return {
+        ok: false,
+        status: 400,
+        message: '问题集中没有启用的问题。',
+        data: { error_code: 'no_enabled_questions', skipped_platforms: [] }
+      };
     }
-    const targets = this.buildPromptTargets(prompts, AIPlatformService.getAvailablePlatforms(), projectPlatforms);
+
+    let projectPlatforms = normalizePlatformCodes(
+      Array.isArray(platforms) && platforms.length ? platforms : projectData.platforms
+    );
+    if (!projectPlatforms.length) projectPlatforms = await AIPlatformService.getPlatformCodes();
+
+    if (!this.hasPromptProjectPlatformOverlap(enabledPrompts, projectPlatforms)
+      || (promptSelectionExplicit && !this.hasEveryPromptProjectPlatformOverlap(enabledPrompts, projectPlatforms))) {
+      return {
+        ok: false,
+        status: 400,
+        message: PLATFORM_MISMATCH_MESSAGE,
+        data: { error_code: 'platform_scope_mismatch', skipped_platforms: [] }
+      };
+    }
+
+    const candidateTargets = this.buildPromptTargets(enabledPrompts, projectPlatforms, projectPlatforms);
+    const candidateCodes = normalizePlatformCodes(candidateTargets.map((target) => target.platform));
+    const availability = await AIPlatformService.getPlatformAvailability(candidateCodes);
+    const availabilityByCode = new Map(availability.map((item) => [item.code, item]));
+    const targets = candidateTargets
+      .filter((target) => availabilityByCode.get(target.platform)?.available)
+      .map((target) => {
+        const status = availabilityByCode.get(target.platform);
+        return {
+          ...target,
+          platform_name: status.platform_name,
+          model_name: status.model_name,
+          platformConfig: status.config
+        };
+      });
+    const skippedPlatforms = availability
+      .filter((item) => !item.available)
+      .map((item) => ({
+        platform: item.code,
+        name: item.platform_name,
+        reason: item.reason,
+        message: skippedPlatformMessage(item)
+      }));
+
     if (!targets.length) {
-      if (promptSelectionExplicit && !(Array.isArray(prompts) && prompts.length)) {
-        return { ok: false, status: 400, message: '选择的问题不存在或已停用' };
-      }
-      if (Array.isArray(prompts) && prompts.length && !this.hasPromptProjectPlatformOverlap(prompts, projectPlatforms)) {
-        return { ok: false, status: 400, message: PLATFORM_MISMATCH_MESSAGE };
-      }
-      return { ok: false, status: 400, message: '没有可运行的启用问题，或监测平台暂不可用' };
+      const detail = skippedPlatforms.map((item) => item.message).join('；') || '监测平台配置暂不可用';
+      return {
+        ok: false,
+        status: 400,
+        message: `${detail}，无法运行。`,
+        data: { error_code: 'all_platforms_unavailable', skipped_platforms: skippedPlatforms }
+      };
     }
+
+    const runtimeSettings = await this.getRuntimeSettings();
 
     const quota = await this.consumeRunQuota(runUser.id, targets.length);
     if (!quota.ok) {
@@ -332,6 +423,8 @@ class ProjectRunService {
       projectData,
       runUser,
       targets,
+      skippedPlatforms,
+      runtimeSettings,
       competitors,
       keywords,
       entries
@@ -364,7 +457,7 @@ class ProjectRunService {
 
     this.schedulePreparedRun(prepared);
     const recordIds = prepared.entries.map((entry) => entry.record.id);
-    return {
+    const result = {
       ok: true,
       status: 202,
       message: '项目分析已加入队列',
@@ -375,6 +468,7 @@ class ProjectRunService {
         pending: prepared.entries.length,
         completed: 0,
         failed: 0,
+        skipped_platforms: prepared.skippedPlatforms,
         record_ids: recordIds,
         results: prepared.entries.map((entry) => ({
           record_id: entry.record.id,
@@ -384,9 +478,13 @@ class ProjectRunService {
         }))
       }
     };
+    if (prepared.skippedPlatforms.length) {
+      result.message = `已加入 ${prepared.targets.length} 个运行任务；${prepared.skippedPlatforms.map((item) => item.message).join('；')}，已跳过。`;
+    }
+    return result;
   }
 
-  async runTarget({ target, record: preparedRecord = null, runUser, projectData, competitors, keywords }) {
+  async runTarget({ target, record: preparedRecord = null, runUser, projectData, competitors, keywords, runtimeSettings }) {
     const prompt = target.prompt;
     let record = preparedRecord;
     try {
@@ -394,15 +492,19 @@ class ProjectRunService {
         record = await this.createTargetRecord({ target, runUser, projectData, keywords });
       }
 
-      const aiResult = await AIPlatformService.queryPlatform(target.platform, prompt.question);
+      const aiResult = await AIPlatformService.queryPlatform(target.platform, prompt.question, {
+        config: target.platformConfig,
+        runtimeSettings
+      });
       if (!aiResult.success) {
-        await this.failRecord(record, SAFE_PLATFORM_FAILURE_MESSAGE);
+        const message = runtimePlatformFailureMessage(aiResult);
+        await this.failRecord(record, message);
         return {
           record_id: record.id,
           prompt_id: prompt.id,
           platform: target.platform,
           status: 'failed',
-          error: SAFE_PLATFORM_FAILURE_MESSAGE
+          error: message
         };
       }
 
@@ -502,7 +604,7 @@ class ProjectRunService {
     const summary = this.summarizeRunResults(results, prepared.targets.length);
     const ok = summary.completed > 0;
 
-    return {
+    const response = {
       ok,
       status: ok ? 200 : 502,
       message: summary.message,
@@ -510,9 +612,14 @@ class ProjectRunService {
         total: summary.total,
         completed: summary.completed,
         failed: summary.failed,
+        skipped_platforms: prepared.skippedPlatforms,
         results
       }
     };
+    if (prepared.skippedPlatforms.length) {
+      response.message = `${summary.message}；${prepared.skippedPlatforms.map((item) => item.message).join('；')}，已跳过。`;
+    }
+    return response;
   }
 }
 

@@ -286,6 +286,17 @@ test('classifies common mainland content citation domains as media sources', () 
   ]);
 });
 
+test('uses a media allowlist and labels unmatched external domains as other third-party sources', () => {
+  assert.equal(
+    SourceAnalysisService.classifySource({ url: 'https://www.thepaper.cn/news/1' }),
+    '媒体内容'
+  );
+  assert.equal(
+    SourceAnalysisService.classifySource({ url: 'https://industry-example.cn/article/1' }),
+    '其他第三方来源'
+  );
+});
+
 test('aggregates leading-www and bare domains as the same citation domain', () => {
   const result = SourceAnalysisService.summarize([
     {

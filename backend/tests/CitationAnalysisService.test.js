@@ -3,6 +3,29 @@ const assert = require('node:assert/strict');
 
 const CitationAnalysisService = require('../services/CitationAnalysisService');
 
+test('extracts Responses API web_search_call action sources', () => {
+  const result = CitationAnalysisService.extractSources({
+    responseText: '联网回答没有直接打印 URL。',
+    aiResponse: {
+      output: [{
+        type: 'web_search_call',
+        action: {
+          sources: [{
+            title: '教育周界案例',
+            url: 'https://news.example.com/campus?id=1'
+          }]
+        }
+      }]
+    },
+    brand: { website: 'https://gato.com.cn' },
+    competitors: []
+  });
+
+  assert.equal(result.citation_count, 1);
+  assert.equal(result.sources[0].url, 'https://news.example.com/campus?id=1');
+  assert.equal(result.sources[0].title, '教育周界案例');
+});
+
 test('extracts unique citation sources from response text and metadata', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '参考 https://www.michelin.com.cn/tyres 和 https://example.com/a?x=1。',

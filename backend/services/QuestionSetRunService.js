@@ -7,9 +7,9 @@ const {
   VisibilityMetric
 } = require('../models');
 const QuestionSetRunCsvService = require('./QuestionSetRunCsvService');
-const VisibilityAnalysisService = require('./VisibilityAnalysisService');
 
 const SCHEMA_VERSION = 'question_set_run_v1';
+const STRUCTURED_ANALYSIS_METHODS = new Set(['ai_structured_v1', 'ai_structured_v2']);
 
 function plain(row) {
   return row && typeof row.toJSON === 'function' ? row.toJSON() : row;
@@ -73,20 +73,6 @@ function summarize(rows) {
   };
 }
 
-function normalizeReportRanks(rows, brandProject) {
-  const brand = plain(brandProject);
-  const brandTerms = brand ? VisibilityAnalysisService.buildBrandVisibilityTerms(brand) : [];
-  return rows.map((row) => {
-    if (!row?.has_metrics || !row.brand_mentioned) return row;
-    const listPosition = brandTerms.length
-      ? VisibilityAnalysisService.listItemPosition(row.answer, brandTerms)
-      : null;
-    if (listPosition) return { ...row, brand_rank: listPosition };
-    const hasCompetitorBaseline = Array.isArray(row.competitor_mentions) && row.competitor_mentions.length > 0;
-    return hasCompetitorBaseline ? row : { ...row, brand_rank: null };
-  });
-}
-
 function normalizeNativeRow(record) {
   const row = plain(record);
   const detail = plain(row.resultDetail) || {};
@@ -105,7 +91,10 @@ function normalizeNativeRow(record) {
     has_metrics: Boolean(metric),
     brand_mentioned: Boolean(metric?.brand_mentioned),
     brand_mentions: finiteNumber(metric?.brand_mentions),
-    brand_rank: metric?.brand_rank == null ? null : finiteNumber(metric.brand_rank),
+    brand_rank: STRUCTURED_ANALYSIS_METHODS.has(metric?.analysis_method)
+      || (Array.isArray(metric?.competitor_mentions) && metric.competitor_mentions.length > 0)
+      ? (metric?.brand_rank == null ? null : finiteNumber(metric.brand_rank))
+      : null,
     brand_recommended: Boolean(metric?.brand_recommended),
     share_of_voice: finiteNumber(metric?.share_of_voice),
     citation_count: finiteNumber(metric?.citation_count),
@@ -113,6 +102,15 @@ function normalizeNativeRow(record) {
     competitor_citation_count: finiteNumber(metric?.competitor_citation_count),
     sentiment: metric?.sentiment || '',
     sentiment_reason: metric?.sentiment_reason || '',
+    analysis_method: metric?.analysis_method || 'legacy_rules_v1',
+    analysis_platform: metric?.analysis_platform || '',
+    analysis_model: metric?.analysis_model || '',
+    analysis_structure: metric?.analysis_structure && typeof metric.analysis_structure === 'object'
+      ? metric.analysis_structure
+      : {},
+    analysis_evidence: metric?.analysis_evidence && typeof metric.analysis_evidence === 'object'
+      ? metric.analysis_evidence
+      : {},
     competitor_mentions: Array.isArray(metric?.competitor_mentions) ? metric.competitor_mentions : [],
     citation_sources: Array.isArray(metric?.citation_sources) ? metric.citation_sources : [],
     created_at: row.created_at || null,
@@ -163,7 +161,7 @@ class QuestionSetRunService {
     return ids.map((id) => byId.get(id)).filter(Boolean).map(normalizeNativeRow);
   }
 
-  async getReport({ projectId, runId, repositories = {}, brandProject }) {
+  async getReport({ projectId, runId, repositories = {} }) {
     const stored = await this.findRun({ projectId, runId, repositories });
     if (!stored) return null;
     const run = plain(stored);
@@ -171,10 +169,11 @@ class QuestionSetRunService {
     const sourceRows = run.source === 'imported' || cachedRows.length
       ? cachedRows
       : await this.getNativeRows(run, repositories);
-    const resolvedBrandProject = brandProject === undefined
-      ? await this.findBrandProject(projectId, repositories)
-      : brandProject;
-    const rows = normalizeReportRanks(sourceRows, resolvedBrandProject);
+    const rows = sourceRows.map((row) => {
+      if (STRUCTURED_ANALYSIS_METHODS.has(row?.analysis_method)) return row;
+      const hasCompetitorBaseline = Array.isArray(row?.competitor_mentions) && row.competitor_mentions.length > 0;
+      return hasCompetitorBaseline ? row : { ...row, brand_rank: null };
+    });
     const status = deriveStatus(rows);
     const expectedRows = Array.isArray(run.record_ids) ? run.record_ids.length : 0;
     if (run.source === 'native' && !cachedRows.length && status !== 'running' && rows.length === expectedRows && rows.length) {

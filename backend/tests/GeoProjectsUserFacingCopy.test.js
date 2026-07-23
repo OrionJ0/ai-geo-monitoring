@@ -11,8 +11,7 @@ test('geo project route messages avoid implementation-specific prompt generation
     '使用 DeepSeek',
     'AI 生成 Prompt',
     'AI 返回内容',
-    '配置生成服务',
-    'API Key'
+    '配置生成服务'
   ];
   const offenders = forbidden.filter((text) => routeSource.includes(text));
 

@@ -47,7 +47,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.put('/:id/enabled', async (req, res) => {
+router.patch('/:id/enabled', async (req, res) => {
   try {
     if (typeof req.body?.enabled !== 'boolean') {
       throw new PlatformConfigError('enabled 必须是布尔值');
@@ -56,6 +56,16 @@ router.put('/:id/enabled', async (req, res) => {
     return res.json({ success: true, message: platform.enabled ? 'AI 平台已启用' : 'AI 平台已停用', data: platform });
   } catch (error) {
     return handleError(res, error, '启停');
+  }
+});
+
+router.get('/:id/api-key', async (req, res) => {
+  try {
+    const secret = await AIPlatformConfigService.revealApiKey(req.params.id);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ success: true, data: secret });
+  } catch (error) {
+    return handleError(res, error, '密钥读取');
   }
 });
 
@@ -68,6 +78,22 @@ router.delete('/:id/api-key', async (req, res) => {
   }
 });
 
+router.get('/:id/models', async (req, res) => {
+  try {
+    const result = await AIPlatformRequestService.listModels(req.params.id);
+    if (!result.success) {
+      throw new PlatformConfigError(
+        result.error || '模型列表读取失败',
+        result.error_code || 'model_list_failed',
+        400
+      );
+    }
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return handleError(res, error, '模型列表读取');
+  }
+});
+
 router.post('/:id/test', async (req, res) => {
   try {
     const result = await AIPlatformRequestService.testConnection(req.params.id);
@@ -77,12 +103,23 @@ router.post('/:id/test', async (req, res) => {
   }
 });
 
+router.post('/:id/test-web-search', async (req, res) => {
+  try {
+    const input = String(req.body?.input || '').trim();
+    if (input.length > 1000) throw new PlatformConfigError('联网测试问题不能超过 1000 个字符');
+    const result = await AIPlatformRequestService.testWebSearch(req.params.id, input);
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return handleError(res, error, '联网能力测试');
+  }
+});
+
 router.delete('/:id', async (req, res) => {
   try {
-    const platform = await AIPlatformConfigService.archivePlatform(req.params.id);
-    return res.json({ success: true, message: 'AI 平台已归档', data: platform });
+    const platform = await AIPlatformConfigService.deletePlatform(req.params.id);
+    return res.json({ success: true, message: 'AI 平台已删除', data: platform });
   } catch (error) {
-    return handleError(res, error, '归档');
+    return handleError(res, error, '删除');
   }
 });
 

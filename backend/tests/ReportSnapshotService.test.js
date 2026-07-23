@@ -163,7 +163,7 @@ test('stores top citation urls in generated report summaries', async () => {
     {
       url: 'https://example.com/guide',
       domain: 'example.com',
-      source_type: '第三方来源',
+      source_type: '其他第三方来源',
       citation_count: 1,
       response_count: 1,
       platforms: ['deepseek'],

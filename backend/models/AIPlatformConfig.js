@@ -12,13 +12,18 @@ const AIPlatformConfig = sequelize.define('AIPlatformConfig', {
   default_model: { type: DataTypes.STRING(255), allowNull: false },
   request_timeout_seconds: { type: DataTypes.INTEGER, allowNull: true },
   max_tokens: { type: DataTypes.INTEGER, allowNull: true },
+  request_options: { type: DataTypes.JSON, allowNull: false, defaultValue: {} },
   enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   builtin: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   archived_at: { type: DataTypes.DATE, allowNull: true },
   test_status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'untested' },
   last_tested_at: { type: DataTypes.DATE, allowNull: true },
   last_test_error_code: { type: DataTypes.STRING(50), allowNull: true },
-  last_test_message: { type: DataTypes.STRING(255), allowNull: true }
+  last_test_message: { type: DataTypes.STRING(255), allowNull: true },
+  web_search_test_status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'untested' },
+  last_web_search_tested_at: { type: DataTypes.DATE, allowNull: true },
+  last_web_search_test_error_code: { type: DataTypes.STRING(50), allowNull: true },
+  last_web_search_test_message: { type: DataTypes.STRING(255), allowNull: true }
 }, {
   tableName: 'ai_platform_configs',
   timestamps: true,

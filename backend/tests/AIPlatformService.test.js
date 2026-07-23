@@ -1,208 +1,97 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const axios = require('axios');
 
-const AIPlatformService = require('../services/AIPlatformService');
+const { AIPlatformService } = require('../services/AIPlatformService');
 
-test('uses platform specific model environment variables', () => {
-  const originalDeepseekModel = process.env.DEEPSEEK_MODEL;
-  const originalKimiModel = process.env.KIMI_MODEL;
-  const originalQianwenModel = process.env.QIANWEN_MODEL;
-
-  process.env.DEEPSEEK_MODEL = 'deepseek-reasoner';
-  process.env.KIMI_MODEL = 'moonshot-v1-32k';
-  process.env.QIANWEN_MODEL = 'qwen-plus';
-
-  try {
-    assert.equal(AIPlatformService.getModelName('deepseek'), 'deepseek-reasoner');
-    assert.equal(AIPlatformService.getModelName('kimi'), 'moonshot-v1-32k');
-    assert.equal(AIPlatformService.getModelName('qianwen'), 'qwen-plus');
-  } finally {
-    restoreEnv('DEEPSEEK_MODEL', originalDeepseekModel);
-    restoreEnv('KIMI_MODEL', originalKimiModel);
-    restoreEnv('QIANWEN_MODEL', originalQianwenModel);
-  }
-});
-
-test('keeps stable default model names when no override is configured', () => {
-  const originalDeepseekModel = process.env.DEEPSEEK_MODEL;
-
-  delete process.env.DEEPSEEK_MODEL;
-
-  try {
-    assert.equal(AIPlatformService.getModelName('deepseek'), 'deepseek-chat');
-  } finally {
-    restoreEnv('DEEPSEEK_MODEL', originalDeepseekModel);
-  }
-});
-
-test('uses a responses model for doubao web search requests instead of the legacy chat model override', () => {
-  const originalDoubaoModel = process.env.DOUBAO_MODEL;
-  const originalDoubaoResponsesModel = process.env.DOUBAO_RESPONSES_MODEL;
-
-  process.env.DOUBAO_MODEL = 'doubao-1-5-pro-32k-250115';
-  delete process.env.DOUBAO_RESPONSES_MODEL;
-
-  try {
-    const requestData = AIPlatformService.buildRequestData('doubao', '测试问题');
-    assert.equal(requestData.model, 'doubao-seed-1-6-250615');
-  } finally {
-    restoreEnv('DOUBAO_MODEL', originalDoubaoModel);
-    restoreEnv('DOUBAO_RESPONSES_MODEL', originalDoubaoResponsesModel);
-  }
-});
-
-test('allows overriding the doubao responses model independently', () => {
-  const originalDoubaoResponsesModel = process.env.DOUBAO_RESPONSES_MODEL;
-
-  process.env.DOUBAO_RESPONSES_MODEL = 'custom-responses-model';
-
-  try {
-    const requestData = AIPlatformService.buildRequestData('doubao', '测试问题');
-    assert.equal(requestData.model, 'custom-responses-model');
-  } finally {
-    restoreEnv('DOUBAO_RESPONSES_MODEL', originalDoubaoResponsesModel);
-  }
-});
-
-test('reports available platforms only for supported mainland monitoring platforms', () => {
-  const originalDoubaoApiKey = AIPlatformService.platforms.doubao.apiKey;
-  const originalDeepseekApiKey = AIPlatformService.platforms.deepseek.apiKey;
-  const originalKimiApiKey = AIPlatformService.platforms.kimi?.apiKey;
-  const originalQianwenApiKey = AIPlatformService.platforms.qianwen?.apiKey;
-
-  AIPlatformService.platforms.doubao.apiKey = 'doubao-key';
-  AIPlatformService.platforms.deepseek.apiKey = 'deepseek-key';
-  AIPlatformService.platforms.kimi.apiKey = 'kimi-key';
-  AIPlatformService.platforms.qianwen.apiKey = 'qianwen-key';
-
-  try {
-    assert.deepEqual(AIPlatformService.getAvailablePlatforms(), ['doubao', 'deepseek']);
-  } finally {
-    AIPlatformService.platforms.doubao.apiKey = originalDoubaoApiKey;
-    AIPlatformService.platforms.deepseek.apiKey = originalDeepseekApiKey;
-    AIPlatformService.platforms.kimi.apiKey = originalKimiApiKey;
-    AIPlatformService.platforms.qianwen.apiKey = originalQianwenApiKey;
-  }
-});
-
-test('reports platform response time as elapsed milliseconds when header is unavailable', async () => {
-  const originalPost = axios.post;
-  const originalNow = Date.now;
-  const originalApiKey = AIPlatformService.platforms.deepseek.apiKey;
-  const originalHeaders = { ...AIPlatformService.platforms.deepseek.headers };
-  let nowCall = 0;
-
-  AIPlatformService.platforms.deepseek.apiKey = 'test-key';
-  AIPlatformService.platforms.deepseek.headers.Authorization = 'Bearer test-key';
-  Date.now = () => {
-    nowCall += 1;
-    return nowCall === 1 ? 1000 : 1280;
-  };
-  axios.post = async () => ({
-    data: { choices: [{ message: { content: '测试回答' } }] },
-    headers: {}
-  });
-
-  try {
-    const result = await AIPlatformService.queryPlatform('deepseek', '测试问题');
-    assert.equal(result.success, true);
-    assert.equal(result.responseTime, 280);
-  } finally {
-    axios.post = originalPost;
-    Date.now = originalNow;
-    AIPlatformService.platforms.deepseek.apiKey = originalApiKey;
-    AIPlatformService.platforms.deepseek.headers = originalHeaders;
-  }
-});
-
-test('does not log raw ai platform error response payloads', async () => {
-  const originalPost = axios.post;
-  const originalError = console.error;
-  const originalApiKey = AIPlatformService.platforms.deepseek.apiKey;
-  const originalHeaders = { ...AIPlatformService.platforms.deepseek.headers };
-  const logs = [];
-
-  AIPlatformService.platforms.deepseek.apiKey = 'test-key';
-  AIPlatformService.platforms.deepseek.headers.Authorization = 'Bearer test-key';
-  axios.post = async () => {
-    const error = new Error('request failed');
-    error.response = {
-      status: 400,
-      data: { error: { code: 'AccountOverdueError', message: 'provider raw detail', token: 'secret-token' } }
-    };
-    throw error;
-  };
-  console.error = (...args) => logs.push(args.join(' '));
-
-  try {
-    const result = await AIPlatformService.queryPlatform('deepseek', '测试问题');
-    assert.equal(result.success, false);
-    assert.equal(logs.some((line) => line.includes('status 400')), true);
-    assert.equal(logs.some((line) => line.includes('AccountOverdueError')), true);
-    assert.equal(result.error.includes('AccountOverdueError'), true);
-    assert.equal(logs.some((line) => line.includes('secret-token')), false);
-    assert.equal(logs.some((line) => line.includes('provider raw detail')), false);
-  } finally {
-    axios.post = originalPost;
-    console.error = originalError;
-    AIPlatformService.platforms.deepseek.apiKey = originalApiKey;
-    AIPlatformService.platforms.deepseek.headers = originalHeaders;
-  }
-});
-
-test('calls doubao through Ark Responses API with web search enabled', async () => {
-  const originalPost = axios.post;
-  const originalApiKey = AIPlatformService.platforms.doubao.apiKey;
-  const originalApiUrl = AIPlatformService.platforms.doubao.apiUrl;
-  const originalHeaders = { ...AIPlatformService.platforms.doubao.headers };
+function createService() {
+  const rows = [
+    {
+      code: 'doubao',
+      name: '豆包',
+      enabled: true,
+      archived_at: null,
+      encrypted_api_key: null,
+      base_url: 'https://ark.example.com/responses',
+      default_model: 'doubao-model'
+    },
+    {
+      code: 'deepseek',
+      name: 'DeepSeek',
+      enabled: true,
+      archived_at: null,
+      encrypted_api_key: 'encrypted',
+      base_url: 'https://api.example.com/chat/completions',
+      default_model: 'deepseek-v4-flash'
+    },
+    {
+      code: 'archived-ai',
+      name: 'Archived AI',
+      enabled: false,
+      archived_at: new Date(),
+      encrypted_api_key: 'encrypted',
+      base_url: 'https://archive.example.com/chat/completions',
+      default_model: 'archive-model'
+    }
+  ];
   const calls = [];
-
-  AIPlatformService.platforms.doubao.apiKey = 'test-doubao-key';
-  AIPlatformService.platforms.doubao.apiUrl = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
-  AIPlatformService.platforms.doubao.headers.Authorization = 'Bearer test-doubao-key';
-  axios.post = async (url, data) => {
-    calls.push({ url, data });
-    return {
-      data: {
-        output: [
-          {
-            type: 'message',
-            content: [{ type: 'output_text', text: '联网回答' }]
-          }
-        ]
-      },
-      headers: {}
-    };
+  const requestService = {
+    queryPlatform: async (...args) => {
+      calls.push(args);
+      return { success: true, platform: args[0], text: 'OK', data: { answer: 'OK' } };
+    }
   };
+  const configService = {
+    listCatalog: async () => rows
+      .filter((row) => !row.archived_at)
+      .map((row) => ({
+        code: row.code,
+        name: row.name,
+        enabled: row.enabled,
+        configured: Boolean(row.encrypted_api_key),
+        selectable: row.enabled && Boolean(row.encrypted_api_key),
+        unavailable_reason: row.encrypted_api_key ? null : 'missing_api_key'
+      })),
+    listPlatformRows: async () => rows
+  };
+  return { service: new AIPlatformService({ requestService, configService }), rows, calls };
+}
 
-  try {
-    const result = await AIPlatformService.queryPlatform('doubao', '今天有什么行业新闻？');
+test('reports runnable platforms from database configuration only', async () => {
+  const { service } = createService();
 
-    assert.equal(result.success, true);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://ark.cn-beijing.volces.com/api/v3/responses');
-    assert.deepEqual(calls[0].data.tools, [{ type: 'web_search' }]);
-    assert.deepEqual(calls[0].data.input, [
-      {
-        role: 'user',
-        content: [{ type: 'input_text', text: '今天有什么行业新闻？' }]
-      }
-    ]);
-    assert.equal(calls[0].data.messages, undefined);
-    assert.equal(calls[0].data.max_output_tokens, AIPlatformService.getMaxTokens('doubao'));
-  } finally {
-    axios.post = originalPost;
-    AIPlatformService.platforms.doubao.apiKey = originalApiKey;
-    AIPlatformService.platforms.doubao.apiUrl = originalApiUrl;
-    AIPlatformService.platforms.doubao.headers = originalHeaders;
-  }
+  assert.deepEqual(await service.getAvailablePlatforms(), ['deepseek']);
 });
 
-function restoreEnv(key, value) {
-  if (value === undefined) {
-    delete process.env[key];
-  } else {
-    process.env[key] = value;
-  }
-}
+test('resolves detailed availability for requested dynamic platform codes', async () => {
+  const { service } = createService();
+  const statuses = await service.getPlatformAvailability(['doubao', 'deepseek', 'custom-missing', 'archived-ai']);
+
+  assert.deepEqual(statuses.map((item) => ({ code: item.code, available: item.available, reason: item.reason })), [
+    { code: 'doubao', available: false, reason: 'missing_api_key' },
+    { code: 'deepseek', available: true, reason: null },
+    { code: 'custom-missing', available: false, reason: 'config_unavailable' },
+    { code: 'archived-ai', available: false, reason: 'archived' }
+  ]);
+  assert.equal(statuses[1].model_name, 'deepseek-v4-flash');
+  assert.equal(statuses[1].platform_name, 'DeepSeek');
+});
+
+test('delegates platform calls with a supplied database configuration snapshot', async () => {
+  const { service, rows, calls } = createService();
+  const result = await service.queryPlatform('deepseek', '测试问题', { config: rows[1] });
+
+  assert.equal(result.success, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'deepseek');
+  assert.equal(calls[0][1], '测试问题');
+  assert.equal(calls[0][2].config.default_model, 'deepseek-v4-flash');
+});
+
+test('AI platform service contains no provider credential environment fallback', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '../services/AIPlatformService.js'), 'utf8');
+
+  assert.doesNotMatch(source, /DOUBAO_|DEEPSEEK_|KIMI_|QIANWEN_|AI_MAX_TOKENS/);
+  assert.doesNotMatch(source, /process\.env/);
+});

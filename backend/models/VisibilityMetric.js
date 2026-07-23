@@ -7,7 +7,7 @@ const VisibilityMetric = sequelize.define('VisibilityMetric', {
   prompt_id: { type: DataTypes.INTEGER, allowNull: true },
   question_record_id: { type: DataTypes.INTEGER, allowNull: false },
   user_id: { type: DataTypes.INTEGER, allowNull: false },
-  platform: { type: DataTypes.ENUM('doubao', 'deepseek', 'kimi', 'qianwen'), allowNull: false },
+  platform: { type: DataTypes.STRING(50), allowNull: false },
   brand_mentioned: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   brand_mentions: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   brand_position: { type: DataTypes.INTEGER, allowNull: true },
@@ -23,7 +23,12 @@ const VisibilityMetric = sequelize.define('VisibilityMetric', {
   prompt_category: { type: DataTypes.STRING(80), allowNull: true },
   sentiment: { type: DataTypes.ENUM('positive', 'neutral', 'negative'), allowNull: false, defaultValue: 'neutral' },
   sentiment_reason: { type: DataTypes.STRING(80), allowNull: true },
-  sentiment_risk_terms: { type: DataTypes.JSON, allowNull: false, defaultValue: [] }
+  sentiment_risk_terms: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
+  analysis_method: { type: DataTypes.STRING(40), allowNull: false, defaultValue: 'legacy_rules_v1' },
+  analysis_platform: { type: DataTypes.STRING(50), allowNull: true },
+  analysis_model: { type: DataTypes.STRING(255), allowNull: true },
+  analysis_structure: { type: DataTypes.JSON, allowNull: false, defaultValue: {} },
+  analysis_evidence: { type: DataTypes.JSON, allowNull: false, defaultValue: {} }
 }, {
   tableName: 'visibility_metrics',
   timestamps: true,

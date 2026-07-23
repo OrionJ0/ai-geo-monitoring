@@ -10,7 +10,7 @@ const runtimeSettings = {
   ai_run_concurrency: 2
 };
 
-function createService({ row, post, savedResults = [] }) {
+function createService({ row, post, get, savedResults = [] }) {
   const configService = {
     getPlatformByCode: async () => row,
     getPlatform: async () => row,
@@ -18,12 +18,16 @@ function createService({ row, post, savedResults = [] }) {
     saveTestResult: async (id, result) => {
       savedResults.push({ id, result });
       return { id, enabled: row.enabled, test_status: result.success ? 'success' : 'failed' };
+    },
+    saveWebSearchTestResult: async (id, result) => {
+      savedResults.push({ id, webSearch: true, result });
+      return { id, enabled: row.enabled, web_search_test_status: result.status };
     }
   };
   return new AIPlatformRequestService({
     configService,
     settingsService: { getSettings: async () => runtimeSettings },
-    httpClient: { post },
+    httpClient: { post, get },
     urlValidator: async (url) => ({
       url,
       hostname: 'api.example.com',
@@ -37,6 +41,77 @@ function createService({ row, post, savedResults = [] }) {
     wait: async () => {}
   });
 }
+
+test('loads selectable model ids from the provider models endpoint', async () => {
+  let request;
+  const row = {
+    id: 3,
+    code: 'deepseek',
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1/chat/completions',
+    encrypted_api_key: 'encrypted',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async () => {
+      throw new Error('not used');
+    },
+    get: async (url, options) => {
+      request = { url, options };
+      return {
+        data: {
+          object: 'list',
+          data: [
+            { id: 'deepseek-v4-pro', object: 'model' },
+            { id: 'deepseek-v4-flash', object: 'model' },
+            { id: 'deepseek-v4-pro', object: 'model' },
+            { id: '', object: 'model' }
+          ]
+        }
+      };
+    }
+  });
+
+  const result = await service.listModels(row.id);
+
+  assert.equal(result.success, true);
+  assert.equal(request.url, 'https://api.example.com/v1/models');
+  assert.equal(request.options.headers.Authorization, 'Bearer sk-configured');
+  assert.deepEqual(result.models, ['deepseek-v4-flash', 'deepseek-v4-pro']);
+  assert.equal(result.current_model, 'deepseek-v4-flash');
+  assert.equal(result.source, 'provider_api');
+  assert.equal(result.persisted, false);
+});
+
+test('does not report a successful refresh when the provider returns no model ids', async () => {
+  const row = {
+    id: 3,
+    code: 'example-ai',
+    name: 'Example AI',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'saved-model',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async () => {
+      throw new Error('not used');
+    },
+    get: async () => ({ data: { object: 'list', data: [] } })
+  });
+
+  const result = await service.listModels(row.id);
+
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'invalid_provider_response');
+});
 
 test('calls an OpenAI compatible platform from the saved database configuration', async () => {
   let request;
@@ -74,13 +149,119 @@ test('calls an OpenAI compatible platform from the saved database configuration'
   assert.equal(request.options.maxRedirects, 0);
 });
 
-test('uses the Responses request contract for the Doubao adapter', async () => {
+test('appends the Chat Completions path to an OpenAI-compatible Base URL and merges request parameters', async () => {
+  let request;
+  const row = {
+    id: 4,
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/compatible-mode/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'qwen3.7-plus',
+    request_options: {
+      enable_search: true,
+      search_options: { forced_search: true },
+      temperature: 0.1
+    },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (url, body) => {
+      request = { url, body };
+      return {
+        data: {
+          choices: [{ message: { content: '联网回答' } }],
+          usage: { plugins: { search: { count: 1 } } }
+        },
+        headers: {}
+      };
+    }
+  });
+
+  const result = await service.queryPlatform('qwen', '查询今天的新闻');
+
+  assert.equal(result.success, true);
+  assert.equal(request.url, 'https://api.example.com/compatible-mode/v1/chat/completions');
+  assert.equal(request.body.enable_search, true);
+  assert.deepEqual(request.body.search_options, { forced_search: true });
+  assert.equal(request.body.temperature, 0.1);
+  assert.equal(request.body.model, 'qwen3.7-plus');
+});
+
+test('allows internal analysis calls to omit monitoring-only request parameters', async () => {
+  let requestBody;
+  const row = {
+    id: 4,
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/compatible-mode/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'qwen3.7-plus',
+    request_options: {
+      enable_search: true,
+      search_options: { forced_search: true }
+    },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (_url, body) => {
+      requestBody = body;
+      return { data: { choices: [{ message: { content: '{}' } }] }, headers: {} };
+    }
+  });
+
+  const result = await service.queryConfig(row, '结构化回答', { requestOptions: {} });
+
+  assert.equal(result.success, true);
+  assert.equal(requestBody.model, 'qwen3.7-plus');
+  assert.equal('enable_search' in requestBody, false);
+  assert.equal('search_options' in requestBody, false);
+});
+
+test('preserves model fields when overriding request options on a Sequelize-like config row', async () => {
+  let requestBody;
+  const values = {
+    adapter_type: 'openai_chat_completions',
+    default_model: 'deepseek-v4-flash'
+  };
+  const row = {
+    id: 4,
+    code: 'deepseek',
+    name: 'DeepSeek',
+    base_url: 'https://api.example.com/v1/chat/completions',
+    encrypted_api_key: 'encrypted',
+    enabled: true,
+    archived_at: null,
+    get adapter_type() { return values.adapter_type; },
+    get default_model() { return values.default_model; }
+  };
+  const service = createService({
+    row,
+    post: async (_url, body) => {
+      requestBody = body;
+      return { data: { choices: [{ message: { content: '{}' } }] }, headers: {} };
+    }
+  });
+
+  const result = await service.queryConfig(row, '结构化回答', { requestOptions: {} });
+
+  assert.equal(result.success, true);
+  assert.equal(requestBody.model, 'deepseek-v4-flash');
+});
+
+test('uses the OpenAI Responses contract for Doubao without a provider-specific adapter', async () => {
   let requestBody;
   const row = {
     id: 1,
     code: 'doubao',
     name: '豆包',
-    adapter_type: 'doubao_responses',
+    adapter_type: 'openai_responses',
     base_url: 'https://ark.example.com/api/v3/responses',
     encrypted_api_key: 'encrypted',
     default_model: 'doubao-model',
@@ -101,6 +282,77 @@ test('uses the Responses request contract for the Doubao adapter', async () => {
   assert.equal(result.text, '豆包结果');
   assert.deepEqual(requestBody.tools, [{ type: 'web_search' }]);
   assert.equal(requestBody.max_output_tokens, 4096);
+});
+
+test('uses the generic Responses contract for Qwen web search with source-capable output', async () => {
+  let request;
+  const row = {
+    id: 6,
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_responses',
+    base_url: 'https://api.example.com/compatible-mode/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'qwen3.7-plus',
+    request_options: {},
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (url, body) => {
+      request = { url, body };
+      return {
+        data: {
+          output_text: '带来源的联网回答',
+          output: [{
+            type: 'web_search_call',
+            action: { sources: [{ url: 'https://example.com/source' }] }
+          }]
+        },
+        headers: {}
+      };
+    }
+  });
+
+  const result = await service.queryPlatform('qwen', '查询今天的新闻');
+
+  assert.equal(result.success, true);
+  assert.equal(result.text, '带来源的联网回答');
+  assert.equal(request.url, 'https://api.example.com/compatible-mode/v1/responses');
+  assert.deepEqual(request.body.tools, [{ type: 'web_search' }]);
+  assert.equal(request.body.input[0].content[0].text, '查询今天的新闻');
+});
+
+test('removes built-in web search tools from Responses requests used only for analysis', async () => {
+  let requestBody;
+  const row = {
+    id: 6,
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_responses',
+    base_url: 'https://api.example.com/compatible-mode/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'qwen3.7-plus',
+    request_options: { tools: [{ type: 'web_search' }] },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (_url, body) => {
+      requestBody = body;
+      return { data: { output_text: '{}' }, headers: {} };
+    }
+  });
+
+  const result = await service.queryConfig(row, '结构化回答', {
+    requestOptions: {},
+    disableWebSearch: true
+  });
+
+  assert.equal(result.success, true);
+  assert.equal('tools' in requestBody, false);
 });
 
 test('normalizes provider failures without exposing raw provider data', async () => {
@@ -156,4 +408,106 @@ test('tests disabled platforms without changing their enabled state', async () =
   assert.equal(result.connection.success, true);
   assert.equal(result.platform.enabled, false);
   assert.equal(savedResults[0].result.success, true);
+});
+
+test('web-search test succeeds only when the provider response contains search evidence', async () => {
+  const savedResults = [];
+  const row = {
+    id: 10,
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'qwen3.7-plus',
+    request_options: { enable_search: true, search_options: { forced_search: true } },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    savedResults,
+    post: async () => ({
+      data: {
+        choices: [{ message: { content: '已联网查询。' } }],
+        usage: { plugins: { search: { count: 1 } } }
+      },
+      headers: {}
+    })
+  });
+
+  const result = await service.testWebSearch(row.id, '请检查今天的日期');
+
+  assert.equal(result.web_search.status, 'success');
+  assert.equal(result.web_search.evidence_type, 'provider_search_usage');
+  assert.equal(result.web_search.input, '请检查今天的日期');
+  assert.equal(result.web_search.output.text, '已联网查询。');
+  assert.deepEqual(result.web_search.output.provider_response.usage, {
+    plugins: { search: { count: 1 } }
+  });
+  assert.equal(savedResults[0].result.status, 'success');
+});
+
+test('web-search test reports inconclusive when generation succeeds without provider search evidence', async () => {
+  const savedResults = [];
+  const row = {
+    id: 11,
+    code: 'doubao',
+    name: '豆包',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/api/v3/chat/completions',
+    encrypted_api_key: 'encrypted',
+    default_model: 'doubao-model',
+    request_options: {},
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    savedResults,
+    post: async () => ({
+      data: { choices: [{ message: { content: '今天是 2026 年 7 月 23 日。' } }] },
+      headers: {}
+    })
+  });
+
+  const result = await service.testWebSearch(row.id, '请检查今天的日期');
+
+  assert.equal(result.web_search.status, 'inconclusive');
+  assert.equal(result.web_search.success, false);
+  assert.equal(savedResults[0].result.status, 'inconclusive');
+});
+
+test('web-search test does not treat accepted forced-search parameters as execution evidence', async () => {
+  const savedResults = [];
+  const row = {
+    id: 12,
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'qwen3.7-plus',
+    request_options: {
+      enable_search: true,
+      search_options: { forced_search: true }
+    },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    savedResults,
+    post: async () => ({
+      data: { choices: [{ message: { content: '已完成联网查询。' } }] },
+      headers: {}
+    })
+  });
+
+  const result = await service.testWebSearch(row.id);
+
+  assert.equal(result.web_search.status, 'inconclusive');
+  assert.equal(result.web_search.success, false);
+  assert.equal(result.web_search.evidence_type, undefined);
+  assert.equal(savedResults[0].result.status, 'inconclusive');
 });

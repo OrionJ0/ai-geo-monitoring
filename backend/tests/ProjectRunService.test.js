@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const { QuestionRecord, ResultDetail, BrandCompetitor } = require('../models');
 const AIPlatformService = require('../services/AIPlatformService');
 const ProjectRunService = require('../services/ProjectRunService');
-const SentimentAnalysisService = require('../services/SentimentAnalysisService');
+const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
+const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
 const AlertEvaluationService = require('../services/AlertEvaluationService');
 
 test('builds project run targets from enabled prompts and project platforms', () => {
@@ -93,7 +94,8 @@ test('reports selected prompt availability separately from api key availability'
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.equal(result.message, '选择的问题不存在或已停用');
+  assert.equal(result.message, '问题集中没有启用的问题。');
+  assert.equal(result.data.error_code, 'no_enabled_questions');
 });
 
 test('reports prompt and project platform mismatch separately from api key availability', async () => {
@@ -106,7 +108,8 @@ test('reports prompt and project platform mismatch separately from api key avail
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.equal(result.message, '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置');
+  assert.equal(result.message, '问题选择的平台不在当前项目的监测范围内。');
+  assert.equal(result.data.error_code, 'platform_scope_mismatch');
 });
 
 test('rejects explicit project runs when any selected prompt has no project platform overlap', async () => {
@@ -123,7 +126,7 @@ test('rejects explicit project runs when any selected prompt has no project plat
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.equal(result.message, '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置');
+  assert.equal(result.message, '问题选择的平台不在当前项目的监测范围内。');
 });
 
 test('builds keyword stats list from brand, aliases and brand product terms', () => {
@@ -182,6 +185,38 @@ test('marks a completed AI response as failed when metric generation fails', asy
     assert.equal(updates[0].status, 'failed');
     assert.equal(updates[0].error_message, '指标生成失败，请稍后重试');
     assert.equal(result.error, '指标生成失败，请稍后重试');
+  } finally {
+    ProjectRunService.createVisibilityMetric = originalCreateMetric;
+  }
+});
+
+test('explains that invalid AI structure is excluded instead of falling back to rules', async () => {
+  const originalCreateMetric = ProjectRunService.createVisibilityMetric;
+  const updates = [];
+  ProjectRunService.createVisibilityMetric = async () => {
+    throw new AIResponseAnalysisError('证据不在原回答中');
+  };
+
+  try {
+    const result = await ProjectRunService.finalizeSuccessfulRecord({
+      record: {
+        id: 13,
+        update: async (payload) => updates.push(payload)
+      },
+      responseText: '原始回答仍然保留',
+      aiResponse: {},
+      project: { id: 1, name: '广拓' },
+      competitors: [],
+      prompt: { id: 1, question: '示例问题' },
+      keywords: ['广拓']
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'AI 结构化分析失败，本条未计入有效样本');
+    assert.deepEqual(updates[0], {
+      status: 'failed',
+      error_message: 'AI 结构化分析失败，本条未计入有效样本'
+    });
   } finally {
     ProjectRunService.createVisibilityMetric = originalCreateMetric;
   }
@@ -250,11 +285,33 @@ test('counts compact brand spellings in record keyword counts without exposing c
 });
 
 test('builds complete visibility metric payload for any project detection path', async () => {
-  const originalAnalyze = SentimentAnalysisService.analyzeWithDeepSeek;
-  SentimentAnalysisService.analyzeWithDeepSeek = async () => ({
+  const originalAnalyze = AIResponseAnalysisService.analyze;
+  AIResponseAnalysisService.analyze = async () => ({
+    brand_mentioned: true,
+    brand_mentions: 1,
+    brand_position: 1,
+    brand_rank: 1,
+    brand_recommended: true,
+    visibility_score: 1,
+    competitor_mentions: [],
+    share_of_voice: 50,
     sentiment: 'positive',
-    reason: '明确推荐品牌',
-    risk_terms: ['价格高']
+    sentiment_reason: '明确推荐品牌',
+    sentiment_risk_terms: ['价格高'],
+    analysis_method: 'ai_structured_v2',
+    analysis_platform: 'analysis-ai',
+    analysis_model: 'analysis-model',
+    analysis_structure: {
+      schema_version: 'geo_metric_input_v2',
+      entities: [{ name: '米其林', type: 'brand' }],
+      mentions: [{ entity_name: '米其林', surface_forms: ['米其林'] }],
+      candidate_lists: [{ ordered: true, entries: ['米其林'] }],
+      recommendations: [{ entity_name: '米其林', kind: 'explicit' }],
+      claims: [],
+      sentiment: { label: 'positive', reason: '明确推荐品牌', risk_terms: ['价格高'] },
+      target_entity_name: '米其林',
+      competitor_matches: [{ configured_name: '马牌', entity_name: null }]
+    }
   });
 
   try {
@@ -299,18 +356,56 @@ test('builds complete visibility metric payload for any project detection path',
     assert.equal(payload.sentiment, 'positive');
     assert.equal(payload.sentiment_reason, '明确推荐品牌');
     assert.deepEqual(payload.sentiment_risk_terms, ['价格高']);
+    assert.equal(payload.analysis_method, 'ai_structured_v2');
+    assert.equal(payload.analysis_platform, 'analysis-ai');
+    assert.equal(payload.analysis_model, 'analysis-model');
+    assert.equal(payload.analysis_structure.citations.count, 1);
+    assert.equal(payload.analysis_structure.citations.official_website_cited, true);
+    assert.equal(payload.analysis_structure.citations.sources[0].domain, 'michelin.com.cn');
+    assert.deepEqual(payload.analysis_evidence, {});
   } finally {
-    SentimentAnalysisService.analyzeWithDeepSeek = originalAnalyze;
+    AIResponseAnalysisService.analyze = originalAnalyze;
   }
 });
 
-test('keeps sentiment neutral when the target brand is absent from the AI response', async () => {
-  const originalAnalyze = SentimentAnalysisService.analyzeWithDeepSeek;
-  let sentimentCalls = 0;
-  SentimentAnalysisService.analyzeWithDeepSeek = async () => {
-    sentimentCalls += 1;
-    return { sentiment: 'positive' };
-  };
+test('uses the structured analysis result when the target brand is absent', async () => {
+  const originalAnalyze = AIResponseAnalysisService.analyze;
+  AIResponseAnalysisService.analyze = async () => ({
+    brand_mentioned: false,
+    brand_mentions: 0,
+    brand_position: null,
+    brand_rank: null,
+    brand_recommended: false,
+    visibility_score: 0,
+    competitor_mentions: [{
+      id: null,
+      name: '马牌',
+      mentioned: true,
+      mentions: 1,
+      recommended: true,
+      position: 1,
+      rank: 1,
+      evidence: ['马牌']
+    }],
+    share_of_voice: 0,
+    sentiment: 'neutral',
+    sentiment_reason: '未提及目标品牌',
+    sentiment_risk_terms: [],
+    analysis_method: 'ai_structured_v2',
+    analysis_platform: 'analysis-ai',
+    analysis_model: 'analysis-model',
+    analysis_structure: {
+      schema_version: 'geo_metric_input_v2',
+      entities: [{ name: '马牌', type: 'brand' }],
+      mentions: [{ entity_name: '马牌', surface_forms: ['马牌'] }],
+      candidate_lists: [],
+      recommendations: [{ entity_name: '马牌', kind: 'explicit' }],
+      claims: [],
+      sentiment: { label: 'neutral', reason: '未提及目标品牌', risk_terms: [] },
+      target_entity_name: null,
+      competitor_matches: [{ configured_name: '马牌', entity_name: '马牌' }]
+    }
+  });
 
   try {
     const payload = await ProjectRunService.buildVisibilityMetricPayload({
@@ -341,9 +436,9 @@ test('keeps sentiment neutral when the target brand is absent from the AI respon
 
     assert.equal(payload.brand_mentioned, false);
     assert.equal(payload.sentiment, 'neutral');
-    assert.equal(sentimentCalls, 0);
+    assert.equal(payload.analysis_method, 'ai_structured_v2');
   } finally {
-    SentimentAnalysisService.analyzeWithDeepSeek = originalAnalyze;
+    AIResponseAnalysisService.analyze = originalAnalyze;
   }
 });
 
@@ -474,14 +569,23 @@ test('runs a prepared project run target without creating a duplicate question r
 });
 
 test('queues a project run without waiting for prepared targets to finish', async () => {
-  const originalGetAvailable = AIPlatformService.getAvailablePlatforms;
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
   const originalFindCompetitors = BrandCompetitor.findAll;
   const originalCreateEntries = ProjectRunService.createRunEntries;
   const originalSchedule = ProjectRunService.schedulePreparedRun;
   let scheduledContext = null;
 
-  AIPlatformService.getAvailablePlatforms = () => ['doubao'];
+  AIPlatformService.getPlatformAvailability = async () => [{
+    code: 'doubao',
+    platform_name: '豆包',
+    model_name: 'doubao-model',
+    available: true,
+    reason: null,
+    config: { code: 'doubao', default_model: 'doubao-model' }
+  }];
+  ProjectRunService.getRuntimeSettings = async () => ({ ai_run_concurrency: 2, ai_retry_count: 3, ai_default_timeout_seconds: 90, ai_default_max_tokens: 4096 });
   ProjectRunService.consumeRunQuota = async () => ({ ok: true, used: 2, limit: 100 });
   BrandCompetitor.findAll = async () => [];
   ProjectRunService.createRunEntries = async ({ targets }) => targets.map((target, index) => ({
@@ -511,11 +615,107 @@ test('queues a project run without waiting for prepared targets to finish', asyn
     assert.deepEqual(result.data.record_ids, [10, 11]);
     assert.equal(scheduledContext.entries.length, 2);
   } finally {
-    AIPlatformService.getAvailablePlatforms = originalGetAvailable;
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
     ProjectRunService.consumeRunQuota = originalConsumeQuota;
     BrandCompetitor.findAll = originalFindCompetitors;
     ProjectRunService.createRunEntries = originalCreateEntries;
     ProjectRunService.schedulePreparedRun = originalSchedule;
+  }
+});
+
+test('queues runnable platforms and reports unavailable platforms as skipped', async () => {
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  const originalFindCompetitors = BrandCompetitor.findAll;
+  const originalCreateEntries = ProjectRunService.createRunEntries;
+  const originalSchedule = ProjectRunService.schedulePreparedRun;
+  let quotaAmount = 0;
+
+  AIPlatformService.getPlatformAvailability = async () => [
+    { code: 'doubao', platform_name: '豆包', model_name: 'doubao-model', available: false, reason: 'missing_api_key', config: null },
+    { code: 'deepseek', platform_name: 'DeepSeek', model_name: 'deepseek-v4-flash', available: true, reason: null, config: { code: 'deepseek', default_model: 'deepseek-v4-flash' } }
+  ];
+  ProjectRunService.getRuntimeSettings = async () => ({ ai_run_concurrency: 2 });
+  ProjectRunService.consumeRunQuota = async (_userId, amount) => {
+    quotaAmount = amount;
+    return { ok: true };
+  };
+  BrandCompetitor.findAll = async () => [];
+  ProjectRunService.createRunEntries = async ({ targets }) => targets.map((target) => ({ target, record: { id: 31 } }));
+  ProjectRunService.schedulePreparedRun = () => {};
+
+  try {
+    const result = await ProjectRunService.enqueueProjectRun({
+      project: { id: 2, user_id: 9, status: 'active', name: 'Goodie AI', platforms: ['doubao', 'deepseek'] },
+      prompts: [{ id: 3, question: 'GEO 怎么做', enabled: true, platforms: ['doubao', 'deepseek'] }],
+      platforms: ['doubao', 'deepseek'],
+      user: { id: 9, role: 'user' }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data.total, 1);
+    assert.equal(quotaAmount, 1);
+    assert.deepEqual(result.data.skipped_platforms, [{
+      platform: 'doubao',
+      name: '豆包',
+      reason: 'missing_api_key',
+      message: '豆包未配置 API Key'
+    }]);
+    assert.match(result.message, /豆包未配置 API Key，已跳过/);
+  } finally {
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
+    ProjectRunService.consumeRunQuota = originalConsumeQuota;
+    BrandCompetitor.findAll = originalFindCompetitors;
+    ProjectRunService.createRunEntries = originalCreateEntries;
+    ProjectRunService.schedulePreparedRun = originalSchedule;
+  }
+});
+
+test('does not consume quota or create records when every candidate platform is unavailable', async () => {
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  const originalCreateEntries = ProjectRunService.createRunEntries;
+  let quotaCalled = false;
+  let recordsCalled = false;
+
+  AIPlatformService.getPlatformAvailability = async () => [{
+    code: 'deepseek',
+    platform_name: 'DeepSeek',
+    model_name: 'deepseek-v4-flash',
+    available: false,
+    reason: 'missing_api_key',
+    config: null
+  }];
+  ProjectRunService.consumeRunQuota = async () => {
+    quotaCalled = true;
+    return { ok: true };
+  };
+  ProjectRunService.createRunEntries = async () => {
+    recordsCalled = true;
+    return [];
+  };
+
+  try {
+    const result = await ProjectRunService.runProject({
+      project: { id: 2, user_id: 9, status: 'active', platforms: ['deepseek'] },
+      prompts: [{ id: 3, question: 'GEO 怎么做', enabled: true, platforms: ['deepseek'] }],
+      platforms: ['deepseek'],
+      user: { id: 9, role: 'user' }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 400);
+    assert.equal(result.data.error_code, 'all_platforms_unavailable');
+    assert.match(result.message, /DeepSeek未配置 API Key/);
+    assert.equal(quotaCalled, false);
+    assert.equal(recordsCalled, false);
+  } finally {
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.consumeRunQuota = originalConsumeQuota;
+    ProjectRunService.createRunEntries = originalCreateEntries;
   }
 });
 

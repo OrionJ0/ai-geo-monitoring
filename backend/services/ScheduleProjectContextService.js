@@ -63,8 +63,10 @@ async function resolveProjectContext({ user, source, repositories = {}, messages
   };
 }
 
-function validatePlatformsWithinContext(platforms, projectContext, message = '监测平台必须包含在项目或问题的监测平台内') {
-  const result = PlatformSelectionService.validate(platforms);
+function validatePlatformsWithinContext(platforms, projectContext, message = '监测平台必须包含在项目或问题的监测平台内', availablePlatforms = null) {
+  const result = PlatformSelectionService.validate(platforms, availablePlatforms
+    ? { availablePlatforms, defaultPlatforms: availablePlatforms }
+    : {});
   if (!result.ok) return result;
   if (!projectContext?.project_id) return result;
   const scoped = PlatformSelectionService.validateWithinProject(result.platforms, projectContext.allowed_platforms);
@@ -73,11 +75,10 @@ function validatePlatformsWithinContext(platforms, projectContext, message = '�
 }
 
 function defaultPlatformsForContext(availablePlatforms, projectContext) {
-  const result = PlatformSelectionService.validate(availablePlatforms);
-  const mainlandAvailable = result.ok ? result.platforms : [];
-  if (!projectContext?.project_id) return mainlandAvailable;
+  const normalizedAvailable = PlatformSelectionService.normalize(availablePlatforms);
+  if (!projectContext?.project_id) return normalizedAvailable;
   const allowed = new Set(PlatformSelectionService.normalize(projectContext.allowed_platforms));
-  return mainlandAvailable.filter((platform) => allowed.has(platform));
+  return normalizedAvailable.filter((platform) => allowed.has(platform));
 }
 
 function canOperateSchedule(schedule, user) {

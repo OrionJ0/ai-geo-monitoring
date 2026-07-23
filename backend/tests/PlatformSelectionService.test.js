@@ -3,62 +3,96 @@ const assert = require('node:assert/strict');
 
 const PlatformSelectionService = require('../services/PlatformSelectionService');
 
-test('rejects unsupported explicit monitoring platforms instead of silently defaulting', () => {
-  const result = PlatformSelectionService.validate(['deepseek', 'kimi']);
+const selectablePlatforms = ['doubao', 'deepseek', 'example-ai'];
 
-  assert.equal(result.ok, false);
-  assert.deepEqual(result.invalid_platforms, ['kimi']);
-  assert.match(result.message, /豆包|DeepSeek/);
-});
-
-test('defaults empty monitoring platforms to mainland AI platforms', () => {
-  const result = PlatformSelectionService.validate([]);
-
-  assert.equal(result.ok, true);
-  assert.deepEqual(result.platforms, ['doubao', 'deepseek']);
-});
-
-test('builds platform status only for mainland monitoring platforms', () => {
-  const statuses = PlatformSelectionService.buildSupportedStatus({
-    doubao: { name: '豆包', apiKey: 'doubao-key' },
-    deepseek: { name: 'DeepSeek', apiKey: '' },
-    kimi: { name: 'Kimi', apiKey: 'kimi-key' },
-    qianwen: { name: '千问', apiKey: 'qianwen-key' }
+test('accepts dynamic platform codes supplied by the database catalog', () => {
+  const result = PlatformSelectionService.validate(['deepseek', 'example-ai'], {
+    availablePlatforms: selectablePlatforms
   });
 
-  assert.deepEqual(statuses.map((item) => item.platform), ['doubao', 'deepseek']);
-  assert.deepEqual(statuses.map((item) => item.ok), [true, false]);
-  assert.deepEqual(statuses.map((item) => item.message), ['平台服务凭证已配置', '平台服务凭证未配置']);
-});
-
-test('defaults prompt platforms to the selected project platforms', () => {
-  const result = PlatformSelectionService.validateWithinProject(undefined, ['deepseek']);
-
   assert.equal(result.ok, true);
-  assert.deepEqual(result.platforms, ['deepseek']);
+  assert.deepEqual(result.platforms, ['deepseek', 'example-ai']);
 });
 
-test('rejects prompt platforms outside the selected project platforms', () => {
-  const result = PlatformSelectionService.validateWithinProject(['doubao'], ['deepseek']);
+test('rejects platform codes outside the current selectable catalog', () => {
+  const result = PlatformSelectionService.validate(['deepseek', 'missing-ai'], {
+    availablePlatforms: selectablePlatforms
+  });
 
   assert.equal(result.ok, false);
-  assert.deepEqual(result.invalid_platforms, ['doubao']);
-  assert.match(result.message, /项目监测平台/);
+  assert.deepEqual(result.invalid_platforms, ['missing-ai']);
+  assert.match(result.message, /当前不可选择/);
 });
 
-test('reconciles existing prompt platforms after project platform changes', () => {
+test('rejects explicit platform selection when the selectable catalog is empty', () => {
+  const result = PlatformSelectionService.validate(['custom-ai'], {
+    availablePlatforms: [],
+    defaultPlatforms: []
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.invalid_platforms, ['custom-ai']);
+});
+
+test('project updates retain existing unavailable platforms but reject newly unavailable codes', () => {
   assert.deepEqual(
-    PlatformSelectionService.reconcilePromptPlatforms(['doubao', 'deepseek'], ['deepseek']),
+    PlatformSelectionService.validateProjectUpdate(
+      ['temporarily-disabled', 'deepseek'],
+      ['temporarily-disabled'],
+      ['deepseek']
+    ),
+    {
+      ok: true,
+      platforms: ['temporarily-disabled', 'deepseek'],
+      invalid_platforms: []
+    }
+  );
+
+  const result = PlatformSelectionService.validateProjectUpdate(
+    ['temporarily-disabled', 'unknown-platform'],
+    ['temporarily-disabled'],
     ['deepseek']
+  );
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.invalid_platforms, ['unknown-platform']);
+});
+
+test('defaults empty monitoring platforms to the caller supplied defaults', () => {
+  const result = PlatformSelectionService.validate([], {
+    availablePlatforms: selectablePlatforms,
+    defaultPlatforms: ['deepseek', 'example-ai']
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.platforms, ['deepseek', 'example-ai']);
+});
+
+test('defaults prompt platforms to selectable project platforms', () => {
+  const result = PlatformSelectionService.validateWithinProject(undefined, ['deepseek', 'example-ai'], selectablePlatforms);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.platforms, ['deepseek', 'example-ai']);
+});
+
+test('rejects prompt platforms outside the project or selectable catalog', () => {
+  const outsideProject = PlatformSelectionService.validateWithinProject(['doubao'], ['deepseek'], selectablePlatforms);
+  assert.equal(outsideProject.ok, false);
+  assert.deepEqual(outsideProject.invalid_platforms, ['doubao']);
+  assert.match(outsideProject.message, /项目监测平台/);
+
+  const unavailable = PlatformSelectionService.validateWithinProject(['example-ai'], ['example-ai'], ['deepseek']);
+  assert.equal(unavailable.ok, false);
+  assert.deepEqual(unavailable.invalid_platforms, ['example-ai']);
+});
+
+test('reconciles custom prompt platforms after project platform changes', () => {
+  assert.deepEqual(
+    PlatformSelectionService.reconcilePromptPlatforms(['deepseek', 'example-ai'], ['example-ai']),
+    ['example-ai']
   );
 
   assert.deepEqual(
-    PlatformSelectionService.reconcilePromptPlatforms(['doubao'], ['deepseek']),
-    ['deepseek']
-  );
-
-  assert.deepEqual(
-    PlatformSelectionService.reconcilePromptPlatforms(['kimi'], ['doubao']),
-    ['doubao']
+    PlatformSelectionService.reconcilePromptPlatforms(['doubao'], ['example-ai']),
+    ['example-ai']
   );
 });

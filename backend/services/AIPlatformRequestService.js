@@ -26,29 +26,68 @@ const ERROR_MESSAGES = Object.freeze({
   missing_model: '平台未配置默认模型。'
 });
 
+const PROTECTED_REQUEST_OPTION_KEYS = new Set([
+  'model',
+  'messages',
+  'input',
+  'stream',
+  'max_tokens',
+  'max_output_tokens'
+]);
+
+function safeRequestOptions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => !PROTECTED_REQUEST_OPTION_KEYS.has(key))
+  );
+}
+
+function isResponsesAdapter(adapterType) {
+  return adapterType === 'openai_responses';
+}
+
 function buildRequestBody(config, question, maxTokens) {
-  if (config.adapter_type === 'doubao_responses') {
+  const requestOptions = safeRequestOptions(config.request_options);
+  if (isResponsesAdapter(config.adapter_type)) {
     return {
+      tools: [{ type: 'web_search' }],
+      temperature: 0.7,
+      ...requestOptions,
       model: config.default_model,
       input: [{
         role: 'user',
         content: [{ type: 'input_text', text: question }]
       }],
-      tools: [{ type: 'web_search' }],
-      temperature: 0.7,
       max_output_tokens: maxTokens
     };
   }
   return {
+    temperature: 0.7,
+    ...requestOptions,
     model: config.default_model,
     messages: [{ role: 'user', content: question }],
-    temperature: 0.7,
     max_tokens: maxTokens
   };
 }
 
+function resolveRequestUrl(adapterType, rawUrl) {
+  const url = new URL(String(rawUrl || ''));
+  const suffix = isResponsesAdapter(adapterType) ? '/responses' : '/chat/completions';
+  const normalizedPath = url.pathname.replace(/\/+$/u, '');
+  if (!normalizedPath.endsWith(suffix)) url.pathname = `${normalizedPath}${suffix}`;
+  return url.toString();
+}
+
+function resolveModelsUrl(rawUrl) {
+  const url = new URL(String(rawUrl || ''));
+  let normalizedPath = url.pathname.replace(/\/+$/u, '');
+  normalizedPath = normalizedPath.replace(/\/(?:chat\/completions|responses)$/u, '');
+  url.pathname = `${normalizedPath}/models`;
+  return url.toString();
+}
+
 function extractResponseText(adapterType, data) {
-  if (adapterType === 'doubao_responses') {
+  if (isResponsesAdapter(adapterType)) {
     if (typeof data?.output_text === 'string' && data.output_text.trim()) return data.output_text;
     const parts = Array.isArray(data?.output) ? data.output : [];
     const text = parts
@@ -72,6 +111,40 @@ function normalizeRequestError(error) {
     return 'network_error';
   }
   return 'provider_error';
+}
+
+function providerErrorDetails(error) {
+  const data = error?.response?.data;
+  const providerError = data?.error && typeof data.error === 'object' ? data.error : {};
+  const message = String(
+    providerError.message
+    || data?.message
+    || (typeof data === 'string' ? data : '')
+    || ''
+  ).replace(/\s+/gu, ' ').trim().slice(0, 500);
+  const code = String(providerError.code || providerError.type || '').trim().slice(0, 100);
+  return {
+    status: Number(error?.response?.status || 0) || null,
+    code: code || null,
+    message: message || null
+  };
+}
+
+function detectWebSearchEvidence(adapterType, data) {
+  const searchCount = Number(data?.usage?.plugins?.search?.count || 0);
+  if (searchCount > 0) {
+    return { detected: true, type: 'provider_search_usage', count: searchCount };
+  }
+
+  if (isResponsesAdapter(adapterType)) {
+    const output = Array.isArray(data?.output) ? data.output : [];
+    const hasSearchItem = output.some((item) => (
+      /web[_-]?search/iu.test(String(item?.type || ''))
+      || (Array.isArray(item?.content) && item.content.some((part) => /web[_-]?search/iu.test(String(part?.type || ''))))
+    ));
+    if (hasSearchItem) return { detected: true, type: 'provider_web_search_output' };
+  }
+  return { detected: false, type: null };
 }
 
 function createPinnedAgent(validation) {
@@ -136,14 +209,27 @@ class AIPlatformRequestService {
     const timeoutSeconds = config.request_timeout_seconds || settings.ai_default_timeout_seconds;
     const maxTokens = config.max_tokens || settings.ai_default_max_tokens;
     const retryCount = options.retryCount ?? settings.ai_retry_count;
-    const requestBody = buildRequestBody(config, String(question || ''), maxTokens);
+    const requestConfig = options.requestOptions === undefined
+      ? config
+      : {
+          adapter_type: config.adapter_type,
+          default_model: config.default_model,
+          request_options: options.requestOptions
+        };
+    const requestBody = buildRequestBody(requestConfig, String(question || ''), maxTokens);
+    if (options.disableWebSearch) {
+      delete requestBody.tools;
+      delete requestBody.enable_search;
+      delete requestBody.search_options;
+    }
     const requestOptions = this.buildRequestOptions({ apiKey, timeoutSeconds, validation });
     let lastFailure = null;
 
     for (let attempt = 0; attempt <= retryCount; attempt += 1) {
       const startedAt = this.now();
       try {
-        const response = await this.httpClient.post(validation.url, requestBody, requestOptions);
+        const requestUrl = resolveRequestUrl(config.adapter_type, validation.url);
+        const response = await this.httpClient.post(requestUrl, requestBody, requestOptions);
         const text = extractResponseText(config.adapter_type, response?.data);
         if (!text) return this.failure(platform, 'invalid_provider_response');
         const headerTime = Number(response?.headers?.['x-response-time']);
@@ -159,11 +245,17 @@ class AIPlatformRequestService {
         };
       } catch (error) {
         const errorCode = normalizeRequestError(error);
-        lastFailure = this.failure(platform, errorCode);
+        const providerError = providerErrorDetails(error);
+        lastFailure = {
+          ...this.failure(platform, errorCode),
+          provider_error: providerError
+        };
         console.error('AI 平台调用失败:', {
           platform,
           error_code: errorCode,
-          status: Number(error?.response?.status || 0) || undefined,
+          status: providerError.status || undefined,
+          provider_code: providerError.code || undefined,
+          provider_message: providerError.message || undefined,
           network_code: String(error?.code || '').slice(0, 40) || undefined
         });
         const retryable = ['rate_limited', 'timeout', 'network_error', 'provider_error'].includes(errorCode);
@@ -196,6 +288,55 @@ class AIPlatformRequestService {
     };
   }
 
+  async listModels(platformId) {
+    const config = await this.configService.getPlatform(platformId);
+    if (!config?.encrypted_api_key) return this.failure(config?.code || 'unknown', 'missing_api_key');
+    if (!String(config?.base_url || '').trim()) return this.failure(config?.code || 'unknown', 'missing_base_url');
+
+    let apiKey;
+    let validation;
+    try {
+      apiKey = this.configService.decryptApiKey(config);
+      validation = await this.urlValidator(config.base_url);
+    } catch (_) {
+      return this.failure(config?.code || 'unknown', 'config_unavailable');
+    }
+
+    const settings = await this.settingsService.getSettings();
+    const timeoutSeconds = config.request_timeout_seconds || settings.ai_default_timeout_seconds;
+    try {
+      const response = await this.httpClient.get(
+        resolveModelsUrl(validation.url),
+        this.buildRequestOptions({ apiKey, timeoutSeconds, validation })
+      );
+      const providerModels = Array.isArray(response?.data?.data) ? response.data.data : [];
+      const providerModelIds = providerModels
+        .map((item) => String(item?.id || '').trim())
+        .filter(Boolean);
+      if (!providerModelIds.length) return this.failure(config.code, 'invalid_provider_response');
+      const models = Array.from(new Set([
+        String(config.default_model || '').trim(),
+        ...providerModelIds
+      ].filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      return {
+        success: true,
+        platform: config.code,
+        current_model: config.default_model,
+        models,
+        source: 'provider_api',
+        persisted: false
+      };
+    } catch (error) {
+      const errorCode = normalizeRequestError(error);
+      console.error('AI 平台模型列表读取失败:', {
+        platform: config.code,
+        error_code: errorCode,
+        status: Number(error?.response?.status || 0) || undefined
+      });
+      return this.failure(config.code, errorCode);
+    }
+  }
+
   async testConnection(platformId) {
     const config = await this.configService.getPlatform(platformId);
     const connection = await this.queryConfig(config, '请只回复 OK', {
@@ -226,6 +367,62 @@ class AIPlatformRequestService {
     };
   }
 
+  async testWebSearch(platformId, input) {
+    const config = await this.configService.getPlatform(platformId);
+    const testInput = String(
+      input || '请务必使用联网搜索回答：今天（北京时间）的日期是什么？并说明你检索到的信息。'
+    ).trim().slice(0, 1000);
+    const connection = await this.queryConfig(
+      config,
+      testInput,
+      { allowDisabled: true, retryCount: 0 }
+    );
+
+    let result;
+    if (!connection.success) {
+      result = {
+        success: false,
+        status: 'failed',
+        error_code: connection.error_code,
+        message: connection.error,
+        input: testInput,
+        output: null
+      };
+    } else {
+      const evidence = detectWebSearchEvidence(config.adapter_type, connection.data);
+      result = evidence.detected
+        ? {
+            success: true,
+            status: 'success',
+            evidence_type: evidence.type,
+            message: '已检测到供应商返回的联网搜索调用证据',
+            response_time_ms: connection.responseTime,
+            model_name: connection.model_name,
+            input: testInput,
+            output: {
+              text: connection.text,
+              provider_response: connection.data
+            }
+          }
+        : {
+            success: false,
+            status: 'inconclusive',
+            error_code: 'search_evidence_missing',
+            message: '模型调用成功，但供应商响应中没有可验证的联网搜索证据',
+            response_time_ms: connection.responseTime,
+            model_name: connection.model_name,
+            input: testInput,
+            output: {
+              text: connection.text,
+              provider_response: connection.data
+            }
+          };
+    }
+
+    const platform = await this.configService.saveWebSearchTestResult(platformId, result);
+    return { platform, web_search: result };
+  }
+
   failure(platform, errorCode) {
     return {
       success: false,
@@ -244,4 +441,9 @@ module.exports.ERROR_MESSAGES = ERROR_MESSAGES;
 module.exports.buildRequestBody = buildRequestBody;
 module.exports.extractResponseText = extractResponseText;
 module.exports.normalizeRequestError = normalizeRequestError;
+module.exports.providerErrorDetails = providerErrorDetails;
 module.exports.createPinnedAgent = createPinnedAgent;
+module.exports.resolveModelsUrl = resolveModelsUrl;
+module.exports.resolveRequestUrl = resolveRequestUrl;
+module.exports.detectWebSearchEvidence = detectWebSearchEvidence;
+module.exports.isResponsesAdapter = isResponsesAdapter;

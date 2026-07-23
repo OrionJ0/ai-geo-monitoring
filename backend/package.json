@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "setup:local-key": "node scripts/setupLocalEncryptionKey.js"
   },
   "keywords": [],
   "author": "",

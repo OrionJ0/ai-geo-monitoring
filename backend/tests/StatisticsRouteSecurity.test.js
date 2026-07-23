@@ -13,12 +13,8 @@ test('keyword statistics route loads stored keyword counts', () => {
   assert.match(routeSource, /attributes:\s*\[[^\]]*'result_summary'/);
 });
 
-test('statistics routes only aggregate mainland monitoring platforms', () => {
-  assert.match(routeSource, /MAINLAND_MONITORING_PLATFORMS\s*=\s*\[\s*'doubao'\s*,\s*'deepseek'\s*\]/);
-  assert.match(routeSource, /function\s+withMainlandPlatformScope/);
-  assert.doesNotMatch(routeSource, /where:\s*whereClause/);
-  assert.doesNotMatch(routeSource, /where:\s*metricWhereClause/);
-
-  const scopedQueries = routeSource.match(/where:\s*withMainlandPlatformScope/g) || [];
-  assert.ok(scopedQueries.length >= 10);
+test('statistics routes aggregate historical records for dynamic platforms', () => {
+  assert.doesNotMatch(routeSource, /MAINLAND_MONITORING_PLATFORMS|withMainlandPlatformScope/);
+  assert.match(routeSource, /where:\s*whereClause/);
+  assert.match(routeSource, /where:\s*metricWhereClause/);
 });

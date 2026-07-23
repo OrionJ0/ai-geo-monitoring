@@ -6,8 +6,6 @@ const SchedulerService = require('../services/SchedulerService');
 const ScheduleProjectContextService = require('../services/ScheduleProjectContextService');
 const { authRequired } = require('../middleware/auth');
 
-const MAINLAND_MONITORING_PLATFORMS = ['doubao', 'deepseek'];
-
 async function resolveProjectContext(req, source) {
   return ScheduleProjectContextService.resolveProjectContext({ user: req.user, source });
 }
@@ -26,9 +24,10 @@ router.post('/', authRequired, async (req, res) => {
     if (projectContext.error) {
       return res.status(projectContext.error.status).json({ success: false, message: projectContext.error.message });
     }
+    const availablePlatforms = await AIPlatformService.getAvailablePlatforms();
     if (!Array.isArray(platforms) || platforms.length === 0) {
       platforms = ScheduleProjectContextService.defaultPlatformsForContext(
-        AIPlatformService.getAvailablePlatforms().filter(p => MAINLAND_MONITORING_PLATFORMS.includes(p)),
+        availablePlatforms,
         projectContext
       );
       if (!Array.isArray(platforms) || platforms.length === 0) {
@@ -38,15 +37,16 @@ router.post('/', authRequired, async (req, res) => {
       const platformResult = ScheduleProjectContextService.validatePlatformsWithinContext(
         platforms,
         projectContext,
-        '定时任务平台必须包含在项目或问题的监测平台内'
+        '定时任务平台必须包含在项目或问题的监测平台内',
+        availablePlatforms
       );
       if (!platformResult.ok) {
-        return res.status(400).json({ success: false, message: platformResult.message || '定时任务仅支持豆包和 DeepSeek' });
+        return res.status(400).json({ success: false, message: platformResult.message || '定时任务平台当前不可用' });
       }
       platforms = platformResult.platforms;
     }
     if (platforms.length === 0) {
-      return res.status(400).json({ success: false, message: '定时任务仅支持豆包和 DeepSeek' });
+      return res.status(400).json({ success: false, message: '定时任务平台当前不可用' });
     }
     if (typeof daily_time !== 'string' || !/^\d{2}:\d{2}$/.test(daily_time)) {
       return res.status(400).json({ success: false, message: 'daily_time 必须是 HH:mm 格式' });
@@ -144,10 +144,11 @@ router.put('/:id', authRequired, async (req, res) => {
       const platformResult = ScheduleProjectContextService.validatePlatformsWithinContext(
         platforms,
         platformContext,
-        '定时任务平台必须包含在项目或问题的监测平台内'
+        '定时任务平台必须包含在项目或问题的监测平台内',
+        await AIPlatformService.getAvailablePlatforms()
       );
       if (!platformResult.ok) {
-        return res.status(400).json({ success: false, message: platformResult.message || '定时任务仅支持豆包和 DeepSeek' });
+        return res.status(400).json({ success: false, message: platformResult.message || '定时任务平台当前不可用' });
       }
       payload.platforms = platformResult.platforms;
     }
@@ -206,9 +207,28 @@ router.post('/:id/run', authRequired, async (req, res) => {
     if (!ScheduleProjectContextService.canOperateSchedule(schedule, req.user)) {
       return res.status(403).json({ success: false, message: '无权操作该任务' });
     }
-    const ok = await SchedulerService.runNow(id);
-    if (!ok) return res.status(500).json({ success: false, message: '执行失败' });
-    return res.json({ success: true, message: '已触发执行', data: schedule });
+    const result = await SchedulerService.runNowWithResult(id);
+    if (!result.ok) {
+      return res.status(result.status || 400).json({
+        success: false,
+        message: result.message,
+        data: {
+          error_code: result.reason || 'schedule_run_failed',
+          skipped_platforms: result.skipped_platforms || []
+        }
+      });
+    }
+    return res.json({
+      success: true,
+      message: result.message,
+      data: {
+        schedule,
+        completed: result.completed,
+        failed: result.failed,
+        attempted: result.attempted,
+        skipped_platforms: result.skipped_platforms || []
+      }
+    });
   } catch (error) {
     console.error('手动执行任务失败:', error);
     return res.status(500).json({ success: false, message: '手动执行任务失败' });

@@ -34,6 +34,7 @@ const ProjectDeletionService = require('../services/ProjectDeletionService');
 const ProjectLifecycleService = require('../services/ProjectLifecycleService');
 const ProjectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
 const QuestionSetRunService = require('../services/QuestionSetRunService');
+const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
 const { CsvValidationError } = require('../services/QuestionSetRunCsvService');
 
 function asArray(value) {
@@ -42,6 +43,10 @@ function asArray(value) {
 
 function cleanPlatforms(value) {
   return PlatformSelectionService.normalize(value);
+}
+
+async function getSelectablePlatformCodes() {
+  return AIPlatformService.getAvailablePlatforms();
 }
 
 function cleanMonitoringPayload(body, existing = {}, normalizedPlatforms = null) {
@@ -66,6 +71,19 @@ function platformValidationError(res, result) {
     message: result.message,
     data: { invalid_platforms: result.invalid_platforms }
   });
+}
+
+function unavailablePlatformMessage(item) {
+  const name = item?.platform_name || item?.code || '监测平台';
+  const labels = {
+    missing_api_key: `${name}未配置 API Key`,
+    disabled: `${name}已被管理员停用`,
+    missing_base_url: `${name}未配置接口地址`,
+    missing_model: `${name}未配置默认模型`,
+    archived: `${name}已归档`,
+    config_unavailable: `${name}配置暂不可用`
+  };
+  return labels[item?.reason] || `${name}暂不可用`;
 }
 
 function alertValidationError(res, error) {
@@ -270,7 +288,14 @@ router.post('/', async (req, res) => {
       primary_keywords: req.body.primary_keywords
     });
     if (!projectFields.name) return res.status(400).json({ success: false, message: '品牌名称不能为空' });
-    const platformResult = PlatformSelectionService.validate(req.body.platforms);
+    const selectablePlatforms = await getSelectablePlatformCodes();
+    const platformResult = PlatformSelectionService.validate(req.body.platforms, {
+      availablePlatforms: selectablePlatforms,
+      defaultPlatforms: selectablePlatforms
+    });
+    if (!platformResult.platforms.length && platformResult.ok) {
+      return res.status(400).json({ success: false, message: '当前没有可选择的监测平台，请联系管理员配置。' });
+    }
     if (!platformResult.ok) return platformValidationError(res, platformResult);
     const duplicate = await BrandProjectService.findDuplicateProject(req.user.id, {
       name: projectFields.name,
@@ -381,7 +406,12 @@ router.put('/:id', loadProject, async (req, res) => {
     }
     let platformResult = null;
     if (req.body.platforms !== undefined) {
-      platformResult = PlatformSelectionService.validate(req.body.platforms);
+      const selectablePlatforms = await getSelectablePlatformCodes();
+      platformResult = PlatformSelectionService.validateProjectUpdate(
+        req.body.platforms,
+        req.brandProject.platforms,
+        selectablePlatforms
+      );
       if (!platformResult.ok) return platformValidationError(res, platformResult);
       payload.platforms = platformResult.platforms;
     }
@@ -718,7 +748,11 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
       order: [['id', 'ASC']]
     });
     if (!questions.length) {
-      return res.status(400).json({ success: false, message: '问题集中没有可运行的启用问题' });
+      return res.status(400).json({
+        success: false,
+        message: '问题集中没有启用的问题。',
+        data: { error_code: 'no_enabled_questions', skipped_platforms: [] }
+      });
     }
     const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
     const result = await ProjectRunService.enqueueProjectRun({
@@ -910,12 +944,23 @@ router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
   try {
     const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能生成问题建议');
     if (archivedResponse) return archivedResponse;
-    const platform = 'deepseek';
-    if (!AIPlatformService.platforms.deepseek?.apiKey) {
-      return res.status(400).json({ success: false, message: '问题建议暂不可用，请联系管理员处理' });
+    const projectData = req.brandProject.toJSON();
+    const projectPlatformCodes = cleanPlatforms(projectData.platforms);
+    const candidateCodes = projectPlatformCodes.length
+      ? projectPlatformCodes
+      : await AIPlatformService.getPlatformCodes();
+    const availability = await AIPlatformService.getPlatformAvailability(candidateCodes);
+    const platformStatus = availability.find((item) => item.available);
+    if (!platformStatus) {
+      const detail = availability.map(unavailablePlatformMessage).join('；') || '监测平台配置暂不可用';
+      return res.status(400).json({
+        success: false,
+        message: `${detail}，无法生成问题建议。`,
+        data: { error_code: 'all_platforms_unavailable' }
+      });
     }
-
-    const [competitors, existingPrompts] = await Promise.all([
+    const platform = platformStatus.code;
+    const [competitors, existingPrompts, runtimeSettings] = await Promise.all([
       BrandCompetitor.findAll({
         where: { project_id: req.brandProject.id },
         order: [['id', 'ASC']]
@@ -924,17 +969,21 @@ router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
         where: { project_id: req.brandProject.id },
         attributes: ['question'],
         raw: true
-      })
+      }),
+      AIRuntimeSettingsService.getSettings()
     ]);
     const requestedCount = PromptSuggestionService.normalizeCount(req.body.count || 10);
-    const projectData = req.brandProject.toJSON();
     const competitorData = competitors.map((item) => item.toJSON());
     const generation = await PromptSuggestionService.generateSuggestions(projectData, competitorData, {
       platform,
       count: requestedCount,
       focus: req.body.focus,
+      platformNames: [platformStatus.platform_name],
       excludeQuestions: existingPrompts.map((item) => item.question).filter(Boolean),
-      queryPlatform: (targetPlatform, question) => AIPlatformService.queryPlatform(targetPlatform, question),
+      queryPlatform: (targetPlatform, question) => AIPlatformService.queryPlatform(targetPlatform, question, {
+        config: platformStatus.config,
+        runtimeSettings
+      }),
       extractResponseText: (data) => ResultParserService.extractResponseText(data),
       maxBrandQuestionRatio: 0.15
     });
@@ -952,6 +1001,8 @@ router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
       message: '问题建议已生成',
       data: {
         platform,
+        platform_name: platformStatus.platform_name,
+        model_name: platformStatus.model_name,
         requested_count: requestedCount,
         batch_count: generation.batch_count,
         suggestions
@@ -977,7 +1028,12 @@ router.post('/:projectId/prompts', loadProject, async (req, res) => {
       : req.body.prompt_group_id;
     const groupResult = await normalizePromptGroupId(req.brandProject.id, questionSetId);
     if (groupResult.error) return res.status(400).json({ success: false, message: groupResult.error });
-    const platformResult = PlatformSelectionService.validateWithinProject(req.body.platforms, req.brandProject.platforms);
+    const selectablePlatforms = await getSelectablePlatformCodes();
+    const platformResult = PlatformSelectionService.validateWithinProject(
+      req.body.platforms,
+      req.brandProject.platforms,
+      selectablePlatforms
+    );
     if (!platformResult.ok) return platformValidationError(res, platformResult);
     const prompt = await TrackedPrompt.create({
       project_id: req.brandProject.id,
@@ -992,6 +1048,79 @@ router.post('/:projectId/prompts', loadProject, async (req, res) => {
     res.json({ success: true, message: '问题已创建', data: prompt });
   } catch (error) {
     res.status(500).json({ success: false, message: '创建问题失败' });
+  }
+});
+
+router.post('/:projectId/prompts/batch', loadProject, async (req, res) => {
+  try {
+    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改问题');
+    if (archivedResponse) return archivedResponse;
+
+    if (!Array.isArray(req.body.questions) || !req.body.questions.length) {
+      return res.status(400).json({ success: false, message: '请至少输入一个问题' });
+    }
+    if (req.body.questions.length > 100) {
+      return res.status(400).json({ success: false, message: '单次最多批量新增 100 个问题' });
+    }
+    const questions = req.body.questions.map((item) => String(item ?? '').trim());
+    if (questions.some((item) => !item)) {
+      return res.status(400).json({ success: false, message: '批量问题中不能包含空内容' });
+    }
+    if (questions.some((item) => item.length > 5000)) {
+      return res.status(400).json({ success: false, message: '单个问题不能超过 5000 个字符' });
+    }
+
+    const questionSetId = req.body.question_set_id !== undefined
+      ? req.body.question_set_id
+      : req.body.prompt_group_id;
+    const groupResult = await normalizePromptGroupId(req.brandProject.id, questionSetId);
+    if (groupResult.error) return res.status(400).json({ success: false, message: groupResult.error });
+
+    const selectablePlatforms = await getSelectablePlatformCodes();
+    const platformResult = PlatformSelectionService.validateWithinProject(
+      req.body.platforms,
+      req.brandProject.platforms,
+      selectablePlatforms
+    );
+    if (!platformResult.ok) return platformValidationError(res, platformResult);
+
+    const existingRows = await TrackedPrompt.findAll({
+      where: { project_id: req.brandProject.id },
+      attributes: ['id', 'question'],
+      raw: true
+    });
+    const prepared = TrackedPromptService.prepareBatchQuestions(questions, existingRows);
+    let created = [];
+    if (prepared.createdQuestions.length) {
+      created = await sequelize.transaction(async (transaction) => TrackedPrompt.bulkCreate(
+        prepared.createdQuestions.map((question) => ({
+          project_id: req.brandProject.id,
+          prompt_group_id: groupResult.value,
+          user_id: projectScopedUser(req).id,
+          question,
+          tags: asArray(req.body.tags),
+          platforms: platformResult.platforms,
+          enabled: req.body.enabled !== false
+        })),
+        { transaction }
+      ));
+      await invalidateGeneratedReports(req.brandProject.id);
+    }
+
+    return res.status(created.length ? 201 : 200).json({
+      success: true,
+      message: created.length
+        ? `已新增 ${created.length} 个问题${prepared.skipped.length ? `，跳过 ${prepared.skipped.length} 个重复项` : ''}`
+        : '没有新增问题，输入内容均已存在',
+      data: {
+        created_count: created.length,
+        skipped_count: prepared.skipped.length,
+        created,
+        skipped: prepared.skipped
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: '批量创建问题失败' });
   }
 });
 
@@ -1021,7 +1150,12 @@ router.put('/:projectId/prompts/:promptId', loadProject, async (req, res) => {
     }
     if (req.body.tags != null) payload.tags = asArray(req.body.tags);
     if (req.body.platforms !== undefined) {
-      const platformResult = PlatformSelectionService.validateWithinProject(req.body.platforms, req.brandProject.platforms);
+      const selectablePlatforms = await getSelectablePlatformCodes();
+      const platformResult = PlatformSelectionService.validateWithinProject(
+        req.body.platforms,
+        req.brandProject.platforms,
+        selectablePlatforms
+      );
       if (!platformResult.ok) return platformValidationError(res, platformResult);
       payload.platforms = platformResult.platforms;
     }

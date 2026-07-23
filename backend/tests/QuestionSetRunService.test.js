@@ -114,7 +114,17 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
       owned: true
     }],
     prompt_category: '购买决策',
-    sentiment: 'positive'
+    sentiment: 'positive',
+    analysis_method: 'ai_structured_v1',
+    analysis_platform: 'analysis-ai',
+    analysis_model: 'analysis-model',
+    analysis_evidence: {
+      brand: {
+        mention: ['广拓'],
+        recommendation: ['可以作为周界报警方案的候选'],
+        rank: []
+      }
+    }
   });
 
   const run = await QuestionSetRunService.createNativeRun({
@@ -136,6 +146,8 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   assert.equal(report.rows.length, 2);
   assert.equal(report.rows[0].answer, '广拓可以作为周界报警方案的候选。');
   assert.equal(report.rows[0].owned_citation_count, 1);
+  assert.equal(report.rows[0].analysis_method, 'ai_structured_v1');
+  assert.equal(report.rows[0].analysis_platform, 'analysis-ai');
   assert.deepEqual(report.rows[0].citation_sources, [{
     url: 'https://www.gato.com.cn/guide',
     domain: 'www.gato.com.cn',
@@ -170,12 +182,15 @@ test('标准 CSV 导出后可以重新导入为内容等价的只读历史报告
   assert.equal(restored.rows[0].question, original.rows[0].question);
   assert.equal(restored.rows[0].answer, original.rows[0].answer);
   assert.deepEqual(restored.rows[0].citation_sources, original.rows[0].citation_sources);
+  assert.equal(restored.rows[0].analysis_method, original.rows[0].analysis_method);
+  assert.equal(restored.rows[0].analysis_model, original.rows[0].analysis_model);
+  assert.deepEqual(restored.rows[0].analysis_evidence, original.rows[0].analysis_evidence);
   assert.equal(restored.summary.brand_mention_rate, original.summary.brand_mention_rate);
   assert.equal(restored.summary.owned_citation_rate, original.summary.owned_citation_rate);
   assert.equal(restored.summary.total_owned_citations, original.summary.total_owned_citations);
 });
 
-test('报告会纠正无竞品项目的历史排名并标记没有竞品基线', async () => {
+test('报告不再用文本规则猜测无竞品项目的历史排名', async () => {
   const imported = await QuestionSetRun.create({
     project_id: project.id,
     user_id: user.id,
@@ -224,9 +239,98 @@ test('报告会纠正无竞品项目的历史排名并标记没有竞品基线',
     runId: imported.id
   });
 
+  assert.equal(report.rows[0].brand_rank, null);
+  assert.equal(report.summary.avg_brand_rank, null);
+  assert.equal(report.summary.competitor_baseline_count, 0);
+});
+
+test('v2 结构化候选顺序可在无竞品项目中产生品牌排名并随 CSV 往返', async () => {
+  const structuredRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: null,
+    question_set_name: '结构化候选顺序',
+    source: 'imported',
+    schema_version: 'question_set_run_v1',
+    record_ids: [],
+    imported_rows: [{
+      record_id: null,
+      question_id: null,
+      question: '学校周界厂家有哪些？',
+      question_category: '',
+      platform: 'deepseek',
+      platform_name: 'DeepSeek',
+      model_name: 'deepseek-v4-flash',
+      status: 'completed',
+      error_message: '',
+      answer: '1. 海康威视\\n2. 大华股份\\n3. 上海广拓',
+      has_metrics: true,
+      brand_mentioned: true,
+      brand_mentions: 1,
+      brand_rank: 3,
+      brand_recommended: false,
+      share_of_voice: 0,
+      citation_count: 1,
+      owned_citation_count: 1,
+      competitor_citation_count: 0,
+      sentiment: 'neutral',
+      sentiment_reason: '',
+      analysis_method: 'ai_structured_v2',
+      analysis_platform: 'analysis-ai',
+      analysis_model: 'analysis-model',
+      analysis_structure: {
+        schema_version: 'geo_metric_input_v2',
+        entities: [
+          { name: '海康威视', type: 'company' },
+          { name: '大华股份', type: 'company' },
+          { name: '上海广拓', type: 'company' }
+        ],
+        mentions: [
+          { entity_name: '海康威视', surface_forms: ['海康威视'] },
+          { entity_name: '大华股份', surface_forms: ['大华股份'] },
+          { entity_name: '上海广拓', surface_forms: ['上海广拓'] }
+        ],
+        candidate_lists: [{ ordered: true, entries: ['海康威视', '大华股份', '上海广拓'] }],
+        recommendations: [],
+        claims: [],
+        sentiment: { label: 'neutral', reason: '', risk_terms: [] },
+        target_entity_name: '上海广拓',
+        competitor_matches: [],
+        citations: {
+          count: 1,
+          official_count: 1,
+          competitor_count: 0,
+          official_website_cited: true,
+          sources: [{ url: 'https://gato.com.cn', domain: 'gato.com.cn', owned: true }]
+        }
+      },
+      analysis_evidence: {},
+      competitor_mentions: [],
+      citation_sources: [{ url: 'https://gato.com.cn', domain: 'gato.com.cn', owned: true }],
+      created_at: null,
+      updated_at: null
+    }],
+    started_at: new Date('2026-07-23T02:00:00.000Z'),
+    completed_at: new Date('2026-07-23T02:01:00.000Z')
+  });
+
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: structuredRun.id
+  });
   assert.equal(report.rows[0].brand_rank, 3);
   assert.equal(report.summary.avg_brand_rank, 3);
-  assert.equal(report.summary.competitor_baseline_count, 0);
+  assert.deepEqual(report.rows[0].analysis_structure.candidate_lists[0].entries, [
+    '海康威视',
+    '大华股份',
+    '上海广拓'
+  ]);
+
+  const csv = await QuestionSetRunService.exportCsv({ projectId: project.id, runId: structuredRun.id });
+  const imported = await QuestionSetRunService.importCsv({ project, user, csv });
+  const restored = await QuestionSetRunService.getReport({ projectId: project.id, runId: imported.id });
+  assert.equal(restored.rows[0].brand_rank, 3);
+  assert.equal(restored.rows[0].analysis_structure.citations.official_website_cited, true);
 });
 
 test('报告汇总能够识别已配置的竞品基线', () => {

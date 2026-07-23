@@ -72,7 +72,6 @@ const { DataTypes } = require('sequelize');
 const detectionRoutes = require('./routes/detection');
 const userRoutes = require('./routes/user');
 const statisticsRoutes = require('./routes/statistics');
-const platformsRoutes = require('./routes/platforms');
 const membershipRoutes = require('./routes/membership');
 const settingsRoutes = require('./routes/settings');
 const captchaRoutes = require('./routes/captcha');
@@ -91,10 +90,9 @@ const { authRequired } = require('./middleware/auth');
 app.use('/api/users', userRoutes);
 // 公开验证码接口（注册用）
 app.use('/api/captcha', captchaRoutes);
-// 需要登录的接口：检测、统计、平台自检
+// 需要登录的接口：检测、统计与业务配置
 app.use('/api/detection', authRequired, detectionRoutes);
 app.use('/api/statistics', authRequired, statisticsRoutes);
-app.use('/api/platforms', authRequired, platformsRoutes);
 app.use('/api/membership', authRequired, membershipRoutes);
 // 定时任务接口（需要登录）
 app.use('/api/schedules', scheduleLimiter, authRequired, scheduleRoutes);
@@ -203,9 +201,67 @@ async function ensureGeoMonitoringColumns() {
   await ensureColumn('visibility_metrics', 'prompt_category', { type: DataTypes.STRING(80), allowNull: true });
   await ensureColumn('visibility_metrics', 'sentiment_reason', { type: DataTypes.STRING(80), allowNull: true });
   await ensureColumn('visibility_metrics', 'sentiment_risk_terms', { type: DataTypes.JSON, allowNull: false, defaultValue: [] });
+  await ensureColumn('visibility_metrics', 'analysis_method', {
+    type: DataTypes.STRING(40),
+    allowNull: false,
+    defaultValue: 'legacy_rules_v1'
+  });
+  await ensureColumn('visibility_metrics', 'analysis_platform', { type: DataTypes.STRING(50), allowNull: true });
+  await ensureColumn('visibility_metrics', 'analysis_model', { type: DataTypes.STRING(255), allowNull: true });
+  await ensureColumn('visibility_metrics', 'analysis_evidence', { type: DataTypes.JSON, allowNull: false, defaultValue: {} });
+  await ensureColumn('visibility_metrics', 'analysis_structure', { type: DataTypes.JSON, allowNull: false, defaultValue: {} });
 
   await ensureColumn('alert_rules', 'last_trigger_value', { type: DataTypes.FLOAT, allowNull: true });
   await ensureColumn('alert_rules', 'last_trigger_message', { type: DataTypes.TEXT, allowNull: true });
+}
+
+async function ensureDynamicPlatformColumns() {
+  const qi = sequelize.getQueryInterface();
+  const questionRecordDescription = await qi.describeTable('question_records');
+  if (!questionRecordDescription.platform_name) {
+    await qi.addColumn('question_records', 'platform_name', { type: DataTypes.STRING(100), allowNull: true });
+    console.log('已添加 question_records.platform_name 列');
+  }
+  if (!questionRecordDescription.model_name) {
+    await qi.addColumn('question_records', 'model_name', { type: DataTypes.STRING(255), allowNull: true });
+    console.log('已添加 question_records.model_name 列');
+  }
+
+  await ensureColumn('ai_platform_configs', 'request_options', {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: {}
+  });
+  await ensureColumn('ai_platform_configs', 'web_search_test_status', {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: 'untested'
+  });
+  await ensureColumn('ai_platform_configs', 'last_web_search_tested_at', {
+    type: DataTypes.DATE,
+    allowNull: true
+  });
+  await ensureColumn('ai_platform_configs', 'last_web_search_test_error_code', {
+    type: DataTypes.STRING(50),
+    allowNull: true
+  });
+  await ensureColumn('ai_platform_configs', 'last_web_search_test_message', {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  });
+
+  if (sequelize.getDialect() === 'postgres') {
+    for (const tableName of ['question_records', 'visibility_metrics']) {
+      const description = await qi.describeTable(tableName);
+      const platformColumn = description?.platform || {};
+      const isEnumColumn = /enum/i.test(String(platformColumn.type || ''))
+        || (Array.isArray(platformColumn.special) && platformColumn.special.length > 0);
+      if (isEnumColumn) {
+        await sequelize.query(`ALTER TABLE "${tableName}" ALTER COLUMN "platform" TYPE VARCHAR(50) USING "platform"::text`);
+        console.log(`已将 ${tableName}.platform 转换为动态平台字符串列`);
+      }
+    }
+  }
 }
 
 // 确保存在演示用户（不占用 id=1），并修复明文密码
@@ -339,6 +395,7 @@ async function ensureDefaultSettings() {
     await ensureExistingTableProjectColumns();
     await sequelize.sync();
     await ensureGeoMonitoringColumns();
+    await ensureDynamicPlatformColumns();
     // 确保 users 表存在会员到期列
     try {
       const qi = sequelize.getQueryInterface();

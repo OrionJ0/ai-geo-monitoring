@@ -2,7 +2,7 @@ const SCHEMA_VERSION = 'question_set_run_v1';
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_ROWS = 5000;
 
-const HEADERS = [
+const REQUIRED_HEADERS = [
   'schema_version',
   'source_run_id',
   'question_set_name',
@@ -32,6 +32,14 @@ const HEADERS = [
   'record_created_at',
   'record_updated_at'
 ];
+const ANALYSIS_HEADERS = [
+  'analysis_method',
+  'analysis_platform',
+  'analysis_model',
+  'analysis_structure_json',
+  'analysis_evidence_json'
+];
+const HEADERS = [...REQUIRED_HEADERS, ...ANALYSIS_HEADERS];
 
 class CsvValidationError extends Error {
   constructor(code, message) {
@@ -93,7 +101,20 @@ function buildCsv(report) {
     JSON.stringify(Array.isArray(row.competitor_mentions) ? row.competitor_mentions : []),
     JSON.stringify(Array.isArray(row.citation_sources) ? row.citation_sources : []),
     dateValue(row.created_at),
-    dateValue(row.updated_at)
+    dateValue(row.updated_at),
+    row.analysis_method || 'legacy_rules_v1',
+    row.analysis_platform || '',
+    row.analysis_model || '',
+    JSON.stringify(
+      row.analysis_structure && typeof row.analysis_structure === 'object' && !Array.isArray(row.analysis_structure)
+        ? row.analysis_structure
+        : {}
+    ),
+    JSON.stringify(
+      row.analysis_evidence && typeof row.analysis_evidence === 'object' && !Array.isArray(row.analysis_evidence)
+        ? row.analysis_evidence
+        : {}
+    )
   ]);
   return `\uFEFF${[HEADERS, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')}`;
 }
@@ -165,6 +186,16 @@ function parseJsonArray(value, column, line) {
   }
 }
 
+function parseJsonObject(value, column, line) {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not-object');
+    return parsed;
+  } catch {
+    throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 ${column} 不是有效 JSON 对象`);
+  }
+}
+
 function parseCitationSources(value, line) {
   const sources = parseJsonArray(value, 'citation_sources_json', line);
   sources.forEach((source) => {
@@ -201,7 +232,7 @@ function parseCsv(csv) {
     throw new CsvValidationError('TOO_MANY_ROWS', `CSV 不能超过 ${MAX_CSV_ROWS} 行数据`);
   }
   const headers = table[0].map((item) => String(item).trim());
-  const missing = HEADERS.filter((header) => !headers.includes(header));
+  const missing = REQUIRED_HEADERS.filter((header) => !headers.includes(header));
   if (missing.length) {
     throw new CsvValidationError('MISSING_COLUMNS', `CSV 缺少必要列：${missing.join('、')}`);
   }
@@ -276,7 +307,16 @@ function parseCsv(csv) {
       competitor_mentions: parseJsonArray(valueAt(row, 'competitor_mentions_json'), 'competitor_mentions_json', line),
       citation_sources: parseCitationSources(valueAt(row, 'citation_sources_json'), line),
       created_at: parseDate(valueAt(row, 'record_created_at'), 'record_created_at', line),
-      updated_at: parseDate(valueAt(row, 'record_updated_at'), 'record_updated_at', line)
+      updated_at: parseDate(valueAt(row, 'record_updated_at'), 'record_updated_at', line),
+      analysis_method: valueAt(row, 'analysis_method').trim() || 'legacy_rules_v1',
+      analysis_platform: valueAt(row, 'analysis_platform').trim(),
+      analysis_model: valueAt(row, 'analysis_model').trim(),
+      analysis_structure: parseJsonObject(
+        valueAt(row, 'analysis_structure_json'),
+        'analysis_structure_json',
+        line
+      ),
+      analysis_evidence: parseJsonObject(valueAt(row, 'analysis_evidence_json'), 'analysis_evidence_json', line)
     };
   });
 
@@ -286,6 +326,7 @@ function parseCsv(csv) {
 module.exports = {
   SCHEMA_VERSION,
   HEADERS,
+  REQUIRED_HEADERS,
   MAX_CSV_BYTES,
   MAX_CSV_ROWS,
   CsvValidationError,

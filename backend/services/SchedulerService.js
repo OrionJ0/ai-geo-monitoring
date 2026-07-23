@@ -4,9 +4,27 @@ const AIPlatformService = require('./AIPlatformService');
 const ResultParserService = require('./ResultParserService');
 const ProjectRunService = require('./ProjectRunService');
 const ProjectRecordFinalizationService = require('./ProjectRecordFinalizationService');
+const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
+const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
-const MAINLAND_PROJECT_PLATFORMS = ['doubao', 'deepseek'];
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
+
+function platformUnavailableMessage(item) {
+  const name = item?.platform_name || item?.code || '监测平台';
+  const messages = {
+    missing_api_key: `${name}未配置 API Key`,
+    disabled: `${name}已被管理员停用`,
+    missing_base_url: `${name}未配置接口地址`,
+    missing_model: `${name}未配置默认模型`,
+    archived: `${name}已归档`,
+    config_unavailable: `${name}配置暂不可用`
+  };
+  return messages[item?.reason] || `${name}暂不可用`;
+}
+
+function safePlatformFailureMessage(result) {
+  return AI_PLATFORM_ERROR_MESSAGES[result?.error_code] || SAFE_PLATFORM_FAILURE_MESSAGE;
+}
 
 function computeNextRun(dailyTime, timezone) {
   try {
@@ -57,6 +75,9 @@ async function validateScheduleProject(schedule, repositories = {}) {
 }
 
 async function submitDetectionForSchedule(schedule, options = {}) {
+  const platformService = options.aiPlatformService || AIPlatformService;
+  const settingsService = options.settingsService || AIRuntimeSettingsService;
+  const quotaConsumer = options.consumeQuota || consumeQuotaDirect;
   let projectData = options.project || null;
   if (!options.projectValidated) {
     const projectGuard = await validateScheduleProject(schedule);
@@ -69,12 +90,50 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   const { user_id, question, platforms, highlight_keywords } = schedule;
   const platformsList = normalizeSchedulePlatforms(platforms, projectData);
   const keywordsArr = Array.isArray(highlight_keywords) ? highlight_keywords : [];
+  let availability;
+  try {
+    availability = await platformService.getPlatformAvailability(platformsList);
+  } catch (error) {
+    console.warn('读取定时任务平台配置失败:', error?.message || error);
+    return {
+      ok: false,
+      reason: 'platform_config_unavailable',
+      attempted: 0,
+      advance_schedule: true,
+      skipped_platforms: platformsList.map((platform) => ({
+        platform,
+        reason: 'config_unavailable',
+        message: `${platform}配置暂不可用`
+      }))
+    };
+  }
+  const runnablePlatforms = availability.filter((item) => item.available);
+  const skippedPlatforms = availability
+    .filter((item) => !item.available)
+    .map((item) => ({
+      platform: item.code,
+      name: item.platform_name,
+      reason: item.reason,
+      message: platformUnavailableMessage(item)
+    }));
+
+  if (!runnablePlatforms.length) {
+    return {
+      ok: false,
+      reason: 'all_platforms_unavailable',
+      attempted: 0,
+      advance_schedule: true,
+      skipped_platforms: skippedPlatforms
+    };
+  }
+
+  const runtimeSettings = await settingsService.getSettings();
 
   // 配额检查：严格按会员控制，每次按平台数量扣减
   try {
-    const consume = await consumeQuotaDirect(user_id, 'detection', platformsList.length);
+    const consume = await quotaConsumer(user_id, 'detection', runnablePlatforms.length);
     if (!consume.ok) {
-      console.warn(`定时任务配额不足或不可用: user=${user_id}, need=${platformsList.length}, limit=${consume.limit}, used=${consume.used}`);
+      console.warn(`定时任务配额不足或不可用: user=${user_id}, need=${runnablePlatforms.length}, limit=${consume.limit}, used=${consume.used}`);
       const reasonMap = {
         not_allowed: '当前会员等级不允许使用该功能',
         exceeded: '今日可用检测次数不足',
@@ -82,13 +141,15 @@ async function submitDetectionForSchedule(schedule, options = {}) {
       };
       const errMsg = reasonMap[consume.reason] || '配额不足';
       // 为每个平台生成失败历史记录，便于用户在历史中看到失败原因
-      for (const platform of platformsList) {
+      for (const platformStatus of runnablePlatforms) {
         try {
           await QuestionRecord.create({
             user_id,
             project_id: schedule.project_id || null,
             tracked_prompt_id: schedule.tracked_prompt_id || null,
-            platform,
+            platform: platformStatus.code,
+            platform_name: platformStatus.platform_name,
+            model_name: platformStatus.model_name,
             question,
             brand: schedule.brand,
             brand_keywords: keywordsArr.join(','),
@@ -99,7 +160,12 @@ async function submitDetectionForSchedule(schedule, options = {}) {
           console.warn('创建配额不足失败记录异常:', e?.message || e);
         }
       }
-      return { ok: false, reason: 'quota_unavailable', attempted: platformsList.length };
+      return {
+        ok: false,
+        reason: 'quota_unavailable',
+        attempted: runnablePlatforms.length,
+        skipped_platforms: skippedPlatforms
+      };
     }
   } catch (e) {
     console.warn('定时任务配额检查失败:', e?.message || e);
@@ -108,7 +174,8 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   let attempted = 0;
   let completed = 0;
   let failed = 0;
-  for (const platform of platformsList) {
+  for (const platformStatus of runnablePlatforms) {
+    const platform = platformStatus.code;
     let rec = null;
     attempted += 1;
     try {
@@ -117,16 +184,21 @@ async function submitDetectionForSchedule(schedule, options = {}) {
         project_id: schedule.project_id || null,
         tracked_prompt_id: schedule.tracked_prompt_id || null,
         platform,
+        platform_name: platformStatus.platform_name,
+        model_name: platformStatus.model_name,
         question,
         brand: schedule.brand,
         brand_keywords: keywordsArr.join(',')
       });
 
-      const result = await AIPlatformService.queryPlatform(platform, question);
+      const result = await platformService.queryPlatform(platform, question, {
+        config: platformStatus.config,
+        runtimeSettings
+      });
       if (!result.success) {
         console.warn('定时任务平台调用失败:', result.error || result.message || platform);
         await QuestionRecord.update(
-          { status: 'failed', error_message: SAFE_PLATFORM_FAILURE_MESSAGE },
+          { status: 'failed', error_message: safePlatformFailureMessage(result) },
           { where: { id: rec.id } }
         );
         failed += 1;
@@ -174,7 +246,7 @@ async function submitDetectionForSchedule(schedule, options = {}) {
       }
     }
   }
-  return { ok: completed > 0, completed, failed, attempted };
+  return { ok: completed > 0, completed, failed, attempted, skipped_platforms: skippedPlatforms };
 }
 
 async function finalizeScheduledProjectRecord({
@@ -203,15 +275,13 @@ async function finalizeScheduledProjectRecord({
 function normalizeSchedulePlatforms(platforms, project = null) {
   const scheduled = (Array.isArray(platforms) ? platforms : [])
     .map(p => String(p || '').trim().toLowerCase())
-    .filter(p => MAINLAND_PROJECT_PLATFORMS.includes(p));
+    .filter(Boolean);
   if (!project?.id) return Array.from(new Set(scheduled));
 
-  const projectPlatforms = (Array.isArray(project.platforms) && project.platforms.length
-    ? project.platforms
-    : MAINLAND_PROJECT_PLATFORMS)
+  const projectPlatforms = (Array.isArray(project.platforms) ? project.platforms : [])
     .map(p => String(p || '').trim().toLowerCase())
-    .filter(p => MAINLAND_PROJECT_PLATFORMS.includes(p));
-  const projectSet = new Set(projectPlatforms.length ? projectPlatforms : MAINLAND_PROJECT_PLATFORMS);
+    .filter(Boolean);
+  const projectSet = new Set(projectPlatforms);
   return Array.from(new Set(scheduled.filter(p => projectSet.has(p))));
 }
 
@@ -234,16 +304,14 @@ class SchedulerService {
     const match = rawTime.match(/^(\d{1,2}):(\d{1,2})$/);
     const hh = match ? Math.max(0, Math.min(23, Number(match[1]))) : 9;
     const mm = match ? Math.max(0, Math.min(59, Number(match[2]))) : 0;
-    const platformList = Array.isArray(project?.platforms) && project.platforms.length
-      ? project.platforms
-      : MAINLAND_PROJECT_PLATFORMS;
+    const platformList = Array.isArray(project?.platforms) ? project.platforms : [];
     const platforms = Array.from(new Set(platformList
       .map((item) => String(item || '').trim().toLowerCase())
-      .filter((item) => MAINLAND_PROJECT_PLATFORMS.includes(item))));
+      .filter(Boolean)));
     return {
       monitoring_enabled: project?.monitoring_enabled === true || project?.monitoring_enabled === 'true',
       monitoring_time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
-      platforms: platforms.length ? platforms : MAINLAND_PROJECT_PLATFORMS
+      platforms
     };
   }
 
@@ -257,6 +325,10 @@ class SchedulerService {
 
   async validateScheduleProject(schedule, repositories = {}) {
     return validateScheduleProject(schedule, repositories);
+  }
+
+  async submitDetectionForSchedule(schedule, options = {}) {
+    return submitDetectionForSchedule(schedule, options);
   }
 
   normalizeSchedulePlatforms(platforms, project = null) {
@@ -301,7 +373,7 @@ class SchedulerService {
       try {
         const result = await submitDetectionForSchedule(s);
         if (result?.skipped) continue;
-        if (!result?.ok && !result?.attempted) continue;
+        if (!result?.ok && !result?.attempted && !result?.advance_schedule) continue;
         const next = computeNextRun(s.daily_time, s.timezone);
         await s.update({ last_run_at: now, next_run_at: next });
       } catch (e) {
@@ -377,20 +449,44 @@ class SchedulerService {
   }
 
   async runNow(scheduleId) {
+    const result = await this.runNowWithResult(scheduleId);
+    return Boolean(result?.ok);
+  }
+
+  async runNowWithResult(scheduleId) {
     const s = await DetectionSchedule.findByPk(scheduleId);
-    if (!s) return false;
+    if (!s) return { ok: false, status: 404, message: '任务不存在' };
     try {
       const now = new Date();
       const guard = await this.validateScheduleProject(s);
-      if (!guard.ok) return false;
+      if (!guard.ok) return { ok: false, status: 400, message: guard.reason };
       const result = await submitDetectionForSchedule(s, { projectValidated: true, project: guard.project });
-      if (!result?.ok) return false;
+      if (!result?.ok) {
+        const skippedMessage = (result?.skipped_platforms || []).map((item) => item.message).filter(Boolean).join('；');
+        const reasonMessages = {
+          all_platforms_unavailable: skippedMessage ? `${skippedMessage}，无法运行。` : '监测平台配置暂不可用，请联系管理员。',
+          platform_config_unavailable: '监测平台配置暂不可用，请联系管理员。',
+          quota_unavailable: '今日可用检测次数不足',
+          quota_check_failed: '配额检查失败'
+        };
+        return {
+          ...result,
+          status: result?.reason === 'quota_unavailable' ? 403 : 400,
+          message: reasonMessages[result?.reason] || '定时任务执行失败'
+        };
+      }
       const next = computeNextRun(s.daily_time, s.timezone);
       await s.update({ last_run_at: now, next_run_at: next });
-      return true;
+      return {
+        ...result,
+        status: 200,
+        message: result.skipped_platforms?.length
+          ? `定时任务已完成；${result.skipped_platforms.map((item) => item.message).join('；')}，已跳过。`
+          : '定时任务已执行'
+      };
     } catch (e) {
       console.warn('手动执行定时任务失败:', e?.message || e);
-      return false;
+      return { ok: false, status: 500, message: '手动执行定时任务失败' };
     }
   }
 }

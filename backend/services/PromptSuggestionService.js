@@ -4,7 +4,7 @@ const VisibilityAnalysisService = require('./VisibilityAnalysisService');
 class PromptSuggestionService {
   MIN_SUGGESTION_COUNT = 3;
   MAX_SUGGESTION_COUNT = 100;
-  DEEPSEEK_BATCH_SIZE = 20;
+  GENERATION_BATCH_SIZE = 20;
   MAX_TOP_UP_BATCHES = 3;
 
   normalizeCount(count) {
@@ -18,7 +18,7 @@ class PromptSuggestionService {
     const batches = [];
     let remaining = total;
     while (remaining > 0) {
-      const batchCount = Math.min(this.DEEPSEEK_BATCH_SIZE, remaining);
+      const batchCount = Math.min(this.GENERATION_BATCH_SIZE, remaining);
       batches.push(batchCount);
       remaining -= batchCount;
     }
@@ -39,10 +39,12 @@ class PromptSuggestionService {
         .filter(Boolean)
         .filter((item, index, rows) => rows.findIndex((row) => row.toLowerCase() === item.toLowerCase()) === index)
       : [];
-    const platformLabels = { doubao: '豆包', deepseek: 'DeepSeek' };
-    const platforms = (Array.isArray(project?.platforms) && project.platforms.length ? project.platforms : ['doubao', 'deepseek'])
-      .map((item) => platformLabels[String(item).trim().toLowerCase()])
+    const platforms = (Array.isArray(options.platformNames) && options.platformNames.length
+      ? options.platformNames
+      : (Array.isArray(project?.platforms) ? project.platforms : []))
+      .map((item) => String(item || '').trim())
       .filter(Boolean);
+    const platformText = platforms.join('、') || '所选监测平台';
     const focus = String(options.focus || '').trim();
     const excludeQuestions = Array.isArray(options.excludeQuestions)
       ? options.excludeQuestions.map((item) => String(item || '').trim()).filter(Boolean).slice(-60)
@@ -50,7 +52,7 @@ class PromptSuggestionService {
 
     return [
       '你是中国大陆市场的 GEO（生成式搜索优化）分析师。',
-      `请生成 ${count} 条适合在${platforms.join('和')}中长期追踪的中文真实用户问题，用于评估行业、品类和竞品场景下的 AI 品牌可见度。`,
+      `请生成 ${count} 条适合在${platformText}中长期追踪的中文真实用户问题，用于评估行业、品类和竞品场景下的 AI 品牌可见度。`,
       `目标品牌：${brandName}`,
       aliases.length ? `品牌别名：${aliases.join('、')}` : '',
       project?.industry ? `行业：${project.industry}` : '',
@@ -74,7 +76,7 @@ class PromptSuggestionService {
   }
 
   async generateSuggestions(project, competitors, options = {}) {
-    const platform = options.platform || 'deepseek';
+    const platform = String(options.platform || project?.platforms?.[0] || '').trim().toLowerCase();
     const requestedCount = this.normalizeCount(options.count || 10);
     const batches = this.buildGenerationBatches(requestedCount);
     const queryPlatform = options.queryPlatform;
@@ -82,6 +84,9 @@ class PromptSuggestionService {
     const baseExcludeQuestions = this.normalizeExcludeQuestions(options.excludeQuestions);
     if (typeof queryPlatform !== 'function') {
       throw new Error('queryPlatform is required');
+    }
+    if (!platform) {
+      throw new Error('platform is required');
     }
 
     const suggestionGroups = [];
@@ -94,6 +99,7 @@ class PromptSuggestionService {
           count: batches[index],
           totalCount: requestedCount,
           focus: options.focus,
+          platformNames: options.platformNames,
           excludeQuestions: [
             ...baseExcludeQuestions,
             ...suggestionGroups.flat().map((item) => item.question)
@@ -132,7 +138,7 @@ class PromptSuggestionService {
       const remainingOriginalBatches = batches.slice(index + 1).reduce((sum, value) => sum + value, 0);
       const shortfall = requestedCount - mergedCount - remainingOriginalBatches;
       if (shortfall > 0 && batches.length < this.MAX_TOP_UP_BATCHES + this.buildGenerationBatches(requestedCount).length) {
-        batches.push(Math.min(this.DEEPSEEK_BATCH_SIZE, shortfall));
+        batches.push(Math.min(this.GENERATION_BATCH_SIZE, shortfall));
       }
     }
 

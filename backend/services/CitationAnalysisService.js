@@ -134,6 +134,9 @@ class CitationAnalysisService {
       return sources;
     }
     if (typeof value === 'object') {
+      if (/web[_-]?search/iu.test(String(value.type || '')) && value.action) {
+        this.collectMetadataSources(value.action, sources, { ...context, source_origin: 'web_search' });
+      }
       if (value.type === 'url_citation' && value.url_citation) {
         this.collectMetadataSources(value.url_citation, sources, { ...context, source_origin: 'web_search' });
       }
@@ -163,6 +166,7 @@ class CitationAnalysisService {
         'web_search',
         'webSearch',
         'source',
+        'action',
         'output',
         'content',
         'choices',

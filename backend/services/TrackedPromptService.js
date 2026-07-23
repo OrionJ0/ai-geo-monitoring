@@ -33,6 +33,34 @@ class TrackedPromptService {
     });
     return this.findDuplicateInRows(question, rows, excludeId);
   }
+
+  prepareBatchQuestions(questions, existingRows = []) {
+    const known = new Map();
+    for (const row of Array.isArray(existingRows) ? existingRows : []) {
+      const canonical = this.canonicalQuestion(row?.question);
+      if (canonical && !known.has(canonical)) known.set(canonical, row);
+    }
+
+    const createdQuestions = [];
+    const skipped = [];
+    for (const value of Array.isArray(questions) ? questions : []) {
+      const question = String(value || '').trim();
+      const canonical = this.canonicalQuestion(question);
+      const duplicate = known.get(canonical);
+      if (duplicate) {
+        skipped.push({
+          question,
+          reason: 'duplicate',
+          duplicate_id: duplicate.id || null
+        });
+        continue;
+      }
+      const pending = { id: null, question };
+      known.set(canonical, pending);
+      createdQuestions.push(question);
+    }
+    return { createdQuestions, skipped };
+  }
 }
 
 module.exports = new TrackedPromptService();
