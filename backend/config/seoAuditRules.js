@@ -1,5 +1,11 @@
 const defaultSeoAuditRules = Object.freeze({
   version: '2026-07-23-v1',
+  crawl: Object.freeze({
+    pageLimit: 200,
+    concurrency: 3,
+    sitemapLimit: 20,
+    sitemapDepth: 3
+  }),
   thresholds: Object.freeze({
     titleMinCharacters: 10,
     titleMaxCharacters: 60,
@@ -46,6 +52,9 @@ function validateSeoAuditRules(config) {
   if (!config.thresholds || typeof config.thresholds !== 'object') {
     throw new Error('SEO 规则配置缺少 thresholds');
   }
+  if (!config.crawl || typeof config.crawl !== 'object') {
+    throw new Error('SEO 规则配置缺少 crawl');
+  }
   if (!config.checks || typeof config.checks !== 'object') {
     throw new Error('SEO 规则配置缺少 checks');
   }
@@ -63,6 +72,11 @@ function validateSeoAuditRules(config) {
   Object.entries(config.thresholds).forEach(([name, value]) => {
     if (!Number.isFinite(value) || value < 0) {
       throw new Error(`SEO 阈值 ${name} 必须是非负数`);
+    }
+  });
+  Object.entries(config.crawl).forEach(([name, value]) => {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`SEO 抓取配置 ${name} 必须是正整数`);
     }
   });
   return config;
