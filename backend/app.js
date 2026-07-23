@@ -81,6 +81,7 @@ const geoProjectRoutes = require('./routes/geoProjects');
 const seoAuditRoutes = require('./routes/seoAudits');
 const SchedulerService = require('./services/SchedulerService');
 const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
+const AIPlatformConfigService = require('./services/AIPlatformConfigService');
 const { authRequired } = require('./middleware/auth');
 
 // 用户登录与公开用户接口保持在 /api/users 下（登录无需鉴权）
@@ -389,6 +390,7 @@ async function ensureDefaultSettings() {
     await ensureDefaultUser();
     await ensureDefaultPlans();
     await ensureDefaultSettings();
+    await AIPlatformConfigService.ensurePresets();
     try {
       const recoveredSeoAudits = await createSeoAuditJobService().recoverInterruptedJobs();
       if (recoveredSeoAudits > 0) console.log(`已恢复 ${recoveredSeoAudits} 个全站 SEO 检测任务`);
