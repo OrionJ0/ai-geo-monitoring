@@ -191,7 +191,8 @@ function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRul
             score: report.score,
             title: report.page.title,
             issues: report.priorities.map(compactIssue),
-            platforms: report.platforms
+            platforms: report.platforms,
+            crawlerAccess: report.crawlerAccess
           });
         } catch (error) {
           errors.push(error);
@@ -283,6 +284,7 @@ function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRul
           truncated
         },
         platforms: firstPage.platforms,
+        crawlerAccess: firstPage.crawlerAccess,
         priorities: issues,
         issues,
         pages

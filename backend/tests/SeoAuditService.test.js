@@ -253,6 +253,46 @@ test('reports non-empty meta keywords as a low-weight SEO check', async () => {
   assert.deepEqual(report.page.keywords, ['技术 SEO', '网站诊断', '搜索优化']);
 });
 
+test('reports configured search and AI crawler permissions from robots.txt', async () => {
+  const report = await createSeoAuditService({ siteClient: createSiteClient() }).audit('https://example.com/products/one');
+  const crawlerCheck = report.categories
+    .flatMap((category) => category.checks)
+    .find((check) => check.id === 'crawler-access');
+
+  assert.equal(report.crawlerAccess.crawlers.length, 13);
+  assert.equal(report.crawlerAccess.crawlers.every((crawler) => crawler.status === 'allowed'), true);
+  assert.equal(crawlerCheck.status, 'passed');
+  assert.equal(crawlerCheck.weight, 7);
+  assert.equal(crawlerCheck.finding, '重要搜索与 AI 抓取 UA 均被 robots.txt 允许');
+  assert.match(crawlerCheck.description, /允许不等于一定收录或引用/);
+});
+
+test('reports the affected crawler when a specific robots group blocks the audited path', async () => {
+  const siteClient = createSiteClient();
+  const fetchPage = siteClient.fetchPage;
+  siteClient.fetchPage = async (url) => ({ ...await fetchPage(url), finalUrl: url });
+  siteClient.probe = async (url) => {
+    if (url.endsWith('/robots.txt')) {
+      return {
+        statusCode: 200,
+        body: 'User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /products/'
+      };
+    }
+    return { statusCode: 404, body: '' };
+  };
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/products/one');
+  const crawlerCheck = report.categories.flatMap((category) => category.checks)
+    .find((check) => check.id === 'crawler-access');
+  const openAiSearch = report.crawlerAccess.crawlers.find((crawler) => crawler.key === 'oai-searchbot');
+
+  assert.equal(openAiSearch.status, 'blocked');
+  assert.equal(openAiSearch.matchedRule, 'Disallow: /products/');
+  assert.equal(crawlerCheck.status, 'failed');
+  assert.equal(crawlerCheck.finding, '1 个重要搜索或 AI 抓取 UA 被 robots.txt 禁止');
+  assert.match(crawlerCheck.recommendation, /OAI-SearchBot/);
+});
+
 test('uses the injected versioned rule configuration for weights and scoring', async () => {
   const { defaultSeoAuditRules } = require('../config/seoAuditRules');
   const customRules = {
@@ -269,7 +309,7 @@ test('uses the injected versioned rule configuration for weights and scoring', a
 
   assert.equal(customReport.scoreVersion, 'test-heavy-title-v1');
   assert.equal(customTitle.weight, 80);
-  assert.equal(customReport.summary.totalWeight, 191);
+  assert.equal(customReport.summary.totalWeight, 198);
   assert.equal(customReport.score < defaultReport.score, true);
 });
 
@@ -283,6 +323,24 @@ test('rejects an incomplete rule configuration before an audit starts', () => {
       ruleConfig: { ...defaultSeoAuditRules, checks: checksWithoutTitle }
     }),
     /SEO 规则配置缺少检查项 title/
+  );
+});
+
+test('rejects invalid crawler profile configuration before an audit starts', () => {
+  const { defaultSeoAuditRules } = require('../config/seoAuditRules');
+
+  assert.throws(
+    () => createSeoAuditService({
+      siteClient: createSiteClient(),
+      ruleConfig: {
+        ...defaultSeoAuditRules,
+        crawlerProfiles: [{
+          ...defaultSeoAuditRules.crawlerProfiles[0],
+          category: 'unknown-category'
+        }]
+      }
+    }),
+    /SEO 爬虫 UA googlebot 的 category 无效/
   );
 });
 

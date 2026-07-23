@@ -1,5 +1,6 @@
 const cheerio = require('cheerio');
 const { defaultSeoAuditRules, validateSeoAuditRules } = require('../config/seoAuditRules');
+const { evaluateCrawlerAccess } = require('./RobotsAccessService');
 
 const CATEGORY_DEFINITIONS = [
   { key: 'crawlability', label: '收录与抓取' },
@@ -293,6 +294,25 @@ function createSeoAuditService({ siteClient, ruleConfig = defaultSeoAuditRules }
         client.probe(`${origin}/sitemap.xml`).catch(() => ({ statusCode: 0, body: '' }))
       ]);
       const robotsAnalysis = analyzeRobots(robotsResult);
+      const crawlerAccess = evaluateCrawlerAccess({
+        robotsResult,
+        targetUrl: finalUrl,
+        profiles: rules.crawlerProfiles
+      });
+      const scoringCrawlers = crawlerAccess.crawlers.filter((crawler) => crawler.affectsScore);
+      const blockedScoringCrawlers = scoringCrawlers.filter((crawler) => crawler.status === 'blocked');
+      const unknownScoringCrawlers = scoringCrawlers.filter((crawler) => crawler.status === 'unknown');
+      const crawlerAccessFinding = crawlerAccess.passed
+        ? '重要搜索与 AI 抓取 UA 均被 robots.txt 允许'
+        : blockedScoringCrawlers.length
+          ? `${blockedScoringCrawlers.length} 个重要搜索或 AI 抓取 UA 被 robots.txt 禁止`
+          : `无法确认 ${unknownScoringCrawlers.length} 个重要搜索或 AI 抓取 UA 的 robots 权限`;
+      const crawlerAccessValue = [
+        `计分 UA：${scoringCrawlers.length} 个`,
+        `允许：${scoringCrawlers.filter((crawler) => crawler.status === 'allowed').length} 个`,
+        `禁止：${blockedScoringCrawlers.length} 个`,
+        `无法判断：${unknownScoringCrawlers.length} 个`
+      ].join(' · ');
       const defaultSitemapUrl = `${origin}/sitemap.xml`;
       const declaredSitemapUrls = [...String(robotsResult.body || '').matchAll(/^sitemap\s*:\s*(\S+)/gim)]
         .map((match) => match[1])
@@ -355,6 +375,15 @@ function createSeoAuditService({ siteClient, ruleConfig = defaultSeoAuditRules }
           value: robotsAnalysis.value,
           description: 'robots.txt 用于声明搜索引擎抓取规则。',
           recommendation: '在网站根目录提供可访问的 robots.txt，并检查是否误封重要路径。'
+        }),
+        createCheck({
+          id: 'crawler-access', category: 'crawlability', title: '搜索与 AI 爬虫权限',
+          passed: crawlerAccess.passed, finding: crawlerAccessFinding,
+          value: crawlerAccessValue,
+          description: '按当前页面路径解析 robots.txt 中各 UA 的抓取声明；允许不等于一定收录或引用，也不能证明 WAF、登录和 IP 策略已放行真实爬虫。',
+          recommendation: blockedScoringCrawlers.length
+            ? `检查并放行 ${blockedScoringCrawlers.map((crawler) => crawler.label).join('、')} 对当前路径的 robots 规则。`
+            : '修复 robots.txt 的访问或格式问题，再确认重要搜索与 AI 搜索爬虫的路径权限。'
         }),
         createCheck({
           id: 'sitemap', category: 'crawlability', title: 'Sitemap.xml',
@@ -553,6 +582,7 @@ function createSeoAuditService({ siteClient, ruleConfig = defaultSeoAuditRules }
           }
         },
         platforms,
+        crawlerAccess,
         priorities: issues.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.weight - a.weight),
         categories
       };

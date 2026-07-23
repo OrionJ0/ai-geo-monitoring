@@ -100,6 +100,34 @@ test('continues after page failures and aggregates issues with affected URLs', a
   ]);
 });
 
+test('evaluates crawler permissions per path and aggregates only affected pages', async () => {
+  const pages = new Map([
+    ['https://example.com/', htmlPage('https://example.com/', ['/private/page'])],
+    ['https://example.com/private/page', htmlPage('https://example.com/private/page')]
+  ]);
+  const siteClient = {
+    async fetchPage(url) {
+      return pages.get(url);
+    },
+    async probe(url) {
+      if (url === 'https://example.com/robots.txt') {
+        return { statusCode: 200, body: 'User-agent: *\nDisallow: /private/' };
+      }
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+  const crawlerIssue = report.issues.find((issue) => issue.id === 'crawler-access');
+  const rootPage = report.pages.find((page) => page.url === 'https://example.com/');
+  const privatePage = report.pages.find((page) => page.url === 'https://example.com/private/page');
+
+  assert.deepEqual(crawlerIssue.affectedPages, ['https://example.com/private/page']);
+  assert.equal(rootPage.crawlerAccess.crawlers.find((crawler) => crawler.key === 'googlebot').status, 'allowed');
+  assert.equal(privatePage.crawlerAccess.crawlers.find((crawler) => crawler.key === 'googlebot').status, 'blocked');
+  assert.equal(report.crawlerAccess.targetPath, '/');
+});
+
 test('respects page limit, reports truncation and emits crawl progress', async () => {
   const pages = new Map([
     ['https://example.com/', htmlPage('https://example.com/', ['/a', '/b', '/c'])],
