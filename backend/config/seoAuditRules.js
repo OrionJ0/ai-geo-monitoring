@@ -63,6 +63,15 @@ const defaultSeoHealthScoreConfig = Object.freeze({
   homepageWeight: 3,
   informationalRuleIds: Object.freeze(['search-verification']),
   siteScopedRuleIds: Object.freeze(['robots-txt', 'sitemap', 'search-verification']),
+  blockerPolicy: Object.freeze({
+    homepageUnavailableCap: 20,
+    allTraditionalSearchCrawlersBlockedCap: 20,
+    homepageNoindexCap: 39,
+    widespreadNoindexCap: 39,
+    widespreadEmptyContentCap: 59,
+    widespreadCoverage: 0.5,
+    traditionalSearchCrawlerKeys: Object.freeze(['googlebot', 'bingbot', 'baiduspider'])
+  }),
   stages: Object.freeze([
     Object.freeze({
       key: 'access',
@@ -173,6 +182,40 @@ function validateSeoHealthScoreConfig(config, rules = defaultSeoAuditRules) {
   if (!Array.isArray(config.informationalRuleIds)) {
     throw new Error('SEO 技术健康评分配置缺少 informationalRuleIds');
   }
+  if (!Array.isArray(config.siteScopedRuleIds)) {
+    throw new Error('SEO 技术健康评分配置缺少 siteScopedRuleIds');
+  }
+  if (!config.blockerPolicy || typeof config.blockerPolicy !== 'object') {
+    throw new Error('SEO 技术健康评分配置缺少 blockerPolicy');
+  }
+  [
+    'homepageUnavailableCap',
+    'allTraditionalSearchCrawlersBlockedCap',
+    'homepageNoindexCap',
+    'widespreadNoindexCap',
+    'widespreadEmptyContentCap'
+  ].forEach((name) => {
+    const value = config.blockerPolicy[name];
+    if (!Number.isInteger(value) || value < 0 || value > 100) {
+      throw new Error(`SEO 技术健康评分 blockerPolicy.${name} 必须是 0–100 的整数`);
+    }
+  });
+  if (
+    !Number.isFinite(config.blockerPolicy.widespreadCoverage)
+    || config.blockerPolicy.widespreadCoverage <= 0
+    || config.blockerPolicy.widespreadCoverage > 1
+  ) {
+    throw new Error('SEO 技术健康评分 blockerPolicy.widespreadCoverage 必须大于 0 且不超过 1');
+  }
+  const traditionalCrawlerKeys = config.blockerPolicy.traditionalSearchCrawlerKeys;
+  if (
+    !Array.isArray(traditionalCrawlerKeys)
+    || !traditionalCrawlerKeys.length
+    || traditionalCrawlerKeys.some((key) => typeof key !== 'string' || !key.trim())
+    || new Set(traditionalCrawlerKeys).size !== traditionalCrawlerKeys.length
+  ) {
+    throw new Error('SEO 技术健康评分 blockerPolicy.traditionalSearchCrawlerKeys 必须是非空且唯一的 key 列表');
+  }
 
   const stageKeys = new Set();
   const assignedRuleIds = new Set();
@@ -202,6 +245,11 @@ function validateSeoHealthScoreConfig(config, rules = defaultSeoAuditRules) {
   config.informationalRuleIds.forEach((id) => {
     if (!rules.checks[id] || assignedRuleIds.has(id)) {
       throw new Error(`SEO 信息性规则 ${id} 不存在或被重复计分`);
+    }
+  });
+  config.siteScopedRuleIds.forEach((id) => {
+    if (!rules.checks[id]) {
+      throw new Error(`SEO 站点级规则 ${id} 不存在`);
     }
   });
   const expectedIds = Object.keys(rules.checks)

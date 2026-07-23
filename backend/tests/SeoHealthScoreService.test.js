@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calculateTechnicalHealth } = require('../services/SeoHealthScoreService');
+const {
+  calculateTechnicalHealth,
+  detectTechnicalHealthBlockers
+} = require('../services/SeoHealthScoreService');
 const {
   defaultSeoAuditRules,
   defaultSeoHealthScoreConfig,
@@ -41,7 +44,9 @@ function instance(id, status, { url = 'https://example.com/', isHomepage = true 
       status,
       severity: TEST_RULES.checks[id].severity,
       weight: TEST_RULES.checks[id].weight,
-      value: status
+      value: status,
+      category: 'technical',
+      recommendation: `修复 ${id}`
     }
   };
 }
@@ -99,7 +104,16 @@ test('全站同类问题按首页权重聚合为一条覆盖率扣分', () => {
     coverage: 0.75,
     affectsHomepage: true,
     deduction: 22.5,
-    value: 'failed'
+    value: 'failed',
+    category: 'technical',
+    weight: 1,
+    recommendation: '修复 title',
+    count: 1,
+    findings: [{
+      url: 'https://example.com/',
+      finding: 'title failed',
+      value: 'failed'
+    }]
   });
 });
 
@@ -185,4 +199,205 @@ test('v4 配置以四阶段覆盖全部计分规则并排除信息性标签', ()
     'access'
   );
   assert.deepEqual(config.informationalRuleIds, ['search-verification']);
+});
+
+test('v4 配置会拒绝不可维护的阻断阈值与重复爬虫 key', () => {
+  assert.throws(
+    () => validateSeoHealthScoreConfig({
+      ...defaultSeoHealthScoreConfig,
+      blockerPolicy: {
+        ...defaultSeoHealthScoreConfig.blockerPolicy,
+        widespreadCoverage: 1.2
+      }
+    }, defaultSeoAuditRules),
+    /widespreadCoverage/
+  );
+  assert.throws(
+    () => validateSeoHealthScoreConfig({
+      ...defaultSeoHealthScoreConfig,
+      blockerPolicy: {
+        ...defaultSeoHealthScoreConfig.blockerPolicy,
+        traditionalSearchCrawlerKeys: ['googlebot', 'googlebot']
+      }
+    }, defaultSeoAuditRules),
+    /traditionalSearchCrawlerKeys/
+  );
+});
+
+test('问题优先级先列阻断，再按阶段和阶段内实际扣分排列', () => {
+  const result = calculateTechnicalHealth({
+    instances: [
+      instance('http-status', 'failed'),
+      instance('indexability', 'passed'),
+      instance('title', 'failed'),
+      instance('viewport', 'passed')
+    ],
+    blockers: [{
+      id: 'homepage-unavailable',
+      title: '首页无法访问',
+      finding: '首页返回 HTTP 503',
+      cap: 20,
+      affectedPages: ['https://example.com/'],
+      coverage: 1
+    }],
+    rules: TEST_RULES,
+    scoreConfig: TEST_SCORE_CONFIG
+  });
+
+  assert.deepEqual(
+    result.priorities.map(({ id }) => id),
+    ['homepage-unavailable', 'http-status', 'title']
+  );
+  assert.equal(result.priorities[0].kind, 'blocker');
+  assert.equal(result.priorities[1].stage, 'access');
+  assert.equal(result.priorities[2].stage, 'content');
+});
+
+test('首页明确 noindex 会形成可解释的索引阻断', () => {
+  const blockers = detectTechnicalHealthBlockers({
+    pages: [
+      {
+        url: 'https://example.com/',
+        isHomepage: true,
+        statusCode: 200,
+        indexable: false,
+        contentCharacters: 1000
+      },
+      {
+        url: 'https://example.com/product',
+        isHomepage: false,
+        statusCode: 200,
+        indexable: true,
+        contentCharacters: 1000
+      }
+    ],
+    crawlerAccess: { crawlers: [] },
+    scoreConfig: defaultSeoHealthScoreConfig
+  });
+
+  assert.deepEqual(blockers, [{
+    id: 'homepage-noindex',
+    title: '首页禁止索引',
+    finding: '首页明确设置 noindex',
+    cap: 39,
+    affectedPages: ['https://example.com/'],
+    coverage: 0.75
+  }]);
+});
+
+test('首页确认返回不可用状态会形成访问阻断', () => {
+  const blockers = detectTechnicalHealthBlockers({
+    pages: [{
+      url: 'https://example.com/',
+      isHomepage: true,
+      statusCode: 503,
+      indexable: true,
+      contentCharacters: 0
+    }],
+    crawlerAccess: { crawlers: [] },
+    scoreConfig: defaultSeoHealthScoreConfig
+  });
+
+  assert.equal(blockers[0].id, 'homepage-unavailable');
+  assert.equal(blockers[0].cap, 20);
+  assert.equal(blockers[0].coverage, 1);
+});
+
+test('首页状态无法确认时保持未知证据，不伪判为已确认的访问阻断', () => {
+  const blockers = detectTechnicalHealthBlockers({
+    pages: [{
+      url: 'https://example.com/',
+      isHomepage: true,
+      statusCode: 0,
+      indexable: null,
+      contentCharacters: null
+    }],
+    crawlerAccess: { crawlers: [] },
+    scoreConfig: defaultSeoHealthScoreConfig
+  });
+
+  assert.deepEqual(blockers, []);
+});
+
+test('明确 noindex 的加权覆盖率达到一半时形成大范围索引阻断', () => {
+  const pages = [{
+    url: 'https://example.com/',
+    isHomepage: true,
+    statusCode: 200,
+    indexable: true,
+    contentCharacters: 1000
+  }];
+  for (let index = 0; index < 4; index += 1) {
+    pages.push({
+      url: `https://example.com/page-${index}`,
+      isHomepage: false,
+      statusCode: 200,
+      indexable: false,
+      contentCharacters: 1000
+    });
+  }
+
+  const blockers = detectTechnicalHealthBlockers({
+    pages,
+    crawlerAccess: { crawlers: [] },
+    scoreConfig: defaultSeoHealthScoreConfig
+  });
+
+  assert.equal(blockers[0].id, 'widespread-noindex');
+  assert.equal(blockers[0].cap, 39);
+  assert.equal(blockers[0].coverage, 0.5714);
+  assert.equal(blockers[0].affectedPages.length, 4);
+});
+
+test('robots 明确阻止全部主要传统搜索爬虫时形成访问阻断', () => {
+  const blockers = detectTechnicalHealthBlockers({
+    pages: [{
+      url: 'https://example.com/',
+      isHomepage: true,
+      statusCode: 200,
+      indexable: true,
+      contentCharacters: 1000
+    }],
+    crawlerAccess: {
+      crawlers: [
+        { key: 'googlebot', status: 'blocked' },
+        { key: 'bingbot', status: 'blocked' },
+        { key: 'baiduspider', status: 'blocked' },
+        { key: 'oai-searchbot', status: 'allowed' }
+      ]
+    },
+    scoreConfig: defaultSeoHealthScoreConfig
+  });
+
+  assert.equal(blockers[0].id, 'all-traditional-search-crawlers-blocked');
+  assert.equal(blockers[0].cap, 20);
+});
+
+test('无有效正文的加权覆盖率达到一半时形成内容阻断', () => {
+  const pages = [{
+    url: 'https://example.com/',
+    isHomepage: true,
+    statusCode: 200,
+    indexable: true,
+    contentCharacters: 1000
+  }];
+  for (let index = 0; index < 4; index += 1) {
+    pages.push({
+      url: `https://example.com/empty-${index}`,
+      isHomepage: false,
+      statusCode: 200,
+      indexable: true,
+      contentCharacters: 0
+    });
+  }
+
+  const blockers = detectTechnicalHealthBlockers({
+    pages,
+    crawlerAccess: { crawlers: [] },
+    scoreConfig: defaultSeoHealthScoreConfig
+  });
+
+  assert.equal(blockers[0].id, 'widespread-empty-content');
+  assert.equal(blockers[0].cap, 59);
+  assert.equal(blockers[0].coverage, 0.5714);
 });
