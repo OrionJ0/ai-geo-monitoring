@@ -74,11 +74,6 @@ src/app/
   - Token expiration warnings (30min/5min before expiry)
   - Helper functions: `setAuthToken()`, `clearAuth()`, `shouldRefreshToken()`, `getCurrentToken()`
   - **Important**: Import from `@/lib/axiosConfig` instead of direct `axios` import
-- **`src/utils/concurrentLimit.js`**: Utility for controlled API calls with:
-  - `concurrentLimit()`: Generic concurrency control (default 5 concurrent)
-  - `sequential()`: Sequential execution (concurrency = 1)
-  - `sequentialWithDelay()`: Sequential with delays (100ms default) to avoid rate limits
-  - **Use case**: Batch operations like deleting multiple records
 - **`src/components/Login.jsx`**: `/`、`/login` 以及受保护布局共用的登录表单
 - **`src/app/geo/layout.tsx`**: GEO 工作台导航与登录态保护
 - **`src/app/admin/layout.tsx`**: 管理后台导航、权限与登录态保护
@@ -126,7 +121,7 @@ backend/
 4. Token expiration warnings at 30min and 5min before expiry
 
 ### Rate Limit Avoidance
-- **Frontend**: Use `sequentialWithDelay()` for batch operations (100ms delay between requests)
+- **Frontend**: Prefer dedicated batch API endpoints instead of issuing one request per item
 - **Backend**: Higher limits for `/api/schedules` endpoint (1000/15min)
 - **Polling**: GEO detection uses 30-second intervals (not 1-second)
 
@@ -153,7 +148,7 @@ backend/
 ### API Calls
 - **Always import from `@/lib/axiosConfig`** for axios instance (not direct `axios` import)
 - Use helper functions: `setAuthToken()`, `clearAuth()` for auth state management
-- **For batch operations**, wrap in `sequentialWithDelay()` to avoid rate limits (100ms default delay)
+- **For batch operations**, use the matching backend batch endpoint when one exists
 - Handle 401 errors gracefully (already handled by interceptors - auto-redirects to login)
 - **Important**: Avoid setting `axios.defaults.baseURL` or `axios.defaults.headers.common['Authorization']` in individual components - use the global config
 
@@ -204,11 +199,10 @@ backend/
    ```
 
 ### Handling Rate Limit Errors
-- Increase delay in `sequentialWithDelay()` calls (e.g., from 100ms to 500ms)
 - Reduce batch sizes
 - Consider implementing exponential backoff for retries
 - Check if endpoint needs higher limit in backend
-- **Common pattern**: Use `sequentialWithDelay(selectedRowKeys, async (id) => { ... }, 100)` for batch deletions
+- Prefer a server-side batch endpoint over repeated client-side mutation requests
 
 ## Deployment Notes
 
