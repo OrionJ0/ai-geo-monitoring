@@ -116,7 +116,9 @@ export default function SeoAuditHistoryDrawer({
             >
               <header>
                 <div>
-                  <span className={styles.historySequence}>报告 #{item.id}</span>
+                  <span className={styles.historySequence}>
+                    {item.summary?.mode === 'site' ? '全站' : '单页'} · 报告 #{item.id}
+                  </span>
                   <h3>{displayHost(item.finalUrl)}</h3>
                 </div>
                 <strong style={{ color: historyScoreColor(item.score) }}>{item.score}</strong>
@@ -125,7 +127,10 @@ export default function SeoAuditHistoryDrawer({
               <footer>
                 <div>
                   <span>{formatHistoryDate(item.checkedAt)}</span>
-                  <span>{item.summary?.issues || 0} 个问题 · {item.durationMs} ms</span>
+                  <span>
+                    {item.summary?.issues || 0} 个问题 · {item.summary?.pages || 1} 页
+                    {item.summary?.truncated ? ' · 已截断' : ''}
+                  </span>
                 </div>
                 <Button
                   type="link"

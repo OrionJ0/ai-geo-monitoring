@@ -49,3 +49,37 @@ test('legacy SEO reports translate failed check labels into problem findings', (
   assert.match(source, /张图片缺少有效 Alt/);
   assert.match(source, /JSON-LD 结构化数据缺失/);
 });
+
+test('SEO audit page defaults to full-site mode and polls persisted asynchronous jobs', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /useState\('site'\)/);
+  assert.match(source, /全站检测/);
+  assert.match(source, /单页检测/);
+  assert.match(source, /post\('\/api\/seo-audits\/site'/);
+  assert.match(source, /get\(`\/api\/seo-audits\/jobs\/\$\{jobId\}`/);
+  assert.match(source, /localStorage/);
+});
+
+test('SEO audit page renders crawl progress and a site-level report contract', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /SeoSiteAuditReport/);
+  assert.match(source, /SeoAuditJobProgress/);
+  assert.match(source, /job\.progress/);
+});
+
+test('SEO reports show separate Google, Bing and Baidu verification tag states', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /SearchPlatformPanel/);
+  assert.match(source, /report\.platforms/);
+});
+
+test('SEO history distinguishes full-site reports and page coverage', () => {
+  const historySource = fs.readFileSync(historyPath, 'utf8');
+
+  assert.match(historySource, /summary\?\.mode/);
+  assert.match(historySource, /全站/);
+  assert.match(historySource, /summary\?\.pages/);
+});

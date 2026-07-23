@@ -38,3 +38,13 @@ test('GEO side navigation exposes only the new workspace modules plus notice and
   requiredRoutes.forEach((route) => assert.match(source, new RegExp(route)));
   forbiddenRoutes.forEach((route) => assert.doesNotMatch(source, new RegExp(route)));
 });
+
+test('GEO workspace collapses its sidebar and keeps content usable on narrow screens', () => {
+  const layoutSource = fs.readFileSync(path.join(srcRoot, 'app/geo/layout.tsx'), 'utf8');
+  const globalStyles = fs.readFileSync(path.join(srcRoot, 'app/globals.css'), 'utf8');
+
+  assert.match(layoutSource, /breakpoint="md"/);
+  assert.match(layoutSource, /className="geo-content"/);
+  assert.match(globalStyles, /@media \(max-width: 680px\)/);
+  assert.match(globalStyles, /\.geo-content/);
+});

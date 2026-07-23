@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Form, Input, Progress, Segmented, Spin, message } from 'antd';
 import {
   CheckCircleFilled,
@@ -15,7 +15,12 @@ import {
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import SeoAuditHistoryDrawer from './SeoAuditHistoryDrawer';
+import SeoAuditJobProgress from './SeoAuditJobProgress';
+import SeoSiteAuditReport from './SeoSiteAuditReport';
+import SearchPlatformPanel from './SearchPlatformPanel';
 import styles from './seo-audit.module.css';
+
+const ACTIVE_JOB_KEY = 'goodie-seo-active-job';
 
 const SEVERITY_LABELS = {
   critical: '严重',
@@ -106,13 +111,20 @@ function SeverityBadge({ severity }) {
   return <span className={`${styles.severityBadge} ${styles[`severity_${severity}`]}`}>{SEVERITY_LABELS[severity]}</span>;
 }
 
+function waitForNextPoll() {
+  return new Promise((resolve) => setTimeout(resolve, 1200));
+}
+
 export default function SeoAuditPage() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState('site');
+  const [job, setJob] = useState(null);
   const [report, setReport] = useState(null);
   const [filter, setFilter] = useState('all');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const pollRef = useRef(0);
 
   const visibleCategories = useMemo(() => {
     if (!report?.categories) return [];
@@ -124,24 +136,85 @@ export default function SeoAuditPage() {
       .filter((category) => category.checks.length > 0);
   }, [filter, report]);
 
-  const runAudit = async ({ url }) => {
+  const pollSiteAudit = useCallback(async (jobId, pollId, restored = false) => {
+    while (pollRef.current === pollId) {
+      try {
+        const response = await axios.get(`/api/seo-audits/jobs/${jobId}`);
+        const nextJob = response?.data?.data;
+        if (!nextJob || pollRef.current !== pollId) return null;
+        setJob(nextJob);
+        if (nextJob.status === 'completed' && nextJob.report) {
+          window.localStorage.removeItem(ACTIVE_JOB_KEY);
+          setReport(nextJob.report);
+          setHistoryRefreshKey((value) => value + 1);
+          message.success(restored ? '已恢复完成的全站检测报告' : '全站 SEO 检测完成');
+          return nextJob.report;
+        }
+        if (nextJob.status === 'failed') {
+          window.localStorage.removeItem(ACTIVE_JOB_KEY);
+          message.error(nextJob.error?.message || '全站 SEO 检测失败，请稍后重试');
+          return null;
+        }
+        await waitForNextPoll();
+      } catch (error) {
+        if (pollRef.current === pollId) {
+          window.localStorage.removeItem(ACTIVE_JOB_KEY);
+          message.error(getApiErrorMessage(error, '读取全站检测进度失败'));
+        }
+        return null;
+      }
+    }
+    return null;
+  }, []);
+
+  useEffect(() => {
+    const storedJobId = Number(window.localStorage.getItem(ACTIVE_JOB_KEY));
+    if (!Number.isInteger(storedJobId) || storedJobId < 1) return undefined;
+    const pollId = pollRef.current + 1;
+    pollRef.current = pollId;
+    setMode('site');
     setLoading(true);
+    setJob({ id: storedJobId, status: 'queued', progress: { phase: 'queued' } });
+    pollSiteAudit(storedJobId, pollId, true).finally(() => {
+      if (pollRef.current === pollId) setLoading(false);
+    });
+    return () => { pollRef.current += 1; };
+  }, [pollSiteAudit]);
+
+  const runAudit = async ({ url }) => {
+    const pollId = pollRef.current + 1;
+    pollRef.current = pollId;
+    setLoading(true);
+    setJob(null);
     try {
-      const response = await axios.post('/api/seo-audits', { url });
-      setReport(response?.data?.data || null);
+      if (mode === 'site') {
+        const response = await axios.post('/api/seo-audits/site', { url });
+        const createdJob = response?.data?.data;
+        if (!createdJob?.id) throw new Error('未获得全站检测任务编号');
+        setReport(null);
+        setJob(createdJob);
+        window.localStorage.setItem(ACTIVE_JOB_KEY, String(createdJob.id));
+        await pollSiteAudit(createdJob.id, pollId);
+      } else {
+        window.localStorage.removeItem(ACTIVE_JOB_KEY);
+        const response = await axios.post('/api/seo-audits', { url });
+        setReport(response?.data?.data || null);
+        setHistoryRefreshKey((value) => value + 1);
+        message.success('单页 SEO 检测完成');
+      }
       setFilter('all');
-      setHistoryRefreshKey((value) => value + 1);
-      message.success('SEO 检测完成');
     } catch (error) {
       message.error(getApiErrorMessage(error, 'SEO 检测失败，请稍后重试'));
     } finally {
-      setLoading(false);
+      if (pollRef.current === pollId) setLoading(false);
     }
   };
 
   const openHistoricalReport = (historicalReport) => {
     if (!historicalReport) return;
     setReport(historicalReport);
+    setMode(historicalReport.mode === 'site' ? 'site' : 'page');
+    setJob(null);
     setFilter('all');
     if (historicalReport.finalUrl) form.setFieldValue('url', historicalReport.finalUrl);
     message.success('已打开历史报告');
@@ -158,9 +231,24 @@ export default function SeoAuditPage() {
           历史报告
         </Button>
         <div className={styles.heroCopy}>
-          <span className={styles.eyebrow}><SearchOutlined /> 单页关键项诊断</span>
-          <h1 id="seo-audit-title">先找出最影响搜索表现的问题</h1>
-          <p>检测页面是否可抓取、信息是否完整、内容结构和移动体验是否达标，并按修复优先级整理成行动清单。</p>
+          <span className={styles.eyebrow}><SearchOutlined /> 技术 SEO 检测</span>
+          <h1 id="seo-audit-title">把整站问题落到每一条 URL</h1>
+          <p>从站内链接与 Sitemap 发现同域页面，检查 Google、Bing、百度共同关注的技术基础，并按严重程度和影响范围排出修复顺序。</p>
+        </div>
+
+        <div className={styles.modeControl}>
+          <span>检测范围</span>
+          <Segmented
+            aria-label="检测范围"
+            value={mode}
+            disabled={loading}
+            onChange={(value) => setMode(value)}
+            options={[
+              { label: '全站检测', value: 'site' },
+              { label: '单页检测', value: 'page' },
+            ]}
+          />
+          <small>{mode === 'site' ? '默认最多检测 200 个同域页面，异步执行' : '只检测输入的精确页面，适合快速复测'}</small>
         </div>
 
         <Form form={form} onFinish={runAudit} initialValues={{ url: 'https://gato.com.cn/' }} className={styles.auditForm}>
@@ -174,7 +262,7 @@ export default function SeoAuditPage() {
               id="seo-audit-url"
               size="large"
               prefix={<GlobalOutlined aria-hidden="true" />}
-              placeholder="https://example.com/page"
+              placeholder={mode === 'site' ? 'https://example.com/' : 'https://example.com/product/item'}
               autoComplete="url"
               disabled={loading}
             />
@@ -186,12 +274,14 @@ export default function SeoAuditPage() {
             icon={<SearchOutlined />}
             loading={loading}
           >
-            开始检测
+            {mode === 'site' ? '开始全站检测' : '检测这个页面'}
           </Button>
         </Form>
         <div className={styles.scopeNote}>
           <SafetyCertificateOutlined aria-hidden="true" />
-          当前检测单个公开页面的关键技术 SEO 项；报告会保存在当前账户，不保存抓取的页面正文。
+          {mode === 'site'
+            ? '只抓取同域公开页面；单页失败不会中断任务，达到上限会在报告中明确标记。'
+            : '只检测输入的公开页面；额外验证根目录 robots.txt、Sitemap 与首页平台标签。'}
         </div>
       </section>
 
@@ -203,7 +293,11 @@ export default function SeoAuditPage() {
         refreshKey={historyRefreshKey}
       />
 
-      {loading && !report && (
+      {loading && !report && mode === 'site' && job && (
+        <SeoAuditJobProgress job={job} progress={job.progress} />
+      )}
+
+      {loading && !report && mode === 'page' && (
         <section className={styles.loadingPanel} aria-live="polite">
           <Spin size="large" />
           <div>
@@ -233,7 +327,9 @@ export default function SeoAuditPage() {
         </section>
       )}
 
-      {report && (
+      {report?.mode === 'site' && <SeoSiteAuditReport report={report} />}
+
+      {report && report.mode !== 'site' && (
         <div className={styles.report} aria-live="polite" aria-busy={loading}>
           <section className={styles.reportMeta}>
             <div>
@@ -305,6 +401,8 @@ export default function SeoAuditPage() {
               </div>
             </aside>
           </section>
+
+          <SearchPlatformPanel platforms={report.platforms} />
 
           <section className={styles.checksSection} aria-labelledby="all-checks-title">
             <header className={styles.checksHeader}>
@@ -396,7 +494,7 @@ export default function SeoAuditPage() {
 
           <footer className={styles.methodNote}>
             <ClockCircleOutlined aria-hidden="true" />
-            <span>这是面向快速修复的单页基础检测，不包含全站爬取、真实 Core Web Vitals、关键词排名或外链数据库。</span>
+            <span>这是输入 URL 的单页技术检测；技术健康度不是 Google、Bing 或百度官方评分，不包含真实 Core Web Vitals、关键词排名或外链数据库。</span>
           </footer>
         </div>
       )}

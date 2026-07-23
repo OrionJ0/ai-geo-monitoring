@@ -200,3 +200,35 @@ button:focus-visible {
 .app-header .logo {
   min-width: 0;
 }
+
+@media (max-width: 680px) {
+  .app-header {
+    padding: 8px 10px;
+  }
+
+  .app-header .logo {
+    gap: 4px !important;
+  }
+
+  .app-header .logo > span {
+    overflow: hidden;
+    max-width: 108px;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-header .ant-space {
+    gap: 4px !important;
+  }
+
+  .app-header .ant-btn:not(.ant-btn-text) {
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+
+  .geo-content {
+    min-width: 0;
+    padding: 12px !important;
+  }
+}

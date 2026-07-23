@@ -117,9 +117,11 @@ export default function GeoLayout({
         <Sider
           width={220}
           collapsedWidth={0}
+          breakpoint="md"
           theme="light"
           collapsible
           collapsed={collapsed}
+          onBreakpoint={(broken) => setCollapsed(broken)}
           onCollapse={(val) => setCollapsed(val)}
           trigger={null}
           style={{ background: '#fff' }}
@@ -131,7 +133,7 @@ export default function GeoLayout({
             items={menuItems}
           />
         </Sider>
-        <Content style={{ padding: 24 }}>
+        <Content className="geo-content" style={{ padding: 24 }}>
           <Breadcrumb
             style={{ margin: '8px 0' }}
             items={breadcrumbItems.map((item: any) => ({
