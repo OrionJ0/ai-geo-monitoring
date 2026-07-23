@@ -24,6 +24,17 @@ coverage/
 .playwright-cli/
 supabase/
 
+# local verification and tool artifacts
+/output/
+/tmp/
+/work/
+/test-results/
+/playwright-report/
+/blob-report/
+/.eslintcache
+/.turbo/
+/.vercel/
+
 # logs
 logs/
 *.log
