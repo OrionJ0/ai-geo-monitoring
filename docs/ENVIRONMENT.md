@@ -1,6 +1,6 @@
 # 环境变量与敏感信息
 
-> ⚠️ **所有敏感值放在 `backend/.env`，不要提交到仓库。**
+> ⚠️ **部署级敏感值放在 `backend/.env`，不要提交到仓库；AI 平台 API Key 由管理员在设置中心填写并加密入库。**
 
 ## 创建本地配置
 
@@ -15,7 +15,15 @@ cp nextjs-frontend/.env.example nextjs-frontend/.env.local
 
 - `JWT_SECRET`
 - `DEFAULT_ADMIN_PASSWORD`
-- 需要启用的平台 API Key，例如 `DOUBAO_API_KEY`、`DEEPSEEK_API_KEY`
+- `CONFIG_ENCRYPTION_KEY`
+
+本地开发可在 `backend/` 目录执行以下命令生成本机专用主密钥。命令不会回显密钥，并会把 `.env` 权限收紧为仅当前用户可读写：
+
+```bash
+npm run setup:local-key
+```
+
+生产环境不要依赖该本地命令，应由部署系统安全注入并备份稳定的 `CONFIG_ENCRYPTION_KEY`。
 
 真实 `.env` 文件已被 `.gitignore` 忽略，模板文件 `.env.example` 可以提交。
 
@@ -39,11 +47,11 @@ cp nextjs-frontend/.env.example nextjs-frontend/.env.local
 - `QUOTA_LOW_THRESHOLD` 配额低阈值（0-1之间的小数），用于通知提示
 
 ## AI 平台
-- `DOUBAO_API_KEY`、`DOUBAO_API_URL`、`DOUBAO_MODEL`
-- `DEEPSEEK_API_KEY`、`DEEPSEEK_API_URL`
-- `KIMI_API_KEY`、`KIMI_API_URL`
-- `QIANWEN_API_KEY`、`QIANWEN_API_URL`
+- `CONFIG_ENCRYPTION_KEY`：AI 平台 API Key 的数据库加密主密钥；必须是 32 字节 Base64 或 64 位十六进制值。
+- `AI_PLATFORM_PRIVATE_HOST_ALLOWLIST`：可选，允许访问私网 AI 服务的精确 `host:port` 白名单，多个值用逗号分隔。
 - 代理（可选）：`HTTPS_PROXY` 或 `HTTP_PROXY` 或 `PROXY_URL`
+
+平台名称、Base URL、默认模型和 API Key 不再使用环境变量。管理员必须在 `/admin/settings` 的“AI 平台”页签人工配置；正式运行没有 `.env` 平台密钥回退。
 
 ## 数据库
 - `DB_STORAGE` SQLite 数据库文件路径（默认：`database.sqlite`）
@@ -68,5 +76,5 @@ cp nextjs-frontend/.env.example nextjs-frontend/.env.local
 - ⚠️ 生产环境通过平台注入或安全分发机制配置环境变量
 - ⚠️ `JWT_SECRET` **必须设置为强随机口令**（至少32字符，建议使用 crypto.randomBytes 生成）
 - ⚠️ 默认管理员密码**仅用于首次初始化**，生产环境首次登录后必须立即修改
-- ⚠️ 定期轮换 API 密钥和 JWT 密钥
+- ⚠️ 定期轮换平台 API Key 和 JWT 密钥；当前版本不支持在线轮换 `CONFIG_ENCRYPTION_KEY`
 - ⚠️ 生产环境设置 `ALLOWED_ORIGINS` 为实际使用的域名

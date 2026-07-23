@@ -14,7 +14,7 @@ test('filters prompts by question, tags, platform label and status text', () => 
 
   assert.deepEqual(filterPromptRows(rows, { search: '静音' }).map((item) => item.id), [1]);
   assert.deepEqual(filterPromptRows(rows, { search: '产品适配' }).map((item) => item.id), [2]);
-  assert.deepEqual(filterPromptRows(rows, { search: '豆包' }).map((item) => item.id), [1]);
+  assert.deepEqual(filterPromptRows(rows, { search: '豆包', platformLabels: { doubao: '豆包' } }).map((item) => item.id), [1]);
   assert.deepEqual(filterPromptRows(rows, { search: 'deepseek' }).map((item) => item.id), [2]);
   assert.deepEqual(filterPromptRows(rows, { search: '已停用' }).map((item) => item.id), [2]);
 });
@@ -40,8 +40,8 @@ test('filters prompts by derived prompt category', () => {
   assert.deepEqual(filterPromptRows(rows, { search: '竞品对比' }).map((item) => item.id), [2]);
 });
 
-test('normalizes prompt platforms with project platform fallback', () => {
+test('normalizes arbitrary prompt platforms with project platform fallback', () => {
   assert.deepEqual(normalizePromptPlatforms([], ['deepseek']), ['deepseek']);
-  assert.deepEqual(normalizePromptPlatforms(['kimi'], ['doubao']), ['doubao']);
+  assert.deepEqual(normalizePromptPlatforms(['kimi'], ['doubao']), ['kimi']);
   assert.deepEqual(normalizePromptPlatforms(['doubao'], ['deepseek']), ['doubao']);
 });

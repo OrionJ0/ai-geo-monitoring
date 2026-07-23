@@ -6,27 +6,22 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../app/geo/prompts/page.tsx'), 'utf8');
 
-test('prompt page guards async list, generation and history responses from stale project writes', () => {
+test('prompt page guards async list, batch creation and history responses from stale project writes', () => {
   assert.match(source, /const promptsRequestRef = useRef\(0\)/);
-  assert.match(source, /const generationRequestRef = useRef\(0\)/);
-  assert.match(source, /const generatedSaveRequestRef = useRef\(0\)/);
+  assert.match(source, /const batchRequestRef = useRef\(0\)/);
   assert.match(source, /const historyRequestRef = useRef\(0\)/);
   assert.match(source, /const runRequestRef = useRef\(0\)/);
   assert.match(source, /const currentProjectIdRef = useRef\(null\)/);
-  assert.match(source, /generationRequestRef\.current \+= 1/);
-  assert.match(source, /generatedSaveRequestRef\.current \+= 1/);
+  assert.match(source, /batchRequestRef\.current \+= 1/);
   assert.match(source, /runRequestRef\.current \+= 1/);
   assert.match(source, /const requestId = promptsRequestRef\.current \+ 1/);
   assert.match(source, /promptsRequestRef\.current = requestId/);
   assert.match(source, /if \(!projectId\) \{[\s\S]*setPrompts\(\[\]\);[\s\S]*setPromptsLoading\(false\);[\s\S]*return;/);
   assert.match(source, /setPrompts\(\[\]\)[\s\S]*setPromptsLoading\(true\)/);
   assert.match(source, /if \(promptsRequestRef\.current === requestId\) setPrompts\(Array\.isArray\(res\?\.data\?\.data\) \? res\.data\.data : \[\]\)/);
-  assert.match(source, /const generationProjectId = selectedProjectId/);
-  assert.match(source, /if \(generationRequestRef\.current === requestId && currentProjectIdRef\.current === generationProjectId\)/);
-  assert.match(source, /if \(generationRequestRef\.current === requestId && currentProjectIdRef\.current === generationProjectId\) setGenerating\(false\)/);
-  assert.match(source, /const requestId = generatedSaveRequestRef\.current \+ 1/);
-  assert.match(source, /generatedSaveRequestRef\.current = requestId/);
-  assert.match(source, /generatedSaveRequestRef\.current === requestId && isCurrentPromptProject\(mutationProjectId\)/);
+  assert.match(source, /const requestId = batchRequestRef\.current \+ 1/);
+  assert.match(source, /batchRequestRef\.current = requestId/);
+  assert.match(source, /batchRequestRef\.current === requestId && isCurrentPromptProject\(mutationProjectId\)/);
   assert.match(source, /if \(historyRequestRef\.current === requestId && currentProjectIdRef\.current === historyProjectId\)/);
   assert.match(source, /const runProjectId = selectedProjectId/);
   assert.match(source, /runRequestRef\.current === requestId && currentProjectIdRef\.current === runProjectId/);
@@ -64,8 +59,30 @@ test('prompt page shows each prompt monitoring platform scope', () => {
   assert.match(source, /platformLabels\[item\]/);
 });
 
-test('prompt page paginates generated prompt suggestions for bulk generation', () => {
-  assert.match(source, /rowKey="question"[\s\S]*dataSource=\{generatedSuggestions\}[\s\S]*pagination=\{\{[\s\S]*pageSize:\s*20[\s\S]*showSizeChanger:\s*false[\s\S]*\}\}/);
+test('single prompt editor can update monitoring platforms within the current project scope', () => {
+  const openEditStart = source.indexOf('const openEdit');
+  const openEditEnd = source.indexOf('const openBatchCreate', openEditStart);
+  const savePromptStart = source.indexOf('const savePrompt');
+  const savePromptEnd = source.indexOf('const saveBatchPrompts', savePromptStart);
+  const editorStart = source.indexOf("title={editingPrompt ? '编辑问题' : '新建问题'}");
+  const editorEnd = source.indexOf('title="批量新增问题"', editorStart);
+
+  assert.ok(openEditStart >= 0 && openEditEnd > openEditStart, '应找到单问题编辑初始化');
+  assert.ok(savePromptStart >= 0 && savePromptEnd > savePromptStart, '应找到单问题保存逻辑');
+  assert.ok(editorStart >= 0 && editorEnd > editorStart, '应找到单问题编辑弹窗');
+  assert.match(source.slice(openEditStart, openEditEnd), /platforms:/);
+  assert.match(source.slice(savePromptStart, savePromptEnd), /platforms:\s*normalizeList\(values\.platforms\)/);
+  assert.match(source.slice(editorStart, editorEnd), /name="platforms"/);
+  assert.match(source.slice(editorStart, editorEnd), /label="监测平台"/);
+  assert.match(source.slice(editorStart, editorEnd), /mode="multiple"/);
+  assert.match(source.slice(editorStart, editorEnd), /selectableProjectPlatforms\.map/);
+});
+
+test('prompt page offers parsed text batch creation instead of generated suggestions', () => {
+  assert.match(source, /parseBatchQuestions/);
+  assert.match(source, /\/prompts\/batch/);
+  assert.match(source, /批量新增问题/);
+  assert.doesNotMatch(source, /title="生成问题建议"/);
 });
 
 test('prompt page refreshes prompt data only for the current project after mutations', () => {

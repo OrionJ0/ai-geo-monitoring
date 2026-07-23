@@ -1,21 +1,13 @@
-const PLATFORM_LABELS = {
-  doubao: '豆包',
-  deepseek: 'DeepSeek',
-};
-
-const DEFAULT_PROJECT_PLATFORMS = ['doubao', 'deepseek'];
-
 function normalizeList(value) {
   return Array.isArray(value)
     ? value.map((item) => String(item || '').trim()).filter(Boolean)
     : [];
 }
 
-function normalizePromptPlatforms(promptPlatforms, projectPlatforms = DEFAULT_PROJECT_PLATFORMS) {
-  const projectList = normalizeList(projectPlatforms).filter((item) => PLATFORM_LABELS[item]);
-  const fallback = projectList.length ? projectList : DEFAULT_PROJECT_PLATFORMS;
-  const promptList = normalizeList(promptPlatforms).filter((item) => PLATFORM_LABELS[item]);
-  return promptList.length ? promptList : fallback;
+function normalizePromptPlatforms(promptPlatforms, projectPlatforms = []) {
+  const projectList = normalizeList(projectPlatforms);
+  const promptList = normalizeList(promptPlatforms);
+  return promptList.length ? Array.from(new Set(promptList)) : Array.from(new Set(projectList));
 }
 
 function filterPromptRows(prompts, options = {}) {
@@ -25,6 +17,9 @@ function filterPromptRows(prompts, options = {}) {
   const platform = options.platform || 'all';
   const category = options.category || 'all';
   const projectPlatforms = normalizeList(options.projectPlatforms);
+  const platformLabels = options.platformLabels && typeof options.platformLabels === 'object'
+    ? options.platformLabels
+    : {};
 
   return rows.filter((item) => {
     const enabled = item?.enabled !== false;
@@ -40,7 +35,7 @@ function filterPromptRows(prompts, options = {}) {
     if (!keyword) return true;
     const tagsText = normalizeList(item?.tags).join(' ');
     const platformText = platforms
-      .flatMap((value) => [value, PLATFORM_LABELS[value]])
+      .flatMap((value) => [value, platformLabels[value]])
       .filter(Boolean)
       .join(' ');
     const statusText = enabled ? '启用中 enabled' : '已停用 disabled';
@@ -49,8 +44,6 @@ function filterPromptRows(prompts, options = {}) {
 }
 
 module.exports = {
-  PLATFORM_LABELS,
-  DEFAULT_PROJECT_PLATFORMS,
   normalizePromptPlatforms,
   filterPromptRows,
 };

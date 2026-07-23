@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Col, Descriptions, Empty, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Descriptions, Empty, Form, Input, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
@@ -10,7 +10,6 @@ import remarkGfm from 'remark-gfm';
 import remarkKeywordHighlight from '@/utils/remarkKeywordHighlight';
 import { resolveKeywordStats } from '@/utils/keywordStats.cjs';
 import { buildBrandKeywords } from '@/utils/brandKeywords.cjs';
-import { canSaveGeneratedPrompts } from '@/utils/generatedPromptSaveState.cjs';
 import { getHistoryAnalysisDisplay } from '@/utils/historyAnalysisDisplay.cjs';
 import { normalizeHistoryCitationSources } from '@/utils/historyCitationSources.cjs';
 import { formatHistoryErrorMessage, formatHistoryParsingErrorMessage } from '@/utils/historyErrorDisplay.cjs';
@@ -24,19 +23,12 @@ import {
   shouldResetPromptListFilters,
   shouldResetPromptSelection
 } from '@/utils/promptSelection.cjs';
-import {
-  PROMPT_GENERATION_MAX_COUNT,
-  PROMPT_GENERATION_MIN_COUNT
-} from '@/utils/promptGenerationLimits.cjs';
 import { getProjectPromptRunBlockReason } from '@/utils/projectPromptSummary.cjs';
 import { filterPromptRows } from '@/utils/promptListFilters.cjs';
+import { parseBatchQuestions } from '@/utils/questionBatchParser.cjs';
+import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 
 const { Text } = Typography;
-
-const platformLabels = {
-  doubao: '豆包',
-  deepseek: 'DeepSeek',
-};
 
 const statusLabels = {
   completed: '已完成',
@@ -88,6 +80,13 @@ const formatRank = (value) => {
 
 export default function GeoPromptsPage() {
   const router = useRouter();
+  const {
+    platforms: platformCatalog,
+    labels: platformLabels,
+    selectableCodes,
+    loading: platformCatalogLoading,
+    error: platformCatalogError
+  } = useAIPlatformCatalog();
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [prompts, setPrompts] = useState([]);
@@ -97,6 +96,8 @@ export default function GeoPromptsPage() {
   const [questionSetsLoading, setQuestionSetsLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(null);
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [savingBatch, setSavingBatch] = useState(false);
   const [runningPromptId, setRunningPromptId] = useState(null);
   const [questionSetModalOpen, setQuestionSetModalOpen] = useState(false);
   const [editingQuestionSet, setEditingQuestionSet] = useState(null);
@@ -112,21 +113,18 @@ export default function GeoPromptsPage() {
   const [historyPrompt, setHistoryPrompt] = useState(null);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [savingGenerated, setSavingGenerated] = useState(false);
-  const [generatedSuggestions, setGeneratedSuggestions] = useState([]);
-  const [generatorForm] = Form.useForm();
   const [form] = Form.useForm();
+  const [batchForm] = Form.useForm();
   const [questionSetForm] = Form.useForm();
   const previousProjectIdRef = useRef(null);
   const currentProjectIdRef = useRef(null);
   const promptsRequestRef = useRef(0);
   const questionSetsRequestRef = useRef(0);
-  const generationRequestRef = useRef(0);
-  const generatedSaveRequestRef = useRef(0);
+  const batchRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const runRequestRef = useRef(0);
   const questionSetRunRequestRef = useRef(0);
+  const batchText = Form.useWatch('questions_text', batchForm);
 
   const selectedProject = useMemo(
     () => projects.find((item) => item.id === selectedProjectId) || null,
@@ -138,9 +136,18 @@ export default function GeoPromptsPage() {
     : [];
 
   const projectPlatforms = useMemo(() => {
-    const list = normalizeList(selectedProject?.platforms).filter((item) => platformLabels[item]);
-    return list.length ? list : ['doubao', 'deepseek'];
+    return Array.from(new Set(normalizeList(selectedProject?.platforms)));
   }, [selectedProject]);
+
+  const selectableProjectPlatforms = useMemo(
+    () => projectPlatforms.filter((item) => selectableCodes.includes(item)),
+    [projectPlatforms, selectableCodes]
+  );
+
+  const batchPreview = useMemo(
+    () => parseBatchQuestions(batchText || ''),
+    [batchText]
+  );
 
   const getProjectPlatforms = () => projectPlatforms;
 
@@ -150,9 +157,10 @@ export default function GeoPromptsPage() {
       status: promptStatusFilter,
       platform: promptPlatformFilter,
       category: promptCategoryFilter,
-      projectPlatforms
+      projectPlatforms,
+      platformLabels
     });
-  }, [prompts, promptSearch, promptStatusFilter, promptPlatformFilter, promptCategoryFilter, projectPlatforms]);
+  }, [prompts, promptSearch, promptStatusFilter, promptPlatformFilter, promptCategoryFilter, projectPlatforms, platformLabels]);
 
   const selectedFilteredCount = useMemo(() => {
     const selected = new Set(selectedPromptIds);
@@ -172,7 +180,7 @@ export default function GeoPromptsPage() {
   }, [prompts]);
 
   const getPromptPlatforms = (row) => {
-    const list = normalizeList(row?.platforms).filter((item) => platformLabels[item]);
+    const list = normalizeList(row?.platforms);
     return list.length ? list : getProjectPlatforms();
   };
 
@@ -231,8 +239,9 @@ export default function GeoPromptsPage() {
           </Descriptions.Item>
           <Descriptions.Item label="品牌" span={1}>{row.brand || selectedProject?.name || '-'}</Descriptions.Item>
           <Descriptions.Item label="检测平台" span={1}>
-            <Tag color="processing">{platformLabels[row.platform] || String(row.platform || '-')}</Tag>
+            <Tag color="processing">{row.platform_name || platformLabels[row.platform] || String(row.platform || '-')}</Tag>
           </Descriptions.Item>
+          <Descriptions.Item label="实际模型" span={1}>{row.model_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="声量占比（SOV）" span={1}>
             {analysisDisplay.sov}
           </Descriptions.Item>
@@ -391,12 +400,15 @@ export default function GeoPromptsPage() {
     setSelectedPromptIds([]);
     setModalOpen(false);
     setEditingPrompt(null);
+    setBatchModalOpen(false);
+    setSavingBatch(false);
     setQuestionSetModalOpen(false);
     setEditingQuestionSet(null);
     setSavingQuestionSet(false);
     setRunningPromptId(null);
     setRunningQuestionSetId(null);
     form.resetFields();
+    batchForm.resetFields();
     questionSetForm.resetFields();
   };
 
@@ -416,13 +428,12 @@ export default function GeoPromptsPage() {
       setPromptCategoryFilter('all');
     }
     if (shouldClearGeneratedPromptSuggestions(previousProjectIdRef.current, selectedProjectId)) {
-      generationRequestRef.current += 1;
-      generatedSaveRequestRef.current += 1;
+      batchRequestRef.current += 1;
       historyRequestRef.current += 1;
       runRequestRef.current += 1;
       questionSetRunRequestRef.current += 1;
-      setGeneratedSuggestions([]);
-      setSavingGenerated(false);
+      setBatchModalOpen(false);
+      setSavingBatch(false);
       setHistoryOpen(false);
       setHistoryPrompt(null);
       setHistoryRows([]);
@@ -437,25 +448,47 @@ export default function GeoPromptsPage() {
   }, [selectedProjectId, days, fetchPrompts, fetchQuestionSets]);
 
   const openCreate = () => {
+    if (!selectableProjectPlatforms.length) {
+      message.warning('当前项目没有已配置且启用的监测平台，请联系管理员处理');
+      return;
+    }
     setEditingPrompt(null);
     form.setFieldsValue({
       question: '',
       tags: [],
       question_set_id: null,
+      platforms: selectableProjectPlatforms,
       enabled: true,
     });
     setModalOpen(true);
   };
 
   const openEdit = (record) => {
+    const currentPlatforms = getPromptPlatforms(record)
+      .filter((item) => selectableProjectPlatforms.includes(item));
     setEditingPrompt(record);
     form.setFieldsValue({
       question: record.question || '',
       tags: normalizeList(record.tags),
       question_set_id: record.question_set_id || null,
+      platforms: currentPlatforms.length ? currentPlatforms : selectableProjectPlatforms,
       enabled: record.enabled !== false,
     });
     setModalOpen(true);
+  };
+
+  const openBatchCreate = () => {
+    if (!selectableProjectPlatforms.length) {
+      message.warning('当前项目没有已配置且启用的监测平台，请联系管理员处理');
+      return;
+    }
+    batchForm.setFieldsValue({
+      questions_text: '',
+      tags: [],
+      question_set_id: null,
+      enabled: true
+    });
+    setBatchModalOpen(true);
   };
 
   const savePrompt = async () => {
@@ -470,7 +503,7 @@ export default function GeoPromptsPage() {
         question: String(values.question || '').trim(),
         tags: normalizeList(values.tags),
         question_set_id: values.question_set_id || null,
-        platforms: getProjectPlatforms(),
+        platforms: normalizeList(values.platforms),
         enabled: values.enabled !== false,
       };
       if (editingPrompt?.id) {
@@ -489,6 +522,54 @@ export default function GeoPromptsPage() {
     } catch (error) {
       if (error?.errorFields) return;
       message.error(getApiErrorMessage(error, '保存问题失败'));
+    }
+  };
+
+  const saveBatchPrompts = async () => {
+    if (!selectedProjectId) {
+      message.warning('请先选择品牌项目');
+      return;
+    }
+    const mutationProjectId = selectedProjectId;
+    const requestId = batchRequestRef.current + 1;
+    batchRequestRef.current = requestId;
+    try {
+      const values = await batchForm.validateFields();
+      const parsed = parseBatchQuestions(values.questions_text || '');
+      if (parsed.overflow_count > 0) {
+        message.error(`单次最多新增 100 个问题，请减少 ${parsed.overflow_count} 个后重试`);
+        return;
+      }
+      if (!parsed.questions.length) {
+        message.warning('请至少输入一个问题');
+        return;
+      }
+      setSavingBatch(true);
+      const response = await axios.post(`/api/geo-projects/${mutationProjectId}/prompts/batch`, {
+        questions: parsed.questions,
+        tags: normalizeList(values.tags),
+        question_set_id: values.question_set_id || null,
+        platforms: selectableProjectPlatforms,
+        enabled: values.enabled !== false
+      });
+      if (!(batchRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId))) return;
+      const data = response?.data?.data || {};
+      const createdCount = Number(data.created_count || 0);
+      const skippedCount = Number(data.skipped_count || 0);
+      if (createdCount) message.success(`已新增 ${createdCount} 个问题`);
+      if (skippedCount) message.warning(`已跳过 ${skippedCount} 个重复问题`);
+      setBatchModalOpen(false);
+      batchForm.resetFields();
+      refreshPromptDataForProject(mutationProjectId);
+    } catch (error) {
+      if (error?.errorFields) return;
+      if (batchRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId)) {
+        message.error(getApiErrorMessage(error, '批量新增问题失败'));
+      }
+    } finally {
+      if (batchRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId)) {
+        setSavingBatch(false);
+      }
     }
   };
 
@@ -596,106 +677,6 @@ export default function GeoPromptsPage() {
       if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
         setRunningQuestionSetId(null);
       }
-    }
-  };
-
-  const saveGeneratedPrompt = async (suggestion) => {
-    if (!canSaveGeneratedPrompts({ projectId: selectedProjectId, suggestions: [suggestion].filter(Boolean), saving: savingGenerated })) return;
-    const mutationProjectId = selectedProjectId;
-    const requestId = generatedSaveRequestRef.current + 1;
-    generatedSaveRequestRef.current = requestId;
-    try {
-      setSavingGenerated(true);
-      await axios.post(`/api/geo-projects/${mutationProjectId}/prompts`, {
-        question: suggestion.question,
-        tags: normalizeList(suggestion.tags),
-        platforms: getProjectPlatforms(),
-        enabled: true,
-      });
-      if (!(generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId))) return;
-      message.success('问题已保存');
-      setGeneratedSuggestions((prev) => prev.filter((item) => item.question !== suggestion.question));
-      refreshPromptDataForProject(mutationProjectId);
-    } catch (error) {
-      if (generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId)) {
-        message.error(getApiErrorMessage(error, '保存生成问题失败'));
-      }
-    } finally {
-      if (generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId)) setSavingGenerated(false);
-    }
-  };
-
-  const saveAllGeneratedPrompts = async () => {
-    if (!canSaveGeneratedPrompts({ projectId: selectedProjectId, suggestions: generatedSuggestions, saving: savingGenerated })) return;
-    const mutationProjectId = selectedProjectId;
-    const requestId = generatedSaveRequestRef.current + 1;
-    generatedSaveRequestRef.current = requestId;
-    let saved = 0;
-    let duplicated = 0;
-    const completedQuestions = new Set();
-    try {
-      setSavingGenerated(true);
-      for (const suggestion of generatedSuggestions) {
-        try {
-          await axios.post(`/api/geo-projects/${mutationProjectId}/prompts`, {
-            question: suggestion.question,
-            tags: normalizeList(suggestion.tags),
-            platforms: getProjectPlatforms(),
-            enabled: true,
-          });
-          saved += 1;
-          completedQuestions.add(suggestion.question);
-        } catch (error) {
-          if (error?.response?.status === 409) {
-            duplicated += 1;
-            completedQuestions.add(suggestion.question);
-          }
-        }
-      }
-    } finally {
-      if (generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId)) setSavingGenerated(false);
-    }
-    if (!(generatedSaveRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId))) return;
-    if (saved) message.success(`已保存 ${saved} 个问题`);
-    if (duplicated) message.warning(`${duplicated} 个问题已存在，已跳过`);
-    const failed = generatedSuggestions.length - saved - duplicated;
-    if (failed > 0) message.warning(`有 ${failed} 条保存失败`);
-    setGeneratedSuggestions((prev) => prev.filter((item) => !completedQuestions.has(item.question)));
-    refreshPromptDataForProject(mutationProjectId);
-  };
-
-  const generatePrompts = async () => {
-    if (!selectedProjectId) {
-      message.warning('请先选择品牌项目');
-      return;
-    }
-    let requestId = 0;
-    const generationProjectId = selectedProjectId;
-    try {
-      const values = await generatorForm.validateFields();
-      requestId = generationRequestRef.current + 1;
-      generationRequestRef.current = requestId;
-      setGenerating(true);
-      const requestedCount = Math.max(
-        PROMPT_GENERATION_MIN_COUNT,
-        Math.min(PROMPT_GENERATION_MAX_COUNT, Number(values.count || 10))
-      );
-      const res = await axios.post(`/api/geo-projects/${generationProjectId}/prompts/generate`, {
-        count: requestedCount,
-        focus: values.focus || '',
-      });
-      const suggestions = Array.isArray(res?.data?.data?.suggestions) ? res.data.data.suggestions : [];
-      if (generationRequestRef.current === requestId && currentProjectIdRef.current === generationProjectId) {
-        setGeneratedSuggestions(suggestions);
-        message.success(`已生成 ${suggestions.length} 个问题建议`);
-      }
-    } catch (error) {
-      if (error?.errorFields) return;
-      if (!requestId || (generationRequestRef.current === requestId && currentProjectIdRef.current === generationProjectId)) {
-        message.error(getApiErrorMessage(error, '生成问题建议失败'));
-      }
-    } finally {
-      if (generationRequestRef.current === requestId && currentProjectIdRef.current === generationProjectId) setGenerating(false);
     }
   };
 
@@ -839,7 +820,7 @@ export default function GeoPromptsPage() {
       width: 140,
       render: (_, row) => (
         <Space wrap size={[4, 4]}>
-          {getPromptPlatforms(row).map((item) => <Tag color="processing" key={item}>{platformLabels[item]}</Tag>)}
+          {getPromptPlatforms(row).map((item) => <Tag color="processing" key={item}>{platformLabels[item] || item}</Tag>)}
         </Space>
       ),
     },
@@ -952,6 +933,7 @@ export default function GeoPromptsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      {platformCatalogError ? <Alert type="error" showIcon title={platformCatalogError} /> : null}
       <Card title="问题库">
         <Row gutter={[12, 12]} align="middle">
           <Col flex="360px">
@@ -977,10 +959,19 @@ export default function GeoPromptsPage() {
           <Col flex="auto">
             <Space wrap>
               <Button size="small" onClick={() => refreshPromptDataForProject(selectedProjectId)} disabled={!selectedProjectId}>刷新</Button>
-              <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId}>新建问题</Button>
+              <Tooltip title={!selectedProjectId ? '请先选择品牌项目' : !selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : ''}>
+                <span>
+                  <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableProjectPlatforms.length}>新建问题</Button>
+                </span>
+              </Tooltip>
+              <Tooltip title={!selectedProjectId ? '请先选择品牌项目' : !selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : ''}>
+                <span>
+                  <Button size="small" onClick={openBatchCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableProjectPlatforms.length}>批量新增</Button>
+                </span>
+              </Tooltip>
               <Text type="secondary">
                 {selectedProject
-                  ? `当前项目：${selectedProject.name}｜监测平台：${getProjectPlatforms().map((item) => platformLabels[item]).join('、')}`
+                  ? `当前项目：${selectedProject.name}｜监测平台：${getProjectPlatforms().map((item) => platformLabels[item] || item).join('、') || '未配置'}`
                   : '请先在品牌项目中创建项目'}
               </Text>
             </Space>
@@ -1071,73 +1062,6 @@ export default function GeoPromptsPage() {
         )}
       </Card>
 
-      <Card
-        title="生成问题建议"
-        extra={<Button type="primary" loading={generating} disabled={!selectedProjectId || savingGenerated} onClick={generatePrompts}>生成建议</Button>}
-      >
-        <Form form={generatorForm} layout="inline" initialValues={{ count: 10 }}>
-          <Form.Item name="focus" label="生成重点">
-            <Input placeholder="例如：购买决策、竞品对比、价格顾虑" allowClear style={{ width: 320 }} />
-          </Form.Item>
-          <Form.Item name="count" label="数量" rules={[{ required: true, message: '请输入数量' }]}>
-            <InputNumber min={PROMPT_GENERATION_MIN_COUNT} max={PROMPT_GENERATION_MAX_COUNT} precision={0} style={{ width: 110 }} />
-          </Form.Item>
-          <Form.Item>
-            <Space>
-              <Text type="secondary">生成覆盖行业场景、品牌核心关键词与竞品对比的真实用户问题，最多 {PROMPT_GENERATION_MAX_COUNT} 条。</Text>
-              <Button
-                loading={savingGenerated}
-                disabled={!canSaveGeneratedPrompts({ projectId: selectedProjectId, suggestions: generatedSuggestions, saving: savingGenerated })}
-                onClick={saveAllGeneratedPrompts}
-              >
-                全部保存
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-        {generatedSuggestions.length ? (
-            <Table
-              style={{ marginTop: 12 }}
-              rowKey="question"
-              size="small"
-              dataSource={generatedSuggestions}
-              pagination={{
-                pageSize: 20,
-                showSizeChanger: false,
-                showTotal: (total) => `共 ${total} 条`,
-              }}
-              columns={[
-              { title: '生成问题', dataIndex: 'question', ellipsis: true },
-              {
-                title: '标签',
-                dataIndex: 'tags',
-                width: 220,
-                render: (values) => (
-                  <Space wrap size={[4, 4]}>
-                    {normalizeList(values).map((item) => <Tag key={item}>{item}</Tag>)}
-                  </Space>
-                ),
-              },
-              {
-                title: '操作',
-                width: 100,
-                render: (_, row) => (
-                  <Button
-                    size="small"
-                    type="primary"
-                    loading={savingGenerated}
-                    disabled={savingGenerated}
-                    onClick={() => saveGeneratedPrompt(row)}
-                  >
-                    保存
-                  </Button>
-                ),
-              },
-            ]}
-          />
-        ) : null}
-      </Card>
-
       <Card title="问题列表">
         {selectedProjectId ? (
           <Space orientation="vertical" size={12} style={{ width: '100%' }}>
@@ -1156,8 +1080,7 @@ export default function GeoPromptsPage() {
                   onChange={setPromptPlatformFilter}
                   options={[
                     { label: '全部平台', value: 'all' },
-                    { label: '豆包', value: 'doubao' },
-                    { label: 'DeepSeek', value: 'deepseek' },
+                    ...platformCatalog.map((item) => ({ label: item.name || item.code, value: item.code })),
                   ]}
                 />
                 <Select
@@ -1244,7 +1167,74 @@ export default function GeoPromptsPage() {
               options={questionSets.map((item) => ({ label: item.name, value: item.id }))}
             />
           </Form.Item>
+          <Form.Item
+            name="platforms"
+            label="监测平台"
+            extra="只影响单问题独立运行；运行问题集时仍会覆盖项目的全部可用模型。"
+            rules={[{ required: true, message: '请至少选择一个监测平台' }]}
+          >
+            <Select
+              mode="multiple"
+              placeholder="选择该问题独立运行时使用的平台"
+              options={selectableProjectPlatforms.map((item) => ({
+                label: platformLabels[item] || item,
+                value: item
+              }))}
+            />
+          </Form.Item>
           <Form.Item name="enabled" label="启用" valuePropName="checked">
+            <Switch checkedChildren="启用" unCheckedChildren="停用" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="批量新增问题"
+        open={batchModalOpen}
+        onOk={saveBatchPrompts}
+        onCancel={() => {
+          batchRequestRef.current += 1;
+          setBatchModalOpen(false);
+          setSavingBatch(false);
+          batchForm.resetFields();
+        }}
+        confirmLoading={savingBatch}
+        okText={`新增${batchPreview.questions.length ? ` ${batchPreview.questions.length} 个问题` : ''}`}
+        cancelText="取消"
+        width={720}
+        forceRender
+        destroyOnHidden
+      >
+        <Form form={batchForm} layout="vertical">
+          <Form.Item
+            name="questions_text"
+            label="问题内容"
+            extra="每行一个，也支持中英文分号；逗号保留。可粘贴带序号列表，单次最多 100 个。"
+            rules={[{ required: true, message: '请输入至少一个问题' }]}
+          >
+            <Input.TextArea
+              rows={10}
+              placeholder={'例如：\n1. 这个品牌适合家庭用户吗？\n2. 价格高，是否值得买；售后服务怎么样？'}
+            />
+          </Form.Item>
+          <Alert
+            type={batchPreview.overflow_count > 0 ? 'error' : 'info'}
+            showIcon
+            title={batchPreview.overflow_count > 0
+              ? `已识别 ${batchPreview.questions.length + batchPreview.overflow_count} 个问题，超出上限 ${batchPreview.overflow_count} 个`
+              : `已识别 ${batchPreview.questions.length} 个问题`}
+          />
+          <Form.Item name="tags" label="统一标签" style={{ marginTop: 16 }}>
+            <Select mode="tags" tokenSeparators={[',', '，', ';', '\n']} placeholder="可选，应用到本批次全部问题" />
+          </Form.Item>
+          <Form.Item name="question_set_id" label="统一加入问题集">
+            <Select
+              allowClear
+              placeholder="可选；问题仍可单独运行"
+              options={questionSets.map((item) => ({ label: item.name, value: item.id }))}
+            />
+          </Form.Item>
+          <Form.Item name="enabled" label="新增后启用" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="停用" />
           </Form.Item>
         </Form>
@@ -1318,7 +1308,13 @@ export default function GeoPromptsPage() {
               title: '平台',
               dataIndex: 'platform',
               width: 110,
-              render: (value) => <Tag>{value === 'doubao' ? '豆包' : value === 'deepseek' ? 'DeepSeek' : value}</Tag>
+              render: (value, row) => <Tag>{row.platform_name || platformLabels[value] || value}</Tag>
+            },
+            {
+              title: '模型',
+              dataIndex: 'model_name',
+              width: 150,
+              render: (value) => value || '-'
             },
             {
               title: '状态',

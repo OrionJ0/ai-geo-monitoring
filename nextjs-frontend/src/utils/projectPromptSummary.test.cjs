@@ -16,8 +16,14 @@ test('summarizes enabled and total project prompts', () => {
   ]), {
     enabled: 2,
     total: 3,
-    runnable: true
+    runnable: false
   });
+});
+
+test('supports custom platform codes', () => {
+  assert.deepEqual(getRunnableProjectPromptIds([
+    { id: 7, enabled: true, platforms: ['custom-ai'] }
+  ], ['custom-ai']), [7]);
 });
 
 test('treats projects without enabled prompts as not runnable', () => {

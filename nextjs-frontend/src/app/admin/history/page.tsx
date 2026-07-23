@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, Table, Space, Button, Input, Select, Tag, message } from 'antd';
 import axios from 'axios';
 import { resolveKeywordStats } from '@/utils/keywordStats.cjs';
+import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 
 type HistoryFilters = {
   userId?: string;
@@ -13,6 +14,7 @@ type HistoryFilters = {
 };
 
 export default function AdminHistoryPage() {
+  const { platforms: platformCatalog, labels: platformLabels } = useAIPlatformCatalog();
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
@@ -70,7 +72,15 @@ export default function AdminHistoryPage() {
     fetchHistory(1, limit, {});
   }, [fetchHistory, limit]);
 
-  const PLATFORM_LABELS = useMemo(() => ({ doubao: '豆包', deepseek: 'DeepSeek' }), []);
+  const platformFilterOptions = useMemo(() => {
+    const byCode = new Map(platformCatalog.map((item) => [item.code, item.name || item.code]));
+    records.forEach((record: any) => {
+      if (record?.platform && !byCode.has(record.platform)) {
+        byCode.set(record.platform, record.platform_name || record.platform);
+      }
+    });
+    return Array.from(byCode, ([value, label]) => ({ value, label }));
+  }, [platformCatalog, records]);
 
   const columns = useMemo(() => [
     { title: '检测时间', dataIndex: 'created_at', key: 'created_at', width: 160, render: (t: any) => {
@@ -80,9 +90,10 @@ export default function AdminHistoryPage() {
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     } },
     { title: '问题', dataIndex: 'question', key: 'question', ellipsis: true, width: 380 },
-    { title: '平台', dataIndex: 'platform', key: 'platform', width: 120, render: (p: any) => (
-      <Tag color="processing">{PLATFORM_LABELS[p as keyof typeof PLATFORM_LABELS] || String(p || '-')}</Tag>
+    { title: '平台', dataIndex: 'platform', key: 'platform', width: 120, render: (p: any, record: any) => (
+      <Tag color="processing">{record.platform_name || platformLabels[p] || String(p || '-')}</Tag>
     ) },
+    { title: '模型', dataIndex: 'model_name', key: 'model_name', width: 160, render: (value: any) => value || '-' },
     { title: '状态', dataIndex: 'status', key: 'status', width: 110, render: (s: any) => (
       <Tag color={s === 'completed' ? 'success' : s === 'failed' ? 'error' : 'processing'}>
         {s === 'completed' ? '已完成' : s === 'failed' ? '失败' : '进行中'}
@@ -100,7 +111,7 @@ export default function AdminHistoryPage() {
         </div>
       );
     } },
-  ], [PLATFORM_LABELS]);
+  ], [platformLabels]);
 
   return (
     <Card
@@ -121,7 +132,7 @@ export default function AdminHistoryPage() {
             allowClear
             value={platform}
             onChange={setPlatform}
-            options={['doubao','deepseek'].map(v => ({ value: v, label: PLATFORM_LABELS[v as keyof typeof PLATFORM_LABELS] || v }))}
+            options={platformFilterOptions}
             style={{ width: 140, maxWidth: '100%' }}
           />
           <Select

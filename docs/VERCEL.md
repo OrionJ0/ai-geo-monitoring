@@ -4,7 +4,7 @@
 
 - Vercel 只部署 `nextjs-frontend/`
 - `backend/` 部署到支持常驻 Node.js 服务和持久化磁盘/数据库的平台，例如云服务器、Railway、Render、Fly.io 等
-- 生产数据库继续使用 SQLite 时必须有持久化磁盘；更推荐迁移到托管 MySQL
+- 生产数据库继续使用 SQLite 时必须有持久化磁盘；更推荐迁移到托管 PostgreSQL
 
 ## 1. 先部署后端
 
@@ -21,11 +21,12 @@ NODE_ENV=production
 PORT=3002
 JWT_SECRET=<强随机值，至少32字符>
 DEFAULT_ADMIN_PASSWORD=<强随机密码>
+CONFIG_ENCRYPTION_KEY=<32字节Base64或64位十六进制值>
 ALLOWED_ORIGINS=https://your-vercel-domain.vercel.app,https://your-domain.com
 DB_STORAGE=database.sqlite
 ```
 
-如果使用 AI 平台能力，还需要补充对应平台的 API Key。
+后端启动后，由管理员在 `/admin/settings` 的“AI 平台”页签人工填写平台 API Key；平台密钥不会从环境变量自动导入。
 
 确认后端健康检查可访问：
 

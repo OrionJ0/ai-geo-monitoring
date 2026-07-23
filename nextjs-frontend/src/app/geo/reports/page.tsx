@@ -7,13 +7,9 @@ import axios from 'axios';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import { buildReportCsv } from '@/utils/reportCsv.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 
 const { Text, Title } = Typography;
-
-const platformLabel = {
-  doubao: '豆包',
-  deepseek: 'DeepSeek',
-};
 
 const typeColor = {
   自有来源: 'green',
@@ -71,7 +67,7 @@ function renderTags(values, fallbackMap = {}) {
   );
 }
 
-function formatOpportunityScope(item) {
+function formatOpportunityScope(item, platformLabel = {}) {
   const platform = item?.platform ? (platformLabel[item.platform] || item.platform) : '';
   const domain = item?.domain || '';
   if (platform && domain) return `${platform} / ${domain}`;
@@ -79,6 +75,7 @@ function formatOpportunityScope(item) {
 }
 
 export default function GeoReportsPage() {
+  const { labels: platformLabel } = useAIPlatformCatalog();
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState();
   const [report, setReport] = useState(null);
@@ -333,7 +330,7 @@ export default function GeoReportsPage() {
       },
     },
     { title: '机会类型', dataIndex: 'type', width: 130, render: (value) => <Tag color="blue">{value || '机会'}</Tag> },
-    { title: '平台/来源', key: 'scope', width: 130, render: (_, row) => formatOpportunityScope(row) || '-' },
+    { title: '平台/来源', key: 'scope', width: 130, render: (_, row) => formatOpportunityScope(row, platformLabel) || '-' },
     { title: '对象', key: 'target', width: 240, render: (_, row) => row.prompt || row.domain || row.competitor || row.prompt_category || '-' },
     { title: '证据', dataIndex: 'evidence', width: 280, render: (value) => value || '-' },
     { title: '建议动作', dataIndex: 'recommendation', render: (value) => value || '-' },

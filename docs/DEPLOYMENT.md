@@ -27,11 +27,8 @@
   DEFAULT_ADMIN_EMAIL=admin@example.com
   DEFAULT_ADMIN_PASSWORD=<强随机值>
 
-  # AI 平台密钥
-  DEEPSEEK_API_KEY=<你的密钥>
-  DOUBAO_API_KEY=<你的密钥>
-  KIMI_API_KEY=<你的密钥>
-  QIANWEN_API_KEY=<你的密钥>
+  # 用于加密数据库中的 AI 平台密钥（32 字节 Base64 或 64 位十六进制）
+  CONFIG_ENCRYPTION_KEY=<加密主密钥>
 
   # 可选代理
   HTTPS_PROXY=http://proxy.example.com:8080
@@ -109,7 +106,7 @@ server {
 
 ## 验证与健康检查
 - 健康检查：`GET https://<你的域名>/api/health`
-- 平台密钥自检：`GET https://<你的域名>/api/platforms/ping`
+- AI 平台配置：管理员登录 `/admin/settings`，人工填写 API Key 和供应商明确支持的模型请求参数，再分别执行“测试连接”和“检测联网能力”
 - 登录验证：使用默认管理员登录并立即修改密码（见下方安全建议）
 
 ## 安全与合规建议
@@ -131,7 +128,8 @@ server {
 - 定期更新依赖包：`npm audit fix`
 
 ## 常见问题排查
-- API Key 未配置：`/api/platforms/ping` 显示未配置，请在 `backend/.env` 补充对应密钥
+- API Key 未配置：管理员进入 `/admin/settings` 的“AI 平台”页签人工填写；平台配置不会从 `.env` 导入
+- 联网能力显示“证据不足”：说明模型调用成功，但供应商协议没有返回可验证的搜索证据，或当前没有配置官方强制联网参数；不要据此擅自复制其他平台参数
 - 429/网络错误：后端已包含重试与代理支持，设置 `HTTPS_PROXY`/`HTTP_PROXY` 即可
 - SSE 推流中断：检查 Nginx `proxy_buffering off` 与 `proxy_read_timeout` 配置
 - CORS 错误：检查 `ALLOWED_ORIGINS` 是否包含前端域名

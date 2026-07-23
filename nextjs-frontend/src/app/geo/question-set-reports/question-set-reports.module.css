@@ -53,6 +53,28 @@
   box-shadow: 0 14px 36px rgba(31, 46, 68, 0.07);
 }
 
+.pdfLayout {
+  width: 980px;
+  max-width: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pdfLayout .reportActions,
+.pdfLayout :global(.ant-table-pagination) {
+  display: none !important;
+}
+
+.pdfLayout :global(.ant-table-row-expand-icon) {
+  visibility: hidden;
+}
+
+.pdfLayout .metricsCollapse :global(.ant-collapse-content) {
+  display: block !important;
+  height: auto !important;
+  opacity: 1 !important;
+}
+
 .reportHeader {
   display: flex;
   align-items: flex-start;
@@ -383,58 +405,5 @@
 
   .historyFilter > :global(.ant-typography) {
     white-space: normal;
-  }
-}
-
-@media print {
-  @page {
-    size: landscape;
-    margin: 12mm;
-  }
-
-  :global(body):has(.page) :global(.app-header),
-  :global(body):has(.page) :global(.ant-layout-sider),
-  :global(body):has(.page) :global(.geo-content > .ant-breadcrumb),
-  :global(body):has(.page) :global(.ant-drawer-root),
-  .toolbar,
-  .historyDrawer {
-    display: none !important;
-  }
-
-  :global(body):has(.page) :global(.app-header + .ant-layout) {
-    margin-top: 0 !important;
-  }
-
-  :global(body):has(.page) :global(.geo-content) {
-    padding: 0 !important;
-  }
-
-  .page {
-    padding: 0;
-  }
-
-  .reportSheet {
-    min-height: 0;
-    padding: 0;
-    border: 0;
-    box-shadow: none;
-  }
-
-  .reportActions {
-    display: none;
-  }
-
-  .metricsSection {
-    break-inside: avoid;
-  }
-
-  .resultsSection :global(.ant-table-cell) {
-    padding: 6px 8px !important;
-    font-size: 10px;
-  }
-
-  .resultsSection :global(.ant-table-row-expand-icon-cell),
-  .resultsSection :global(.ant-table-row-expand-icon) {
-    display: none;
   }
 }

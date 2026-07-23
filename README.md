@@ -23,11 +23,11 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 
 - 品牌项目创建、归档、恢复与删除
 - GEO 检测任务创建、调度与执行记录
-- 多平台 AI 回答结果监测，当前重点支持豆包、DeepSeek
-- 豆包联网搜索调用与引用来源提取
-- 品牌提及率、Share of Voice、引用率、竞品曝光分析
+- 多平台 AI 回答结果监测，预置豆包、DeepSeek，并支持管理员新增 OpenAI Chat Completions 或 Responses 兼容平台
+- 平台级模型请求参数配置、连接测试与联网能力检测
+- 由独立 AI 分析 API 抽取全部品牌/公司、目标实体映射、提及、候选顺序与推荐关系，程序据此计算品牌提及、推荐和排名；引用来源直接解析监测 API 响应
 - AI 回答情绪判断，支持正向、中性、负向标签与风险项沉淀
-- 问题库管理、分类、平台选择与历史结果追踪
+- 问题库支持单条与文本批量新增、分类、平台选择与历史结果追踪
 - 问题集管理：每次整组运行生成独立报告与历史，支持标准 CSV 导出和只读回导，同时保留单问题独立运行
 - 技术 SEO 双模式检测：默认异步发现并检测最多 200 个同域路由，也保留精确 URL 的单页快速复测；执行 23 项可配置规则（含低权重 Keywords 和搜索/AI 爬虫 robots 权限），Sitemap 按高优先级计分；每次成功检测按账户保存，可分页查看，并支持标准长表 CSV 导出及重新导入历史
 - 引用来源按自有来源、竞品来源、第三方来源聚合分析，并保留域名、URL、平台、问题分类和出现时间
@@ -43,7 +43,7 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 
 ### 信源引用
 
-系统会从联网回答和模型返回的引用元数据中提取来源，按域名和 URL 聚合，并区分自有来源、竞品来源、第三方来源、媒体内容等类型。来源分析页可查看总引用数、有引用回答、来源域名、竞品来源缺口、新增/流失/保留引用域名，以及具体 URL 明细，帮助判断 AI 回答更依赖哪些页面和内容来源。
+系统会从联网回答和模型返回的引用元数据中提取来源，按域名和 URL 聚合。品牌官网及其子域名归为自有来源，竞品官网归为竞品来源；维护的媒体域名归为媒体内容，其他未命中已知内容类型的外部域名归为其他第三方来源。来源分析页可查看总引用数、有引用回答、来源域名、竞品来源缺口、新增/流失/保留引用域名，以及具体 URL 明细。
 
 ## 适用场景
 
@@ -82,9 +82,11 @@ cp nextjs-frontend/.env.example nextjs-frontend/.env.local
 
 - `JWT_SECRET`
 - `DEFAULT_ADMIN_PASSWORD`
-- 需要启用的平台 API Key，例如 `DOUBAO_API_KEY`、`DEEPSEEK_API_KEY`
+- `CONFIG_ENCRYPTION_KEY`（用于加密数据库中的 AI 平台密钥）
 
-生产环境还应配置 `ALLOWED_ORIGINS`，并通过环境变量注入 `DATABASE_URL`、AI 平台密钥等敏感配置。
+本地开发也可以在 `backend/` 目录运行 `npm run setup:local-key`，生成不会回显内容的本机专用加密主密钥；生产环境仍应由部署系统安全注入。
+
+生产环境还应配置 `ALLOWED_ORIGINS`，并通过环境变量注入 `DATABASE_URL` 等部署配置。AI 平台名称、Base URL、模型和 API Key 必须由管理员登录后在 `/admin/settings` 人工添加；系统不会从 `.env` 自动导入或回退读取平台密钥。
 
 统一启动前后端：
 

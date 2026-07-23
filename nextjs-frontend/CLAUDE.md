@@ -60,7 +60,6 @@ src/app/
 │   ├── users/          # User management
 │   ├── memberships/    # Membership plans
 │   ├── settings/       # System settings
-│   ├── platforms/      # Platform configuration
 │   ├── history/        # Admin history view
 │   ├── health/         # System health
 │   └── notice/         # Admin notices
@@ -92,7 +91,8 @@ backend/
 │   ├── user.js        # User authentication & management
 │   ├── schedules.js   # Scheduled task management
 │   ├── statistics.js  # Analytics endpoints
-│   ├── platforms.js   # Platform configuration
+│   ├── aiPlatforms.js # Authenticated platform catalog
+│   ├── adminAIPlatforms.js # Admin platform configuration
 │   ├── membership.js  # Membership plans
 │   ├── settings.js    # System settings
 │   └── captcha.js     # CAPTCHA generation

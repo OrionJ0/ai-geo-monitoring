@@ -33,3 +33,16 @@ test('问题可以选择所属问题集并继续单独运行', () => {
   assert.match(pageSource, /新建问题/);
   assert.match(pageSource, /编辑问题/);
 });
+
+test('问题库隐藏生成建议并提供单条和批量新增入口', () => {
+  assert.doesNotMatch(pageSource, /title="生成问题建议"/);
+  assert.doesNotMatch(pageSource, />生成建议<\/Button>/);
+  assert.match(pageSource, />新建问题<\/Button>/);
+  assert.match(pageSource, />批量新增<\/Button>/);
+  assert.match(pageSource, /\/prompts\/batch`/);
+});
+
+test('问题库不再被全局原生按钮黑色背景污染', () => {
+  const globalsSource = fs.readFileSync(path.resolve(__dirname, '../app/globals.css'), 'utf8');
+  assert.doesNotMatch(globalsSource, /button\s*\{[\s\S]*?background-color:\s*#1a1a1a/);
+});

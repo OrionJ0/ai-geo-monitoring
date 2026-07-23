@@ -10,14 +10,10 @@ import { shouldRenderMetricChart } from '@/utils/dashboardChartState.cjs';
 import { getBrandSentimentDisplay } from '@/utils/historyAnalysisDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
+import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import styles from './project-dashboard.module.css';
 
 const { Text, Title } = Typography;
-
-const platformLabel = {
-  doubao: '豆包',
-  deepseek: 'DeepSeek',
-};
 
 const sourceTypeColor = {
   自有来源: 'green',
@@ -59,7 +55,7 @@ function formatRank(value) {
   return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '-';
 }
 
-function formatOpportunityScope(row) {
+function formatOpportunityScope(row, platformLabel = {}) {
   const platform = row?.platform ? (platformLabel[row.platform] || row.platform) : '';
   const domain = row?.domain || '';
   if (platform && domain) return `${platform} / ${domain}`;
@@ -88,6 +84,7 @@ function metricTitle(label, explanation) {
 }
 
 export default function GeoProjectDashboardPage() {
+  const { labels: platformLabel } = useAIPlatformCatalog();
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState();
   const [dashboard, setDashboard] = useState(null);
@@ -219,13 +216,13 @@ export default function GeoProjectDashboardPage() {
       { platform: platformLabel[item.platform] || item.platform || '未知', type: '引用率', value: percent(item.citation_rate) },
       { platform: platformLabel[item.platform] || item.platform || '未知', type: '推荐率', value: percent(item.recommendation_rate) },
     ])
-  ), [platforms]);
+  ), [platforms, platformLabel]);
   const platformCheckChartData = useMemo(() => (
     platforms.map((item) => ({
       platform: platformLabel[item.platform] || item.platform || '未知',
       checks: Number(item.checks || 0)
     }))
-  ), [platforms]);
+  ), [platforms, platformLabel]);
   const shouldShowTrendChart = useMemo(() => (
     shouldRenderMetricChart(summary, trendData)
   ), [summary, trendData]);
@@ -423,7 +420,7 @@ export default function GeoProjectDashboardPage() {
       title: '平台/来源',
       key: 'scope',
       width: 130,
-      render: (_, row) => formatOpportunityScope(row)
+      render: (_, row) => formatOpportunityScope(row, platformLabel)
     },
     {
       title: '对象',

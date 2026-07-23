@@ -18,16 +18,17 @@ import {
 } from 'antd';
 import {
   DownloadOutlined,
+  FilePdfOutlined,
   FileSearchOutlined,
   HistoryOutlined,
   ImportOutlined,
   LoadingOutlined,
-  PrinterOutlined,
   QuestionCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { downloadQuestionSetReportPdf } from '@/utils/downloadQuestionSetReportPdf';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import QuestionSetRunHistoryDrawer, {
   type QuestionSetOption,
@@ -72,6 +73,37 @@ type ReportRow = {
   citation_count?: number;
   owned_citation_count?: number;
   sentiment?: string;
+  analysis_method?: string;
+  analysis_platform?: string;
+  analysis_model?: string;
+  analysis_structure?: {
+    schema_version?: string;
+    target_entity_name?: string | null;
+    entities?: Array<{ name?: string; type?: 'brand' | 'company' }>;
+    mentions?: Array<{ entity_name?: string; surface_forms?: string[] }>;
+    competitor_matches?: Array<{ configured_name?: string; entity_name?: string | null }>;
+    candidate_lists?: Array<{ ordered?: boolean; entries?: string[] }>;
+    recommendations?: Array<{ entity_name?: string; kind?: string }>;
+    claims?: Array<{
+      subject_name?: string;
+      predicate?: string;
+      value?: string;
+      qualifier?: string;
+    }>;
+    citations?: {
+      count?: number;
+      official_count?: number;
+      official_website_cited?: boolean;
+      sources?: Array<{ url?: string; domain?: string; owned?: boolean }>;
+    };
+  };
+  analysis_evidence?: {
+    brand?: {
+      mention?: string[];
+      recommendation?: string[];
+      rank?: string[];
+    };
+  };
   competitor_mentions?: Array<{ id?: number | null; name?: string; mentioned?: boolean }>;
   citation_sources?: Array<{ url?: string; domain?: string; title?: string; owned?: boolean }>;
 };
@@ -189,12 +221,14 @@ export default function QuestionSetReportsPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [printing, setPrinting] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
+  const [pdfLayout, setPdfLayout] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [metricsExpanded, setMetricsExpanded] = useState(false);
   const historyRequest = useRef(0);
   const questionSetRequest = useRef(0);
   const reportRequest = useRef(0);
+  const reportSheetRef = useRef<HTMLElement>(null);
   const preferredIds = useRef<{ projectId?: number; runId?: number }>({});
 
   useEffect(() => {
@@ -358,9 +392,21 @@ export default function QuestionSetReportsPage() {
   );
   const summary = report?.summary || {};
   const hasCompetitorBaseline = Number(summary.competitor_baseline_count || 0) > 0;
+  const hasLegacyAnalysis = Boolean(report?.rows?.some(
+    (row) => row.has_metrics && !['ai_structured_v1', 'ai_structured_v2'].includes(row.analysis_method || ''),
+  ));
   const progress = summary.total ? Math.round(((summary.completed || 0) + (summary.failed || 0)) / summary.total * 100) : 0;
 
   const selectRun = (nextRunId: number) => setRunId(nextRunId);
+
+  const brandEvidence = (row: ReportRow) => {
+    const evidence = row.analysis_evidence?.brand || {};
+    return [
+      ...(Array.isArray(evidence.mention) ? evidence.mention : []),
+      ...(Array.isArray(evidence.recommendation) ? evidence.recommendation : []),
+      ...(Array.isArray(evidence.rank) ? evidence.rank : []),
+    ].filter((item, index, rows) => item && rows.indexOf(item) === index);
+  };
 
   const exportReport = async () => {
     if (!projectId || !report) return;
@@ -379,12 +425,26 @@ export default function QuestionSetReportsPage() {
     }
   };
 
-  const printReport = () => {
-    setPrinting(true);
-    window.setTimeout(() => {
-      window.print();
-      setPrinting(false);
-    }, 0);
+  const exportPdf = async () => {
+    if (!report || !reportSheetRef.current) return;
+    setPdfExporting(true);
+    setPdfLayout(true);
+    try {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => resolve());
+      }));
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+      await downloadQuestionSetReportPdf(
+        reportSheetRef.current,
+        `${safeFilename(report.question_set_name)}-${report.id}`,
+      );
+      message.success('PDF 已下载');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '导出 PDF 失败');
+    } finally {
+      setPdfLayout(false);
+      setPdfExporting(false);
+    }
   };
 
   const importReport = async (file: File) => {
@@ -425,7 +485,7 @@ export default function QuestionSetReportsPage() {
     {
       title: '问题',
       dataIndex: 'question',
-      width: 300,
+      width: pdfLayout ? 270 : 300,
       render: (value: string, row: ReportRow) => (
         <Space orientation="vertical" size={2}>
           <Text strong>{value || '-'}</Text>
@@ -436,7 +496,7 @@ export default function QuestionSetReportsPage() {
     {
       title: '平台 / 模型',
       key: 'platform',
-      width: 180,
+      width: pdfLayout ? 160 : 180,
       render: (_: unknown, row: ReportRow) => (
         <Space orientation="vertical" size={2}>
           <Text>{row.platform_name || row.platform || '-'}</Text>
@@ -447,7 +507,7 @@ export default function QuestionSetReportsPage() {
     {
       title: '状态',
       dataIndex: 'status',
-      width: 90,
+      width: pdfLayout ? 80 : 90,
       render: (value: string) => value === 'completed'
         ? <Tag color="success">完成</Tag>
         : value === 'failed'
@@ -457,7 +517,7 @@ export default function QuestionSetReportsPage() {
     {
       title: '品牌表现',
       key: 'brand',
-      width: 180,
+      width: pdfLayout ? 145 : 180,
       render: (_: unknown, row: ReportRow) => row.has_metrics ? (
         <Space wrap size={[4, 4]}>
           <Tag color={row.brand_mentioned ? 'blue' : 'default'}>{row.brand_mentioned ? '已提及' : '未提及'}</Tag>
@@ -469,19 +529,19 @@ export default function QuestionSetReportsPage() {
     {
       title: '排名',
       dataIndex: 'brand_rank',
-      width: 80,
+      width: pdfLayout ? 60 : 80,
       render: formatRank,
     },
     {
       title: '引用',
       dataIndex: 'citation_count',
-      width: 70,
+      width: pdfLayout ? 60 : 70,
       render: (value: number) => Number(value || 0),
     },
     {
       title: '情绪',
       dataIndex: 'sentiment',
-      width: 80,
+      width: pdfLayout ? 70 : 80,
       render: (value: string) => sentimentLabel[value] || '-',
     },
   ];
@@ -551,7 +611,11 @@ export default function QuestionSetReportsPage() {
         }}
       />
 
-      <main className={styles.reportSheet} aria-busy={reportLoading}>
+      <main
+        ref={reportSheetRef}
+        className={`${styles.reportSheet} ${pdfLayout ? styles.pdfLayout : ''}`}
+        aria-busy={reportLoading || pdfExporting}
+      >
             {!report ? (
               <Empty
                 image={<FileSearchOutlined className={styles.emptyIcon} />}
@@ -570,8 +634,8 @@ export default function QuestionSetReportsPage() {
                       {selectedProject?.name || '品牌项目'} · 开始于 {formatDate(report.started_at || report.created_at)}
                     </Text>
                   </div>
-                  <Space wrap className={styles.reportActions}>
-                    <Button icon={<PrinterOutlined />} onClick={printReport}>打印 / 导出 PDF</Button>
+                  <Space wrap className={styles.reportActions} data-pdf-exclude="true">
+                    <Button icon={<FilePdfOutlined />} loading={pdfExporting} onClick={exportPdf}>导出 PDF</Button>
                     <Button icon={<DownloadOutlined />} onClick={exportReport}>导出标准 CSV</Button>
                   </Space>
                 </header>
@@ -582,6 +646,16 @@ export default function QuestionSetReportsPage() {
                     showIcon
                     title="问题集仍在运行，报告会自动更新"
                     description={<Progress percent={progress} size="small" />}
+                    className={styles.runningAlert}
+                  />
+                ) : null}
+
+                {hasLegacyAnalysis ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    title="这份历史报告包含旧规则指标"
+                    description="旧记录沿用生成当时的文本规则，只用于历史回看，不代表当前结构化口径。重新运行问题集后，新记录才会使用“AI 抽取指标原料、程序统一计算指标”的口径。"
                     className={styles.runningAlert}
                   />
                 ) : null}
@@ -598,28 +672,28 @@ export default function QuestionSetReportsPage() {
                     <MetricItem
                       label="有效样本"
                       value={`${summary.valid_analyses || 0} / ${summary.total || 0}`}
-                      help="产生可用分析指标的已完成任务数 ÷ 本次计划任务数。失败、进行中或未生成指标的任务不进入各项比率计算。"
+                      help="通过 JSON 结构校验、实体关系校验和短实体词原回答定位校验的已完成分析数 ÷ 本次计划任务数。调用失败、结构无效或仍在进行中的任务不进入各项比率计算。"
                     />
                     <MetricItem
                       label="品牌提及率"
                       value={`${percent(summary.brand_mention_rate)}%`}
-                      help="提及品牌的有效分析数 ÷ 有效分析数。品牌通过项目名称、别名和已识别的自有产品词匹配。"
+                      help="至少存在 1 条目标品牌结构化提及记录的有效分析数 ÷ 有效分析数。分析模型先把目标品牌显式映射到回答实体；每条提及只保留品牌名或别名等短实体词，并须能按顺序在原回答中定位。是否提及和百分比由程序计数，分析模型不直接返回。"
                     />
                     <MetricItem
                       label="推荐率"
                       value={`${percent(summary.recommendation_rate)}%`}
-                      help="明确推荐品牌的有效分析数 ÷ 有效分析数。仅识别品牌同句或分句中的明确推荐表达，并排除“不推荐”等否定表达。"
+                      help="至少存在 1 条目标品牌明确推荐关系的有效分析数 ÷ 有效分析数。仅客观列举不算推荐，程序根据明确推荐关系计算是否推荐和推荐率，分析模型不直接返回布尔值或比例。"
                     />
                     <MetricItem
                       label="平均品牌排名"
                       value={formatRank(summary.avg_brand_rank)}
-                      help="优先读取品牌在回答顶层厂家列表中的实际列表项位置，再对形成排名的有效回答取平均；没有列表且未配置竞品时不强行排名，显示为“-”。配置竞品后，可用品牌与竞品的首次出现顺序作为兜底。"
+                      help="程序读取分析模型显式映射的目标实体，并根据首个明确排序列表中的 entries 数组位置求平均。普通项目符号或正文首次出现位置不是排名；没有明确排序时显示“-”，是否配置竞品不影响目标品牌自身排名。"
                     />
                   </div>
 
                   <Collapse
                     className={styles.metricsCollapse}
-                    activeKey={metricsExpanded || printing ? ['more-metrics'] : []}
+                    activeKey={metricsExpanded || pdfLayout ? ['more-metrics'] : []}
                     onChange={(keys) => setMetricsExpanded(
                       Array.isArray(keys) ? keys.includes('more-metrics') : keys === 'more-metrics'
                     )}
@@ -637,7 +711,7 @@ export default function QuestionSetReportsPage() {
                             <MetricItem
                               label="平均 SOV"
                               value={`${percent(summary.avg_share_of_voice)}%`}
-                              help="仅在项目配置竞品时展示。每条有效回答先计算品牌与竞品的可见度分：提及次数 + 首次出现排名加分 + 明确推荐加分；品牌得分 ÷ 全部品牌得分得到相对声量，再对有效回答取平均。"
+                              help="仅在项目配置竞品时展示。每条有效回答按结构化提及次数计数：品牌提及次数 ÷ 品牌与已配置竞品提及总次数；再对有效回答取平均。排名、推荐和未配置的其他品牌不加分。"
                             />
                           ) : null}
                           <MetricItem
@@ -686,13 +760,89 @@ export default function QuestionSetReportsPage() {
                     rowKey={(row) => `${row.record_id || 'imported'}-${row.question_id || row.question}-${row.platform}`}
                     columns={rowColumns}
                     dataSource={report.rows || []}
-                    pagination={printing ? false : { pageSize: 20, showSizeChanger: false }}
-                    scroll={{ x: 1080 }}
+                    pagination={pdfLayout ? false : { pageSize: 20, showSizeChanger: false }}
+                    scroll={{ x: pdfLayout ? 880 : 1080 }}
                     locale={{ emptyText: '本次运行暂无结果' }}
                     expandable={{
                       expandedRowRender: (row) => (
                         <div className={styles.answerPanel}>
                           {row.error_message ? <Alert type="error" showIcon title={row.error_message} /> : null}
+                          {row.has_metrics ? (
+                            <Space wrap size={6}>
+                              <Text className={styles.answerLabel}>分析方式</Text>
+                              {row.analysis_method === 'ai_structured_v2'
+                                ? <Tag color="blue">AI 结构化 v2</Tag>
+                                : row.analysis_method === 'ai_structured_v1'
+                                  ? <Tag>AI 结构化 v1（历史）</Tag>
+                                  : <Tag>历史规则</Tag>}
+                              {row.analysis_platform ? (
+                                <Text type="secondary">
+                                  {row.analysis_platform}{row.analysis_model ? ` · ${row.analysis_model}` : ''}
+                                </Text>
+                              ) : null}
+                            </Space>
+                          ) : null}
+                          {Array.isArray(row.analysis_structure?.entities)
+                            && row.analysis_structure.entities.length ? (
+                            <div>
+                              <Text className={styles.answerLabel}>识别到的品牌 / 公司</Text>
+                              <Space wrap size={[4, 4]}>
+                                {row.analysis_structure.entities.map((entity, index) => (
+                                  <Tag
+                                    key={`${entity.name || 'entity'}-${index}`}
+                                    color={entity.name === row.analysis_structure?.target_entity_name ? 'blue' : undefined}
+                                  >
+                                    {entity.name || '-'} · {entity.type === 'company' ? '公司' : '品牌'}
+                                  </Tag>
+                                ))}
+                              </Space>
+                              <div>
+                                <Text type="secondary">
+                                  目标品牌映射：
+                                  {row.analysis_structure.target_entity_name || '回答中未识别到'}
+                                </Text>
+                              </div>
+                            </div>
+                          ) : null}
+                          {Array.isArray(row.analysis_structure?.candidate_lists)
+                            && row.analysis_structure.candidate_lists.length ? (
+                            <div>
+                              <Text className={styles.answerLabel}>候选顺序</Text>
+                              <Space orientation="vertical" size={4}>
+                                {row.analysis_structure.candidate_lists.map((list, index) => (
+                                  <Text key={`candidate-list-${index}`}>
+                                    {list.ordered ? '明确排序' : '普通列表'}：
+                                    {(list.entries || []).join(' → ') || '-'}
+                                  </Text>
+                                ))}
+                              </Space>
+                            </div>
+                          ) : null}
+                          {Array.isArray(row.analysis_structure?.claims)
+                            && row.analysis_structure.claims.length ? (
+                            <div>
+                              <Text className={styles.answerLabel}>待核验事实声明</Text>
+                              <Space orientation="vertical" size={4}>
+                                {row.analysis_structure.claims.map((claim, index) => (
+                                  <Text key={`claim-${index}`}>
+                                    {claim.subject_name || '-'} · {claim.predicate || '-'}：
+                                    {claim.value || '-'}
+                                    {claim.qualifier ? `（${claim.qualifier}）` : ''}
+                                  </Text>
+                                ))}
+                              </Space>
+                            </div>
+                          ) : null}
+                          {row.analysis_method === 'ai_structured_v1' && brandEvidence(row).length ? (
+                            <div>
+                              <Text className={styles.answerLabel}>历史 v1 分析依据</Text>
+                              <Space orientation="vertical" size={4}>
+                                {brandEvidence(row).map((quote) => (
+                                  <Text key={quote}>“{quote}”</Text>
+                                ))}
+                              </Space>
+                            </div>
+                          ) : null}
                           <Text className={styles.answerLabel}>AI 原始回答</Text>
                           <Paragraph className={styles.answerText}>{row.answer || '暂无回答内容'}</Paragraph>
                           {Array.isArray(row.citation_sources) && row.citation_sources.length ? (
@@ -710,7 +860,12 @@ export default function QuestionSetReportsPage() {
                           ) : null}
                         </div>
                       ),
-                      rowExpandable: (row) => Boolean(row.answer || row.error_message || row.citation_sources?.length),
+                      rowExpandable: (row) => Boolean(
+                        row.answer
+                        || row.error_message
+                        || row.citation_sources?.length
+                        || row.has_metrics
+                      ),
                     }}
                   />
                 </section>

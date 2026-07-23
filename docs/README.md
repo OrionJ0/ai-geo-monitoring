@@ -23,6 +23,8 @@
 - `ENVIRONMENT.md`：环境变量与敏感信息管理
 - `DEPLOYMENT.md`：部署与运维建议
 - `SECURITY.md`：安全加固说明与最佳实践
+- `closed-2026-07-23-002-ai-platform-settings/`：全局 AI 平台设置中心、临时模型目录、分析结构化协议与 OpenAI 兼容协议收敛的已完成需求
+- `closed-2026-07-23-004-question-set-run-reports/`：问题集独立运行报告、AI 实体/关系结构化指标、标准 CSV 往返与 A4 竖版 PDF 的已完成需求
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 
@@ -50,7 +52,7 @@
 
 ## 功能特性
 
-- 多平台检测：支持豆包（Doubao）、DeepSeek、Kimi、千问。
+- 多平台检测：管理员可在 `/admin/settings` 人工配置豆包、DeepSeek 或新增 OpenAI Chat Completions 兼容平台。
 - 批量问题：支持按行输入多个问题并同时检测。
 - 关键词高亮与统计：对原文进行关键词高亮，并统计出现次数（含英文词边界）。
 - 历史记录：按时间、平台、状态筛选，支持查看详情、删除、清空、导出。
@@ -88,7 +90,7 @@
 
 ```
 backend/        # Node.js (Express) 后端
-  .env          # 环境变量 (数据库配置, API密钥)
+  .env          # 部署环境变量（数据库、JWT、平台密钥加密主密钥等）
   app.js        # 应用主文件
   config/       # 数据库配置
   models/       # Sequelize 模型
@@ -134,14 +136,15 @@ nextjs-frontend/ # Next.js 前端
 - `GET /api/detection/status/:recordId` — 轮询某条记录的状态
 - `GET /api/detection/stream?user_id=&platform=&question=&brand_keywords=` — 启动流式（SSE）
 - `GET /api/statistics/user/:userId` — 用户统计数据
-- `GET /api/platforms/ping` — 平台连通性自检
+- `GET /api/ai-platforms` — 当前 AI 平台目录（需登录）
+- `/api/admin/ai-platforms/*` — AI 平台管理、模型请求参数、启停、连接测试与联网能力检测（需管理员）
 
 更多字段与返回示例详见 `API.md`。
 
 ## 生成参数与可调项
 
 - 生成温度（后端服务层）：`temperature = 0.7`。
-- 最大 Token 等参数：可在后端服务中按平台策略设置。
+- 并发、重试、默认超时和最大 Token：由管理员在 `/admin/settings` 的“运行设置”页签维护；平台可覆盖超时和最大 Token。
 
 ## 开发与运维建议
 

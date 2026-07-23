@@ -5,6 +5,7 @@ import { Button, Card, Form, Input, InputNumber, Select, Space, Tabs, message } 
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import AIPlatformSettings from './AIPlatformSettings';
+import AIAnalysisSettings from './AIAnalysisSettings';
 
 type SettingsResponse = {
   seo_title?: string;
@@ -158,8 +159,9 @@ export default function AdminSettingsPage() {
         defaultActiveKey="ai-platforms"
         items={[
           { key: 'ai-platforms', label: 'AI 平台', children: <AIPlatformSettings refreshSignal={refreshSignal} /> },
-          { key: 'runtime', label: '运行设置', children: runtimeSettings },
-          { key: 'seo', label: '站点 SEO', children: seoSettings },
+          { key: 'ai-analysis', label: 'AI 分析 API', children: <AIAnalysisSettings /> },
+          { key: 'runtime', label: '运行设置', children: runtimeSettings, forceRender: true },
+          { key: 'seo', label: '站点 SEO', children: seoSettings, forceRender: true },
         ]}
       />
     </Card>

@@ -153,7 +153,7 @@ curl -H "Authorization: Bearer <userA_token>" http://localhost:3002/api/detectio
 ### 速率限制测试
 ```bash
 # 快速发送多个请求，应触发 429
-for i in {1..550}; do curl -H "Authorization: Bearer <token>" http://localhost:3002/api/platforms/ping; done
+for i in {1..550}; do curl -H "Authorization: Bearer <token>" http://localhost:3002/api/ai-platforms; done
 ```
 
 ### CORS 测试

@@ -70,6 +70,9 @@ Authorization: Bearer <token>
 - `GET /api/geo-projects/:projectId/prompts` 查询项目问题列表及近期表现
 - `POST /api/geo-projects/:projectId/prompts` 新建单问题
   - 请求体：`question` 必填；`question_set_id`、`tags`、`platforms`、`enabled` 可选
+- `POST /api/geo-projects/:projectId/prompts/batch` 批量新增问题
+  - 请求体：`questions` 为 1–100 个非空字符串；`question_set_id`、`tags`、`platforms`、`enabled` 统一应用到整批问题
+  - 批次内和库内的规范化重复问题会跳过，响应返回 `created_count`、`skipped_count`、`created` 与 `skipped`
 - `PUT /api/geo-projects/:projectId/prompts/:promptId` 编辑单问题
 - `DELETE /api/geo-projects/:projectId/prompts/:promptId` 删除单问题
 - `POST /api/geo-projects/:projectId/prompts/:promptId/run` 独立运行一个启用问题
@@ -213,8 +216,20 @@ Authorization: Bearer <token>
 - `POST /api/schedules/:id/run` 立即执行一次
   - **权限验证**：只能执行自己的任务
 
-## 平台自检（需认证）
-- `GET /api/platforms/ping` 检查各平台 API Key 配置状态
+## AI 平台目录（需认证）
+- `GET /api/ai-platforms` 获取未归档平台目录及是否可选择，不返回 API Key。
+
+## AI 平台管理（需管理员权限）
+- `GET /api/admin/ai-platforms` 获取管理列表。
+- `POST /api/admin/ai-platforms` 新增 OpenAI Chat Completions 或 Responses 兼容平台。
+- `PUT /api/admin/ai-platforms/:id` 编辑平台、默认模型和 `request_options`；API Key 留空表示保留。
+- `PATCH /api/admin/ai-platforms/:id/enabled` 启用或停用平台。
+- `GET /api/admin/ai-platforms/:id/models` 使用该平台已保存的连接配置临时读取供应商 `GET /models`；成功时合并当前默认模型并返回 `persisted: false`，模型目录不落库。
+- `GET /api/admin/ai-platforms/:id/api-key` 由管理员主动读取该平台现有 API Key；响应设置 `Cache-Control: no-store`，平台列表仍不返回明文。
+- `DELETE /api/admin/ai-platforms/:id/api-key` 清除 API Key。
+- `DELETE /api/admin/ai-platforms/:id` 删除自定义平台；为保留历史记录含义，服务端采用软删除。
+- `POST /api/admin/ai-platforms/:id/test` 主动测试连接，不改变启用状态。
+- `POST /api/admin/ai-platforms/:id/test-web-search` 独立检测联网能力；可提交 `{ "input": "测试问题" }`，返回 `success`、`failed` 或 `inconclusive`，以及本次 `input`、模型文本和供应商响应体。输入输出仅随当前响应返回，数据库只保存状态、时间和简短结论，不改变平台启用状态。
 
 ## 会员方案（需管理员权限）
 - `GET /api/membership/plans` 获取全部会员方案
@@ -226,6 +241,10 @@ Authorization: Bearer <token>
 - 管理员接口（需管理员权限）：
   - `GET /api/settings` 获取允许的系统设置项
   - `PUT /api/settings` 更新设置
+  - `GET /api/settings/analysis-api` 获取当前 AI 结构化分析平台与独立模型
+  - `GET /api/settings/analysis-api/prompt` 获取正式运行使用的版本化分析提示词模板与期望 JSON 结构
+  - `PUT /api/settings/analysis-api` 通过 `{ "platform_code": "deepseek", "model_name": "deepseek-v4-pro" }` 分别选择已启用且配置完整的平台和分析模型
+  - `POST /api/settings/analysis-api/test` 提交品牌、别名和一段原回答，临时返回测试输入、证据结构、程序派生结果和 API 原始输出；测试内容不落库
 - 公开接口（无需认证）：
   - `GET /api/settings/seo` 获取公共 SEO 设置
   - `GET /api/settings/notice` 获取系统通知

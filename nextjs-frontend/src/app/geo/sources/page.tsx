@@ -2,19 +2,15 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import axios from 'axios';
 import { Column } from '@ant-design/plots';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import { normalizeSourceContextValues } from '@/utils/sourceDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 
 const { Text, Title } = Typography;
-
-const platformLabel = {
-  doubao: '豆包',
-  deepseek: 'DeepSeek',
-};
 
 const typeColor = {
   自有来源: 'green',
@@ -24,6 +20,7 @@ const typeColor = {
   百科资料: 'purple',
   视频内容: 'cyan',
   媒体内容: 'geekblue',
+  其他第三方来源: 'default',
   第三方来源: 'default',
   未知来源: 'default',
 };
@@ -57,6 +54,7 @@ function renderTags(values, fallbackMap = {}) {
 }
 
 export default function GeoSourcesPage() {
+  const { labels: platformLabel } = useAIPlatformCatalog();
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState();
   const [projectLoading, setProjectLoading] = useState(false);
@@ -293,13 +291,20 @@ export default function GeoSourcesPage() {
         <Card><Empty description="请先创建品牌项目后查看来源分析" /></Card>
       ) : null}
 
+      <Alert
+        type="info"
+        showIcon
+        title="来源类型口径"
+        description="媒体内容表示域名命中系统维护的媒体域名规则；其他第三方来源表示非自有、非竞品且未命中社区、电商、百科、视频或媒体规则的外部来源。顶部第三方来源总数包含媒体及其他外部类型。"
+      />
+
       <Row gutter={[12, 12]}>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="总引用" value={summary.total_citations || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="有引用回答" value={summary.cited_responses || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="来源域名" value={summary.source_domain_count || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="自有来源" value={summary.owned_citations || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="竞品来源" value={summary.competitor_citations || 0} loading={sourceLoading} /></Card></Col>
-        <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="第三方来源" value={summary.third_party_citations || 0} loading={sourceLoading} /></Card></Col>
+        <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="全部第三方来源" value={summary.third_party_citations || 0} loading={sourceLoading} /></Card></Col>
       </Row>
 
       <Row gutter={[12, 12]}>
