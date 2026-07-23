@@ -22,9 +22,23 @@ function displayHost(value) {
 }
 
 function historyScoreColor(score) {
+  if (score === null || score === undefined) return '#64748b';
   if (score >= 80) return '#15803d';
   if (score >= 60) return '#d97706';
   return '#dc2626';
+}
+
+function comparablePrevious(items, currentIndex, item) {
+  const hasValidScore = item.score !== null && Number.isFinite(Number(item.score));
+  const scoreVersion = item.summary?.scoreVersion;
+  if (!hasValidScore || !scoreVersion) return null;
+  return items.slice(currentIndex + 1).find((candidate) => (
+    candidate.score !== null
+    && Number.isFinite(Number(candidate.score))
+    && candidate.finalUrl === item.finalUrl
+    && candidate.summary?.mode === item.summary?.mode
+    && candidate.summary?.scoreVersion === scoreVersion
+  )) || null;
 }
 
 export default function SeoAuditHistoryDrawer({
@@ -108,7 +122,11 @@ export default function SeoAuditHistoryDrawer({
         />
       ) : (
         <div className={styles.historyList}>
-          {items.map((item) => (
+          {items.map((item, index) => {
+            const previous = comparablePrevious(items, index, item);
+            const scoreDelta = previous ? Number(item.score) - Number(previous.score) : null;
+            const scoreVersion = item.summary?.scoreVersion;
+            return (
             <article
               key={item.id}
               className={`${styles.historyItem} ${item.id === currentAuditId ? styles.historyItemActive : ''}`}
@@ -122,9 +140,18 @@ export default function SeoAuditHistoryDrawer({
                   </span>
                   <h3>{displayHost(item.finalUrl)}</h3>
                 </div>
-                <strong style={{ color: historyScoreColor(item.score) }}>{item.score}</strong>
+                <div className={styles.historyScore}>
+                  <strong style={{ color: historyScoreColor(item.score) }}>{item.score ?? '—'}</strong>
+                  <span>{scoreVersion === '2026-07-23-v4' ? 'v4 技术健康分' : '旧版评分'}</span>
+                </div>
               </header>
               <p title={item.finalUrl}>{item.finalUrl}</p>
+              {scoreDelta !== null && (
+                <div className={`${styles.historyDelta} ${scoreDelta >= 0 ? styles.historyDeltaUp : styles.historyDeltaDown}`}>
+                  较上次 {scoreDelta > 0 ? '+' : ''}{scoreDelta} 分
+                  <span>同 URL · 同模式 · 同评分版本</span>
+                </div>
+              )}
               <footer>
                 <div>
                   <span>{formatHistoryDate(item.checkedAt)}</span>
@@ -142,7 +169,8 @@ export default function SeoAuditHistoryDrawer({
                 </Button>
               </footer>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -97,6 +97,29 @@ test('continues link discovery when the first homepage link points back to the h
   ]);
 });
 
+test('full-site audit always includes the homepage when started from a subpage', async () => {
+  const pages = new Map([
+    ['https://example.com/', htmlPage('https://example.com/')],
+    ['https://example.com/product', htmlPage('https://example.com/product')]
+  ]);
+  const siteClient = {
+    async fetchPage(url) {
+      return pages.get(url);
+    },
+    async probe() {
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/product');
+
+  assert.deepEqual(report.pages.map((page) => page.url), [
+    'https://example.com/product',
+    'https://example.com/'
+  ]);
+  assert.equal(report.pages.find((page) => page.url === 'https://example.com/').isHomepage, true);
+});
+
 test('continues after page failures and aggregates issues with affected URLs', async () => {
   const root = htmlPage('https://example.com/', ['/missing-title', '/unavailable']);
   const missingTitle = htmlPage('https://example.com/missing-title');
@@ -130,6 +153,10 @@ test('continues after page failures and aggregates issues with affected URLs', a
   assert.equal(report.issues.find((issue) => issue.id === 'title').coverage, 0.25);
   assert.equal(report.issues.find((issue) => issue.id === 'http-status').coverage, 0.2);
   assert.equal(report.priorities[0].stage, 'access');
+  const sitemapIssue = report.issues.find((issue) => issue.id === 'sitemap');
+  assert.equal(sitemapIssue.coverage, 1);
+  assert.equal(sitemapIssue.applicablePages, 3);
+  assert.equal(sitemapIssue.affectedPages.length, 3);
 });
 
 test('evaluates crawler permissions per path and aggregates only affected pages', async () => {

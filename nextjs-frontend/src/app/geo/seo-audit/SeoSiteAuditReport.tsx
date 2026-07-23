@@ -2,26 +2,13 @@
 'use client';
 
 import React from 'react';
-import { Progress } from 'antd';
 import { CheckCircleFilled, ClockCircleOutlined, ExclamationCircleFilled } from '@ant-design/icons';
 import SearchPlatformPanel from './SearchPlatformPanel';
 import CrawlerAccessPanel from './CrawlerAccessPanel';
+import TechnicalHealthOverview from './TechnicalHealthOverview';
 import styles from './seo-audit.module.css';
 
 const SEVERITY_LABELS = { critical: '严重', high: '高优先级', medium: '中优先级', low: '建议优化' };
-
-function scoreColor(score) {
-  if (score >= 80) return '#15803d';
-  if (score >= 60) return '#d97706';
-  return '#dc2626';
-}
-
-function scoreCopy(score) {
-  if (score >= 90) return '技术基础优秀';
-  if (score >= 75) return '整体技术基础良好';
-  if (score >= 60) return '仍有明显提升空间';
-  return '建议优先修复抓取与页面核心问题';
-}
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
@@ -38,7 +25,7 @@ function SeverityBadge({ severity }) {
 
 export default function SeoSiteAuditReport({ report }) {
   const pages = Array.isArray(report.pages) ? report.pages : [];
-  const issues = Array.isArray(report.issues) ? report.issues : report.priorities || [];
+  const issues = Array.isArray(report.priorities) ? report.priorities : report.issues || [];
   return (
     <div className={styles.report} aria-live="polite">
       <section className={styles.reportMeta}>
@@ -54,64 +41,55 @@ export default function SeoSiteAuditReport({ report }) {
         </dl>
       </section>
 
-      {report.site.truncated && (
-        <div className={styles.truncatedNotice} role="status">
-          <ExclamationCircleFilled /> 已达到 {report.site.limit} 页检测上限。本报告只代表已检测页面，不代表覆盖站点全部路由。
-        </div>
-      )}
+      <TechnicalHealthOverview report={report} />
 
-      <section className={styles.reportLead}>
-        <article className={styles.priorityPanel}>
-          <header className={styles.sectionHeading}>
-            <div><span className={styles.sectionKicker}>整站问题地图</span><h2>按影响范围优先修复</h2></div>
-            <span className={styles.issueCount}>{issues.length} 类问题</span>
-          </header>
-          {issues.length === 0 ? (
-            <div className={styles.allPassed}><CheckCircleFilled /> 已检测页面的关键项均通过</div>
-          ) : (
-            <ol className={styles.siteIssueList}>
-              {issues.map((issue, index) => (
-                <li key={issue.id} className={`${styles.siteIssue} ${styles[`rail_${issue.severity}`]}`}>
-                  <span className={styles.priorityNumber}>{String(index + 1).padStart(2, '0')}</span>
-                  <div>
-                    <div className={styles.priorityTitle}>
-                      <strong>{issue.finding || `${issue.title}未通过`}</strong>
-                      <SeverityBadge severity={issue.severity} />
-                    </div>
-                    <p className={styles.siteIssueScope}>影响 {issue.count || issue.affectedPages?.length || 0} 个页面 · 权重 {issue.weight}</p>
-                    <div className={styles.affectedUrls}>
-                      {(issue.affectedPages || []).slice(0, 6).map((url) => (
-                        <a key={url} href={url} target="_blank" rel="noreferrer">{url}</a>
-                      ))}
-                      {(issue.affectedPages?.length || 0) > 6 && <span>另有 {issue.affectedPages.length - 6} 个页面</span>}
-                    </div>
-                    {issue.recommendation && <p className={styles.priorityRecommendation}>建议：{issue.recommendation}</p>}
+      <section className={styles.priorityPanel}>
+        <header className={styles.sectionHeading}>
+          <div><span className={styles.sectionKicker}>整站问题地图</span><h2>按技术链路优先修复</h2></div>
+          <span className={styles.issueCount}>{issues.length} 类问题</span>
+        </header>
+        {issues.length === 0 ? (
+          <div className={styles.allPassed}><CheckCircleFilled /> 已检测页面的关键项均通过</div>
+        ) : (
+          <ol className={styles.siteIssueList}>
+            {issues.map((issue, index) => (
+              <li key={issue.id} className={`${styles.siteIssue} ${styles[`rail_${issue.severity}`]}`}>
+                <span className={styles.priorityNumber}>{String(index + 1).padStart(2, '0')}</span>
+                <div>
+                  <span className={styles.prioritySubject}>{issue.title}</span>
+                  <div className={styles.priorityTitle}>
+                    <strong>{issue.finding || `${issue.title}未通过`}</strong>
+                    <SeverityBadge severity={issue.severity} />
                   </div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </article>
-
-        <aside className={styles.scorePanel} aria-label="整站技术健康度">
-          <span className={styles.sectionKicker}>技术健康度</span>
-          <Progress
-            type="circle"
-            percent={report.score}
-            size={154}
-            strokeWidth={8}
-            strokeColor={scoreColor(report.score)}
-            railColor="#e8edf5"
-            format={(value) => <span className={styles.scoreValue}>{value}</span>}
-          />
-          <strong>{scoreCopy(report.score)}</strong>
-          <p>规则版本 {report.scoreVersion} · 实际总权重 {report.summary.totalWeight}</p>
-          <div className={styles.scoreStats}>
-            <div><span>{report.site.successfulPages}</span><small>成功页面</small></div>
-            <div><span>{report.summary.issues}</span><small>问题类型</small></div>
-            <div><span>{report.summary.issueInstances}</span><small>问题实例</small></div>
-          </div>
-        </aside>
+                  <div className={styles.issueMetrics}>
+                    <span>{issue.stageLabel || '旧版问题'}</span>
+                    <span>覆盖率 {Math.round(Number(issue.coverage || 0) * 100)}%</span>
+                    <span>{issue.affectsHomepage ? '影响首页' : '不影响首页'}</span>
+                    <strong>
+                      {issue.deduction === null || issue.deduction === undefined
+                        ? issue.cap ? `分数上限 ${issue.cap}` : '旧版未记录扣分'
+                        : `实际扣分 ${Number(issue.deduction).toFixed(2)}`}
+                    </strong>
+                  </div>
+                  <p className={styles.siteIssueScope}>
+                    影响 {issue.count || issue.affectedPages?.length || 0} / {issue.applicablePages || report.site.auditedPages} 个适用页面
+                  </p>
+                  <div className={styles.priorityFact}>
+                    <span>检测事实</span>
+                    <p>{issue.findings?.[0]?.value || issue.value || issue.finding || '未返回事实数据'}</p>
+                  </div>
+                  <div className={styles.affectedUrls}>
+                    {(issue.affectedPages || []).slice(0, 6).map((url) => (
+                      <a key={url} href={url} target="_blank" rel="noreferrer">{url}</a>
+                    ))}
+                    {(issue.affectedPages?.length || 0) > 6 && <span>另有 {issue.affectedPages.length - 6} 个页面</span>}
+                  </div>
+                  {issue.recommendation && <p className={styles.priorityRecommendation}>建议：{issue.recommendation}</p>}
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
       </section>
 
       <SearchPlatformPanel platforms={report.platforms} />
@@ -132,7 +110,7 @@ export default function SeoSiteAuditReport({ report }) {
                 </span>
                 <span className={styles.pageUrl}>{page.url}</span>
                 <span className={styles.pageIssueCount}>{page.issues?.length || 0} 个问题</span>
-                <strong>{page.status === 'failed' ? '失败' : page.score}</strong>
+                <strong>{page.status === 'failed' ? '失败' : page.score ?? '—'}</strong>
               </summary>
               <div className={styles.pageDetail}>
                 {page.errorMessage && <p>失败原因：{page.errorMessage}</p>}
@@ -147,7 +125,7 @@ export default function SeoSiteAuditReport({ report }) {
 
       <footer className={styles.methodNote}>
         <ClockCircleOutlined aria-hidden="true" />
-        <span>技术健康度按本次实际检查实例加权计算，不是 Google、Bing 或百度的官方评分，也不代表排名保证。</span>
+        <span>技术健康分按本次实际检测范围和问题覆盖率计算，不是 Google、Bing 或百度的官方评分，也不代表排名保证。</span>
       </footer>
     </div>
   );

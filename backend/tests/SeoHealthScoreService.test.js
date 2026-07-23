@@ -157,6 +157,10 @@ test('关键证据不完整时不生成伪精确技术健康分', () => {
   assert.equal(result.rawScore, null);
   assert.equal(result.status, 'unknown');
   assert.equal(result.bottleneck, null);
+  assert.equal(result.stages.every((stage) => stage.score === null), true);
+  assert.equal(result.issues.length, 1);
+  assert.equal(result.issues[0].id, 'http-status');
+  assert.equal(result.issues[0].deduction, null);
   assert.deepEqual(result.unknownReasons, ['无法确认首页是否可访问']);
 });
 
@@ -487,4 +491,41 @@ test('无有效正文的加权覆盖率达到一半时形成内容阻断', () =>
   assert.equal(blockers[0].id, 'widespread-empty-content');
   assert.equal(blockers[0].cap, 59);
   assert.equal(blockers[0].coverage, 0.5714);
+});
+
+test('大范围阻断覆盖率只以可判断页面为分母，不被抓取失败页面稀释', () => {
+  const pages = [{
+    url: 'https://example.com/',
+    isHomepage: true,
+    statusCode: 200,
+    indexable: true,
+    contentCharacters: 1000
+  }];
+  for (let index = 0; index < 4; index += 1) {
+    pages.push({
+      url: `https://example.com/noindex-${index}`,
+      isHomepage: false,
+      statusCode: 200,
+      indexable: false,
+      contentCharacters: 0
+    });
+  }
+  for (let index = 0; index < 10; index += 1) {
+    pages.push({
+      url: `https://example.com/unknown-${index}`,
+      isHomepage: false,
+      statusCode: 0,
+      indexable: null,
+      contentCharacters: null
+    });
+  }
+
+  const blockers = detectTechnicalHealthBlockers({
+    pages,
+    crawlerAccess: { crawlers: [] },
+    scoreConfig: defaultSeoHealthScoreConfig
+  });
+
+  assert.equal(blockers.find((blocker) => blocker.id === 'widespread-noindex').coverage, 0.5714);
+  assert.equal(blockers.find((blocker) => blocker.id === 'widespread-empty-content').coverage, 0.5714);
 });

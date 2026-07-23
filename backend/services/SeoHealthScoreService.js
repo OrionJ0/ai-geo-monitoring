@@ -13,12 +13,13 @@ function pageWeight(instance, scoreConfig) {
   return instance.isHomepage ? scoreConfig.homepageWeight : 1;
 }
 
-function pageCoverage(pages, predicate, scoreConfig) {
-  const totalWeight = pages.reduce(
+function pageCoverage(pages, predicate, scoreConfig, isApplicable = () => true) {
+  const applicablePages = pages.filter(isApplicable);
+  const totalWeight = applicablePages.reduce(
     (sum, page) => sum + (page.isHomepage ? scoreConfig.homepageWeight : 1),
     0
   );
-  const affected = pages.filter(predicate);
+  const affected = applicablePages.filter(predicate);
   const affectedWeight = affected.reduce(
     (sum, page) => sum + (page.isHomepage ? scoreConfig.homepageWeight : 1),
     0
@@ -84,7 +85,8 @@ function detectTechnicalHealthBlockers({
   const noindexCoverage = pageCoverage(
     pages,
     (page) => page.indexable === false,
-    scoreConfig
+    scoreConfig,
+    (page) => typeof page.indexable === 'boolean'
   );
   if (
     noindexCoverage.coverage >= scoreConfig.blockerPolicy.widespreadCoverage
@@ -101,10 +103,11 @@ function detectTechnicalHealthBlockers({
   }
   const emptyContentCoverage = pageCoverage(
     pages,
+    (page) => page.contentCharacters === 0,
+    scoreConfig,
     (page) => page.statusCode >= 200
       && page.statusCode < 400
-      && page.contentCharacters === 0,
-    scoreConfig
+      && Number.isFinite(page.contentCharacters)
   );
   if (emptyContentCoverage.coverage >= scoreConfig.blockerPolicy.widespreadCoverage) {
     blockers.push({
@@ -127,21 +130,6 @@ function calculateTechnicalHealth({
   rules,
   scoreConfig
 }) {
-  if (!evidenceComplete) {
-    return {
-      score: null,
-      rawScore: null,
-      status: 'unknown',
-      scoreCap: null,
-      blockers: [],
-      bottleneck: null,
-      stages: [],
-      issues: [],
-      priorities: [],
-      unknownReasons
-    };
-  }
-
   const uniqueInstances = new Map();
   instances.forEach((instance) => {
     const key = `${instance.check.id}\u0000${instance.url}`;
@@ -259,6 +247,27 @@ function calculateTechnicalHealth({
     ...blockerPriorities,
     ...issues.map((issue) => ({ ...issue, kind: 'issue' }))
   ];
+
+  if (!evidenceComplete) {
+    const unknownIssues = issues.map((issue) => ({ ...issue, deduction: null }));
+    const unknownIssuesById = new Map(unknownIssues.map((issue) => [issue.id, issue]));
+    return {
+      score: null,
+      rawScore: null,
+      status: 'unknown',
+      scoreCap: null,
+      blockers,
+      bottleneck: null,
+      stages: stages.map((stage) => ({ ...stage, score: null, deduction: null })),
+      issues: unknownIssues,
+      priorities: priorities.map((priority) => (
+        priority.kind === 'issue'
+          ? { ...unknownIssuesById.get(priority.id), kind: 'issue' }
+          : priority
+      )),
+      unknownReasons
+    };
+  }
 
   return {
     score,

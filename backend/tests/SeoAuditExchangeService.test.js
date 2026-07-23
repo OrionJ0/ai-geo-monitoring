@@ -132,3 +132,53 @@ test('关键证据不足的 v4 报告可带空分数导出并原样回导', () =
   assert.equal(parsed.report.grade, 'unknown');
   assert.deepEqual(parsed.report.health.unknownReasons, ['robots.txt 证据不足']);
 });
+
+test('v4 CSV 往返完整保留阶段、阻断、覆盖率和实际扣分', () => {
+  const report = pageReport();
+  report.scoreVersion = '2026-07-23-v4';
+  report.scoreModel = 'technical-health-v4';
+  report.grade = 'blocked';
+  report.score = 39;
+  report.health = {
+    score: 39,
+    rawScore: 76.25,
+    status: 'blocked',
+    scoreCap: 39,
+    stages: [
+      { key: 'access', label: '访问与发现', budget: 30, score: 25, deduction: 5 },
+      { key: 'index', label: '索引资格', budget: 25, score: 20, deduction: 5 },
+      { key: 'content', label: '内容理解', budget: 30, score: 20, deduction: 10 },
+      { key: 'enhancement', label: '展示与增强', budget: 15, score: 11.25, deduction: 3.75 }
+    ],
+    blockers: [{
+      id: 'homepage-noindex',
+      title: '首页禁止索引',
+      finding: '首页明确设置 noindex',
+      cap: 39,
+      affectedPages: ['https://example.com/'],
+      coverage: 1
+    }],
+    issues: [{
+      id: 'title',
+      stage: 'content',
+      coverage: 1,
+      deduction: 6.5,
+      affectedPages: ['https://example.com/']
+    }]
+  };
+  report.priorities[0] = {
+    ...report.priorities[0],
+    stage: 'content',
+    stageLabel: '内容理解',
+    coverage: 1,
+    deduction: 6.5,
+    affectedPages: ['https://example.com/']
+  };
+
+  const parsed = SeoAuditExchangeService.parseCsv(
+    SeoAuditExchangeService.buildCsv(report)
+  );
+
+  assert.deepEqual(parsed.report.health, report.health);
+  assert.deepEqual(parsed.report.priorities, report.priorities);
+});

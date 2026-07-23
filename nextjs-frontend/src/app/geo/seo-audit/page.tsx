@@ -21,6 +21,7 @@ import SeoAuditJobProgress from './SeoAuditJobProgress';
 import SeoSiteAuditReport from './SeoSiteAuditReport';
 import SearchPlatformPanel from './SearchPlatformPanel';
 import CrawlerAccessPanel from './CrawlerAccessPanel';
+import TechnicalHealthOverview from './TechnicalHealthOverview';
 import styles from './seo-audit.module.css';
 
 const ACTIVE_JOB_KEY = 'goodie-seo-active-job';
@@ -84,13 +85,6 @@ function scoreColor(score) {
   if (score >= 80) return '#15803d';
   if (score >= 60) return '#d97706';
   return '#dc2626';
-}
-
-function scoreCopy(score) {
-  if (score >= 90) return '基础表现优秀';
-  if (score >= 75) return '整体表现良好';
-  if (score >= 60) return '仍有明显提升空间';
-  return '建议优先修复核心问题';
 }
 
 function formatDate(value) {
@@ -437,62 +431,55 @@ export default function SeoAuditPage() {
             </dl>
           </section>
 
-          <section className={styles.reportLead}>
-            <article className={styles.priorityPanel}>
-              <header className={styles.sectionHeading}>
-                <div>
-                  <span className={styles.sectionKicker}>行动清单</span>
-                  <h2>优先修复</h2>
-                </div>
-                <span className={styles.issueCount}>{report.summary.issues} 个问题</span>
-              </header>
+          <TechnicalHealthOverview report={report} />
 
-              {report.priorities.length === 0 ? (
-                <div className={styles.allPassed}><CheckCircleFilled /> 当前关键项均已通过</div>
-              ) : (
-                <ol className={styles.priorityList}>
-                  {report.priorities.slice(0, 6).map((item, index) => (
-                    <li key={item.id} className={`${styles.priorityItem} ${styles[`rail_${item.severity}`]}`}>
-                      <span className={styles.priorityNumber}>{String(index + 1).padStart(2, '0')}</span>
-                      <div>
-                        <span className={styles.prioritySubject}>{item.title}</span>
-                        <div className={styles.priorityTitle}>
-                          <strong>{getCheckFinding(item)}</strong>
-                          <SeverityBadge severity={item.severity} />
-                        </div>
-                        <div className={styles.priorityFact}>
-                          <span>检测事实</span>
-                          <p>{item.value || '未返回事实数据'}</p>
-                        </div>
-                        {item.recommendation && (
-                          <p className={styles.priorityRecommendation}>建议：{item.recommendation}</p>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </article>
-
-            <aside className={styles.scorePanel} aria-label="SEO 基础分摘要">
-              <span className={styles.sectionKicker}>SEO 基础分</span>
-              <Progress
-                type="circle"
-                percent={report.score}
-                size={154}
-                strokeWidth={8}
-                strokeColor={scoreColor(report.score)}
-                railColor="#e8edf5"
-                format={(value) => <span className={styles.scoreValue}>{value}</span>}
-              />
-              <strong>{scoreCopy(report.score)}</strong>
-              <p>按 {report.summary.total} 项基础检查的重要性加权计算</p>
-              <div className={styles.scoreStats}>
-                <div><span>{report.summary.passed}</span><small>已通过</small></div>
-                <div><span>{report.summary.critical + report.summary.high}</span><small>优先处理</small></div>
-                <div><span>{report.summary.medium + report.summary.low}</span><small>一般问题</small></div>
+          <section className={styles.priorityPanel} aria-label={`从 ${report.summary.total} 项检查中生成的修复清单`}>
+            <header className={styles.sectionHeading}>
+              <div>
+                <span className={styles.sectionKicker}>行动清单</span>
+                <h2>优先修复</h2>
               </div>
-            </aside>
+              <span className={styles.issueCount}>{report.priorities.length} 类问题</span>
+            </header>
+
+            {report.priorities.length === 0 ? (
+              <div className={styles.allPassed}><CheckCircleFilled /> 当前关键项均已通过</div>
+            ) : (
+              <ol className={styles.priorityList}>
+                {report.priorities.slice(0, 8).map((item, index) => (
+                  <li key={item.id} className={`${styles.priorityItem} ${styles[`rail_${item.severity}`]}`}>
+                    <span className={styles.priorityNumber}>{String(index + 1).padStart(2, '0')}</span>
+                    <div>
+                      <span className={styles.prioritySubject}>{item.title}</span>
+                      <div className={styles.priorityTitle}>
+                        <strong>{getCheckFinding(item)}</strong>
+                        <SeverityBadge severity={item.severity} />
+                      </div>
+                      {item.stageLabel && (
+                        <div className={styles.issueMetrics}>
+                          <span>{item.stageLabel}</span>
+                          <span>覆盖率 {Math.round(Number(item.coverage || 0) * 100)}%</span>
+                          <span>{item.affectsHomepage ? '影响首页' : '不影响首页'}</span>
+                          <strong>
+                            {item.deduction === null || item.deduction === undefined
+                              ? `分数上限 ${item.cap}`
+                              : `实际扣分 ${Number(item.deduction).toFixed(2)}`}
+                          </strong>
+                        </div>
+                      )}
+                      <div className={styles.priorityFact}>
+                        <span>检测事实</span>
+                        <p>{item.findings?.[0]?.value || item.value || item.finding || '未返回事实数据'}</p>
+                        {(item.affectedPages || [])[0] && <small>{item.affectedPages[0]}</small>}
+                      </div>
+                      {item.recommendation && (
+                        <p className={styles.priorityRecommendation}>建议：{item.recommendation}</p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
           </section>
 
           <SearchPlatformPanel platforms={report.platforms} />

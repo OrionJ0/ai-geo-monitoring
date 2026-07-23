@@ -8,6 +8,7 @@ const pagePath = path.resolve(__dirname, '../app/geo/seo-audit/page.tsx');
 const historyPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoAuditHistoryDrawer.tsx');
 const crawlerAccessPath = path.resolve(__dirname, '../app/geo/seo-audit/CrawlerAccessPanel.tsx');
 const siteReportPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoSiteAuditReport.tsx');
+const healthOverviewPath = path.resolve(__dirname, '../app/geo/seo-audit/TechnicalHealthOverview.tsx');
 
 test('SEO audit page uses the authenticated API and leads with prioritized fixes', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
@@ -117,4 +118,45 @@ test('SEO 报告支持标准 CSV 导出并重新导入历史', () => {
   assert.match(pageSource, /responseType:\s*'blob'/);
   assert.match(historySource, /summary\?\.source === 'imported'/);
   assert.match(historySource, /导入/);
+});
+
+test('v4 单页和全站报告只使用技术健康分作为主指标并展示四阶段', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+  const siteSource = fs.readFileSync(siteReportPath, 'utf8');
+  const healthSource = fs.readFileSync(healthOverviewPath, 'utf8');
+
+  assert.match(pageSource, /TechnicalHealthOverview/);
+  assert.match(siteSource, /TechnicalHealthOverview/);
+  assert.match(healthSource, /技术健康分/);
+  assert.match(healthSource, /访问与发现/);
+  assert.match(healthSource, /索引资格/);
+  assert.match(healthSource, /内容理解/);
+  assert.match(healthSource, /展示与增强/);
+  assert.match(healthSource, /主要瓶颈/);
+  assert.doesNotMatch(pageSource, /SEO 基础分/);
+  assert.doesNotMatch(siteSource, /技术健康度/);
+});
+
+test('v4 问题项展示阶段、覆盖率、具体事实、实际扣分和小字建议', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+  const siteSource = fs.readFileSync(siteReportPath, 'utf8');
+
+  for (const source of [pageSource, siteSource]) {
+    assert.match(source, /stageLabel/);
+    assert.match(source, /coverage/);
+    assert.match(source, /deduction/);
+    assert.match(source, /检测事实/);
+    assert.match(source, /建议：/);
+  }
+});
+
+test('SEO 历史只比较版本、模式和 URL 相同的有效分数', () => {
+  const historySource = fs.readFileSync(historyPath, 'utf8');
+
+  assert.match(historySource, /scoreVersion/);
+  assert.match(historySource, /summary\?\.mode/);
+  assert.match(historySource, /finalUrl/);
+  assert.match(historySource, /score !== null/);
+  assert.match(historySource, /较上次/);
+  assert.match(historySource, /旧版评分/);
 });

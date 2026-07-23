@@ -64,9 +64,19 @@ test('stores site audit mode and page coverage in the history summary', async ()
     durationMs: 5000,
     score: 76,
     grade: 'good',
+    scoreVersion: '2026-07-23-v4',
+    scoreModel: 'technical-health-v4',
     checkedAt: '2026-07-23T01:00:00.000Z',
     summary: { total: 100, issues: 4 },
-    site: { auditedPages: 8, failedPages: 1, truncated: true }
+    site: { auditedPages: 8, failedPages: 1, truncated: true },
+    health: {
+      status: 'needs_improvement',
+      rawScore: 75.625,
+      scoreCap: null,
+      stages: [
+        { key: 'access', label: '访问与发现', score: 20, budget: 30, deduction: 10 }
+      ]
+    }
   };
 
   await service.save(7, report);
@@ -78,7 +88,14 @@ test('stores site audit mode and page coverage in the history summary', async ()
     pages: 8,
     failedPages: 1,
     truncated: true,
-    scoreStatus: 'scored'
+    scoreStatus: 'needs_improvement',
+    scoreVersion: '2026-07-23-v4',
+    scoreModel: 'technical-health-v4',
+    rawScore: 75.625,
+    scoreCap: null,
+    stageScores: [
+      { key: 'access', label: '访问与发现', score: 20, budget: 30, deduction: 10 }
+    ]
   });
   assert.equal(created.report, report);
 });

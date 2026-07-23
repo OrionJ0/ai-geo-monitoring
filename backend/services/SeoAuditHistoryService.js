@@ -38,13 +38,21 @@ function createSeoAuditHistoryService({ model = SeoAuditRecord } = {}) {
   return {
     async save(userId, report) {
       const scoreStatus = report.health?.status || (report.score === null ? 'unknown' : 'scored');
+      const scoreFacts = report.scoreVersion ? {
+        scoreVersion: report.scoreVersion,
+        scoreModel: report.scoreModel || 'legacy',
+        rawScore: report.health?.rawScore ?? report.score,
+        scoreCap: report.health?.scoreCap ?? null,
+        stageScores: Array.isArray(report.health?.stages) ? report.health.stages : []
+      } : {};
       const summary = {
         ...(report.summary || {}),
         mode: report.mode || 'page',
         pages: report.site?.auditedPages || 1,
         failedPages: report.site?.failedPages || 0,
         truncated: Boolean(report.site?.truncated),
-        scoreStatus
+        scoreStatus,
+        ...scoreFacts
       };
       return model.create({
         user_id: userId,

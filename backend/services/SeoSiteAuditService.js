@@ -116,6 +116,7 @@ function createSeoSiteAuditService({
         return true;
       };
       addPage(requestedUrl);
+      addPage(`${origin}/`);
 
       await emit(onProgress, { phase: 'discovering', discoveredPages: discovered.length, auditedPages: 0, failedPages: 0 });
 
@@ -237,6 +238,19 @@ function createSeoSiteAuditService({
         });
       }
 
+      const discoveredOrder = new Map(
+        discovered.slice(0, maxPages).map((url, index) => [url, index])
+      );
+      pages.sort((left, right) => (
+        (discoveredOrder.get(left.url) ?? Number.MAX_SAFE_INTEGER)
+        - (discoveredOrder.get(right.url) ?? Number.MAX_SAFE_INTEGER)
+      ));
+      checkInstances.sort((left, right) => (
+        (discoveredOrder.get(left.url) ?? Number.MAX_SAFE_INTEGER)
+        - (discoveredOrder.get(right.url) ?? Number.MAX_SAFE_INTEGER)
+        || left.check.id.localeCompare(right.check.id)
+      ));
+
       const successfulPages = pages.filter((page) => page.status === 'completed');
       if (!successfulPages.length) throw errors[0] || new Error('没有可检测的页面');
 
@@ -266,7 +280,7 @@ function createSeoSiteAuditService({
       if (scoringCrawlers.some((crawler) => crawler.status === 'unknown')) {
         unknownReasons.push('robots.txt 证据不足，无法确认重要搜索与 AI 搜索爬虫权限');
       }
-      const health = calculateTechnicalHealth({
+      const scoredHealth = calculateTechnicalHealth({
         instances: checkInstances,
         blockers,
         evidenceComplete: unknownReasons.length === 0,
@@ -274,7 +288,21 @@ function createSeoSiteAuditService({
         rules,
         scoreConfig: scoring
       });
-      const issues = health.issues;
+      const scopeUrls = pages.map((page) => page.finalUrl || page.url);
+      const expandSiteScope = (issue) => siteScopedChecks.has(issue.id) ? {
+        ...issue,
+        count: scopeUrls.length,
+        affectedPages: scopeUrls,
+        applicablePages: scopeUrls.length
+      } : issue;
+      const issues = scoredHealth.issues.map(expandSiteScope);
+      const issuesById = new Map(issues.map((issue) => [issue.id, issue]));
+      const priorities = scoredHealth.priorities.map((priority) => (
+        priority.kind === 'issue' && issuesById.has(priority.id)
+          ? { ...issuesById.get(priority.id), kind: 'issue' }
+          : priority
+      ));
+      const health = { ...scoredHealth, issues, priorities };
 
       const report = {
         mode: 'site',
@@ -311,7 +339,7 @@ function createSeoSiteAuditService({
         platforms: firstPage.platforms,
         crawlerAccess: firstPage.crawlerAccess,
         health,
-        priorities: health.priorities,
+        priorities,
         issues,
         pages
       };
