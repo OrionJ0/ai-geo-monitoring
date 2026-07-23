@@ -59,6 +59,11 @@ test('discovers and audits unique same-origin pages from links and recursive sit
   assert.equal(report.site.auditedPages, 5);
   assert.equal(report.site.failedPages, 0);
   assert.equal(report.site.truncated, false);
+  assert.equal(report.scoreVersion, '2026-07-23-v4');
+  assert.equal(report.scoreModel, 'technical-health-v4');
+  assert.equal(report.score, report.health.score);
+  assert.equal(report.grade, report.health.status);
+  assert.equal(report.health.stages.reduce((sum, stage) => sum + stage.budget, 0), 100);
   assert.deepEqual(report.pages.map((page) => page.url).sort(), [
     'https://example.com/',
     'https://example.com/about',
@@ -122,6 +127,9 @@ test('continues after page failures and aggregates issues with affected URLs', a
   assert.deepEqual(report.issues.find((issue) => issue.id === 'http-status').affectedPages, [
     'https://example.com/unavailable'
   ]);
+  assert.equal(report.issues.find((issue) => issue.id === 'title').coverage, 0.25);
+  assert.equal(report.issues.find((issue) => issue.id === 'http-status').coverage, 0.2);
+  assert.equal(report.priorities[0].stage, 'access');
 });
 
 test('evaluates crawler permissions per path and aggregates only affected pages', async () => {
@@ -150,6 +158,36 @@ test('evaluates crawler permissions per path and aggregates only affected pages'
   assert.equal(rootPage.crawlerAccess.crawlers.find((crawler) => crawler.key === 'googlebot').status, 'allowed');
   assert.equal(privatePage.crawlerAccess.crawlers.find((crawler) => crawler.key === 'googlebot').status, 'blocked');
   assert.equal(report.crawlerAccess.targetPath, '/');
+});
+
+test('uses weighted site coverage and caps widespread noindex without averaging page scores', async () => {
+  const pages = new Map([
+    ['https://example.com/', htmlPage('https://example.com/', ['/a', '/b', '/c', '/d'])],
+    ['https://example.com/a', htmlPage('https://example.com/a')],
+    ['https://example.com/b', htmlPage('https://example.com/b')],
+    ['https://example.com/c', htmlPage('https://example.com/c')],
+    ['https://example.com/d', htmlPage('https://example.com/d')]
+  ]);
+  ['/a', '/b', '/c', '/d'].forEach((path) => {
+    const page = pages.get(`https://example.com${path}`);
+    page.html = page.html.replace('<head>', '<head><meta name="robots" content="noindex">');
+  });
+  const siteClient = {
+    async fetchPage(url) {
+      return pages.get(url);
+    },
+    async probe(url) {
+      if (url.endsWith('/robots.txt')) return { statusCode: 200, body: 'User-agent: *\nAllow: /' };
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+
+  assert.equal(report.health.blockers.some((blocker) => blocker.id === 'widespread-noindex'), true);
+  assert.equal(report.health.blockers.find((blocker) => blocker.id === 'widespread-noindex').coverage, 0.5714);
+  assert.equal(report.score, 39);
+  assert.equal(report.pages.reduce((sum, page) => sum + page.score, 0) / report.pages.length > report.score, true);
 });
 
 test('respects page limit, reports truncation and emits crawl progress', async () => {

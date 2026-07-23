@@ -111,3 +111,24 @@ test('可见表格字段会防止电子表格公式注入', () => {
   assert.match(csv, /\t=WEBSERVICE/);
   assert.deepEqual(SeoAuditExchangeService.parseCsv(csv).report, report);
 });
+
+test('关键证据不足的 v4 报告可带空分数导出并原样回导', () => {
+  const report = pageReport();
+  report.scoreVersion = '2026-07-23-v4';
+  report.scoreModel = 'technical-health-v4';
+  report.score = null;
+  report.grade = 'unknown';
+  report.health = {
+    score: null,
+    status: 'unknown',
+    unknownReasons: ['robots.txt 证据不足']
+  };
+
+  const parsed = SeoAuditExchangeService.parseCsv(
+    SeoAuditExchangeService.buildCsv(report)
+  );
+
+  assert.equal(parsed.report.score, null);
+  assert.equal(parsed.report.grade, 'unknown');
+  assert.deepEqual(parsed.report.health.unknownReasons, ['robots.txt 证据不足']);
+});

@@ -61,3 +61,32 @@ test('persists a completed site audit job and report in SQLite', async () => {
   assert.equal(history.items[0].summary.mode, 'site');
   assert.equal(history.items[0].summary.pages, 3);
 });
+
+test('persists a v4 unknown score report in SQLite and returns a null score in history', async () => {
+  await SeoAuditRecord.destroy({ where: {} });
+  const user = await User.findOne({ where: { username: 'seo-audit-sqlite-user' } });
+  const report = {
+    mode: 'page',
+    scoreVersion: '2026-07-23-v4',
+    scoreModel: 'technical-health-v4',
+    requestedUrl: 'https://example.com/',
+    finalUrl: 'https://example.com/',
+    checkedAt: '2026-07-23T02:00:00.000Z',
+    statusCode: 200,
+    durationMs: 300,
+    score: null,
+    grade: 'unknown',
+    summary: { total: 23, issues: 1 },
+    health: { score: null, status: 'unknown', unknownReasons: ['robots.txt 证据不足'] },
+    categories: []
+  };
+  const historyService = createSeoAuditHistoryService({ model: SeoAuditRecord });
+
+  await historyService.save(user.id, report);
+  const history = await historyService.list(user.id);
+  const stored = await SeoAuditRecord.findOne({ where: { user_id: user.id } });
+
+  assert.equal(stored.score, 0);
+  assert.equal(stored.report.score, null);
+  assert.equal(history.items[0].score, null);
+});

@@ -27,7 +27,7 @@ function summarize(row) {
     finalUrl: value.final_url,
     statusCode: value.status_code,
     durationMs: value.duration_ms,
-    score: value.score,
+    score: summary.scoreStatus === 'unknown' ? null : value.score,
     grade: value.grade,
     summary,
     checkedAt: new Date(value.checked_at).toISOString()
@@ -37,12 +37,14 @@ function summarize(row) {
 function createSeoAuditHistoryService({ model = SeoAuditRecord } = {}) {
   return {
     async save(userId, report) {
+      const scoreStatus = report.health?.status || (report.score === null ? 'unknown' : 'scored');
       const summary = {
         ...(report.summary || {}),
         mode: report.mode || 'page',
         pages: report.site?.auditedPages || 1,
         failedPages: report.site?.failedPages || 0,
-        truncated: Boolean(report.site?.truncated)
+        truncated: Boolean(report.site?.truncated),
+        scoreStatus
       };
       return model.create({
         user_id: userId,
@@ -50,7 +52,7 @@ function createSeoAuditHistoryService({ model = SeoAuditRecord } = {}) {
         final_url: report.finalUrl,
         status_code: report.statusCode,
         duration_ms: report.durationMs,
-        score: report.score,
+        score: report.score ?? 0,
         grade: report.grade,
         summary,
         report,

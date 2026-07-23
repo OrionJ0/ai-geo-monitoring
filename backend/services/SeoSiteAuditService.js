@@ -1,16 +1,15 @@
 const cheerio = require('cheerio');
 const { createSeoAuditService, normalizeWebsiteUrl } = require('./SeoAuditService');
-const { defaultSeoAuditRules, validateSeoAuditRules } = require('../config/seoAuditRules');
-
-const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
-const SITE_SCOPED_CHECKS = new Set(['robots-txt', 'sitemap', 'search-verification']);
-
-function gradeFromScore(score) {
-  if (score >= 90) return 'excellent';
-  if (score >= 75) return 'good';
-  if (score >= 60) return 'needs_improvement';
-  return 'poor';
-}
+const {
+  defaultSeoAuditRules,
+  defaultSeoHealthScoreConfig,
+  validateSeoAuditRules,
+  validateSeoHealthScoreConfig
+} = require('../config/seoAuditRules');
+const {
+  calculateTechnicalHealth,
+  detectTechnicalHealthBlockers
+} = require('./SeoHealthScoreService');
 
 function normalizeSameOriginUrl(value, baseUrl, origin) {
   try {
@@ -71,30 +70,20 @@ function compactIssue(check) {
   };
 }
 
-function aggregateIssues(instances) {
-  const aggregated = new Map();
-  instances.filter(({ check }) => check.status === 'failed').forEach(({ url, check }) => {
-    if (!aggregated.has(check.id)) {
-      aggregated.set(check.id, {
-        ...compactIssue(check),
-        count: 0,
-        affectedPages: [],
-        findings: []
-      });
-    }
-    const issue = aggregated.get(check.id);
-    issue.count += 1;
-    issue.affectedPages.push(url);
-    issue.findings.push({ url, finding: check.finding, value: check.value });
-  });
-  return [...aggregated.values()].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
-    || b.count - a.count || b.weight - a.weight);
-}
-
-function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRules } = {}) {
+function createSeoSiteAuditService({
+  siteClient,
+  ruleConfig = defaultSeoAuditRules,
+  scoreConfig = defaultSeoHealthScoreConfig
+} = {}) {
   const client = createCachedClient(siteClient || require('./SeoSiteClient'));
   const rules = validateSeoAuditRules(ruleConfig);
-  const pageAudit = createSeoAuditService({ siteClient: client, ruleConfig: rules });
+  const scoring = validateSeoHealthScoreConfig(scoreConfig, rules);
+  const siteScopedChecks = new Set(scoring.siteScopedRuleIds);
+  const pageAudit = createSeoAuditService({
+    siteClient: client,
+    ruleConfig: rules,
+    scoreConfig: scoring
+  });
 
   async function emit(onProgress, progress) {
     if (!onProgress) return;
@@ -177,12 +166,13 @@ function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRul
 
           const report = await pageAudit.audit(url);
           const checks = pageChecks(report);
+          const isHomepage = new URL(report.finalUrl).pathname === '/';
           checks.forEach((check) => {
-            if (SITE_SCOPED_CHECKS.has(check.id)) {
+            if (siteScopedChecks.has(check.id)) {
               if (siteChecksSeen.has(check.id)) return;
               siteChecksSeen.add(check.id);
             }
-            checkInstances.push({ url, check });
+            checkInstances.push({ url, isHomepage, check });
           });
           pages.push({
             url,
@@ -192,7 +182,10 @@ function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRul
             durationMs: report.durationMs,
             score: report.score,
             title: report.page.title,
-            issues: report.priorities.map(compactIssue),
+            contentCharacters: report.page.contentCharacters,
+            indexable: report.page.indexable,
+            isHomepage,
+            issues: report.health.issues.map(compactIssue),
             platforms: report.platforms,
             crawlerAccess: report.crawlerAccess
           });
@@ -210,9 +203,11 @@ function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRul
             value: error.message,
             recommendation: '修复页面访问错误，确保目标 URL 可稳定返回 2xx。'
           };
-          checkInstances.push({ url, check: failedCheck });
+          const isHomepage = new URL(url).pathname === '/';
+          checkInstances.push({ url, isHomepage, check: failedCheck });
           pages.push({
             url,
+            isHomepage,
             status: 'failed',
             statusCode: 0,
             durationMs: 0,
@@ -246,25 +241,53 @@ function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRul
       if (!successfulPages.length) throw errors[0] || new Error('没有可检测的页面');
 
       const totalWeight = checkInstances.reduce((sum, { check }) => sum + check.weight, 0);
-      const passedWeight = checkInstances
-        .filter(({ check }) => check.status === 'passed')
-        .reduce((sum, { check }) => sum + check.weight, 0);
-      const score = totalWeight ? Math.round((passedWeight / totalWeight) * 100) : 0;
-      const issues = aggregateIssues(checkInstances);
       const failedPages = pages.length - successfulPages.length;
       const truncated = discovered.length > maxPages;
-      const firstPage = successfulPages[0];
+      const firstPage = successfulPages.find((page) => page.isHomepage) || successfulPages[0];
+      const healthPages = pages.map((page) => ({
+        url: page.finalUrl || page.url,
+        isHomepage: page.isHomepage,
+        statusCode: page.statusCode,
+        indexable: page.status === 'completed' ? page.indexable : null,
+        contentCharacters: page.status === 'completed' ? page.contentCharacters : null
+      }));
+      const blockers = detectTechnicalHealthBlockers({
+        pages: healthPages,
+        crawlerAccess: firstPage.crawlerAccess,
+        scoreConfig: scoring
+      });
+      const homepagePage = pages.find((page) => page.isHomepage);
+      const scoringCrawlers = firstPage.crawlerAccess?.crawlers
+        ?.filter((crawler) => crawler.affectsScore) || [];
+      const unknownReasons = [];
+      if (homepagePage?.status === 'failed') {
+        unknownReasons.push('首页访问失败，无法确认首页技术状态');
+      }
+      if (scoringCrawlers.some((crawler) => crawler.status === 'unknown')) {
+        unknownReasons.push('robots.txt 证据不足，无法确认重要搜索与 AI 搜索爬虫权限');
+      }
+      const health = calculateTechnicalHealth({
+        instances: checkInstances,
+        blockers,
+        evidenceComplete: unknownReasons.length === 0,
+        unknownReasons,
+        rules,
+        scoreConfig: scoring
+      });
+      const issues = health.issues;
 
       const report = {
         mode: 'site',
-        scoreVersion: rules.version,
+        scoreVersion: scoring.version,
+        scoreModel: 'technical-health-v4',
+        ruleVersion: rules.version,
         requestedUrl,
         finalUrl: `${origin}/`,
         checkedAt: new Date().toISOString(),
         statusCode: firstPage.statusCode,
         durationMs: Date.now() - startedAt,
-        score,
-        grade: gradeFromScore(score),
+        score: health.score,
+        grade: health.status,
         summary: {
           total: checkInstances.length,
           totalWeight,
@@ -287,7 +310,8 @@ function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRul
         },
         platforms: firstPage.platforms,
         crawlerAccess: firstPage.crawlerAccess,
-        priorities: issues,
+        health,
+        priorities: health.priorities,
         issues,
         pages
       };

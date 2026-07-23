@@ -198,7 +198,12 @@ function validateReport(report) {
   if (!report.requestedUrl || !report.finalUrl) {
     throw new SeoAuditCsvError('INVALID_REPORT', 'CSV 中缺少报告网址');
   }
-  if (!Number.isInteger(report.score) || report.score < 0 || report.score > 100) {
+  const isUnknownScore = report.score === null
+    && (report.health?.status === 'unknown' || report.grade === 'unknown');
+  if (
+    !isUnknownScore
+    && (!Number.isInteger(report.score) || report.score < 0 || report.score > 100)
+  ) {
     throw new SeoAuditCsvError('INVALID_REPORT', 'CSV 中的报告分数无效');
   }
   if (!report.summary || typeof report.summary !== 'object' || !dateValue(report.checkedAt)) {

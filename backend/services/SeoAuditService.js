@@ -1,6 +1,15 @@
 const cheerio = require('cheerio');
-const { defaultSeoAuditRules, validateSeoAuditRules } = require('../config/seoAuditRules');
+const {
+  defaultSeoAuditRules,
+  defaultSeoHealthScoreConfig,
+  validateSeoAuditRules,
+  validateSeoHealthScoreConfig
+} = require('../config/seoAuditRules');
 const { evaluateCrawlerAccess } = require('./RobotsAccessService');
+const {
+  calculateTechnicalHealth,
+  detectTechnicalHealthBlockers
+} = require('./SeoHealthScoreService');
 
 const CATEGORY_DEFINITIONS = [
   { key: 'crawlability', label: '收录与抓取' },
@@ -128,16 +137,14 @@ function analyzeSitemap(result) {
   };
 }
 
-function gradeFromScore(score) {
-  if (score >= 90) return 'excellent';
-  if (score >= 75) return 'good';
-  if (score >= 60) return 'needs_improvement';
-  return 'poor';
-}
-
-function createSeoAuditService({ siteClient, ruleConfig = defaultSeoAuditRules } = {}) {
+function createSeoAuditService({
+  siteClient,
+  ruleConfig = defaultSeoAuditRules,
+  scoreConfig = defaultSeoHealthScoreConfig
+} = {}) {
   const client = siteClient || require('./SeoSiteClient');
   const rules = validateSeoAuditRules(ruleConfig);
+  const scoring = validateSeoHealthScoreConfig(scoreConfig, rules);
   const thresholds = rules.thresholds;
   const createCheck = (input) => {
     const configuredRule = rules.checks[input.id];
@@ -527,8 +534,6 @@ function createSeoAuditService({ siteClient, ruleConfig = defaultSeoAuditRules }
       ];
 
       const totalWeight = checks.reduce((sum, check) => sum + check.weight, 0);
-      const passedWeight = checks.filter((check) => check.status === 'passed').reduce((sum, check) => sum + check.weight, 0);
-      const score = Math.round((passedWeight / totalWeight) * 100);
       const issues = checks.filter((check) => check.status === 'failed');
       const categories = CATEGORY_DEFINITIONS.map((definition) => {
         const categoryChecks = checks
@@ -538,17 +543,44 @@ function createSeoAuditService({ siteClient, ruleConfig = defaultSeoAuditRules }
         const categoryPassedWeight = categoryChecks.filter((check) => check.status === 'passed').reduce((sum, check) => sum + check.weight, 0);
         return { ...definition, score: Math.round((categoryPassedWeight / weight) * 100), checks: categoryChecks };
       });
+      const isHomepage = new URL(finalUrl).pathname === '/';
+      const indexabilityCheck = checks.find((check) => check.id === 'indexability');
+      const pageFacts = {
+        url: finalUrl,
+        isHomepage,
+        statusCode: response.statusCode,
+        indexable: indexabilityCheck?.status === 'passed',
+        contentCharacters
+      };
+      const blockers = detectTechnicalHealthBlockers({
+        pages: [pageFacts],
+        crawlerAccess,
+        scoreConfig: scoring
+      });
+      const unknownReasons = unknownScoringCrawlers.length
+        ? ['robots.txt 证据不足，无法确认重要搜索与 AI 搜索爬虫权限']
+        : [];
+      const health = calculateTechnicalHealth({
+        instances: checks.map((check) => ({ url: finalUrl, isHomepage, check })),
+        blockers,
+        evidenceComplete: unknownReasons.length === 0,
+        unknownReasons,
+        rules,
+        scoreConfig: scoring
+      });
 
       return {
         mode: 'page',
-        scoreVersion: rules.version,
+        scoreVersion: scoring.version,
+        scoreModel: 'technical-health-v4',
+        ruleVersion: rules.version,
         requestedUrl,
         finalUrl,
         checkedAt: new Date().toISOString(),
         statusCode: response.statusCode,
         durationMs: response.durationMs,
-        score,
-        grade: gradeFromScore(score),
+        score: health.score,
+        grade: health.status,
         summary: {
           total: checks.length,
           totalWeight,
@@ -570,7 +602,10 @@ function createSeoAuditService({ siteClient, ruleConfig = defaultSeoAuditRules }
           imagesWithAlt,
           internalLinks,
           externalLinks,
-          htmlBytes
+          htmlBytes,
+          contentCharacters,
+          indexable: pageFacts.indexable,
+          isHomepage
         },
         previews: {
           search: { title: title || finalUrl, description, url: finalUrl },
@@ -583,7 +618,8 @@ function createSeoAuditService({ siteClient, ruleConfig = defaultSeoAuditRules }
         },
         platforms,
         crawlerAccess,
-        priorities: issues.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.weight - a.weight),
+        health,
+        priorities: health.priorities,
         categories
       };
     }

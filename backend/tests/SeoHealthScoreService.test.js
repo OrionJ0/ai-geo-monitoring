@@ -96,6 +96,7 @@ test('全站同类问题按首页权重聚合为一条覆盖率扣分', () => {
     id: 'title',
     title: 'title',
     finding: 'title failed',
+    status: 'failed',
     severity: 'high',
     stage: 'content',
     stageLabel: '内容理解',
@@ -182,6 +183,92 @@ test('存在计分失败项时整数分不能因四舍五入达到 100', () => {
 
   assert.equal(result.rawScore, 99.97);
   assert.equal(result.score, 99);
+});
+
+test('修复失败项且其他事实不变时技术健康分不会下降', () => {
+  const before = calculateTechnicalHealth({
+    instances: [
+      instance('http-status', 'failed'),
+      instance('indexability', 'passed'),
+      instance('title', 'failed'),
+      instance('viewport', 'passed')
+    ],
+    rules: TEST_RULES,
+    scoreConfig: TEST_SCORE_CONFIG
+  });
+  const after = calculateTechnicalHealth({
+    instances: [
+      instance('http-status', 'passed'),
+      instance('indexability', 'passed'),
+      instance('title', 'failed'),
+      instance('viewport', 'passed')
+    ],
+    rules: TEST_RULES,
+    scoreConfig: TEST_SCORE_CONFIG
+  });
+
+  assert.equal(after.score >= before.score, true);
+  assert.equal(after.rawScore > before.rawScore, true);
+});
+
+test('扩大同一问题覆盖率且其他事实不变时技术健康分不会上升', () => {
+  const pages = [
+    { url: 'https://example.com/', isHomepage: true },
+    { url: 'https://example.com/a', isHomepage: false }
+  ];
+  const scoreWithFailures = (failedUrls) => calculateTechnicalHealth({
+    instances: pages.flatMap((page) => [
+      instance('http-status', 'passed', page),
+      instance('indexability', 'passed', page),
+      instance('title', failedUrls.includes(page.url) ? 'failed' : 'passed', page),
+      instance('viewport', 'passed', page)
+    ]),
+    rules: TEST_RULES,
+    scoreConfig: TEST_SCORE_CONFIG
+  });
+
+  const narrow = scoreWithFailures(['https://example.com/a']);
+  const widespread = scoreWithFailures(['https://example.com/', 'https://example.com/a']);
+
+  assert.equal(widespread.score <= narrow.score, true);
+  assert.equal(widespread.rawScore < narrow.rawScore, true);
+});
+
+test('同一规则和 URL 的重复实例不会重复计分或重复列入事实', () => {
+  const duplicated = instance('title', 'failed');
+  const result = calculateTechnicalHealth({
+    instances: [
+      instance('http-status', 'passed'),
+      instance('indexability', 'passed'),
+      duplicated,
+      { ...duplicated, check: { ...duplicated.check } },
+      instance('viewport', 'passed')
+    ],
+    rules: TEST_RULES,
+    scoreConfig: TEST_SCORE_CONFIG
+  });
+
+  assert.equal(result.score, 70);
+  assert.equal(result.issues[0].count, 1);
+  assert.deepEqual(result.issues[0].affectedPages, ['https://example.com/']);
+});
+
+test('相同事实和评分版本会产生完全相同的评分结果', () => {
+  const input = {
+    instances: [
+      instance('http-status', 'passed'),
+      instance('indexability', 'passed'),
+      instance('title', 'failed'),
+      instance('viewport', 'passed')
+    ],
+    rules: TEST_RULES,
+    scoreConfig: TEST_SCORE_CONFIG
+  };
+
+  assert.deepEqual(
+    calculateTechnicalHealth(input),
+    calculateTechnicalHealth(input)
+  );
 });
 
 test('v4 配置以四阶段覆盖全部计分规则并排除信息性标签', () => {

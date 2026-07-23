@@ -59,10 +59,19 @@ test('returns a prioritized, categorized SEO report for a public page', async ()
   assert.equal(report.summary.total, report.summary.passed + report.summary.issues);
   assert.equal(report.summary.high > 0, true);
   assert.equal(report.score >= 0 && report.score <= 100, true);
+  assert.equal(report.scoreVersion, '2026-07-23-v4');
+  assert.equal(report.scoreModel, 'technical-health-v4');
+  assert.equal(report.score, report.health.score);
+  assert.equal(report.grade, report.health.status);
+  assert.deepEqual(
+    report.health.stages.map(({ key, budget }) => [key, budget]),
+    [['access', 30], ['index', 25], ['content', 30], ['enhancement', 15]]
+  );
   assert.equal(report.priorities[0].severity, 'high');
   assert.equal(report.priorities.some((item) => item.id === 'meta-description'), true);
   assert.equal(report.priorities.some((item) => item.id === 'h1'), true);
   assert.equal(report.priorities.some((item) => item.id === 'sitemap'), true);
+  assert.equal(report.priorities.some((item) => item.id === 'search-verification'), false);
   assert.equal(report.priorities.every((item) => item.status === 'failed'), true);
 });
 
@@ -94,7 +103,8 @@ test('does not treat empty robots and sitemap responses as healthy', async () =>
   assert.equal(sitemap.finding, 'Sitemap 内容为空');
   assert.equal(sitemap.severity, 'high');
   assert.equal(sitemap.weight, 7);
-  assert.equal(report.scoreVersion, '2026-07-23-v3');
+  assert.equal(report.scoreVersion, '2026-07-23-v4');
+  assert.equal(report.ruleVersion, '2026-07-23-v3');
 });
 
 test('validates a sitemap declared in robots.txt instead of trusting the declaration alone', async () => {
@@ -296,7 +306,7 @@ test('reports the affected crawler when a specific robots group blocks the audit
   assert.match(crawlerCheck.recommendation, /OAI-SearchBot/);
 });
 
-test('uses the injected versioned rule configuration for weights and scoring', async () => {
+test('uses the injected versioned rule configuration inside the maintainable v4 score model', async () => {
   const { defaultSeoAuditRules } = require('../config/seoAuditRules');
   const customRules = {
     ...defaultSeoAuditRules,
@@ -310,10 +320,34 @@ test('uses the injected versioned rule configuration for weights and scoring', a
   const customReport = await createSeoAuditService({ siteClient: createSiteClient(), ruleConfig: customRules }).audit('https://example.com/');
   const customTitle = customReport.categories.flatMap((category) => category.checks).find((check) => check.id === 'title');
 
-  assert.equal(customReport.scoreVersion, 'test-heavy-title-v1');
+  assert.equal(customReport.scoreVersion, '2026-07-23-v4');
+  assert.equal(customReport.ruleVersion, 'test-heavy-title-v1');
   assert.equal(customTitle.weight, 80);
   assert.equal(customReport.summary.totalWeight, 201);
   assert.equal(customReport.score < defaultReport.score, true);
+});
+
+test('caps a homepage noindex report and exposes the confirmed blocker', async () => {
+  const siteClient = createSiteClient();
+  const originalFetchPage = siteClient.fetchPage;
+  siteClient.fetchPage = async (url) => {
+    const response = await originalFetchPage(url);
+    return {
+      ...response,
+      html: response.html.replace(
+        '<meta name="viewport"',
+        '<meta name="robots" content="noindex"><meta name="viewport"'
+      )
+    };
+  };
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
+
+  assert.equal(report.score <= 39, true);
+  assert.equal(report.score, Math.min(Math.round(report.health.rawScore), 39));
+  assert.equal(report.health.scoreCap, 39);
+  assert.equal(report.health.blockers[0].id, 'homepage-noindex');
+  assert.equal(report.priorities[0].kind, 'blocker');
 });
 
 test('rejects an incomplete rule configuration before an audit starts', () => {

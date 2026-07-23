@@ -137,12 +137,22 @@ function calculateTechnicalHealth({
       bottleneck: null,
       stages: [],
       issues: [],
+      priorities: [],
       unknownReasons
     };
   }
 
-  const byRule = new Map();
+  const uniqueInstances = new Map();
   instances.forEach((instance) => {
+    const key = `${instance.check.id}\u0000${instance.url}`;
+    const existing = uniqueInstances.get(key);
+    if (!existing || (existing.check.status !== 'failed' && instance.check.status === 'failed')) {
+      uniqueInstances.set(key, instance);
+    }
+  });
+  const deduplicatedInstances = [...uniqueInstances.values()];
+  const byRule = new Map();
+  deduplicatedInstances.forEach((instance) => {
     const id = instance.check.id;
     if (!byRule.has(id)) byRule.set(id, []);
     byRule.get(id).push(instance);
@@ -200,6 +210,7 @@ function calculateTechnicalHealth({
         id: result.id,
         title: first.title,
         finding: first.finding,
+        status: 'failed',
         severity: first.severity,
         stage: result.stage.key,
         stageLabel: result.stage.label,
@@ -233,11 +244,12 @@ function calculateTechnicalHealth({
     .map((blocker) => ({
       ...blocker,
       kind: 'blocker',
+      status: 'failed',
       severity: 'critical',
       stage: 'blocker',
       stageLabel: '确定性阻断',
       affectsHomepage: blocker.affectedPages?.some(
-        (url) => instances.some((instance) => instance.url === url && instance.isHomepage)
+        (url) => deduplicatedInstances.some((instance) => instance.url === url && instance.isHomepage)
       ) || false,
       deduction: null,
       recommendation: blocker.recommendation || null

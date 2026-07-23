@@ -77,7 +77,8 @@ test('stores site audit mode and page coverage in the history summary', async ()
     mode: 'site',
     pages: 8,
     failedPages: 1,
-    truncated: true
+    truncated: true,
+    scoreStatus: 'scored'
   });
   assert.equal(created.report, report);
 });
@@ -108,4 +109,51 @@ test('loads a complete report only inside the requested user scope', async () =>
     categories: [{ key: 'metadata', checks: [] }],
     auditId: 23
   });
+});
+
+test('persists an unknown score without presenting the database sentinel as a real score', async () => {
+  let created;
+  const model = {
+    async create(values) {
+      created = values;
+      return values;
+    },
+    async findAndCountAll() {
+      return {
+        count: 1,
+        rows: [{
+          id: 41,
+          requested_url: 'https://example.com/',
+          final_url: 'https://example.com/',
+          status_code: 200,
+          duration_ms: 500,
+          score: 0,
+          grade: 'unknown',
+          summary: created.summary,
+          checked_at: new Date('2026-07-23T01:00:00.000Z')
+        }]
+      };
+    }
+  };
+  const service = createSeoAuditHistoryService({ model });
+  const report = {
+    mode: 'page',
+    requestedUrl: 'https://example.com/',
+    finalUrl: 'https://example.com/',
+    statusCode: 200,
+    durationMs: 500,
+    score: null,
+    grade: 'unknown',
+    checkedAt: '2026-07-23T01:00:00.000Z',
+    summary: { total: 23, issues: 4 },
+    health: { status: 'unknown', unknownReasons: ['robots.txt 证据不足'] }
+  };
+
+  await service.save(7, report);
+  const history = await service.list(7);
+
+  assert.equal(created.score, 0);
+  assert.equal(created.report.score, null);
+  assert.equal(created.summary.scoreStatus, 'unknown');
+  assert.equal(history.items[0].score, null);
 });
