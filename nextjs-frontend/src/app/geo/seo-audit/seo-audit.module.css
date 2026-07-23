@@ -37,11 +37,17 @@
   z-index: 1;
 }
 
-.historyButton {
+.heroActions {
   position: absolute;
   z-index: 2;
   top: 28px;
   right: 30px;
+  display: flex;
+  gap: 8px;
+}
+
+.historyButton,
+.importButton {
   border-color: #b9c8e7 !important;
   background: rgba(255, 255, 255, 0.82) !important;
   color: var(--blue) !important;
@@ -154,6 +160,39 @@
   margin-top: 14px;
   color: #64748b;
   font-size: 13px;
+}
+
+.reportTransfer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 16px 20px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--blue);
+}
+
+.reportTransfer > div {
+  display: grid;
+  gap: 4px;
+}
+
+.reportTransfer strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.reportTransfer span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reportTransfer :global(.ant-btn) {
+  flex: 0 0 auto;
+  border-color: #b9c8e7;
+  color: var(--blue);
 }
 
 .srOnly {
@@ -1301,12 +1340,20 @@
     flex-direction: column;
   }
 
-  .historyButton {
+  .heroActions {
     position: relative;
     top: auto;
     right: auto;
+    flex-wrap: wrap;
     margin-bottom: 18px;
   }
+
+  .reportTransfer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reportTransfer :global(.ant-btn) { width: 100%; }
 
   .auditForm {
     grid-template-columns: 1fr;

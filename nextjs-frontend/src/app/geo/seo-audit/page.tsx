@@ -2,13 +2,15 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Form, Input, Progress, Segmented, Spin, message } from 'antd';
+import { Button, Form, Input, Progress, Segmented, Spin, Upload, message } from 'antd';
 import {
   CheckCircleFilled,
   ClockCircleOutlined,
   ExclamationCircleFilled,
+  ExportOutlined,
   GlobalOutlined,
   HistoryOutlined,
+  ImportOutlined,
   SafetyCertificateOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
@@ -125,6 +127,8 @@ export default function SeoAuditPage() {
   const [filter, setFilter] = useState('all');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const pollRef = useRef(0);
 
   const visibleCategories = useMemo(() => {
@@ -227,16 +231,86 @@ export default function SeoAuditPage() {
     message.success('已打开历史报告');
   };
 
+  const exportReport = async () => {
+    if (!report?.auditId) return;
+    setExporting(true);
+    try {
+      const response = await axios.get(`/api/seo-audits/${report.auditId}/export`, {
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `seo-audit-${report.auditId}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      message.success('SEO 标准 CSV 已导出');
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '导出 SEO 报告失败'));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const importReport = async (file) => {
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      message.error('请选择 CSV 文件');
+      return false;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      message.error('CSV 文件不能超过 10MB');
+      return false;
+    }
+
+    setImporting(true);
+    try {
+      const response = await axios.post('/api/seo-audits/import', file, {
+        headers: { 'Content-Type': 'text/csv; charset=utf-8' },
+      });
+      const imported = response?.data?.data;
+      if (!imported?.auditId) throw new Error('导入接口未返回报告编号');
+      setReport(imported);
+      setMode(imported.mode === 'site' ? 'site' : 'page');
+      setJob(null);
+      setFilter('all');
+      if (imported.finalUrl) form.setFieldValue('url', imported.finalUrl);
+      setHistoryRefreshKey((value) => value + 1);
+      message.success(`SEO 报告已导入为历史 #${imported.auditId}`);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '导入 SEO 报告失败'));
+    } finally {
+      setImporting(false);
+    }
+    return false;
+  };
+
   return (
     <main className={styles.page}>
       <section className={styles.hero} aria-labelledby="seo-audit-title">
-        <Button
-          className={styles.historyButton}
-          icon={<HistoryOutlined />}
-          onClick={() => setHistoryOpen(true)}
-        >
-          历史报告
-        </Button>
+        <div className={styles.heroActions}>
+          <Upload
+            accept=".csv,text/csv"
+            showUploadList={false}
+            beforeUpload={importReport}
+            disabled={importing || loading}
+          >
+            <Button
+              className={styles.importButton}
+              icon={<ImportOutlined />}
+              loading={importing}
+              disabled={loading}
+            >
+              导入 CSV
+            </Button>
+          </Upload>
+          <Button
+            className={styles.historyButton}
+            icon={<HistoryOutlined />}
+            onClick={() => setHistoryOpen(true)}
+          >
+            历史报告
+          </Button>
+        </div>
         <div className={styles.heroCopy}>
           <span className={styles.eyebrow}><SearchOutlined /> 技术 SEO 检测</span>
           <h1 id="seo-audit-title">把整站问题落到每一条 URL</h1>
@@ -299,6 +373,18 @@ export default function SeoAuditPage() {
         currentAuditId={report?.auditId}
         refreshKey={historyRefreshKey}
       />
+
+      {report?.auditId && (
+        <section className={styles.reportTransfer} aria-label="报告数据导出">
+          <div>
+            <strong>{report.source === 'imported' ? '已导入的标准报告' : '报告与明细数据'}</strong>
+            <span>固定列 CSV 可用 Excel 打开，也可重新导入本系统。</span>
+          </div>
+          <Button icon={<ExportOutlined />} loading={exporting} onClick={exportReport}>
+            导出标准 CSV
+          </Button>
+        </section>
+      )}
 
       {!report && mode === 'site' && job && (loading || job.status === 'failed') && (
         <SeoAuditJobProgress job={job} progress={job.progress} />

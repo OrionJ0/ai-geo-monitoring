@@ -104,3 +104,17 @@ test('SEO history distinguishes full-site reports and page coverage', () => {
   assert.match(historySource, /全站/);
   assert.match(historySource, /summary\?\.pages/);
 });
+
+test('SEO 报告支持标准 CSV 导出并重新导入历史', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+  const historySource = fs.readFileSync(historyPath, 'utf8');
+
+  assert.match(pageSource, /Upload/);
+  assert.match(pageSource, /导入 CSV/);
+  assert.match(pageSource, /get\(`\/api\/seo-audits\/\$\{report\.auditId\}\/export`/);
+  assert.match(pageSource, /post\('\/api\/seo-audits\/import'/);
+  assert.match(pageSource, /text\/csv/);
+  assert.match(pageSource, /responseType:\s*'blob'/);
+  assert.match(historySource, /summary\?\.source === 'imported'/);
+  assert.match(historySource, /导入/);
+});

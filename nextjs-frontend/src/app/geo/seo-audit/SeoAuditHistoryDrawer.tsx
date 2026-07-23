@@ -118,6 +118,7 @@ export default function SeoAuditHistoryDrawer({
                 <div>
                   <span className={styles.historySequence}>
                     {item.summary?.mode === 'site' ? '全站' : '单页'} · 报告 #{item.id}
+                    {item.summary?.source === 'imported' ? ' · 导入' : ''}
                   </span>
                   <h3>{displayHost(item.finalUrl)}</h3>
                 </div>
