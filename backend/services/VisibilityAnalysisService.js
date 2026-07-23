@@ -217,6 +217,22 @@ class VisibilityAnalysisService {
     return Number((Number(stats.mentions || 0) + rankBonus + recommendBonus).toFixed(2));
   }
 
+  listItemPosition(text, terms) {
+    const items = String(text || '')
+      .split(/\r?\n/)
+      .map((line) => {
+        const match = line.match(/^(\s{0,12})(?:[-*+•]\s+|(?:\d+|[一二三四五六七八九十]+)[.)、]\s*)(.+)$/);
+        return match ? { indent: match[1].length, content: match[2] } : null;
+      })
+      .filter(Boolean);
+    if (!items.length) return null;
+
+    const topLevelIndent = Math.min(...items.map((item) => item.indent));
+    const topLevelItems = items.filter((item) => item.indent === topLevelIndent);
+    const index = topLevelItems.findIndex((item) => this.mentionStats(item.content, terms).mentioned);
+    return index >= 0 ? index + 1 : null;
+  }
+
   analyzeResponse({ responseText, brand, competitors }) {
     const text = String(responseText || '');
     const brandTerms = this.buildBrandVisibilityTerms(brand);
@@ -230,6 +246,7 @@ class VisibilityAnalysisService {
         position_key: `competitor-${index}`,
         id: competitor?.id ?? null,
         name: competitor?.name || '',
+        terms,
         ...this.mentionStats(text, terms)
       };
     });
@@ -249,12 +266,18 @@ class VisibilityAnalysisService {
       if (item.type === 'competitor') competitorPositions.set(item.position_key, index + 1);
     });
 
-    const brandPosition = brandPositionIndex === -1 ? null : brandPositionIndex + 1;
+    const relativeBrandPosition = brandPositionIndex === -1 ? null : brandPositionIndex + 1;
+    const brandPosition = brandStats.mentioned
+      ? this.listItemPosition(text, brandTerms)
+        ?? (competitorStats.length ? relativeBrandPosition : null)
+      : null;
     const brandRecommended = this.isAnyMentionRecommended(text, brandTerms);
     const brandScore = this.visibilityScore(brandStats, brandPosition, brandRecommended);
     const competitorRows = Array.isArray(competitors) ? competitors : [];
     const competitorsWithScore = competitorStats.map((item, index) => {
-      const position = competitorPositions.get(item.position_key) || null;
+      const position = item.mentioned
+        ? this.listItemPosition(text, item.terms) ?? competitorPositions.get(item.position_key) ?? null
+        : null;
       const competitor = competitorRows[index];
       const recommended = this.isAnyMentionRecommended(
         text,

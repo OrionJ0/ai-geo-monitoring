@@ -1,11 +1,13 @@
 const { Op } = require('sequelize');
 const {
+  BrandProject,
   QuestionSetRun,
   QuestionRecord,
   ResultDetail,
   VisibilityMetric
 } = require('../models');
 const QuestionSetRunCsvService = require('./QuestionSetRunCsvService');
+const VisibilityAnalysisService = require('./VisibilityAnalysisService');
 
 const SCHEMA_VERSION = 'question_set_run_v1';
 
@@ -46,6 +48,10 @@ function summarize(rows) {
   const completedRows = rows.filter((row) => row.status === 'completed');
   const metricRows = completedRows.filter((row) => row.has_metrics);
   const rankedRows = metricRows.filter((row) => finiteNumber(row.brand_rank) > 0);
+  const competitorBaselineCount = metricRows.reduce(
+    (maximum, row) => Math.max(maximum, Array.isArray(row.competitor_mentions) ? row.competitor_mentions.length : 0),
+    0
+  );
   const sum = (key, list = metricRows) => list.reduce((total, row) => total + finiteNumber(row[key]), 0);
   const totalOwnedCitations = metricRows.reduce((total, row) => total + ownedCitationCount(row), 0);
 
@@ -55,6 +61,7 @@ function summarize(rows) {
     failed: rows.filter((row) => row.status === 'failed').length,
     pending: rows.filter((row) => row.status === 'pending').length,
     valid_analyses: metricRows.length,
+    competitor_baseline_count: competitorBaselineCount,
     brand_mention_rate: percent(metricRows.filter((row) => row.brand_mentioned).length, metricRows.length),
     recommendation_rate: percent(metricRows.filter((row) => row.brand_recommended).length, metricRows.length),
     avg_share_of_voice: metricRows.length ? Number((sum('share_of_voice') / metricRows.length).toFixed(2)) : 0,
@@ -64,6 +71,20 @@ function summarize(rows) {
     total_citations: sum('citation_count'),
     total_owned_citations: totalOwnedCitations
   };
+}
+
+function normalizeReportRanks(rows, brandProject) {
+  const brand = plain(brandProject);
+  const brandTerms = brand ? VisibilityAnalysisService.buildBrandVisibilityTerms(brand) : [];
+  return rows.map((row) => {
+    if (!row?.has_metrics || !row.brand_mentioned) return row;
+    const listPosition = brandTerms.length
+      ? VisibilityAnalysisService.listItemPosition(row.answer, brandTerms)
+      : null;
+    if (listPosition) return { ...row, brand_rank: listPosition };
+    const hasCompetitorBaseline = Array.isArray(row.competitor_mentions) && row.competitor_mentions.length > 0;
+    return hasCompetitorBaseline ? row : { ...row, brand_rank: null };
+  });
 }
 
 function normalizeNativeRow(record) {
@@ -122,6 +143,11 @@ class QuestionSetRunService {
     return Run.findOne({ where: { id: runId, project_id: projectId } });
   }
 
+  async findBrandProject(projectId, repositories = {}) {
+    const Project = repositories.BrandProject || BrandProject;
+    return Project.findByPk(projectId);
+  }
+
   async getNativeRows(run, repositories = {}) {
     const Record = repositories.QuestionRecord || QuestionRecord;
     const ids = Array.isArray(run.record_ids) ? run.record_ids.map(Number).filter(Number.isInteger) : [];
@@ -137,14 +163,18 @@ class QuestionSetRunService {
     return ids.map((id) => byId.get(id)).filter(Boolean).map(normalizeNativeRow);
   }
 
-  async getReport({ projectId, runId, repositories = {} }) {
+  async getReport({ projectId, runId, repositories = {}, brandProject }) {
     const stored = await this.findRun({ projectId, runId, repositories });
     if (!stored) return null;
     const run = plain(stored);
     const cachedRows = Array.isArray(run.imported_rows) ? run.imported_rows : [];
-    const rows = run.source === 'imported' || cachedRows.length
+    const sourceRows = run.source === 'imported' || cachedRows.length
       ? cachedRows
       : await this.getNativeRows(run, repositories);
+    const resolvedBrandProject = brandProject === undefined
+      ? await this.findBrandProject(projectId, repositories)
+      : brandProject;
+    const rows = normalizeReportRanks(sourceRows, resolvedBrandProject);
     const status = deriveStatus(rows);
     const expectedRows = Array.isArray(run.record_ids) ? run.record_ids.length : 0;
     if (run.source === 'native' && !cachedRows.length && status !== 'running' && rows.length === expectedRows && rows.length) {
@@ -185,9 +215,11 @@ class QuestionSetRunService {
       limit: safePageSize,
       offset: (safePage - 1) * safePageSize
     });
+    const brandProject = await this.findBrandProject(projectId, repositories);
     const reports = await Promise.all(result.rows.map((item) => this.getReport({
       projectId,
       runId: item.id,
+      brandProject,
       repositories
     })));
     return {

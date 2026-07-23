@@ -25,19 +25,34 @@ test('问题集报告页面以运行历史和单次逐条结果为中心', () =>
 
 test('问题集报告分级展示指标并给出可聚焦的口径说明', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
+  const primaryStart = source.indexOf(`className={styles.primaryMetrics}`);
+  const primaryEnd = source.indexOf(`className={styles.metricsCollapse}`, primaryStart);
+  const primaryMetrics = source.slice(primaryStart, primaryEnd);
+  const validIndex = primaryMetrics.indexOf('label="有效样本"');
+  const mentionIndex = primaryMetrics.indexOf('label="品牌提及率"');
+  const recommendationIndex = primaryMetrics.indexOf('label="推荐率"');
+  const rankIndex = primaryMetrics.indexOf('label="平均品牌排名"');
 
   assert.match(source, /核心指标/);
   assert.match(source, /品牌提及率/);
   assert.match(source, /推荐率/);
   assert.match(source, /平均 SOV/);
   assert.match(source, /有效样本/);
+  assert.ok(
+    validIndex >= 0 && validIndex < mentionIndex && mentionIndex < recommendationIndex && recommendationIndex < rankIndex,
+    '核心指标应按有效样本、品牌提及率、推荐率、平均品牌排名排序'
+  );
+  assert.doesNotMatch(primaryMetrics, /平均 SOV/);
+  assert.match(source, /summary\.competitor_baseline_count/);
+  assert.match(source, /hasCompetitorBaseline/);
   assert.match(source, /更多指标/);
   assert.match(source, /QuestionCircleOutlined/);
   assert.match(source, /tabIndex=\{0\}/);
   assert.match(source, /trigger=\{\['hover', 'focus'\]\}/);
   assert.match(source, /提及品牌的有效分析数.*有效分析数/);
   assert.match(source, /明确推荐.*有效分析数/);
-  assert.match(source, /品牌与竞品.*相对声量/);
+  assert.match(source, /配置竞品.*相对声量/);
+  assert.match(source, /实际列表项位置/);
   assert.match(source, /官网引用率/);
   assert.match(source, /summary\.owned_citation_rate/);
   assert.match(source, /summary\.total_owned_citations/);

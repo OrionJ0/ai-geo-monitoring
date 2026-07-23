@@ -205,7 +205,7 @@ test('counts ambiguous Chinese brand names when attached to vehicle model contex
 
   assert.equal(result.brand_mentioned, true);
   assert.equal(result.brand_mentions, 1);
-  assert.equal(result.brand_rank, 1);
+  assert.equal(result.brand_rank, null);
 });
 
 test('does not count fruit contexts as Apple brand mentions', () => {
@@ -382,6 +382,38 @@ test('keeps competitor ranks separate when competitor ids are missing', () => {
   assert.equal(result.competitor_mentions[0].rank, 1);
   assert.equal(result.competitor_mentions[1].name, '固特异');
   assert.equal(result.competitor_mentions[1].rank, 2);
+});
+
+test('uses the actual top-level list position when a brand is the third listed vendor', () => {
+  const result = VisibilityAnalysisService.analyzeResponse({
+    responseText: [
+      '### 1. 行业头部与综合安防巨头',
+      '- **海康威视（Hikvision）**：周界产品线齐全。',
+      '- **大华股份（Dahua）**：教育行业项目覆盖广。',
+      '',
+      '### 2. 专业周界报警细分领域核心厂商',
+      '- **上海广拓（GATO）**：在非通电张力式领域经验丰富。',
+      '- **深圳宏创科技（Hongchuang）**：深耕周界报警。'
+    ].join('\n'),
+    brand: { name: '广拓', aliases: ['上海广拓', 'GATO'] },
+    competitors: []
+  });
+
+  assert.equal(result.brand_mentioned, true);
+  assert.equal(result.brand_rank, 3);
+  assert.equal(result.brand_position, 3);
+});
+
+test('does not invent a first-place rank for an unranked prose mention without competitors', () => {
+  const result = VisibilityAnalysisService.analyzeResponse({
+    responseText: '广拓可以作为学校周界报警方案的候选。',
+    brand: { name: '广拓', aliases: ['上海广拓'] },
+    competitors: []
+  });
+
+  assert.equal(result.brand_mentioned, true);
+  assert.equal(result.brand_rank, null);
+  assert.equal(result.brand_position, null);
 });
 
 test('does not treat negated brand recommendation as recommended', () => {

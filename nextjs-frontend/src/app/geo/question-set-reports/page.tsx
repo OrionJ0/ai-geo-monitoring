@@ -43,6 +43,7 @@ type ReportSummary = {
   failed?: number;
   pending?: number;
   valid_analyses?: number;
+  competitor_baseline_count?: number;
   brand_mention_rate?: number;
   recommendation_rate?: number;
   avg_share_of_voice?: number;
@@ -71,6 +72,7 @@ type ReportRow = {
   citation_count?: number;
   owned_citation_count?: number;
   sentiment?: string;
+  competitor_mentions?: Array<{ id?: number | null; name?: string; mentioned?: boolean }>;
   citation_sources?: Array<{ url?: string; domain?: string; title?: string; owned?: boolean }>;
 };
 type RunReport = {
@@ -355,6 +357,7 @@ export default function QuestionSetReportsPage() {
     [projects, projectId],
   );
   const summary = report?.summary || {};
+  const hasCompetitorBaseline = Number(summary.competitor_baseline_count || 0) > 0;
   const progress = summary.total ? Math.round(((summary.completed || 0) + (summary.failed || 0)) / summary.total * 100) : 0;
 
   const selectRun = (nextRunId: number) => setRunId(nextRunId);
@@ -459,7 +462,7 @@ export default function QuestionSetReportsPage() {
         <Space wrap size={[4, 4]}>
           <Tag color={row.brand_mentioned ? 'blue' : 'default'}>{row.brand_mentioned ? '已提及' : '未提及'}</Tag>
           {row.brand_recommended ? <Tag color="green">明确推荐</Tag> : null}
-          <Text type="secondary">SOV {percent(row.share_of_voice)}%</Text>
+          {hasCompetitorBaseline ? <Text type="secondary">SOV {percent(row.share_of_voice)}%</Text> : null}
         </Space>
       ) : '-',
     },
@@ -589,9 +592,14 @@ export default function QuestionSetReportsPage() {
                       <Text className={styles.panelKicker}>OUTCOME METRICS</Text>
                       <Title level={4}>核心指标</Title>
                     </div>
-                    <Text type="secondary">先看有没有被提及、有没有被推荐，以及相对竞品是否显眼</Text>
+                    <Text type="secondary">先确认样本是否充足，再看品牌有没有被提及、推荐和排在前面</Text>
                   </div>
                   <div className={styles.primaryMetrics}>
+                    <MetricItem
+                      label="有效样本"
+                      value={`${summary.valid_analyses || 0} / ${summary.total || 0}`}
+                      help="产生可用分析指标的已完成任务数 ÷ 本次计划任务数。失败、进行中或未生成指标的任务不进入各项比率计算。"
+                    />
                     <MetricItem
                       label="品牌提及率"
                       value={`${percent(summary.brand_mention_rate)}%`}
@@ -603,14 +611,9 @@ export default function QuestionSetReportsPage() {
                       help="明确推荐品牌的有效分析数 ÷ 有效分析数。仅识别品牌同句或分句中的明确推荐表达，并排除“不推荐”等否定表达。"
                     />
                     <MetricItem
-                      label="平均 SOV"
-                      value={`${percent(summary.avg_share_of_voice)}%`}
-                      help="每条有效回答先计算品牌与竞品的可见度分：提及次数 + 首次出现排名加分 + 明确推荐加分；品牌得分 ÷ 全部品牌得分得到相对声量，再对有效回答取平均。"
-                    />
-                    <MetricItem
-                      label="有效样本"
-                      value={`${summary.valid_analyses || 0} / ${summary.total || 0}`}
-                      help="产生可用分析指标的已完成任务数 ÷ 本次计划任务数。失败、进行中或未生成指标的任务不进入各项比率计算。"
+                      label="平均品牌排名"
+                      value={formatRank(summary.avg_brand_rank)}
+                      help="优先读取品牌在回答顶层厂家列表中的实际列表项位置，再对形成排名的有效回答取平均；没有列表且未配置竞品时不强行排名，显示为“-”。配置竞品后，可用品牌与竞品的首次出现顺序作为兜底。"
                     />
                   </div>
 
@@ -625,16 +628,18 @@ export default function QuestionSetReportsPage() {
                       label: (
                         <span className={styles.moreMetricsLabel}>
                           <Text strong>更多指标</Text>
-                          <Text type="secondary">排名、引用和执行情况</Text>
+                          <Text type="secondary">{hasCompetitorBaseline ? '竞品声量、引用和执行情况' : '引用和执行情况'}</Text>
                         </span>
                       ),
                       children: (
                         <div className={styles.secondaryMetrics}>
-                          <MetricItem
-                            label="平均品牌排名"
-                            value={formatRank(summary.avg_brand_rank)}
-                            help="只统计品牌已出现且形成排名的有效回答。排名按品牌与竞品在回答中的首次出现顺序计算，再取平均；未提及品牌的回答不进入分母。"
-                          />
+                          {hasCompetitorBaseline ? (
+                            <MetricItem
+                              label="平均 SOV"
+                              value={`${percent(summary.avg_share_of_voice)}%`}
+                              help="仅在项目配置竞品时展示。每条有效回答先计算品牌与竞品的可见度分：提及次数 + 首次出现排名加分 + 明确推荐加分；品牌得分 ÷ 全部品牌得分得到相对声量，再对有效回答取平均。"
+                            />
+                          ) : null}
                           <MetricItem
                             label="引用率"
                             value={`${percent(summary.citation_rate)}%`}

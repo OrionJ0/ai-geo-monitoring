@@ -175,6 +175,75 @@ test('标准 CSV 导出后可以重新导入为内容等价的只读历史报告
   assert.equal(restored.summary.total_owned_citations, original.summary.total_owned_citations);
 });
 
+test('报告会纠正无竞品项目的历史排名并标记没有竞品基线', async () => {
+  const imported = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: null,
+    question_set_name: '校园周界厂家',
+    source: 'imported',
+    schema_version: 'question_set_run_v1',
+    record_ids: [],
+    imported_rows: [{
+      record_id: null,
+      question_id: null,
+      question: '学校使用的非通电电子围栏，国内哪些厂家做得比较多？',
+      question_category: '',
+      platform: 'deepseek',
+      platform_name: 'DeepSeek',
+      model_name: 'deepseek-v4-flash',
+      status: 'completed',
+      error_message: '',
+      answer: [
+        '- **海康威视（Hikvision）**：周界产品线齐全。',
+        '- **大华股份（Dahua）**：教育行业项目覆盖广。',
+        '- **上海广拓（GATO）**：非通电张力式领域经验丰富。'
+      ].join('\n'),
+      has_metrics: true,
+      brand_mentioned: true,
+      brand_mentions: 1,
+      brand_rank: 1,
+      brand_recommended: false,
+      share_of_voice: 100,
+      citation_count: 0,
+      owned_citation_count: 0,
+      competitor_citation_count: 0,
+      sentiment: 'positive',
+      sentiment_reason: '',
+      competitor_mentions: [],
+      citation_sources: [],
+      created_at: null,
+      updated_at: null
+    }],
+    started_at: new Date('2026-07-23T00:00:00.000Z'),
+    completed_at: new Date('2026-07-23T00:01:00.000Z')
+  });
+
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: imported.id
+  });
+
+  assert.equal(report.rows[0].brand_rank, 3);
+  assert.equal(report.summary.avg_brand_rank, 3);
+  assert.equal(report.summary.competitor_baseline_count, 0);
+});
+
+test('报告汇总能够识别已配置的竞品基线', () => {
+  const summary = QuestionSetRunService.summarize([{
+    status: 'completed',
+    has_metrics: true,
+    brand_mentioned: true,
+    brand_recommended: false,
+    brand_rank: 2,
+    share_of_voice: 40,
+    citation_count: 0,
+    competitor_mentions: [{ id: 12, name: '竞品甲', mentioned: true }]
+  }]);
+
+  assert.equal(summary.competitor_baseline_count, 1);
+});
+
 test('导入拒绝引用来源中的非网页协议', async () => {
   const nativeRun = await QuestionSetRun.findOne({
     where: { project_id: project.id, source: 'native' },
