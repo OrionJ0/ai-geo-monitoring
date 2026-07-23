@@ -81,7 +81,8 @@ Authorization: Bearer <token>
 - `POST /api/geo-projects/:projectId/question-sets/:questionSetId/run` 将问题集内所有启用问题按可用监测平台加入并发队列
   - 返回 `202 Accepted`、队列记录、`question_set_run_id` 和 `report_url`；每个成员问题仍可通过单问题接口独立运行
 - `GET /api/geo-projects/:projectId/question-set-runs` 分页查询当前项目的问题集运行历史
-  - Query 参数：`page` 默认 1；`pageSize` 默认 20，最大 100
+  - Query 参数：`page` 默认 1；`pageSize` 默认 20，最大 100；`questionSetId` 可选，仅返回指定问题集的历史
+  - `questionSetId` 必须是正整数；非法值返回 `400 Bad Request`
   - 返回运行来源、当前状态、本次汇总和分页信息，不在列表中返回逐条回答
 - `GET /api/geo-projects/:projectId/question-set-runs/:runId` 获取一次问题集运行的独立报告
   - 报告只聚合该运行关联的任务，包含本次汇总与逐问题逐平台结果
