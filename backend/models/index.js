@@ -16,6 +16,7 @@ const ReportSnapshot = require('./ReportSnapshot');
 const SeoAuditRecord = require('./SeoAuditRecord');
 const SeoAuditJob = require('./SeoAuditJob');
 const AIPlatformConfig = require('./AIPlatformConfig');
+const QuestionSetRun = require('./QuestionSetRun');
 
 // 定义关联关系
 User.hasMany(QuestionRecord, {
@@ -99,7 +100,8 @@ const models = {
   ReportSnapshot,
   SeoAuditRecord,
   SeoAuditJob,
-  AIPlatformConfig
+  AIPlatformConfig,
+  QuestionSetRun
 };
 
 module.exports = models;
