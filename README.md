@@ -23,7 +23,7 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 
 - 品牌项目创建、归档、恢复与删除
 - GEO 检测任务创建、调度与执行记录
-- 多平台 AI 回答结果监测，预置豆包、DeepSeek，并支持管理员新增 OpenAI Chat Completions 或 Responses 兼容平台
+- 多平台 AI 回答结果监测，预置豆包、DeepSeek、千问和腾讯混元，并支持管理员新增 OpenAI Chat Completions 或 Responses 兼容平台
 - 平台级模型请求参数配置、连接测试与联网能力检测
 - 由独立 AI 分析 API 抽取全部品牌/公司、目标实体映射、提及、候选顺序与推荐关系，程序据此计算品牌提及、推荐和排名；引用来源直接解析监测 API 响应
 - AI 回答情绪判断，支持正向、中性、负向标签与风险项沉淀
@@ -86,7 +86,7 @@ cp nextjs-frontend/.env.example nextjs-frontend/.env.local
 
 本地开发也可以在 `backend/` 目录运行 `npm run setup:local-key`，生成不会回显内容的本机专用加密主密钥；生产环境仍应由部署系统安全注入。
 
-生产环境还应配置 `ALLOWED_ORIGINS`，并通过环境变量注入 `DATABASE_URL` 等部署配置。AI 平台名称、Base URL、模型和 API Key 必须由管理员登录后在 `/admin/settings` 人工添加；系统不会从 `.env` 自动导入或回退读取平台密钥。
+生产环境还应配置 `ALLOWED_ORIGINS`，并通过环境变量注入 `DATABASE_URL` 等部署配置。预置平台的非敏感接口信息会在启动时初始化；模型和 API Key 由管理员登录后在 `/admin/settings` 维护，系统不会从 `.env` 自动导入或回退读取平台密钥。
 
 统一启动前后端：
 

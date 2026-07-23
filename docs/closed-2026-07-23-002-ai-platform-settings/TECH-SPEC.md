@@ -18,7 +18,7 @@ scope: deep
 
 ### 范围
 
-- 新增 AI 平台配置表，预置豆包与 DeepSeek 的非敏感基本信息。
+- 新增 AI 平台配置表，预置豆包、DeepSeek、千问与腾讯混元的非敏感基本信息。
 - 使用环境级主密钥加密存储 API Key；列表和普通读取接口只返回配置状态和末四位，管理员可通过禁止缓存的专用接口主动显示单个平台密钥。
 - 提供管理员平台增删改查、启停、清除密钥和主动连接测试接口。
 - 提供登录用户可读的平台目录接口，供项目与问题表单动态选择。
@@ -71,7 +71,7 @@ scope: deep
 ## 4. 需求、约束与规则
 
 - REQ-001：数据库是平台名称、接口、模型、密钥、启用状态和运行参数的唯一正式来源。
-- REQ-002：系统仅预置豆包与 DeepSeek 基本信息；预置密钥为空且默认启用。
+- REQ-002：系统预置豆包、DeepSeek、千问与腾讯混元基本信息；预置密钥为空且默认启用。
 - REQ-003：DeepSeek 初始默认模型必须为 `deepseek-v4-flash`。
 - REQ-004：管理员可新增 `openai_chat_completions` 或 `openai_responses` 适配器平台，新平台默认启用。
 - REQ-005：配置状态、启用状态与测试状态互相独立；连接测试不自动启停平台。
@@ -87,6 +87,7 @@ scope: deep
 - PAT-001：接口沿用 `{ success, message?, data? }`；业务校验返回 400，认证/权限沿用 401/403，服务端异常返回脱敏 500。
 - PAT-002：平台代码创建后不可修改；只允许小写字母、数字和连字符，长度 2–50。
 - PAT-003：预置平台不可删除；自定义平台对外使用“删除”术语，内部软删除并保留历史显示能力。
+- PAT-004：模型刷新只调用供应商 OpenAI 兼容 `/models`；成功时去重并完整返回，不做“常用/最新”启发式筛选，也不持久化目录。
 
 ## 5. 接口与数据契约
 
@@ -312,7 +313,7 @@ HTTP 状态沿用 400；响应 `data` 必须携带 `error_code` 和 `skipped_pla
 
 ## 8. 验收标准
 
-- AC-001：Given 新数据库，When 后端首次启动，Then 只写入豆包与 DeepSeek 基本信息，API Key 均为空且默认启用。
+- AC-001：Given 新数据库，When 后端首次启动，Then 写入豆包、DeepSeek、千问与腾讯混元基本信息，API Key 均为空且默认启用。
 - AC-002：Given 环境中存在旧平台 API Key，When 初始化预置，Then 数据库仍不导入该密钥。
 - AC-003：Given 有效加密主密钥，When 管理员保存 API Key，Then 数据库存储密文，列表与普通 API 不返回明文或密文；只有管理员主动显示单个平台密钥时返回明文且禁止缓存。
 - AC-004：Given 管理员未主动测试，When 启用平台，Then 平台保持启用且测试状态仍为未测试。
@@ -378,8 +379,8 @@ HTTP 状态沿用 400；响应 `data` 必须携带 `error_code` 和 `skipped_pla
 ## 13. 后续衔接
 
 - U1–U5 已按 TDD 完成代码实现并接入正式入口。
-- 自动化证据：后端全量测试 485/485、前端工具测试 150/150、改动文件 ESLint 与 Node 语法检查、Next.js 生产构建均通过。
-- HTTP 入口证据：临时全新数据库启动后，`GET /api/ai-platforms` 与 `GET /api/admin/ai-platforms` 返回豆包和 DeepSeek 预设，`GET /api/settings` 返回四个运行设置，旧 `GET /api/platforms/ping` 返回 404。
+- 自动化证据：后端全量测试 486/486、前端工具测试 174/174、Node 语法检查、差异格式检查与 Next.js 生产构建均通过。
+- 正式入口证据：重启当前本地后端后，管理员 `/admin/settings` 的 AI 平台表显示豆包、DeepSeek、千问和腾讯混元四个预设；既有千问连接信息保持不变，腾讯混元显示 TokenHub 地址、`hy3` 和“未配置”密钥状态。
 - 历史验收中的“千问强制联网参数被接受即成功”结论已废止。OpenAI Chat Completions 兼容响应没有本次搜索的显式证明时只能标记为“无法验证”；千问需要切换到供应商支持的 Responses API，并从 `web_search_call.action.sources` 获取可核验来源。
 - 真实供应商验收：千问 Chat Completions 调用只返回函数样式文本且没有搜索证据，系统正确标记为“证据不足”；切换 `qwen3.7-plus` 到 `openai_responses` 后，响应包含 `web_search_call.action.sources`，页面展示了测试输入、模型输出和含 18 个来源 URL 的供应商响应。
 

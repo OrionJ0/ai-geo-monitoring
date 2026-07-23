@@ -35,6 +35,24 @@ const PRESET_PLATFORMS = Object.freeze([
     default_model: 'deepseek-v4-flash',
     enabled: true,
     builtin: true
+  }),
+  Object.freeze({
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_responses',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    default_model: 'qwen3.7-plus',
+    enabled: true,
+    builtin: true
+  }),
+  Object.freeze({
+    code: 'hunyuan',
+    name: '腾讯混元',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://tokenhub.tencentmaas.com/v1',
+    default_model: 'hy3',
+    enabled: true,
+    builtin: true
   })
 ]);
 
@@ -167,6 +185,9 @@ class AIPlatformConfigService {
         where: { code: preset.code },
         defaults: preset
       });
+      if (!row.builtin) {
+        await row.update({ builtin: true });
+      }
       const requestOptions = row.request_options || {};
       const isObsoleteDoubaoPreset = preset.code === 'doubao'
         && JSON.stringify(requestOptions) === JSON.stringify({

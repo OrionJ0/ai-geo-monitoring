@@ -34,12 +34,12 @@ test.after(async () => {
   await sequelize.close();
 });
 
-test('seeds only non-sensitive Doubao and DeepSeek preset information', async () => {
+test('seeds only non-sensitive Doubao, DeepSeek, Qwen and Hunyuan preset information', async () => {
   const service = createService();
   await service.ensurePresets();
 
   const rows = await AIPlatformConfig.findAll({ order: [['code', 'ASC']] });
-  assert.deepEqual(rows.map((row) => row.code), ['deepseek', 'doubao']);
+  assert.deepEqual(rows.map((row) => row.code), ['deepseek', 'doubao', 'hunyuan', 'qwen']);
   assert.equal(rows.every((row) => row.enabled && row.builtin), true);
   assert.equal(rows.every((row) => row.encrypted_api_key === null), true);
   assert.equal(rows.every((row) => row.api_key_last4 === null), true);
@@ -48,7 +48,42 @@ test('seeds only non-sensitive Doubao and DeepSeek preset information', async ()
   assert.equal(doubao.adapter_type, 'openai_responses');
   assert.equal(doubao.base_url, 'https://ark.cn-beijing.volces.com/api/v3');
   assert.deepEqual(doubao.request_options, {});
-  assert.equal(PRESET_PLATFORMS.length, 2);
+  const qwen = rows.find((row) => row.code === 'qwen');
+  assert.equal(qwen.name, '千问');
+  assert.equal(qwen.adapter_type, 'openai_responses');
+  assert.equal(qwen.default_model, 'qwen3.7-plus');
+  assert.equal(qwen.base_url, 'https://dashscope.aliyuncs.com/compatible-mode/v1');
+  const hunyuan = rows.find((row) => row.code === 'hunyuan');
+  assert.equal(hunyuan.name, '腾讯混元');
+  assert.equal(hunyuan.adapter_type, 'openai_chat_completions');
+  assert.equal(hunyuan.default_model, 'hy3');
+  assert.equal(hunyuan.base_url, 'https://tokenhub.tencentmaas.com/v1');
+  assert.equal(PRESET_PLATFORMS.length, 4);
+});
+
+test('promotes an existing Qwen row to builtin without overwriting its connection settings', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'qwen',
+    name: '千问工作区',
+    adapter_type: 'openai_responses',
+    base_url: 'https://workspace.example.com/compatible-mode/v1',
+    default_model: 'qwen3.7-plus',
+    encrypted_api_key: 'already-encrypted',
+    api_key_last4: '1234',
+    enabled: false,
+    builtin: false
+  });
+
+  await service.ensurePresets();
+
+  const qwen = await AIPlatformConfig.findOne({ where: { code: 'qwen' } });
+  assert.equal(qwen.builtin, true);
+  assert.equal(qwen.name, '千问工作区');
+  assert.equal(qwen.base_url, 'https://workspace.example.com/compatible-mode/v1');
+  assert.equal(qwen.default_model, 'qwen3.7-plus');
+  assert.equal(qwen.encrypted_api_key, 'already-encrypted');
+  assert.equal(qwen.enabled, false);
 });
 
 test('migrates the retired provider-specific Responses type and obsolete max_keyword preset', async () => {

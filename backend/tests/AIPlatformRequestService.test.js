@@ -149,6 +149,36 @@ test('calls an OpenAI compatible platform from the saved database configuration'
   assert.equal(request.options.maxRedirects, 0);
 });
 
+test('calls the Hunyuan preset through TokenHub Chat Completions with hy3', async () => {
+  let request;
+  const row = {
+    id: 5,
+    code: 'hunyuan',
+    name: '腾讯混元',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://tokenhub.tencentmaas.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'hy3',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (url, body) => {
+      request = { url, body };
+      return { data: { choices: [{ message: { content: '你好' } }] }, headers: {} };
+    }
+  });
+
+  const result = await service.queryPlatform('hunyuan', '你好');
+
+  assert.equal(result.success, true);
+  assert.equal(request.url, 'https://tokenhub.tencentmaas.com/v1/chat/completions');
+  assert.equal(request.body.model, 'hy3');
+  assert.deepEqual(request.body.messages, [{ role: 'user', content: '你好' }]);
+  assert.equal(request.body.stream, undefined);
+});
+
 test('appends the Chat Completions path to an OpenAI-compatible Base URL and merges request parameters', async () => {
   let request;
   const row = {

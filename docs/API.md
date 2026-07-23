@@ -224,7 +224,7 @@ Authorization: Bearer <token>
 - `POST /api/admin/ai-platforms` 新增 OpenAI Chat Completions 或 Responses 兼容平台。
 - `PUT /api/admin/ai-platforms/:id` 编辑平台、默认模型和 `request_options`；API Key 留空表示保留。
 - `PATCH /api/admin/ai-platforms/:id/enabled` 启用或停用平台。
-- `GET /api/admin/ai-platforms/:id/models` 使用该平台已保存的连接配置临时读取供应商 `GET /models`；成功时合并当前默认模型并返回 `persisted: false`，模型目录不落库。
+- `GET /api/admin/ai-platforms/:id/models` 使用该平台已保存的连接配置临时读取供应商 `GET /models`；成功时合并当前默认模型、去重并完整返回，不做“常用/最新”筛选，同时返回 `persisted: false`，模型目录不落库。
 - `GET /api/admin/ai-platforms/:id/api-key` 由管理员主动读取该平台现有 API Key；响应设置 `Cache-Control: no-store`，平台列表仍不返回明文。
 - `DELETE /api/admin/ai-platforms/:id/api-key` 清除 API Key。
 - `DELETE /api/admin/ai-platforms/:id` 删除自定义平台；为保留历史记录含义，服务端采用软删除。
