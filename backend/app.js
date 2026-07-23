@@ -241,7 +241,7 @@ async function ensureDefaultAdmin() {
   try {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
     const email = process.env.DEFAULT_ADMIN_EMAIL || 'admin@example.com';
-    const passwordRaw = process.env.DEFAULT_ADMIN_PASSWORD || 'Admin@123';
+    const passwordRaw = process.env.DEFAULT_ADMIN_PASSWORD || 'admin123456';
     const hashed = await bcrypt.hash(passwordRaw, 10);
 
     const user1 = await User.findByPk(1);

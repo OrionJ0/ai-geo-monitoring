@@ -9,3 +9,13 @@ test('user routes do not expose internal error messages in 500 responses', () =>
   assert.doesNotMatch(source, /status\(\s*500\s*\)\.json\(\{[\s\S]*?error:\s*error\.message[\s\S]*?\}\)/);
   assert.doesNotMatch(source, /error:\s*error\.message/);
 });
+
+test('default administrator bootstrap uses the documented local credentials', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../app.js'), 'utf8');
+  const envExample = fs.readFileSync(path.resolve(__dirname, '../.env.example'), 'utf8');
+
+  assert.match(source, /DEFAULT_ADMIN_USERNAME \|\| 'admin'/);
+  assert.match(source, /DEFAULT_ADMIN_PASSWORD \|\| 'admin123456'/);
+  assert.match(envExample, /^DEFAULT_ADMIN_USERNAME=admin$/m);
+  assert.match(envExample, /^DEFAULT_ADMIN_PASSWORD=admin123456$/m);
+});
