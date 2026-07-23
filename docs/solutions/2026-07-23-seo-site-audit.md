@@ -11,7 +11,8 @@ SEO 检测正式入口 `/geo/seo-audit` 已从单页 MVP 升级为双模式：�
 唯一正式配置入口为 `backend/config/seoAuditRules.js`：
 
 - `version`：写入每份报告的 `scoreVersion`，用于解释历史分数。
-- `checks`：22 个检查项的 `severity` 与 `weight`；业务分析代码不再硬编码权重。
+- `checks`：23 个检查项的 `severity` 与 `weight`；业务分析代码不再硬编码权重。
+- `crawlerProfiles`：维护搜索、AI 搜索、用户触发和 AI 训练/数据使用四类 robots token，包含是否计分、策略类型和官方说明链接。
 - `thresholds`：Title、Description、正文、响应时间、HTML 体积和 Keywords 数量阈值。
 - `crawl`：全站页数上限 200、并发 3、Sitemap 上限 20、递归深度 3。
 - Keywords 检查 ID 为 `meta-keywords`，默认低权重 1；缺失、空值、重复、过多和有效内容均返回具体事实。
@@ -22,7 +23,7 @@ SEO 检测正式入口 `/geo/seo-audit` 已从单页 MVP 升级为双模式：�
 
 `SeoSiteAuditService` 合并四类 URL 来源：提交 URL、同源标准链接、根 `/sitemap.xml`、robots 声明的 Sitemap。Sitemap index 可递归读取；URL 会移除片段、限制为同源 HTTP/HTTPS 并全局去重。
 
-每个页面复用现有 `SeoAuditService` 的 22 项规则与 `SeoSiteClient` 安全边界，因此单页和全站不会出现两套评分逻辑。页面失败只生成一条关键访问问题并继续；站点级 robots、Sitemap 和平台标签只计分一次。站点总分按本次实际检查实例的通过权重除以总权重计算，同一问题按检查 ID 汇总受影响 URL。
+每个页面复用现有 `SeoAuditService` 的 23 项规则与 `SeoSiteClient` 安全边界，因此单页和全站不会出现两套评分逻辑。页面失败只生成一条关键访问问题并继续；Sitemap 和平台标签按站点计分一次，爬虫权限按每个页面路径解析并只聚合受影响 URL。站点总分按本次实际检查实例的通过权重除以总权重计算，同一问题按检查 ID 汇总受影响 URL。
 
 Google、Bing、百度验证状态固定从站点首页读取以下标签：
 
@@ -31,6 +32,19 @@ Google、Bing、百度验证状态固定从站点首页读取以下标签：
 - `baidu-site-verification`
 
 状态分别为“已检测到、缺失、内容为空”。该信号不代表平台后台仍处于验证成功状态。
+
+## 搜索与 AI 爬虫权限
+
+报告使用 `RobotsAccessService` 按目标页面的路径和查询参数解析 `robots.txt`，遵循最具体 User-agent、同等具体分组合并、最长路径优先及同长度 `Allow` 优先。矩阵覆盖：
+
+- 搜索引擎：Googlebot、Bingbot、Baiduspider；纳入评分。
+- AI 搜索：OAI-SearchBot、Claude-SearchBot、PerplexityBot；纳入评分。
+- 用户触发访问：ChatGPT-User、Claude-User、Perplexity-User；robots 规则可能不适用，不计分。
+- AI 训练与数据使用：GPTBot、Google-Extended、ClaudeBot、CCBot；是否开放属于内容授权策略，不计分。其中 Google-Extended 是 robots 控制 token，不是独立 HTTP User-Agent。
+
+`robots.txt` 普通 4xx 或空内容会被解释为“未声明抓取限制”，但独立的文件有效性检查仍会报告文件缺失或为空；429、5xx、网络失败以及非空但无有效 User-agent 的内容为“无法判断”。因此产品只陈述 robots 声明层面的权限，不把“允许”写成“真实 UA 可访问、已经抓取、已经收录或会被 AI 引用”；真实访问仍可能受页面状态、WAF、登录、IP 校验和平台策略影响。
+
+实现依据以各平台公开文档为准：[Google crawlers](https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers)、[Google robots 解释](https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec)、[Bing crawlers](https://www.bing.com/webmasters/help/which-crawlers-does-bing-use-8c184ec0)、[百度 robots](https://www.baidu.com/search/robots_english.html)、[OpenAI crawlers](https://developers.openai.com/api/docs/bots)、[Anthropic crawlers](https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler)、[Perplexity crawlers](https://docs.perplexity.ai/docs/resources/perplexity-crawlers) 与 [CCBot](https://commoncrawl.org/ccbot)。
 
 ## 异步任务、SQLite 与历史
 
@@ -52,12 +66,13 @@ Google、Bing、百度验证状态固定从站点首页读取以下标签：
 
 ## 验证证据
 
-- 后端全量：411 项测试通过（包含工作树同期新增测试）；含 URL/Sitemap 发现、同源去重、失败容错、截断进度、配置注入、用户隔离、任务恢复，以及真实临时 SQLite 建表和报告落库。
-- 前端全量：111 项 Node 测试通过；相关改动 ESLint 通过。
-- 生产构建：Next.js 28 个路由生成成功，`/geo/seo-audit` 正常静态生成。
-- 真实入口：从 `http://localhost:3001/geo/seo-audit` 登录后，对 `https://example.com/` 完成全站报告 #7（1/1 页）和单页报告 #8；历史抽屉可区分模式并重新打开完整报告。
-- 真实 UI：1440×900 和 390×844 截图检查通过；窄屏侧栏自动折叠。真实页面控制台 0 error，唯一 warning 是 Next.js 开发模式 CSS preload 提示。
+- SEO 后端专项：32 项测试通过；覆盖 robots 分组/优先级/通配符/路径规则、文件缺失/空值/不可达、计分边界、单页/全站聚合、历史与任务。
+- SEO 前端专项：9 项测试通过；相关 TSX 改动 ESLint 通过。
+- 生产构建：Next.js 27 个路由生成成功，`/geo/seo-audit` 正常静态生成。
+- 真实入口：从 `http://localhost:3001/geo/seo-audit` 登录后，对 `https://example.com/` 完成单页报告 #10；页面展示 13 个爬虫 token 和命中事实，历史抽屉可找到报告 #10 并重新打开。
+- 真实 UI：1440×900 和 390×844 截图检查通过；窄屏矩阵会改为纵向布局。真实页面控制台 0 error。
 - SQLite 启动：本地后端在无 `DATABASE_URL` 时使用 `database.sqlite`，Sequelize 已创建 `seo_audit_jobs` 及用户/状态索引。
+- 交付时全仓测试受同期未提交改动影响：后端 435 项通过、1 项因缺少非 SEO 的 `QuestionSetRunService` 文件失败；前端 120 项通过、2 项因同期平台目录/Ant Design 属性改动失败。SEO 专项与生产构建均独立通过，未把无关改动混入本次提交。
 
 ## 当前边界
 

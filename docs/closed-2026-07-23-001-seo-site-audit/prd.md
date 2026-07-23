@@ -117,3 +117,11 @@
 - PRD path: `docs/closed-2026-07-23-001-seo-site-audit/prd.md`
 - Delivery status: 已完成。规则配置、单页兼容、全站服务、异步 API、SQLite 历史、前端双模式和真实入口验收均已落地。
 - Implementation evidence: `docs/solutions/2026-07-23-seo-site-audit.md`
+
+## 2026-07-23 爬虫权限补充需求（已交付）
+
+- 新增 `crawler-access` 高优先级检查，默认权重 7；仅搜索引擎和 AI 搜索 token 的禁止/未知状态影响分数。
+- 报告按当前页面路径展示 Google、Bing、百度、OpenAI、Anthropic、Perplexity、Google-Extended 与 CCBot 的 robots 权限和命中规则；全站检测逐路径计算并聚合受影响 URL。
+- 用户触发访问的 robots 约束可能不适用，AI 训练/数据开放属于站点授权选择，两类均展示但不计分。
+- `robots.txt` 全开放、普通 4xx 或空内容只判为“未声明限制”，不能表述为真实 UA 一定可访问、会收录或会引用；429、5xx、网络失败及无法解析的非空文件必须返回“无法判断”。
+- 爬虫画像、类别、是否计分、策略类型与官方说明链接统一维护在 `backend/config/seoAuditRules.js`；规则版本更新为 `2026-07-23-v2`，旧历史报告不重算且仍可打开。

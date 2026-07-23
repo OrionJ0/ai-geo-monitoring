@@ -88,8 +88,10 @@ Authorization: Bearer <token>
   - 返回：新保存的 `auditId`、最终 URL、状态码、响应时间、0–100 基础分、问题统计、优先修复项、六类检查结果与搜索/分享预览
   - 检查项：每项包含 `title`（检查对象）、`finding`（具体发现）、`status`、`severity`、`value`（检测事实）、`description`（影响）和 `recommendation`（建议）
   - 内容有效性：`robots.txt` 和 Sitemap 必须含有效内容；Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 与图片 Alt 不会因空标签而通过；`robots.txt` 中声明的自定义 Sitemap 会被实际抓取并校验
+  - 爬虫权限：响应的 `crawlerAccess` 按当前页面路径分别展示 Google、Bing、百度和重要 AI 爬虫在 `robots.txt` 中的允许、禁止或无法判断状态；搜索与 AI 搜索爬虫纳入评分，用户触发访问及 AI 训练/数据使用策略不计分
+  - 判定边界：`robots.txt` 返回普通 4xx 或内容为空表示“未声明抓取限制”，但独立的 `robots-txt` 有效性检查仍会报缺失/空内容；429、5xx、网络失败或非空但无法解析的文件返回“无法判断”。允许状态不能证明真实 UA 已成功访问、收录或引用
   - 搜索平台标签：固定从站点首页分别检查 Google、Bing、百度 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不识别 DNS 或验证文件方式
-  - 评分配置：响应包含 `scoreVersion` 和 `summary.totalWeight`；规则权重、严重程度与主要阈值集中在 `backend/config/seoAuditRules.js`，Keywords 默认权重为 1
+  - 评分配置：响应包含 `scoreVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`，Keywords 默认权重为 1，爬虫权限默认权重为 7
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：拒绝带用户名/密码的网址、本机和私网 IP、解析到私网的域名，以及重定向到私网的目标；最多跟随 5 次重定向，超时 10 秒，页面响应体上限 2 MB
 - `POST /api/seo-audits/site` 创建全站异步检测任务
