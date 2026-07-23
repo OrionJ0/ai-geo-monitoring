@@ -52,6 +52,7 @@ async function requestRoute(method, routePath, { params = {}, body = {}, query =
   const handlers = layer.route.stack.map((item) => item.handle);
   const dispatch = async (index) => {
     if (!handlers[index]) return;
+    if (handlers[index].name === 'textParser') return dispatch(index + 1);
     await handlers[index](req, response, () => dispatch(index + 1));
   };
   await dispatch(0);
@@ -145,7 +146,7 @@ test('用户可以从报告接口导出标准 CSV 并安全回导', async () => 
 
   const importResponse = await requestRoute('post', '/:projectId/question-set-runs/import', {
     params: { projectId: project.id },
-    body: { csv: exportResponse.payload }
+    body: exportResponse.payload
   });
 
   assert.equal(importResponse.statusCode, 201);
@@ -156,7 +157,7 @@ test('用户可以从报告接口导出标准 CSV 并安全回导', async () => 
   const beforeInvalidImport = await QuestionSetRun.count({ where: { project_id: project.id } });
   const invalidResponse = await requestRoute('post', '/:projectId/question-set-runs/import', {
     params: { projectId: project.id },
-    body: { csv: 'wrong,columns\n1,2' }
+    body: 'wrong,columns\n1,2'
   });
   assert.equal(invalidResponse.statusCode, 422);
   assert.equal(invalidResponse.payload.error.code, 'MISSING_COLUMNS');

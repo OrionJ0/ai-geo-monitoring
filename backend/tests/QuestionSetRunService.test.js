@@ -159,3 +159,17 @@ test('标准 CSV 导出后可以重新导入为内容等价的只读历史报告
   assert.deepEqual(restored.rows[0].citation_sources, original.rows[0].citation_sources);
   assert.equal(restored.summary.brand_mention_rate, original.summary.brand_mention_rate);
 });
+
+test('导入拒绝引用来源中的非网页协议', async () => {
+  const nativeRun = await QuestionSetRun.findOne({
+    where: { project_id: project.id, source: 'native' },
+    order: [['id', 'DESC']]
+  });
+  const csv = await QuestionSetRunService.exportCsv({ projectId: project.id, runId: nativeRun.id });
+  const unsafeCsv = csv.replace('https://example.com/guide', 'javascript:alert(1)');
+
+  await assert.rejects(
+    QuestionSetRunService.importCsv({ project, user, csv: unsafeCsv }),
+    (error) => error?.code === 'INVALID_FIELD' && /citation_sources_json/.test(error.message)
+  );
+});

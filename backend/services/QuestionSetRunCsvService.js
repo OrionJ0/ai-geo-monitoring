@@ -163,6 +163,23 @@ function parseJsonArray(value, column, line) {
   }
 }
 
+function parseCitationSources(value, line) {
+  const sources = parseJsonArray(value, 'citation_sources_json', line);
+  sources.forEach((source) => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 citation_sources_json 包含无效来源`);
+    }
+    if (!source.url) return;
+    try {
+      const parsed = new URL(String(source.url));
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported-protocol');
+    } catch {
+      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 citation_sources_json 包含非网页链接`);
+    }
+  });
+  return sources;
+}
+
 function parseDate(value, column, line, { nullable = true } = {}) {
   if (!value && nullable) return null;
   const date = new Date(value);
@@ -231,7 +248,7 @@ function parseCsv(csv) {
       sentiment: valueAt(row, 'sentiment'),
       sentiment_reason: valueAt(row, 'sentiment_reason'),
       competitor_mentions: parseJsonArray(valueAt(row, 'competitor_mentions_json'), 'competitor_mentions_json', line),
-      citation_sources: parseJsonArray(valueAt(row, 'citation_sources_json'), 'citation_sources_json', line),
+      citation_sources: parseCitationSources(valueAt(row, 'citation_sources_json'), line),
       created_at: parseDate(valueAt(row, 'record_created_at'), 'record_created_at', line),
       updated_at: parseDate(valueAt(row, 'record_updated_at'), 'record_updated_at', line)
     };

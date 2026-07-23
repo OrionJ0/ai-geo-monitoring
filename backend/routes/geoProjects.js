@@ -787,31 +787,36 @@ router.get('/:projectId/question-set-runs/:runId/export', loadProject, async (re
   }
 });
 
-router.post('/:projectId/question-set-runs/import', loadProject, async (req, res) => {
-  try {
-    const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能导入运行报告');
-    if (archivedResponse) return archivedResponse;
-    const imported = await QuestionSetRunService.importCsv({
-      project: req.brandProject,
-      user: req.user,
-      csv: req.body?.csv
-    });
-    const report = await QuestionSetRunService.getReport({
-      projectId: req.brandProject.id,
-      runId: imported.id
-    });
-    return res.status(201).json({ success: true, message: '问题集运行报告已导入', data: report });
-  } catch (error) {
-    if (error instanceof CsvValidationError) {
-      return res.status(422).json({
-        success: false,
-        message: error.message,
-        error: { code: error.code, message: error.message }
+router.post(
+  '/:projectId/question-set-runs/import',
+  express.text({ type: 'text/csv', limit: '5mb' }),
+  loadProject,
+  async (req, res) => {
+    try {
+      const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能导入运行报告');
+      if (archivedResponse) return archivedResponse;
+      const imported = await QuestionSetRunService.importCsv({
+        project: req.brandProject,
+        user: req.user,
+        csv: req.body
       });
+      const report = await QuestionSetRunService.getReport({
+        projectId: req.brandProject.id,
+        runId: imported.id
+      });
+      return res.status(201).json({ success: true, message: '问题集运行报告已导入', data: report });
+    } catch (error) {
+      if (error instanceof CsvValidationError) {
+        return res.status(422).json({
+          success: false,
+          message: error.message,
+          error: { code: error.code, message: error.message }
+        });
+      }
+      return res.status(500).json({ success: false, message: '导入问题集运行报告失败' });
     }
-    return res.status(500).json({ success: false, message: '导入问题集运行报告失败' });
   }
-});
+);
 
 router.get('/:projectId/question-set-runs/:runId', loadProject, async (req, res) => {
   try {

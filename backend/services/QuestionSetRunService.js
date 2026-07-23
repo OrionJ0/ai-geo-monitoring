@@ -133,7 +133,8 @@ class QuestionSetRunService {
       ? cachedRows
       : await this.getNativeRows(run, repositories);
     const status = deriveStatus(rows);
-    if (run.source === 'native' && !cachedRows.length && status !== 'running' && rows.length) {
+    const expectedRows = Array.isArray(run.record_ids) ? run.record_ids.length : 0;
+    if (run.source === 'native' && !cachedRows.length && status !== 'running' && rows.length === expectedRows && rows.length) {
       const completedAt = new Date();
       if (typeof stored.update === 'function') {
         await stored.update({ imported_rows: rows, completed_at: completedAt });
