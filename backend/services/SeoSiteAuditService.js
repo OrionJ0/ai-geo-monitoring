@@ -10,12 +10,28 @@ const {
   calculateTechnicalHealth,
   detectTechnicalHealthBlockers
 } = require('./SeoHealthScoreService');
+const {
+  analyzeSitewideEvidence,
+  compareAuditIssues
+} = require('./SeoSitewideAnalysisService');
+const { createSeoRenderService } = require('./SeoRenderService');
 
 function normalizeSameOriginUrl(value, baseUrl, origin) {
   try {
     const url = new URL(value, baseUrl);
     if (!['http:', 'https:'].includes(url.protocol) || url.origin !== origin) return null;
     if (url.username || url.password) return null;
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHttpUrl(value, baseUrl) {
+  try {
+    const url = new URL(value, baseUrl);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
     url.hash = '';
     return url.toString();
   } catch {
@@ -72,10 +88,18 @@ function compactIssue(check) {
 
 function createSeoSiteAuditService({
   siteClient,
+  renderService,
   ruleConfig = defaultSeoAuditRules,
   scoreConfig = defaultSeoHealthScoreConfig
 } = {}) {
   const client = createCachedClient(siteClient || require('./SeoSiteClient'));
+  const renderer = renderService || (siteClient
+    ? {
+        async sample() {
+          return { status: 'unavailable', reason: 'renderer_not_injected', samples: [] };
+        }
+      }
+    : createSeoRenderService());
   const rules = validateSeoAuditRules(ruleConfig);
   const scoring = validateSeoHealthScoreConfig(scoreConfig, rules);
   const siteScopedChecks = new Set(scoring.siteScopedRuleIds);
@@ -95,7 +119,11 @@ function createSeoSiteAuditService({
   }
 
   return {
-    async audit(inputUrl, { onProgress, maxPages = rules.crawl.pageLimit } = {}) {
+    async audit(inputUrl, {
+      onProgress,
+      maxPages = rules.crawl.pageLimit,
+      previousReport = null
+    } = {}) {
       if (!Number.isInteger(maxPages) || maxPages <= 0) {
         const error = new Error('全站检测页数上限必须是正整数');
         error.code = 'INVALID_PAGE_LIMIT';
@@ -128,6 +156,7 @@ function createSeoSiteAuditService({
         .map((url) => ({ url: normalizeSameOriginUrl(url, origin, origin), depth: 0 }))
         .filter((entry) => entry.url);
       const visitedSitemaps = new Set();
+      const sitemapUrls = new Set();
 
       while (sitemapQueue.length && visitedSitemaps.size < rules.crawl.sitemapLimit) {
         const current = sitemapQueue.shift();
@@ -137,7 +166,12 @@ function createSeoSiteAuditService({
         if (result.statusCode < 200 || result.statusCode >= 300 || !String(result.body || '').trim()) continue;
         const parsed = sitemapLocations(result.body);
         if (parsed.type === 'urlset') {
-          parsed.locations.forEach((url) => addPage(url, current.url));
+          parsed.locations.forEach((url) => {
+            const normalized = normalizeSameOriginUrl(url, current.url, origin);
+            if (!normalized) return;
+            sitemapUrls.add(normalized);
+            addPage(normalized, current.url);
+          });
         } else if (parsed.type === 'index' && current.depth < rules.crawl.sitemapDepth) {
           parsed.locations.forEach((url) => {
             const normalized = normalizeSameOriginUrl(url, current.url, origin);
@@ -161,9 +195,25 @@ function createSeoSiteAuditService({
           const response = await client.fetchPage(url);
           const finalUrl = response.finalUrl || url;
           const $ = cheerio.load(response.html || '');
+          const links = [];
           $('a[href]').each((_, element) => {
-            addPage($(element).attr('href'), finalUrl);
+            const normalized = normalizeHttpUrl($(element).attr('href'), finalUrl);
+            if (!normalized) return;
+            const internal = new URL(normalized).origin === origin;
+            links.push({ url: normalized, internal });
+            if (internal) addPage(normalized, finalUrl);
           });
+          const canonicalUrls = $('link[rel~="canonical"][href]')
+            .map((_, element) => normalizeHttpUrl($(element).attr('href'), finalUrl))
+            .get()
+            .filter(Boolean);
+          const hreflang = $('link[rel~="alternate"][hreflang][href]')
+            .map((_, element) => ({
+              language: $(element).attr('hreflang')?.trim() || '',
+              url: normalizeHttpUrl($(element).attr('href'), finalUrl) || ''
+            }))
+            .get();
+          const description = $('meta[name="description"]').first().attr('content')?.trim() || '';
 
           const report = await pageAudit.audit(url);
           const checks = pageChecks(report);
@@ -183,9 +233,14 @@ function createSeoSiteAuditService({
             durationMs: report.durationMs,
             score: report.score,
             title: report.page.title,
+            description,
             contentCharacters: report.page.contentCharacters,
             indexable: report.page.indexable,
             isHomepage,
+            canonicalUrls,
+            hreflang,
+            links,
+            redirectChain: Array.isArray(response.redirectChain) ? response.redirectChain : [],
             issues: report.health.issues.map(compactIssue),
             platforms: report.platforms,
             crawlerAccess: report.crawlerAccess
@@ -215,6 +270,7 @@ function createSeoSiteAuditService({
             score: 0,
             errorCode: error.code || 'AUDIT_FAILED',
             errorMessage: error.message,
+            redirectChain: Array.isArray(error.redirectChain) ? error.redirectChain : [],
             issues: [compactIssue(failedCheck)]
           });
         }
@@ -253,10 +309,89 @@ function createSeoSiteAuditService({
 
       const successfulPages = pages.filter((page) => page.status === 'completed');
       if (!successfulPages.length) throw errors[0] || new Error('没有可检测的页面');
+      const truncated = discovered.length > maxPages;
+      const pageByUrl = new Map();
+      pages.forEach((page) => {
+        pageByUrl.set(page.url, page);
+        if (page.finalUrl) pageByUrl.set(page.finalUrl, page);
+      });
+      const linkTargets = new Map();
+      successfulPages.forEach((page) => {
+        (Array.isArray(page.links) ? page.links : []).forEach((link) => {
+          const entry = linkTargets.get(link.url) || {
+            url: link.url,
+            internal: link.internal,
+            sourcePages: []
+          };
+          if (!entry.sourcePages.includes(page.finalUrl || page.url)) {
+            entry.sourcePages.push(page.finalUrl || page.url);
+          }
+          linkTargets.set(link.url, entry);
+        });
+      });
+      const linkEntries = Array.from(linkTargets.values()).slice(0, rules.crawl.linkProbeLimit);
+      const linkChecks = [];
+      const probeLink = async (entry) => {
+        if (entry.internal) {
+          const targetPage = pageByUrl.get(entry.url);
+          if (!targetPage) {
+            linkChecks.push({ ...entry, skipped: true, reason: 'outside_audit_limit' });
+            return;
+          }
+          linkChecks.push({
+            ...entry,
+            statusCode: targetPage.statusCode,
+            finalUrl: targetPage.finalUrl || targetPage.url,
+            errorCode: targetPage.status === 'failed' ? targetPage.errorCode : null
+          });
+          return;
+        }
+        try {
+          const response = await client.probe(entry.url);
+          linkChecks.push({
+            ...entry,
+            statusCode: response.statusCode,
+            finalUrl: response.finalUrl || entry.url,
+            redirectChain: response.redirectChain || []
+          });
+        } catch (error) {
+          linkChecks.push({
+            ...entry,
+            statusCode: 0,
+            errorCode: error.code || 'LINK_PROBE_FAILED'
+          });
+        }
+      };
+      for (let index = 0; index < linkEntries.length; index += rules.crawl.concurrency) {
+        await Promise.all(linkEntries.slice(index, index + rules.crawl.concurrency).map(probeLink));
+      }
+      const renderEntries = successfulPages
+        .slice(0, rules.crawl.renderSampleLimit)
+        .map((page) => ({
+          url: page.finalUrl || page.url,
+          source: {
+            title: page.title || '',
+            description: page.description || '',
+            contentCharacters: page.contentCharacters || 0,
+            linkCount: Array.isArray(page.links) ? page.links.length : 0
+          }
+        }));
+      const renderAnalysis = await renderer.sample(renderEntries).catch((error) => ({
+        status: 'unavailable',
+        reason: error.code || 'renderer_failed',
+        samples: []
+      }));
+      const sitewide = analyzeSitewideEvidence({
+        origin,
+        pages,
+        sitemapUrls: Array.from(sitemapUrls),
+        linkChecks,
+        renderAnalysis,
+        truncated
+      });
 
       const totalWeight = checkInstances.reduce((sum, { check }) => sum + check.weight, 0);
       const failedPages = pages.length - successfulPages.length;
-      const truncated = discovered.length > maxPages;
       const firstPage = successfulPages.find((page) => page.isHomepage) || successfulPages[0];
       const healthPages = pages.map((page) => ({
         url: page.finalUrl || page.url,
@@ -325,7 +460,8 @@ function createSeoSiteAuditService({
           critical: issues.filter((issue) => issue.severity === 'critical').length,
           high: issues.filter((issue) => issue.severity === 'high').length,
           medium: issues.filter((issue) => issue.severity === 'medium').length,
-          low: issues.filter((issue) => issue.severity === 'low').length
+          low: issues.filter((issue) => issue.severity === 'low').length,
+          sitewideIssues: sitewide.issues.length
         },
         site: {
           origin,
@@ -341,8 +477,10 @@ function createSeoSiteAuditService({
         health,
         priorities,
         issues,
-        pages
+        pages,
+        sitewide
       };
+      report.comparison = compareAuditIssues(report, previousReport);
       await emit(onProgress, {
         phase: 'completed',
         discoveredPages: discovered.length,

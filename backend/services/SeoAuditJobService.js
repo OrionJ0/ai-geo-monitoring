@@ -61,8 +61,12 @@ function createSeoAuditJobService({
     });
 
     try {
+      const previousReport = typeof historyService.findPreviousSiteReport === 'function'
+        ? await historyService.findPreviousSiteReport(Number(job.user_id), job.requested_url)
+        : null;
       const report = await siteAuditService.audit(job.requested_url, {
-        onProgress: (progress) => job.update({ progress })
+        onProgress: (progress) => job.update({ progress }),
+        previousReport
       });
       const stored = await historyService.save(Number(job.user_id), report);
       await job.update({

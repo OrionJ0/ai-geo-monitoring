@@ -4,7 +4,9 @@ const defaultSeoAuditRules = Object.freeze({
     pageLimit: 200,
     concurrency: 3,
     sitemapLimit: 20,
-    sitemapDepth: 3
+    sitemapDepth: 3,
+    linkProbeLimit: 500,
+    renderSampleLimit: 3
   }),
   thresholds: Object.freeze({
     titleMinCharacters: 10,

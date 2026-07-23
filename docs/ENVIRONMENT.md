@@ -63,6 +63,7 @@ npm run setup:local-key
 - `SEO_DESCRIPTION` 网站 SEO 描述
 - `SEO_KEYWORDS` 网站 SEO 关键词
 - `SEO_ROBOTS` 搜索引擎爬虫策略（默认：`index,follow`）
+- `SEO_RENDER_BROWSER_EXECUTABLE` 全站 JavaScript 渲染抽样使用的 Chrome/Chromium 可执行文件；macOS 和常见 Linux 路径会自动发现，容器或自定义安装位置需显式配置
 
 ## Next.js 前端
 - `NEXT_PUBLIC_API_BASE_URL` 客户端 axios 使用的 API 地址，开发默认 `http://localhost:3002`

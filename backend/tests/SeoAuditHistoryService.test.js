@@ -174,3 +174,46 @@ test('persists an unknown score without presenting the database sentinel as a re
   assert.equal(created.summary.scoreStatus, 'unknown');
   assert.equal(history.items[0].score, null);
 });
+
+test('finds the latest previous full-site report for the same origin and user', async () => {
+  let receivedQuery;
+  const model = {
+    async findAll(query) {
+      receivedQuery = query;
+      return [
+        {
+          id: 31,
+          report: {
+            mode: 'page',
+            finalUrl: 'https://example.com/',
+            checkedAt: '2026-07-23T02:00:00.000Z'
+          }
+        },
+        {
+          id: 30,
+          report: {
+            mode: 'site',
+            finalUrl: 'https://other.example/',
+            checkedAt: '2026-07-23T01:30:00.000Z'
+          }
+        },
+        {
+          id: 29,
+          report: {
+            mode: 'site',
+            finalUrl: 'https://example.com/',
+            checkedAt: '2026-07-23T01:00:00.000Z'
+          }
+        }
+      ];
+    }
+  };
+  const service = createSeoAuditHistoryService({ model });
+
+  const report = await service.findPreviousSiteReport(7, 'https://example.com/product');
+
+  assert.deepEqual(receivedQuery.where, { user_id: 7 });
+  assert.deepEqual(receivedQuery.order, [['checked_at', 'DESC'], ['id', 'DESC']]);
+  assert.equal(report.auditId, 29);
+  assert.equal(report.mode, 'site');
+});

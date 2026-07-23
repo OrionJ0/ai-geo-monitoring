@@ -40,8 +40,9 @@ test('creates an async site audit job, persists progress and saves the completed
     score: 80, grade: 'good', summary: { issues: 2 }, site: { auditedPages: 5 }
   };
   const siteAuditService = {
-    async audit(url, { onProgress }) {
+    async audit(url, { onProgress, previousReport }) {
       assert.equal(url, 'https://example.com/');
+      assert.equal(previousReport.auditId, 55);
       await onProgress({ phase: 'crawling', auditedPages: 2, discoveredPages: 5, failedPages: 0 });
       return report;
     }
@@ -54,6 +55,11 @@ test('creates an async site audit job, persists progress and saves the completed
     },
     async get(userId, auditId) {
       return userId === 7 && auditId === 77 ? { ...report, auditId } : null;
+    },
+    async findPreviousSiteReport(userId, url) {
+      assert.equal(userId, 7);
+      assert.equal(url, 'https://example.com/');
+      return { auditId: 55, mode: 'site', issues: [] };
     }
   };
   const service = createSeoAuditJobService({

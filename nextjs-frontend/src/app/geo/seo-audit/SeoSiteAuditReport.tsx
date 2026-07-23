@@ -7,6 +7,7 @@ import SearchPlatformPanel from './SearchPlatformPanel';
 import CrawlerAccessPanel from './CrawlerAccessPanel';
 import TechnicalHealthOverview from './TechnicalHealthOverview';
 import StageChecksPanel from './StageChecksPanel';
+import SitewideAuditPanel from './SitewideAuditPanel';
 import { sortPriorities } from '@/utils/seoStagePresentation.cjs';
 import styles from './seo-audit.module.css';
 
@@ -47,6 +48,7 @@ export default function SeoSiteAuditReport({ report }) {
 
       <TechnicalHealthOverview report={report} />
       <StageChecksPanel report={report} />
+      <SitewideAuditPanel sitewide={report.sitewide} comparison={report.comparison} />
 
       <section className={styles.priorityPanel}>
         <header className={styles.sectionHeading}>

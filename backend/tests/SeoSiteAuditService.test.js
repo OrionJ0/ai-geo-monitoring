@@ -262,3 +262,70 @@ test('rejects invalid crawl configuration before creating an audit', () => {
     }
   }), /SEO 抓取配置 pageLimit 必须是正整数/);
 });
+
+test('adds cross-page SEO evidence and JavaScript render sampling to the formal site report', async () => {
+  const root = htmlPage('https://example.com/', ['/a', 'https://outside.example/missing']);
+  root.html = root.html
+    .replace('href="https://example.com/"', 'href="https://example.com/a"')
+    .replace('</head>', '<link rel="alternate" hreflang="en" href="/a"></head>');
+  const pageA = htmlPage('https://example.com/a');
+  pageA.html = pageA.html.replace('href="https://example.com/a"', 'href="https://example.com/"');
+  const orphan = htmlPage('https://example.com/orphan');
+  const pages = new Map([
+    ['https://example.com/', root],
+    ['https://example.com/a', pageA],
+    ['https://example.com/orphan', orphan]
+  ]);
+  const siteClient = {
+    async fetchPage(url) {
+      if (!pages.has(url)) {
+        throw Object.assign(new Error('页面不存在'), { code: 'UPSTREAM_UNAVAILABLE', status: 502 });
+      }
+      return pages.get(url);
+    },
+    async probe(url) {
+      if (url === 'https://example.com/sitemap.xml') {
+        return {
+          statusCode: 200,
+          body: [
+            '<urlset>',
+            '<url><loc>https://example.com/</loc></url>',
+            '<url><loc>https://example.com/a</loc></url>',
+            '<url><loc>https://example.com/orphan</loc></url>',
+            '<url><loc>https://example.com/dead</loc></url>',
+            '</urlset>'
+          ].join('')
+        };
+      }
+      return { statusCode: 404, body: '' };
+    }
+  };
+  const renderService = {
+    async sample(entries) {
+      return {
+        status: 'completed',
+        samples: [{
+          url: entries[0].url,
+          source: entries[0].source,
+          rendered: {
+            ...entries[0].source,
+            title: '浏览器渲染后的标题'
+          }
+        }]
+      };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient, renderService })
+    .audit('https://example.com/');
+
+  assert.equal(report.sitewide.version, 'sitewide-audit-v1');
+  assert.equal(report.sitewide.checks.find((check) => check.id === 'duplicate-titles').status, 'failed');
+  assert.equal(report.sitewide.checks.find((check) => check.id === 'canonical-conflicts').status, 'failed');
+  assert.equal(report.sitewide.checks.find((check) => check.id === 'broken-links').status, 'failed');
+  assert.deepEqual(report.sitewide.orphan_pages, ['https://example.com/orphan']);
+  assert.equal(report.sitewide.checks.find((check) => check.id === 'hreflang').status, 'failed');
+  assert.equal(report.sitewide.checks.find((check) => check.id === 'sitemap-coverage').status, 'failed');
+  assert.equal(report.sitewide.checks.find((check) => check.id === 'javascript-rendering').status, 'failed');
+  assert.equal(report.summary.sitewideIssues, report.sitewide.issues.length);
+});

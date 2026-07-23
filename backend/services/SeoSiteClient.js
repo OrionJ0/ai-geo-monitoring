@@ -159,6 +159,8 @@ function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request
   async function requestWithRedirects(inputUrl, { maxBytes, accept }) {
     const startedAt = Date.now();
     let currentUrl = assertAllowedUrl(inputUrl);
+    const redirectChain = [];
+    const visitedUrls = new Set([currentUrl.toString()]);
 
     for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
       const addresses = await resolvePublicTarget(currentUrl);
@@ -198,15 +200,30 @@ function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request
 
       const headers = responseHeaders(response.headers);
       if (REDIRECT_STATUSES.has(response.status) && headers.location) {
-        if (redirectCount === MAX_REDIRECTS) {
-          throw new SeoAuditRequestError('网站重定向次数过多', 'TOO_MANY_REDIRECTS', 422);
+        const nextUrl = assertAllowedUrl(new URL(headers.location, currentUrl));
+        redirectChain.push({
+          from: currentUrl.toString(),
+          statusCode: response.status,
+          to: nextUrl.toString()
+        });
+        if (visitedUrls.has(nextUrl.toString())) {
+          const error = new SeoAuditRequestError('网站存在重定向循环', 'REDIRECT_LOOP', 422);
+          error.redirectChain = redirectChain;
+          throw error;
         }
-        currentUrl = assertAllowedUrl(new URL(headers.location, currentUrl));
+        if (redirectCount === MAX_REDIRECTS) {
+          const error = new SeoAuditRequestError('网站重定向次数过多', 'TOO_MANY_REDIRECTS', 422);
+          error.redirectChain = redirectChain;
+          throw error;
+        }
+        visitedUrls.add(nextUrl.toString());
+        currentUrl = nextUrl;
         continue;
       }
 
       return {
         finalUrl: currentUrl.toString(),
+        redirectChain,
         statusCode: response.status,
         durationMs: Date.now() - startedAt,
         headers,
@@ -217,6 +234,12 @@ function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request
   }
 
   return {
+    async assertPublicUrl(url) {
+      const parsed = assertAllowedUrl(url);
+      await resolvePublicTarget(parsed);
+      return parsed.toString();
+    },
+
     async fetchPage(url) {
       const response = await requestWithRedirects(url, {
         maxBytes: PAGE_LIMIT_BYTES,
@@ -232,6 +255,7 @@ function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request
         statusCode: response.statusCode,
         durationMs: response.durationMs,
         headers: response.headers,
+        redirectChain: response.redirectChain,
         html: response.body
       };
     },

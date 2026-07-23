@@ -10,6 +10,7 @@ const crawlerAccessPath = path.resolve(__dirname, '../app/geo/seo-audit/CrawlerA
 const siteReportPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoSiteAuditReport.tsx');
 const healthOverviewPath = path.resolve(__dirname, '../app/geo/seo-audit/TechnicalHealthOverview.tsx');
 const stageChecksPath = path.resolve(__dirname, '../app/geo/seo-audit/StageChecksPanel.tsx');
+const sitewidePanelPath = path.resolve(__dirname, '../app/geo/seo-audit/SitewideAuditPanel.tsx');
 
 test('SEO audit page uses the authenticated API and leads with prioritized fixes', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
@@ -79,6 +80,30 @@ test('SEO audit page renders crawl progress and a site-level report contract', (
   assert.match(source, /SeoSiteAuditReport/);
   assert.match(source, /SeoAuditJobProgress/);
   assert.match(source, /job\.progress/);
+});
+
+test('全站报告展示九类跨页专项审计和本次与上次问题差异', () => {
+  const siteReportSource = fs.readFileSync(siteReportPath, 'utf8');
+  assert.equal(fs.existsSync(sitewidePanelPath), true, '全站专项审计组件应存在');
+  const panelSource = fs.readFileSync(sitewidePanelPath, 'utf8');
+
+  assert.match(siteReportSource, /SitewideAuditPanel/);
+  assert.match(siteReportSource, /report\.sitewide/);
+  assert.match(siteReportSource, /report\.comparison/);
+  assert.match(panelSource, /重复页面标题/);
+  assert.match(panelSource, /重复 Meta 描述/);
+  assert.match(panelSource, /Canonical 冲突与聚类/);
+  assert.match(panelSource, /重定向链与循环/);
+  assert.match(panelSource, /失效内链与外链/);
+  assert.match(panelSource, /孤儿页面/);
+  assert.match(panelSource, /hreflang 国际化声明/);
+  assert.match(panelSource, /Sitemap 与可访问页面差异/);
+  assert.match(panelSource, /JavaScript 渲染抽样/);
+  assert.match(panelSource, /新增问题/);
+  assert.match(panelSource, /已解决/);
+  assert.match(panelSource, /持续存在/);
+  assert.match(panelSource, /safeReportUrl/);
+  assert.match(panelSource, /\['http:', 'https:'\]\.includes/);
 });
 
 test('SEO reports show separate Google, Bing and Baidu verification tag states', () => {

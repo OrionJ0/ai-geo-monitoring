@@ -182,3 +182,44 @@ test('v4 CSV 往返完整保留阶段、阻断、覆盖率和实际扣分', () =
   assert.deepEqual(parsed.report.health, report.health);
   assert.deepEqual(parsed.report.priorities, report.priorities);
 });
+
+test('全站专项检查和审计差异会进入标准长表并保持报告可回导', () => {
+  const report = pageReport();
+  report.mode = 'site';
+  report.site = { auditedPages: 2, failedPages: 0, truncated: false };
+  report.pages = [{ url: 'https://example.com/', status: 'completed', issues: [] }];
+  report.issues = [];
+  report.sitewide = {
+    version: 'sitewide-audit-v1',
+    checks: [{
+      id: 'duplicate-titles',
+      title: '重复页面标题',
+      status: 'failed',
+      severity: 'high',
+      finding: '1 组重复内容',
+      value: '2 个页面受影响',
+      affectedPages: ['https://example.com/', 'https://example.com/a']
+    }],
+    issues: []
+  };
+  report.comparison = {
+    status: 'compared',
+    previous_audit_id: 40,
+    added: [{
+      key: 'sitewide:duplicate-titles:https://example.com/a',
+      id: 'duplicate-titles',
+      title: '重复页面标题',
+      url: 'https://example.com/a'
+    }],
+    resolved: [],
+    persisting: []
+  };
+
+  const csv = SeoAuditExchangeService.buildCsv(report);
+  const parsed = SeoAuditExchangeService.parseCsv(csv);
+
+  assert.match(csv, /,sitewide_check,/);
+  assert.match(csv, /,comparison_added,/);
+  assert.deepEqual(parsed.report.sitewide, report.sitewide);
+  assert.deepEqual(parsed.report.comparison, report.comparison);
+});

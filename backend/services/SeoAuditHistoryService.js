@@ -97,6 +97,34 @@ function createSeoAuditHistoryService({ model = SeoAuditRecord } = {}) {
       if (!row) return null;
       const value = plainRow(row);
       return { ...value.report, auditId: value.id };
+    },
+
+    async findPreviousSiteReport(userId, inputUrl) {
+      let origin;
+      try {
+        origin = new URL(inputUrl).origin;
+      } catch {
+        return null;
+      }
+      const rows = await model.findAll({
+        where: { user_id: userId },
+        attributes: ['id', 'report', 'checked_at'],
+        order: [['checked_at', 'DESC'], ['id', 'DESC']],
+        limit: 50
+      });
+      for (const row of rows) {
+        const value = plainRow(row);
+        const report = value?.report;
+        if (report?.mode !== 'site') continue;
+        try {
+          if (new URL(report.finalUrl || report.requestedUrl).origin === origin) {
+            return { ...report, auditId: value.id };
+          }
+        } catch {
+          // Ignore malformed historical imports and continue to an older usable baseline.
+        }
+      }
+      return null;
     }
   };
 }

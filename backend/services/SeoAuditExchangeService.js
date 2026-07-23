@@ -144,6 +144,15 @@ function buildRows(report, exportedAt) {
   add('report', report, { score: report.score });
   const issues = report.mode === 'site' ? report.issues : report.priorities;
   (Array.isArray(issues) ? issues : []).forEach((issue) => add('issue', issue));
+  (Array.isArray(report.sitewide?.checks) ? report.sitewide.checks : [])
+    .forEach((item) => add('sitewide_check', item, { category: 'sitewide' }));
+  ['added', 'resolved', 'persisting'].forEach((kind) => {
+    (Array.isArray(report.comparison?.[kind]) ? report.comparison[kind] : [])
+      .forEach((item) => add(`comparison_${kind}`, item, {
+        pageUrl: item.url,
+        category: item.scope || 'sitewide'
+      }));
+  });
 
   (Array.isArray(report.categories) ? report.categories : []).forEach((category) => {
     (Array.isArray(category.checks) ? category.checks : []).forEach((check) => {
