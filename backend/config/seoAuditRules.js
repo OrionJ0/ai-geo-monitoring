@@ -58,6 +58,47 @@ const defaultSeoAuditRules = Object.freeze({
   })
 });
 
+const defaultSeoHealthScoreConfig = Object.freeze({
+  version: '2026-07-23-v4',
+  homepageWeight: 3,
+  informationalRuleIds: Object.freeze(['search-verification']),
+  siteScopedRuleIds: Object.freeze(['robots-txt', 'sitemap', 'search-verification']),
+  stages: Object.freeze([
+    Object.freeze({
+      key: 'access',
+      label: '访问与发现',
+      budget: 30,
+      ruleIds: Object.freeze([
+        'http-status', 'https', 'robots-txt', 'crawler-access',
+        'sitemap', 'crawlable-links', 'response-time', 'html-size'
+      ])
+    }),
+    Object.freeze({
+      key: 'index',
+      label: '索引资格',
+      budget: 25,
+      ruleIds: Object.freeze(['indexability', 'canonical'])
+    }),
+    Object.freeze({
+      key: 'content',
+      label: '内容理解',
+      budget: 30,
+      ruleIds: Object.freeze([
+        'title', 'meta-description', 'meta-keywords', 'h1',
+        'heading-order', 'content-depth', 'language'
+      ])
+    }),
+    Object.freeze({
+      key: 'enhancement',
+      label: '展示与增强',
+      budget: 15,
+      ruleIds: Object.freeze([
+        'viewport', 'image-alt', 'structured-data', 'open-graph', 'twitter-card'
+      ])
+    })
+  ])
+});
+
 const ALLOWED_SEVERITIES = new Set(['critical', 'high', 'medium', 'low']);
 const ALLOWED_CRAWLER_CATEGORIES = new Set(['search', 'ai-search', 'user-triggered', 'ai-training']);
 const ALLOWED_ROBOTS_POLICIES = new Set(['standard', 'advisory', 'control-token']);
@@ -119,4 +160,61 @@ function validateSeoAuditRules(config) {
   return config;
 }
 
-module.exports = { defaultSeoAuditRules, validateSeoAuditRules };
+function validateSeoHealthScoreConfig(config, rules = defaultSeoAuditRules) {
+  if (!config || typeof config.version !== 'string' || !config.version.trim()) {
+    throw new Error('SEO 技术健康评分配置缺少 version');
+  }
+  if (!Number.isInteger(config.homepageWeight) || config.homepageWeight <= 0) {
+    throw new Error('SEO 技术健康评分 homepageWeight 必须是正整数');
+  }
+  if (!Array.isArray(config.stages) || !config.stages.length) {
+    throw new Error('SEO 技术健康评分配置缺少 stages');
+  }
+  if (!Array.isArray(config.informationalRuleIds)) {
+    throw new Error('SEO 技术健康评分配置缺少 informationalRuleIds');
+  }
+
+  const stageKeys = new Set();
+  const assignedRuleIds = new Set();
+  let totalBudget = 0;
+  config.stages.forEach((stage) => {
+    if (!stage?.key || !stage.label || stageKeys.has(stage.key)) {
+      throw new Error('SEO 技术健康评分阶段的 key、label 必须完整且 key 唯一');
+    }
+    if (!Number.isInteger(stage.budget) || stage.budget <= 0) {
+      throw new Error(`SEO 技术健康评分阶段 ${stage.key} 的 budget 必须是正整数`);
+    }
+    if (!Array.isArray(stage.ruleIds) || !stage.ruleIds.length) {
+      throw new Error(`SEO 技术健康评分阶段 ${stage.key} 缺少 ruleIds`);
+    }
+    stageKeys.add(stage.key);
+    totalBudget += stage.budget;
+    stage.ruleIds.forEach((id) => {
+      if (!rules.checks[id] || assignedRuleIds.has(id)) {
+        throw new Error(`SEO 技术健康评分规则 ${id} 不存在或重复归属`);
+      }
+      assignedRuleIds.add(id);
+    });
+  });
+  if (totalBudget !== 100) {
+    throw new Error('SEO 技术健康评分阶段预算之和必须为 100');
+  }
+  config.informationalRuleIds.forEach((id) => {
+    if (!rules.checks[id] || assignedRuleIds.has(id)) {
+      throw new Error(`SEO 信息性规则 ${id} 不存在或被重复计分`);
+    }
+  });
+  const expectedIds = Object.keys(rules.checks)
+    .filter((id) => !config.informationalRuleIds.includes(id));
+  if (expectedIds.some((id) => !assignedRuleIds.has(id))) {
+    throw new Error('SEO 技术健康评分存在未归属的计分规则');
+  }
+  return config;
+}
+
+module.exports = {
+  defaultSeoAuditRules,
+  defaultSeoHealthScoreConfig,
+  validateSeoAuditRules,
+  validateSeoHealthScoreConfig
+};
