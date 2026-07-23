@@ -716,7 +716,7 @@
 
 .priorityPanel,
 .scorePanel,
-.checksSection,
+.stageChecksPanel,
 .previewSection,
 .platformSection,
 .crawlerSection,
@@ -730,7 +730,7 @@
 }
 
 .sectionHeading,
-.checksHeader {
+.stageChecksHeader {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -738,7 +738,7 @@
 }
 
 .sectionHeading h2,
-.checksHeader h2,
+.stageChecksHeader h2,
 .previewSection > header h2 {
   margin: 5px 0 0;
   color: var(--ink);
@@ -796,6 +796,12 @@
   color: var(--ink);
   font-size: 17px;
   letter-spacing: -0.012em;
+}
+
+.checkTitle strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .prioritySubject,
@@ -1289,8 +1295,19 @@
   font-size: 11px;
 }
 
-.checksSection {
+.stageChecksPanel {
   padding: 30px;
+}
+
+.stageChecksHeader > div:first-child {
+  max-width: 720px;
+}
+
+.stageChecksHeader p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .filterControl {
@@ -1308,52 +1325,83 @@
   background: #edf2f8;
 }
 
-.categoryGrid {
+.stageCheckGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin-top: 24px;
 }
 
-.categoryCard {
+.stageCheckCard {
+  --stage-accent: #2455d6;
   align-self: start;
-  padding: 22px;
   border: 1px solid var(--line);
+  border-top: 4px solid var(--stage-accent);
+  background: #fff;
 }
 
-.categoryCard > header {
-  display: flex;
+.stage_access { --stage-accent: #2455d6; }
+.stage_index { --stage-accent: #4669b2; }
+.stage_content { --stage-accent: #d97706; }
+.stage_enhancement { --stage-accent: #6d5bb5; }
+
+.stageCheckCard > header {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
+  gap: 12px;
+  min-height: 94px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #f8faff;
 }
 
-.categoryCard h3 {
+.stageSequence {
+  color: var(--stage-accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.stageCheckCard h3 {
   margin: 0 0 4px;
   color: var(--ink);
-  font-size: 17px;
+  font-size: 18px;
+  letter-spacing: -0.02em;
 }
 
-.categoryCard header span {
+.stageCheckCard header p {
+  margin: 0;
   color: var(--muted);
   font-size: 11px;
+  line-height: 1.55;
 }
 
-.categoryScore {
+.stageCheckCount {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  min-width: 76px;
+}
+
+.stageCheckCount strong {
+  color: var(--stage-accent);
   font-family: var(--font-geist-mono), monospace;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 720;
 }
 
-.categoryCard > :global(.ant-progress) {
-  margin: 10px 0 4px;
+.stageCheckCount span {
+  color: var(--muted);
+  font-size: 10px;
 }
 
-.checkList {
+.stageCheckRows {
   display: grid;
+  padding: 0 20px;
 }
 
-.checkRow {
+.stageCheckRow {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 11px;
@@ -1361,8 +1409,8 @@
   border-bottom: 1px solid #e8edf4;
 }
 
-.checkRow:last-child {
-  padding-bottom: 0;
+.stageCheckRow:last-child {
+  padding-bottom: 18px;
   border-bottom: 0;
 }
 
@@ -1389,24 +1437,39 @@
   line-height: 1;
 }
 
-.checkFinding {
-  display: block;
-  margin-top: 6px;
-  color: var(--ink);
-  font-size: 15px;
-  line-height: 1.45;
-}
-
-.checkImpact,
-.checkRow .recommendation {
-  margin: 8px 0 0;
-  color: var(--muted);
+.stageCheckDescription,
+.stageCheckFact {
+  margin: 7px 0 0;
   font-size: 11px;
   line-height: 1.55;
 }
 
-.checkRow .recommendation {
-  color: #526078;
+.stageCheckDescription {
+  color: var(--muted);
+}
+
+.stageCheckFact {
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border-left: 2px solid var(--stage-accent);
+  background: #f6f8fc;
+  color: #334155;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+}
+
+.stageCheckMetrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+  color: #64748b;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+}
+
+.stageCheckMetrics strong {
+  color: #b42318;
 }
 
 .emptyFilter {
@@ -1683,7 +1746,7 @@
   .healthScope > div:nth-child(n + 4) { border-top: 1px solid var(--line); }
 
   .reportLead,
-  .categoryGrid,
+  .stageCheckGrid,
   .previewGrid,
   .platformGrid,
   .crawlerGroups {
@@ -1707,7 +1770,7 @@
 
   .hero,
   .priorityPanel,
-  .checksSection,
+  .stageChecksPanel,
   .previewSection {
     padding: 24px 18px;
   }
@@ -1822,7 +1885,7 @@
   .pageIssueCount { display: none; }
   .pageDetail { padding-left: 60px; }
 
-  .checksHeader {
+  .stageChecksHeader {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -1833,7 +1896,14 @@
     overflow-x: auto;
   }
 
-  .categoryCard { padding: 18px; }
+  .stageCheckCard > header {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .stageCheckCount {
+    grid-column: 2;
+    justify-items: start;
+  }
 
   .socialPreview { grid-template-columns: 1fr; }
 

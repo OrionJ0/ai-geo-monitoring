@@ -2,11 +2,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Form, Input, Progress, Segmented, Spin, Upload, message } from 'antd';
+import { Button, Form, Input, Segmented, Spin, Upload, message } from 'antd';
 import {
   CheckCircleFilled,
   ClockCircleOutlined,
-  ExclamationCircleFilled,
   ExportOutlined,
   GlobalOutlined,
   HistoryOutlined,
@@ -22,6 +21,8 @@ import SeoSiteAuditReport from './SeoSiteAuditReport';
 import SearchPlatformPanel from './SearchPlatformPanel';
 import CrawlerAccessPanel from './CrawlerAccessPanel';
 import TechnicalHealthOverview from './TechnicalHealthOverview';
+import StageChecksPanel from './StageChecksPanel';
+import { sortPriorities } from '@/utils/seoStagePresentation.cjs';
 import styles from './seo-audit.module.css';
 
 const ACTIVE_JOB_KEY = 'goodie-seo-active-job';
@@ -34,13 +35,6 @@ const SEVERITY_LABELS = {
   medium: '中优先级',
   low: '建议优化',
 };
-
-const FILTER_OPTIONS = [
-  { label: '全部', value: 'all' },
-  { label: '优先处理', value: 'urgent' },
-  { label: '一般问题', value: 'normal' },
-  { label: '已通过', value: 'passed' },
-];
 
 const LEGACY_FAILED_FINDINGS = {
   'http-status': '页面无法正常访问',
@@ -83,12 +77,6 @@ function getCheckFinding(check) {
   return LEGACY_FAILED_FINDINGS[check.id] || `${check.title}未通过`;
 }
 
-function scoreColor(score) {
-  if (score >= 80) return '#15803d';
-  if (score >= 60) return '#d97706';
-  return '#dc2626';
-}
-
 function formatDate(value) {
   if (!value) return '-';
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
@@ -97,13 +85,6 @@ function formatDate(value) {
 function formatBytes(value) {
   const bytes = Number(value || 0);
   return bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
-}
-
-function checkMatchesFilter(check, filter) {
-  if (filter === 'urgent') return check.status === 'failed' && ['critical', 'high'].includes(check.severity);
-  if (filter === 'normal') return check.status === 'failed' && ['medium', 'low'].includes(check.severity);
-  if (filter === 'passed') return check.status === 'passed';
-  return true;
 }
 
 function SeverityBadge({ severity }) {
@@ -148,22 +129,16 @@ export default function SeoAuditPage() {
   const [mode, setMode] = useState('site');
   const [job, setJob] = useState(null);
   const [report, setReport] = useState(null);
-  const [filter, setFilter] = useState('all');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const pollRef = useRef(0);
 
-  const visibleCategories = useMemo(() => {
-    if (!report?.categories) return [];
-    return report.categories
-      .map((category) => ({
-        ...category,
-        checks: category.checks.filter((check) => checkMatchesFilter(check, filter)),
-      }))
-      .filter((category) => category.checks.length > 0);
-  }, [filter, report]);
+  const priorities = useMemo(
+    () => sortPriorities(report?.priorities || []),
+    [report]
+  );
 
   const pollSiteAudit = useCallback(async (jobId, pollId, restored = false) => {
     while (pollRef.current === pollId) {
@@ -238,7 +213,6 @@ export default function SeoAuditPage() {
         setHistoryRefreshKey((value) => value + 1);
         message.success('单页 SEO 检测完成');
       }
-      setFilter('all');
     } catch (error) {
       message.error(getApiErrorMessage(error, error?.userMessage || 'SEO 检测失败，请稍后重试'));
     } finally {
@@ -251,7 +225,6 @@ export default function SeoAuditPage() {
     setReport(historicalReport);
     setMode(historicalReport.mode === 'site' ? 'site' : 'page');
     setJob(null);
-    setFilter('all');
     if (historicalReport.finalUrl) form.setFieldValue('url', historicalReport.finalUrl);
     message.success('已打开历史报告');
   };
@@ -297,7 +270,6 @@ export default function SeoAuditPage() {
       setReport(imported);
       setMode(imported.mode === 'site' ? 'site' : 'page');
       setJob(null);
-      setFilter('all');
       if (imported.finalUrl) form.setFieldValue('url', imported.finalUrl);
       setHistoryRefreshKey((value) => value + 1);
       message.success(`SEO 报告已导入为历史 #${imported.auditId}`);
@@ -463,6 +435,7 @@ export default function SeoAuditPage() {
           </section>
 
           <TechnicalHealthOverview report={report} />
+          <StageChecksPanel report={report} />
 
           <section className={styles.priorityPanel} aria-label={`从 ${report.summary.total} 项检查中生成的修复清单`}>
             <header className={styles.sectionHeading}>
@@ -470,14 +443,14 @@ export default function SeoAuditPage() {
                 <span className={styles.sectionKicker}>行动清单</span>
                 <h2>优先修复</h2>
               </div>
-              <span className={styles.issueCount}>{report.priorities.length} 类问题</span>
+              <span className={styles.issueCount}>{priorities.length} 类问题</span>
             </header>
 
-            {report.priorities.length === 0 ? (
+            {priorities.length === 0 ? (
               <div className={styles.allPassed}><CheckCircleFilled /> 当前关键项均已通过</div>
             ) : (
               <ol className={styles.priorityList}>
-                {report.priorities.slice(0, 8).map((item, index) => (
+                {priorities.slice(0, 8).map((item, index) => (
                   <li key={item.id} className={`${styles.priorityItem} ${styles[`rail_${item.severity}`]}`}>
                     <span className={styles.priorityNumber}>{String(index + 1).padStart(2, '0')}</span>
                     <div>
@@ -515,69 +488,6 @@ export default function SeoAuditPage() {
 
           <SearchPlatformPanel platforms={report.platforms} />
           <CrawlerAccessPanel access={report.crawlerAccess} />
-
-          <section className={styles.checksSection} aria-labelledby="all-checks-title">
-            <header className={styles.checksHeader}>
-              <div>
-                <span className={styles.sectionKicker}>分类结果</span>
-                <h2 id="all-checks-title">逐项检测</h2>
-              </div>
-              <div className={styles.filterControl}>
-                <label id="priority-filter-label">按优先级筛选</label>
-                <Segmented
-                  aria-labelledby="priority-filter-label"
-                  options={FILTER_OPTIONS}
-                  value={filter}
-                  onChange={setFilter}
-                />
-              </div>
-            </header>
-
-            <div className={styles.categoryGrid}>
-              {visibleCategories.map((category) => (
-                <article key={category.key} className={styles.categoryCard}>
-                  <header>
-                    <div>
-                      <h3>{category.label}</h3>
-                      <span>{category.checks.length} 项当前筛选结果</span>
-                    </div>
-                    <div className={styles.categoryScore} style={{ color: scoreColor(category.score) }}>{category.score}</div>
-                  </header>
-                  <Progress percent={category.score} showInfo={false} strokeColor={scoreColor(category.score)} railColor="#edf1f6" size="small" />
-                  <div className={styles.checkList}>
-                    {category.checks.map((check) => (
-                      <div key={check.id} className={styles.checkRow}>
-                        {check.status === 'passed'
-                          ? <CheckCircleFilled className={styles.passedIcon} aria-label="已通过" />
-                          : <ExclamationCircleFilled className={styles.failedIcon} aria-label="未通过" />}
-                        <div>
-                          <div className={styles.checkTitle}>
-                            <span className={styles.checkSubject}>{check.title}</span>
-                            {check.status === 'failed'
-                              ? <SeverityBadge severity={check.severity} />
-                              : <span className={styles.passedBadge}>通过</span>}
-                          </div>
-                          <strong className={styles.checkFinding}>
-                            {getCheckFinding(check)}
-                          </strong>
-                          <div className={styles.checkFact}>
-                            <span>检测事实</span>
-                            <p>{check.value || '未返回事实数据'}</p>
-                          </div>
-                          <p className={styles.checkImpact}>影响：{check.description}</p>
-                          {check.recommendation && <p className={styles.recommendation}>建议：{check.recommendation}</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </div>
-
-            {visibleCategories.length === 0 && (
-              <div className={styles.emptyFilter}>当前筛选条件下没有检测项。</div>
-            )}
-          </section>
 
           <section className={styles.previewSection} aria-labelledby="preview-title">
             <header>

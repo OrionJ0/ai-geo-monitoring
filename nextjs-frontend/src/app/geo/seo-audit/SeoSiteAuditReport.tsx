@@ -6,6 +6,8 @@ import { CheckCircleFilled, ClockCircleOutlined, ExclamationCircleFilled } from 
 import SearchPlatformPanel from './SearchPlatformPanel';
 import CrawlerAccessPanel from './CrawlerAccessPanel';
 import TechnicalHealthOverview from './TechnicalHealthOverview';
+import StageChecksPanel from './StageChecksPanel';
+import { sortPriorities } from '@/utils/seoStagePresentation.cjs';
 import styles from './seo-audit.module.css';
 
 const SEVERITY_LABELS = { critical: '严重', high: '高优先级', medium: '中优先级', low: '建议优化' };
@@ -25,7 +27,9 @@ function SeverityBadge({ severity }) {
 
 export default function SeoSiteAuditReport({ report }) {
   const pages = Array.isArray(report.pages) ? report.pages : [];
-  const issues = Array.isArray(report.priorities) ? report.priorities : report.issues || [];
+  const issues = sortPriorities(
+    Array.isArray(report.priorities) ? report.priorities : report.issues || []
+  );
   return (
     <div className={styles.report} aria-live="polite">
       <section className={styles.reportMeta}>
@@ -42,6 +46,7 @@ export default function SeoSiteAuditReport({ report }) {
       </section>
 
       <TechnicalHealthOverview report={report} />
+      <StageChecksPanel report={report} />
 
       <section className={styles.priorityPanel}>
         <header className={styles.sectionHeading}>

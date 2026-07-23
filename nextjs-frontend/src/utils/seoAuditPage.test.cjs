@@ -9,6 +9,7 @@ const historyPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoAuditHistor
 const crawlerAccessPath = path.resolve(__dirname, '../app/geo/seo-audit/CrawlerAccessPanel.tsx');
 const siteReportPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoSiteAuditReport.tsx');
 const healthOverviewPath = path.resolve(__dirname, '../app/geo/seo-audit/TechnicalHealthOverview.tsx');
+const stageChecksPath = path.resolve(__dirname, '../app/geo/seo-audit/StageChecksPanel.tsx');
 
 test('SEO audit page uses the authenticated API and leads with prioritized fixes', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
@@ -16,8 +17,8 @@ test('SEO audit page uses the authenticated API and leads with prioritized fixes
   assert.match(source, /from '@\/lib\/axiosConfig'/);
   assert.match(source, /post\('\/api\/seo-audits'/);
   assert.match(source, /优先修复/);
-  assert.match(source, /按优先级筛选/);
-  assert.match(source, /categories/);
+  assert.match(source, /StageChecksPanel/);
+  assert.match(source, /sortPriorities/);
   assert.match(source, /previews/);
 });
 
@@ -178,4 +179,19 @@ test('SEO 历史只比较版本、模式和 URL 相同的有效分数', () => {
   assert.match(historySource, /score !== null/);
   assert.match(historySource, /较上次/);
   assert.match(historySource, /旧版评分/);
+});
+
+test('单页与全站统一使用四阶段检测账本并退役六分类界面', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+  const siteSource = fs.readFileSync(siteReportPath, 'utf8');
+  const stageSource = fs.readFileSync(stageChecksPath, 'utf8');
+
+  assert.match(pageSource, /StageChecksPanel/);
+  assert.match(siteSource, /StageChecksPanel/);
+  assert.match(stageSource, /四阶段检测项目/);
+  assert.match(stageSource, /buildStageGroups/);
+  assert.match(stageSource, /每个检测项只属于一个阶段/);
+  assert.doesNotMatch(pageSource, /分类结果/);
+  assert.doesNotMatch(pageSource, /visibleCategories/);
+  assert.doesNotMatch(pageSource, /categoryGrid/);
 });
