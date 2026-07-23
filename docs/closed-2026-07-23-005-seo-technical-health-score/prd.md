@@ -242,5 +242,6 @@
 ## Handoff
 
 - PRD path: `docs/active-2026-07-23-005-seo-technical-health-score/prd.md`
-- Status: active，已进入实现与验证。
-- Recommended next step: 先进行产品/SEO 规则评审，再使用 `$to-tech-spec` 明确评分数据契约和迁移边界，使用 `$to-visual-design-spec` 定义报告信息层级，最后用 `$to-issues` 拆分实现与验收切片。
+- Status: closed，v4 已接入单页、全站、历史、CSV 与前端正式入口。
+- Delivery evidence: 评分性质、服务、SQLite、历史、CSV、路由与安全专项共 69 项测试通过；前端 13 项源码契约测试和定向 ESLint 通过；真实抓取入口对 `https://gato.com.cn/` 的 20 页范围报告返回 v4 技术健康分 68，并明确标记发现 57 页、达到页面上限。
+- Runtime note: 本地继续使用 SQLite；正式新报告只走 `technical-health-v4`，旧报告按原始 JSON 和版本读取，不进行 v4 静默重算。
