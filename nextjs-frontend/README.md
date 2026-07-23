@@ -14,7 +14,7 @@ npm run dev
 
 ```bash
 cd nextjs-frontend
-npm run dev -- --webpack -p 3001
+npm run dev
 ```
 
 默认登录页地址：`http://localhost:3001`。

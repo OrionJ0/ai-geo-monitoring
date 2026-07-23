@@ -20,7 +20,7 @@ This is an AI GEO Monitoring System for Generative Engine Optimization, with a N
 **Commands**:
 ```bash
 cd nextjs-frontend
-npm run dev -- --webpack -p 3001  # Start development server
+npm run dev                         # Start dev on port 3001 with Turbopack
 npm run build    # Build for production
 PORT=3001 npm run start # Start production server
 npm run lint     # Run ESLint
