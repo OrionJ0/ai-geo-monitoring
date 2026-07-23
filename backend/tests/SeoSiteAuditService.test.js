@@ -68,6 +68,30 @@ test('discovers and audits unique same-origin pages from links and recursive sit
   ]);
 });
 
+test('continues link discovery when the first homepage link points back to the homepage', async () => {
+  const pages = new Map([
+    ['https://example.com/', htmlPage('https://example.com/', ['/', '/news', '/products/item'])],
+    ['https://example.com/news', htmlPage('https://example.com/news')],
+    ['https://example.com/products/item', htmlPage('https://example.com/products/item')]
+  ]);
+  const siteClient = {
+    async fetchPage(url) {
+      return pages.get(url);
+    },
+    async probe() {
+      return { statusCode: 200, body: '<urlset></urlset>' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+
+  assert.deepEqual(report.pages.map((page) => page.url), [
+    'https://example.com/',
+    'https://example.com/news',
+    'https://example.com/products/item'
+  ]);
+});
+
 test('continues after page failures and aggregates issues with affected URLs', async () => {
   const root = htmlPage('https://example.com/', ['/missing-title', '/unavailable']);
   const missingTitle = htmlPage('https://example.com/missing-title');

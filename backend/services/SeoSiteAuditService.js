@@ -171,7 +171,9 @@ function createSeoSiteAuditService({ siteClient, ruleConfig = defaultSeoAuditRul
           const response = await client.fetchPage(url);
           const finalUrl = response.finalUrl || url;
           const $ = cheerio.load(response.html || '');
-          $('a[href]').each((_, element) => addPage($(element).attr('href'), finalUrl));
+          $('a[href]').each((_, element) => {
+            addPage($(element).attr('href'), finalUrl);
+          });
 
           const report = await pageAudit.audit(url);
           const checks = pageChecks(report);
