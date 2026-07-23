@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const pagePath = path.resolve(__dirname, '../app/geo/question-set-reports/page.tsx');
 const historyDrawerPath = path.resolve(__dirname, '../app/geo/question-set-reports/QuestionSetRunHistoryDrawer.tsx');
+const reportCssPath = path.resolve(__dirname, '../app/geo/question-set-reports/question-set-reports.module.css');
 const layoutPath = path.resolve(__dirname, '../app/geo/layout.tsx');
 const promptPagePath = path.resolve(__dirname, '../app/geo/prompts/page.tsx');
 const dashboardCssPath = path.resolve(__dirname, '../app/geo/project-dashboard/project-dashboard.module.css');
@@ -47,6 +48,13 @@ test('历史抽屉可以搜索并按问题集筛选完整历史', () => {
   assert.match(drawer, /optionFilterProp="label"/);
   assert.match(drawer, /placeholder="全部问题集"/);
   assert.match(drawer, /onQuestionSetChange/);
+});
+
+test('历史筛选说明的布局不会把问题集下拉框拆成两行', () => {
+  const css = fs.readFileSync(reportCssPath, 'utf8');
+
+  assert.doesNotMatch(css, /\.historyFilter\s*>\s*div\s*\{/);
+  assert.match(css, /\.historyFilter\s*>\s*div:first-child\s*\{/);
 });
 
 test('问题集报告支持标准 CSV 导入导出并轮询运行中的报告', () => {

@@ -184,12 +184,12 @@
   backdrop-filter: blur(12px);
 }
 
-.historyFilter > div {
+.historyFilter > div:first-child {
   display: grid;
   gap: 3px;
 }
 
-.historyFilter > div :global(.ant-typography:last-child) {
+.historyFilter > div:first-child :global(.ant-typography:last-child) {
   font-size: 11px;
 }
 
