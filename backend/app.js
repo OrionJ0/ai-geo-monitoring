@@ -79,9 +79,12 @@ const captchaRoutes = require('./routes/captcha');
 const scheduleRoutes = require('./routes/schedules');
 const geoProjectRoutes = require('./routes/geoProjects');
 const seoAuditRoutes = require('./routes/seoAudits');
+const adminAIPlatformRoutes = require('./routes/adminAIPlatforms');
+const aiPlatformRoutes = require('./routes/aiPlatforms');
 const SchedulerService = require('./services/SchedulerService');
 const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
 const AIPlatformConfigService = require('./services/AIPlatformConfigService');
+const AIRuntimeSettingsService = require('./services/AIRuntimeSettingsService');
 const { authRequired } = require('./middleware/auth');
 
 // 用户登录与公开用户接口保持在 /api/users 下（登录无需鉴权）
@@ -97,6 +100,8 @@ app.use('/api/membership', authRequired, membershipRoutes);
 app.use('/api/schedules', scheduleLimiter, authRequired, scheduleRoutes);
 app.use('/api/geo-projects', authRequired, geoProjectRoutes);
 app.use('/api/seo-audits', authRequired, seoAuditRoutes);
+app.use('/api/admin/ai-platforms', adminAIPlatformRoutes);
+app.use('/api/ai-platforms', aiPlatformRoutes);
 // 设置路由：内部已对管理接口使用 adminRequired；公开接口（如 /seo、/notice）无需统一鉴权
 app.use('/api/settings', settingsRoutes);
 
@@ -390,6 +395,7 @@ async function ensureDefaultSettings() {
     await ensureDefaultUser();
     await ensureDefaultPlans();
     await ensureDefaultSettings();
+    await AIRuntimeSettingsService.ensureDefaults();
     await AIPlatformConfigService.ensurePresets();
     try {
       const recoveredSeoAudits = await createSeoAuditJobService().recoverInterruptedJobs();

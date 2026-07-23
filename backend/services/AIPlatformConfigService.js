@@ -247,7 +247,11 @@ class AIPlatformConfigService {
     const apiKey = String(payload.api_key ?? '');
     if (apiKey.trim()) {
       const secret = apiKey.trim();
-      values.encrypted_api_key = encryptSecret(secret, this.encryptionKeyProvider());
+      try {
+        values.encrypted_api_key = encryptSecret(secret, this.encryptionKeyProvider());
+      } catch (error) {
+        throw new PlatformConfigError(error.message, 'encryption_unavailable', 503);
+      }
       values.api_key_last4 = secret.slice(-4);
     } else if (creating) {
       values.encrypted_api_key = null;

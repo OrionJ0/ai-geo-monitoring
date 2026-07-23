@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { Setting } = require('../models');
 const { adminRequired } = require('../middleware/auth');
+const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
+const { AI_RUNTIME_SETTING_DEFINITIONS } = require('../services/AIRuntimeSettingsService');
 
 // 允许的设置项及校验
 const allowedKeys = {
@@ -28,7 +30,10 @@ const allowedKeys = {
     const s = String(val ?? '');
     return s.length <= 1000;
   },
-  seo_robots: (val) => ['index,follow','index,nofollow','noindex,follow','noindex,nofollow'].includes(String(val || 'index,follow'))
+  seo_robots: (val) => ['index,follow','index,nofollow','noindex,follow','noindex,nofollow'].includes(String(val || 'index,follow')),
+  ...Object.fromEntries(
+    Object.keys(AI_RUNTIME_SETTING_DEFINITIONS).map((key) => [key, (val) => AIRuntimeSettingsService.isValid(key, val)])
+  )
 };
 
 // 获取所有设置（仅返回允许的键）
@@ -50,6 +55,10 @@ router.get('/', adminRequired, async (req, res) => {
     if (!('seo_description' in map)) map.seo_description = '';
     if (!('seo_keywords' in map)) map.seo_keywords = '';
     if (!('seo_robots' in map)) map.seo_robots = 'index,follow';
+    const runtimeSettings = await AIRuntimeSettingsService.getSettings();
+    for (const [key, value] of Object.entries(runtimeSettings)) {
+      if (!(key in map)) map[key] = String(value);
+    }
     res.json({ success: true, data: map });
   } catch (error) {
     res.status(500).json({ success: false, message: '获取设置失败' });

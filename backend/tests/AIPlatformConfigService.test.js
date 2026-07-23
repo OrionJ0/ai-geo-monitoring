@@ -119,3 +119,18 @@ test('clears an API key through a dedicated operation', async () => {
   assert.equal(stored.api_key_last4, null);
   assert.equal(stored.test_status, 'untested');
 });
+
+test('reports a deployment configuration error when encryption is unavailable', async () => {
+  const service = new AIPlatformConfigService({
+    model: AIPlatformConfig,
+    encryptionKeyProvider: () => '',
+    urlValidator: passthroughUrlValidator
+  });
+  await service.ensurePresets();
+  const platform = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+
+  await assert.rejects(
+    service.updatePlatform(platform.id, { api_key: 'sk-cannot-store' }),
+    (error) => error.code === 'encryption_unavailable' && error.status === 503
+  );
+});
