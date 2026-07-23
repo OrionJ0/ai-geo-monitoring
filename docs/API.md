@@ -88,12 +88,23 @@ Authorization: Bearer <token>
   - 返回：新保存的 `auditId`、最终 URL、状态码、响应时间、0–100 基础分、问题统计、优先修复项、六类检查结果与搜索/分享预览
   - 检查项：每项包含 `title`（检查对象）、`finding`（具体发现）、`status`、`severity`、`value`（检测事实）、`description`（影响）和 `recommendation`（建议）
   - 内容有效性：`robots.txt` 和 Sitemap 必须含有效内容；Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 与图片 Alt 不会因空标签而通过；`robots.txt` 中声明的自定义 Sitemap 会被实际抓取并校验
-  - 搜索平台标签：识别常见 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不能识别 DNS 或验证文件方式
+  - 搜索平台标签：固定从站点首页分别检查 Google、Bing、百度 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不识别 DNS 或验证文件方式
+  - 评分配置：响应包含 `scoreVersion` 和 `summary.totalWeight`；规则权重、严重程度与主要阈值集中在 `backend/config/seoAuditRules.js`，Keywords 默认权重为 1
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：拒绝带用户名/密码的网址、本机和私网 IP、解析到私网的域名，以及重定向到私网的目标；最多跟随 5 次重定向，超时 10 秒，页面响应体上限 2 MB
+- `POST /api/seo-audits/site` 创建全站异步检测任务
+  - 请求体：`url` 必填；以该 URL 为入口，只发现同源 HTTP/HTTPS 页面
+  - 返回：`202 Accepted`，`data.id` 为任务编号，初始 `status` 为 `queued`，`progress.phase` 为 `queued`
+  - 发现来源：提交 URL、页面内链、根目录 `/sitemap.xml`、robots 声明的 Sitemap；支持 Sitemap index、URL 去重和片段移除
+  - 抓取限制：默认上限 200 页、并发 3、最多读取 20 个 Sitemap、递归深度 3；达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
+  - 容错：单页失败写入逐页账本并继续；所有入口均失败时任务标记 `failed`，且不写入伪成功历史
+- `GET /api/seo-audits/jobs/:jobId` 查询当前用户的全站任务
+  - 运行中返回 `status` 与 `progress`（发现、检测和失败页数）
+  - 完成后返回 `auditId` 与完整 `report`；失败时返回安全的 `error.code`、`error.message`
+  - 权限验证：只能读取当前用户自己的任务；任务不存在或不属于当前用户时统一返回 404
 - `GET /api/seo-audits` 分页获取当前用户的检测历史摘要
   - Query 参数：`page` 默认 1；`pageSize` 默认 10，最大 50
-  - 返回：`items` 与 `pagination`；摘要不包含完整报告正文
+  - 返回：`items` 与 `pagination`；`summary.mode` 区分 `site` / `page`，`summary.pages` 为检测页数，摘要不包含完整报告正文
 - `GET /api/seo-audits/:id` 获取一条完整历史报告
   - 权限验证：只能读取当前用户自己的记录；记录不存在或不属于当前用户时统一返回 404
 

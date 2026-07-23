@@ -114,5 +114,6 @@
 
 ## Handoff
 
-- PRD path: `docs/active-2026-07-23-001-seo-site-audit/prd.md`
-- Recommended next step: 按本 PRD 使用 TDD 依次完成规则配置、单页规则、全站服务、异步 API、历史兼容与前端验收。
+- PRD path: `docs/closed-2026-07-23-001-seo-site-audit/prd.md`
+- Delivery status: 已完成。规则配置、单页兼容、全站服务、异步 API、SQLite 历史、前端双模式和真实入口验收均已落地。
+- Implementation evidence: `docs/solutions/2026-07-23-seo-site-audit.md`
