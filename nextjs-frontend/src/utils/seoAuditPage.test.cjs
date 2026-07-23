@@ -6,6 +6,8 @@ const path = require('node:path');
 
 const pagePath = path.resolve(__dirname, '../app/geo/seo-audit/page.tsx');
 const historyPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoAuditHistoryDrawer.tsx');
+const crawlerAccessPath = path.resolve(__dirname, '../app/geo/seo-audit/CrawlerAccessPanel.tsx');
+const siteReportPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoSiteAuditReport.tsx');
 
 test('SEO audit page uses the authenticated API and leads with prioritized fixes', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
@@ -74,6 +76,25 @@ test('SEO reports show separate Google, Bing and Baidu verification tag states',
 
   assert.match(source, /SearchPlatformPanel/);
   assert.match(source, /report\.platforms/);
+});
+
+test('SEO reports group search and AI crawler permissions with robots limitations', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+  const siteReportSource = fs.readFileSync(siteReportPath, 'utf8');
+  const panelSource = fs.readFileSync(crawlerAccessPath, 'utf8');
+
+  assert.match(pageSource, /CrawlerAccessPanel/);
+  assert.match(pageSource, /report\.crawlerAccess/);
+  assert.match(siteReportSource, /CrawlerAccessPanel/);
+  assert.match(siteReportSource, /report\.crawlerAccess/);
+  assert.match(panelSource, /access\.crawlers/);
+  assert.match(panelSource, /搜索引擎/);
+  assert.match(panelSource, /AI 搜索/);
+  assert.match(panelSource, /用户触发访问/);
+  assert.match(panelSource, /AI 训练与数据使用/);
+  assert.match(panelSource, /robots 允许不等于一定收录或引用/);
+  assert.match(panelSource, /纳入评分/);
+  assert.match(panelSource, /不计分/);
 });
 
 test('SEO history distinguishes full-site reports and page coverage', () => {

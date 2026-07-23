@@ -18,6 +18,7 @@ import SeoAuditHistoryDrawer from './SeoAuditHistoryDrawer';
 import SeoAuditJobProgress from './SeoAuditJobProgress';
 import SeoSiteAuditReport from './SeoSiteAuditReport';
 import SearchPlatformPanel from './SearchPlatformPanel';
+import CrawlerAccessPanel from './CrawlerAccessPanel';
 import styles from './seo-audit.module.css';
 
 const ACTIVE_JOB_KEY = 'goodie-seo-active-job';
@@ -409,6 +410,7 @@ export default function SeoAuditPage() {
           </section>
 
           <SearchPlatformPanel platforms={report.platforms} />
+          <CrawlerAccessPanel access={report.crawlerAccess} />
 
           <section className={styles.checksSection} aria-labelledby="all-checks-title">
             <header className={styles.checksHeader}>

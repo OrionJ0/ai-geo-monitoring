@@ -5,6 +5,7 @@ import React from 'react';
 import { Progress } from 'antd';
 import { CheckCircleFilled, ClockCircleOutlined, ExclamationCircleFilled } from '@ant-design/icons';
 import SearchPlatformPanel from './SearchPlatformPanel';
+import CrawlerAccessPanel from './CrawlerAccessPanel';
 import styles from './seo-audit.module.css';
 
 const SEVERITY_LABELS = { critical: '严重', high: '高优先级', medium: '中优先级', low: '建议优化' };
@@ -114,6 +115,7 @@ export default function SeoSiteAuditReport({ report }) {
       </section>
 
       <SearchPlatformPanel platforms={report.platforms} />
+      <CrawlerAccessPanel access={report.crawlerAccess} />
 
       <section className={styles.pageLedger} aria-labelledby="page-ledger-title">
         <header>
