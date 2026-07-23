@@ -4,12 +4,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
+  Collapse,
   Empty,
   Progress,
   Select,
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
   message,
@@ -21,6 +23,7 @@ import {
   ImportOutlined,
   LoadingOutlined,
   PrinterOutlined,
+  QuestionCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
@@ -33,7 +36,7 @@ import styles from './question-set-reports.module.css';
 
 const { Paragraph, Text, Title } = Typography;
 
-type Project = { id: number; name: string; status?: string };
+type Project = { id: number; name: string; status?: string; website?: string };
 type ReportSummary = {
   total?: number;
   completed?: number;
@@ -44,8 +47,10 @@ type ReportSummary = {
   recommendation_rate?: number;
   avg_share_of_voice?: number;
   citation_rate?: number;
+  owned_citation_rate?: number;
   avg_brand_rank?: number | null;
   total_citations?: number;
+  total_owned_citations?: number;
 };
 type ReportRow = {
   record_id?: number | null;
@@ -64,8 +69,9 @@ type ReportRow = {
   share_of_voice?: number;
   brand_rank?: number | null;
   citation_count?: number;
+  owned_citation_count?: number;
   sentiment?: string;
-  citation_sources?: Array<{ url?: string; domain?: string; title?: string }>;
+  citation_sources?: Array<{ url?: string; domain?: string; title?: string; owned?: boolean }>;
 };
 type RunReport = {
   id: number;
@@ -135,6 +141,38 @@ function reportStatusTag(status: RunReport['status']) {
   );
 }
 
+function MetricLabel({ label, help }: { label: string; help: string }) {
+  return (
+    <span className={styles.metricLabel}>
+      <Text>{label}</Text>
+      <Tooltip title={help} trigger={['hover', 'focus']}>
+        <QuestionCircleOutlined
+          className={styles.metricHelp}
+          aria-label={`${label}指标说明`}
+          tabIndex={0}
+        />
+      </Tooltip>
+    </span>
+  );
+}
+
+function MetricItem({
+  label,
+  help,
+  value,
+}: {
+  label: string;
+  help: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className={styles.metricCard}>
+      <MetricLabel label={label} help={help} />
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 export default function QuestionSetReportsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<number>();
@@ -151,6 +189,7 @@ export default function QuestionSetReportsPage() {
   const [importing, setImporting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [metricsExpanded, setMetricsExpanded] = useState(false);
   const historyRequest = useRef(0);
   const questionSetRequest = useRef(0);
   const reportRequest = useRef(0);
@@ -544,13 +583,89 @@ export default function QuestionSetReportsPage() {
                   />
                 ) : null}
 
-                <section className={styles.runSummary} aria-label="本次运行摘要">
-                  <div><Text>任务</Text><strong>{summary.total || 0}</strong></div>
-                  <div><Text>完成 / 失败</Text><strong>{summary.completed || 0} / {summary.failed || 0}</strong></div>
-                  <div><Text>品牌提及率</Text><strong>{percent(summary.brand_mention_rate)}%</strong></div>
-                  <div><Text>推荐率</Text><strong>{percent(summary.recommendation_rate)}%</strong></div>
-                  <div><Text>平均 SOV</Text><strong>{percent(summary.avg_share_of_voice)}%</strong></div>
-                  <div><Text>平均品牌排名</Text><strong>{formatRank(summary.avg_brand_rank)}</strong></div>
+                <section className={styles.metricsSection} aria-label="本次运行指标">
+                  <div className={styles.metricsHeading}>
+                    <div>
+                      <Text className={styles.panelKicker}>OUTCOME METRICS</Text>
+                      <Title level={4}>核心指标</Title>
+                    </div>
+                    <Text type="secondary">先看有没有被提及、有没有被推荐，以及相对竞品是否显眼</Text>
+                  </div>
+                  <div className={styles.primaryMetrics}>
+                    <MetricItem
+                      label="品牌提及率"
+                      value={`${percent(summary.brand_mention_rate)}%`}
+                      help="提及品牌的有效分析数 ÷ 有效分析数。品牌通过项目名称、别名和已识别的自有产品词匹配。"
+                    />
+                    <MetricItem
+                      label="推荐率"
+                      value={`${percent(summary.recommendation_rate)}%`}
+                      help="明确推荐品牌的有效分析数 ÷ 有效分析数。仅识别品牌同句或分句中的明确推荐表达，并排除“不推荐”等否定表达。"
+                    />
+                    <MetricItem
+                      label="平均 SOV"
+                      value={`${percent(summary.avg_share_of_voice)}%`}
+                      help="每条有效回答先计算品牌与竞品的可见度分：提及次数 + 首次出现排名加分 + 明确推荐加分；品牌得分 ÷ 全部品牌得分得到相对声量，再对有效回答取平均。"
+                    />
+                    <MetricItem
+                      label="有效样本"
+                      value={`${summary.valid_analyses || 0} / ${summary.total || 0}`}
+                      help="产生可用分析指标的已完成任务数 ÷ 本次计划任务数。失败、进行中或未生成指标的任务不进入各项比率计算。"
+                    />
+                  </div>
+
+                  <Collapse
+                    className={styles.metricsCollapse}
+                    activeKey={metricsExpanded || printing ? ['more-metrics'] : []}
+                    onChange={(keys) => setMetricsExpanded(
+                      Array.isArray(keys) ? keys.includes('more-metrics') : keys === 'more-metrics'
+                    )}
+                    items={[{
+                      key: 'more-metrics',
+                      label: (
+                        <span className={styles.moreMetricsLabel}>
+                          <Text strong>更多指标</Text>
+                          <Text type="secondary">排名、引用和执行情况</Text>
+                        </span>
+                      ),
+                      children: (
+                        <div className={styles.secondaryMetrics}>
+                          <MetricItem
+                            label="平均品牌排名"
+                            value={formatRank(summary.avg_brand_rank)}
+                            help="只统计品牌已出现且形成排名的有效回答。排名按品牌与竞品在回答中的首次出现顺序计算，再取平均；未提及品牌的回答不进入分母。"
+                          />
+                          <MetricItem
+                            label="引用率"
+                            value={`${percent(summary.citation_rate)}%`}
+                            help="至少包含 1 条可核验引用来源的有效分析数 ÷ 有效分析数。"
+                          />
+                          <MetricItem
+                            label="官网引用率"
+                            value={selectedProject?.website
+                              ? `${percent(summary.owned_citation_rate)}%`
+                              : '未配置官网'}
+                            help="至少引用 1 次品牌官网的有效分析数 ÷ 有效分析数。引用域名等于品牌项目中配置的官网域名或其子域名时，计为官网引用；未配置官网时无法识别。"
+                          />
+                          <MetricItem
+                            label="官网引用次数"
+                            value={selectedProject?.website ? (summary.total_owned_citations || 0) : '未配置官网'}
+                            help="本次所有有效分析中，引用域名属于品牌官网或其子域名的引用条数合计。"
+                          />
+                          <MetricItem
+                            label="总引用次数"
+                            value={summary.total_citations || 0}
+                            help="本次所有有效分析中识别到的可核验引用来源条数合计，同一回答中的多条来源分别计数。"
+                          />
+                          <MetricItem
+                            label="执行状态"
+                            value={`${summary.completed || 0} / ${summary.failed || 0} / ${summary.pending || 0}`}
+                            help="依次为已完成、失败和进行中的任务数。三项合计应等于本次计划任务数。"
+                          />
+                        </div>
+                      ),
+                    }]}
+                  />
                 </section>
 
                 <section className={styles.resultsSection} aria-labelledby="run-results-title">
@@ -579,9 +694,12 @@ export default function QuestionSetReportsPage() {
                             <Space orientation="vertical" size={4}>
                               <Text className={styles.answerLabel}>引用来源</Text>
                               {row.citation_sources.map((source, index) => source.url ? (
-                                <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer">
-                                  {source.title || source.domain || source.url}
-                                </a>
+                                <Space key={`${source.url}-${index}`} size={6}>
+                                  {source.owned ? <Tag color="green">品牌官网</Tag> : null}
+                                  <a href={source.url} target="_blank" rel="noreferrer">
+                                    {source.title || source.domain || source.url}
+                                  </a>
+                                </Space>
                               ) : null)}
                             </Space>
                           ) : null}

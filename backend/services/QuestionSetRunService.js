@@ -23,6 +23,14 @@ function percent(count, total) {
   return Number(((count / total) * 100).toFixed(2));
 }
 
+function ownedCitationCount(row) {
+  if (row.owned_citation_count !== undefined && row.owned_citation_count !== null) {
+    return finiteNumber(row.owned_citation_count);
+  }
+  const sources = Array.isArray(row.citation_sources) ? row.citation_sources : [];
+  return sources.filter((source) => source?.owned === true).length;
+}
+
 function deriveStatus(rows) {
   const total = rows.length;
   const pending = rows.filter((row) => row.status === 'pending').length;
@@ -39,6 +47,7 @@ function summarize(rows) {
   const metricRows = completedRows.filter((row) => row.has_metrics);
   const rankedRows = metricRows.filter((row) => finiteNumber(row.brand_rank) > 0);
   const sum = (key, list = metricRows) => list.reduce((total, row) => total + finiteNumber(row[key]), 0);
+  const totalOwnedCitations = metricRows.reduce((total, row) => total + ownedCitationCount(row), 0);
 
   return {
     total: rows.length,
@@ -50,8 +59,10 @@ function summarize(rows) {
     recommendation_rate: percent(metricRows.filter((row) => row.brand_recommended).length, metricRows.length),
     avg_share_of_voice: metricRows.length ? Number((sum('share_of_voice') / metricRows.length).toFixed(2)) : 0,
     citation_rate: percent(metricRows.filter((row) => finiteNumber(row.citation_count) > 0).length, metricRows.length),
+    owned_citation_rate: percent(metricRows.filter((row) => ownedCitationCount(row) > 0).length, metricRows.length),
     avg_brand_rank: rankedRows.length ? Number((sum('brand_rank', rankedRows) / rankedRows.length).toFixed(2)) : null,
-    total_citations: sum('citation_count')
+    total_citations: sum('citation_count'),
+    total_owned_citations: totalOwnedCitations
   };
 }
 
@@ -77,6 +88,8 @@ function normalizeNativeRow(record) {
     brand_recommended: Boolean(metric?.brand_recommended),
     share_of_voice: finiteNumber(metric?.share_of_voice),
     citation_count: finiteNumber(metric?.citation_count),
+    owned_citation_count: finiteNumber(metric?.owned_citation_count),
+    competitor_citation_count: finiteNumber(metric?.competitor_citation_count),
     sentiment: metric?.sentiment || '',
     sentiment_reason: metric?.sentiment_reason || '',
     competitor_mentions: Array.isArray(metric?.competitor_mentions) ? metric.competitor_mentions : [],

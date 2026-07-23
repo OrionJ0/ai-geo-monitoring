@@ -20,15 +20,16 @@ test('legacy GEO routes redirect into the new project workspace routes', () => {
   });
 });
 
-test('GEO side navigation exposes only the new workspace modules plus notice and profile', () => {
+test('GEO side navigation exposes the prioritized workspace modules and the other group', () => {
   const source = fs.readFileSync(path.join(srcRoot, 'app/geo/layout.tsx'), 'utf8');
+  const menuSource = source.slice(source.indexOf('const menuItems'), source.indexOf('// 未登录'));
   const requiredRoutes = [
     '/geo/projects',
-    '/geo/prompts',
-    '/geo/project-dashboard',
     '/geo/seo-audit',
+    '/geo/prompts',
+    '/geo/question-set-reports',
     '/geo/sources',
-    '/geo/reports',
+    '/geo/project-dashboard',
     '/geo/alerts',
     '/geo/notice',
     '/geo/profile'
@@ -37,6 +38,7 @@ test('GEO side navigation exposes only the new workspace modules plus notice and
 
   requiredRoutes.forEach((route) => assert.match(source, new RegExp(route)));
   forbiddenRoutes.forEach((route) => assert.doesNotMatch(source, new RegExp(route)));
+  assert.doesNotMatch(menuSource, /\/geo\/reports/);
 });
 
 test('GEO workspace collapses its sidebar and keeps content usable on narrow screens', () => {

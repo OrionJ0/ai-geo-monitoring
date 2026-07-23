@@ -107,7 +107,12 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     visibility_score: 80,
     share_of_voice: 55,
     citation_count: 1,
-    citation_sources: [{ url: 'https://example.com/guide', domain: 'example.com' }],
+    owned_citation_count: 1,
+    citation_sources: [{
+      url: 'https://www.gato.com.cn/guide',
+      domain: 'www.gato.com.cn',
+      owned: true
+    }],
     prompt_category: '购买决策',
     sentiment: 'positive'
   });
@@ -126,9 +131,16 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   assert.equal(report.summary.completed, 1);
   assert.equal(report.summary.failed, 1);
   assert.equal(report.summary.brand_mention_rate, 100);
+  assert.equal(report.summary.owned_citation_rate, 100);
+  assert.equal(report.summary.total_owned_citations, 1);
   assert.equal(report.rows.length, 2);
   assert.equal(report.rows[0].answer, '广拓可以作为周界报警方案的候选。');
-  assert.deepEqual(report.rows[0].citation_sources, [{ url: 'https://example.com/guide', domain: 'example.com' }]);
+  assert.equal(report.rows[0].owned_citation_count, 1);
+  assert.deepEqual(report.rows[0].citation_sources, [{
+    url: 'https://www.gato.com.cn/guide',
+    domain: 'www.gato.com.cn',
+    owned: true
+  }]);
   assert.equal(report.rows[1].error_message, '监测平台调用失败，请稍后重试');
 
   await QuestionRecord.destroy({ where: { id: [completed.id, failed.id] } });
@@ -159,6 +171,8 @@ test('标准 CSV 导出后可以重新导入为内容等价的只读历史报告
   assert.equal(restored.rows[0].answer, original.rows[0].answer);
   assert.deepEqual(restored.rows[0].citation_sources, original.rows[0].citation_sources);
   assert.equal(restored.summary.brand_mention_rate, original.summary.brand_mention_rate);
+  assert.equal(restored.summary.owned_citation_rate, original.summary.owned_citation_rate);
+  assert.equal(restored.summary.total_owned_citations, original.summary.total_owned_citations);
 });
 
 test('导入拒绝引用来源中的非网页协议', async () => {
@@ -167,7 +181,7 @@ test('导入拒绝引用来源中的非网页协议', async () => {
     order: [['id', 'DESC']]
   });
   const csv = await QuestionSetRunService.exportCsv({ projectId: project.id, runId: nativeRun.id });
-  const unsafeCsv = csv.replace('https://example.com/guide', 'javascript:alert(1)');
+  const unsafeCsv = csv.replace('https://www.gato.com.cn/guide', 'javascript:alert(1)');
 
   await assert.rejects(
     QuestionSetRunService.importCsv({ project, user, csv: unsafeCsv }),
