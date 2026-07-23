@@ -234,5 +234,5 @@
 
 ## Handoff
 
-- PRD path: `docs/draft-2026-07-23-002-ai-platform-settings/prd.md`
+- PRD path: `docs/active-2026-07-23-002-ai-platform-settings/prd.md`
 - Recommended next step: `$to-tech-spec`
