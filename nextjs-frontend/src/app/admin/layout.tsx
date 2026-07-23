@@ -60,9 +60,8 @@ export default function AdminLayout({
     { key: 'dashboard', label: '数据仪表' },
     { key: 'history', label: '历史记录' },
     { key: 'users', label: '用户管理' },
-    { key: 'platforms', label: '平台自检' },
     { key: 'memberships', label: '会员设置' },
-    { key: 'settings', label: '系统设置' },
+    { key: 'settings', label: '设置中心' },
     { key: 'notice', label: '通知管理' },
     { key: 'health', label: '系统健康' },
   ];
