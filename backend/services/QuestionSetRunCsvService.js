@@ -49,11 +49,13 @@ function dateValue(value) {
 
 function protectFormula(value) {
   const text = String(value ?? '');
+  if (text.startsWith('\t')) return `\t${text}`;
   return /^[=+\-@]/.test(text) ? `\t${text}` : text;
 }
 
 function unprotectFormula(value) {
   const text = String(value ?? '');
+  if (text.startsWith('\t\t')) return text.slice(1);
   return /^\t[=+\-@]/.test(text) ? text.slice(1) : text;
 }
 
@@ -207,6 +209,7 @@ function parseCsv(csv) {
   const valueAt = (row, column) => unprotectFormula(row[columnIndex.get(column)] ?? '');
   const allowedStatuses = new Set(['pending', 'completed', 'failed']);
   let questionSetName = '';
+  let sourceRunId = '';
   let startedAt = null;
   let completedAt = null;
 
@@ -220,9 +223,32 @@ function parseCsv(csv) {
     if (questionSetName && questionSetName !== currentName) {
       throw new CsvValidationError('MIXED_REPORTS', '一个 CSV 只能包含同一次问题集报告的数据');
     }
+    if (currentName.length > 120) {
+      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行问题集名称不能超过 120 个字符`);
+    }
     questionSetName = currentName;
-    startedAt = startedAt || parseDate(valueAt(row, 'run_started_at'), 'run_started_at', line, { nullable: false });
-    completedAt = completedAt || parseDate(valueAt(row, 'run_completed_at'), 'run_completed_at', line);
+    const currentSourceRunId = valueAt(row, 'source_run_id').trim();
+    if (!currentSourceRunId) {
+      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行缺少 source_run_id`);
+    }
+    if (sourceRunId && sourceRunId !== currentSourceRunId) {
+      throw new CsvValidationError('MIXED_REPORTS', '一个 CSV 只能包含同一次问题集报告的数据');
+    }
+    sourceRunId = currentSourceRunId;
+    const currentStartedAt = parseDate(valueAt(row, 'run_started_at'), 'run_started_at', line, { nullable: false });
+    const currentCompletedAt = parseDate(valueAt(row, 'run_completed_at'), 'run_completed_at', line);
+    if (startedAt && startedAt.getTime() !== currentStartedAt.getTime()) {
+      throw new CsvValidationError('MIXED_REPORTS', '一个 CSV 只能包含同一次问题集报告的数据');
+    }
+    if (
+      index > 0
+      && ((completedAt === null) !== (currentCompletedAt === null)
+        || (completedAt && completedAt.getTime() !== currentCompletedAt.getTime()))
+    ) {
+      throw new CsvValidationError('MIXED_REPORTS', '一个 CSV 只能包含同一次问题集报告的数据');
+    }
+    startedAt = currentStartedAt;
+    completedAt = currentCompletedAt;
     const status = valueAt(row, 'status').trim();
     if (!allowedStatuses.has(status)) {
       throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 status 不受支持`);

@@ -9,6 +9,7 @@ process.env.DB_STORAGE = path.join(databaseDir, 'test.sqlite');
 delete process.env.DATABASE_URL;
 
 const QuestionSetRunService = require('../services/QuestionSetRunService');
+const QuestionSetRunCsvService = require('../services/QuestionSetRunCsvService');
 const {
   sequelize,
   User,
@@ -172,4 +173,61 @@ test('导入拒绝引用来源中的非网页协议', async () => {
     QuestionSetRunService.importCsv({ project, user, csv: unsafeCsv }),
     (error) => error?.code === 'INVALID_FIELD' && /citation_sources_json/.test(error.message)
   );
+});
+
+test('导入拒绝把同名问题集的不同运行拼成一份报告', async () => {
+  const nativeRun = await QuestionSetRun.findOne({
+    where: { project_id: project.id, source: 'native' },
+    order: [['id', 'DESC']]
+  });
+  const csv = await QuestionSetRunService.exportCsv({ projectId: project.id, runId: nativeRun.id });
+  const lines = csv.split('\n');
+  lines[2] = lines[2].replace(
+    `question_set_run_v1,${nativeRun.id},`,
+    `question_set_run_v1,${nativeRun.id + 1000},`
+  );
+
+  await assert.rejects(
+    QuestionSetRunService.importCsv({ project, user, csv: lines.join('\n') }),
+    (error) => error?.code === 'MIXED_REPORTS'
+  );
+});
+
+test('CSV 公式防护不会破坏原本以制表符开头的内容', () => {
+  const report = {
+    id: 99,
+    question_set_name: '公式字符回导测试',
+    started_at: new Date('2026-07-23T00:00:00.000Z'),
+    completed_at: new Date('2026-07-23T00:01:00.000Z'),
+    rows: [{
+      record_id: 1,
+      question_id: 2,
+      question: '=SUM(1,1)',
+      question_category: '',
+      platform: 'deepseek',
+      platform_name: 'DeepSeek',
+      model_name: '',
+      status: 'completed',
+      error_message: '',
+      answer: '\t=这不是公式',
+      has_metrics: false,
+      brand_mentioned: false,
+      brand_mentions: 0,
+      brand_rank: null,
+      brand_recommended: false,
+      share_of_voice: 0,
+      citation_count: 0,
+      sentiment: '',
+      sentiment_reason: '',
+      competitor_mentions: [],
+      citation_sources: [],
+      created_at: null,
+      updated_at: null
+    }]
+  };
+
+  const parsed = QuestionSetRunCsvService.parseCsv(QuestionSetRunCsvService.buildCsv(report));
+
+  assert.equal(parsed.rows[0].question, '=SUM(1,1)');
+  assert.equal(parsed.rows[0].answer, '\t=这不是公式');
 });
