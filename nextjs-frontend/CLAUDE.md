@@ -237,7 +237,6 @@ backend/
 
 ### Database Issues
 - SQLite database file: `backend/database.sqlite`
-- Reset admin password: `node backend/reset_admin_pwd.js`
 - Sequelize models auto-sync in development
 
 This documentation should help Claude Code understand the project structure and conventions when working with this codebase.
