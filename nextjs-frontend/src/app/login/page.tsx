@@ -15,5 +15,5 @@ export default function LoginPage() {
     router.push('/geo');
   };
 
-  return <Login onLogin={handleLogin} showRegister={true} />;
+  return <Login onLogin={handleLogin} />;
 }

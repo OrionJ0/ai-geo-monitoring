@@ -3,14 +3,12 @@
 import React from 'react';
 import { Card, Form, Input, Button, Typography, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
 const { Title, Paragraph } = Typography;
 
-export default function Login({ onLogin, showRegister = true }) {
+export default function Login({ onLogin }) {
   const [form] = Form.useForm();
-  const router = useRouter();
 
   const handleSubmit = async (values) => {
     try {
@@ -67,11 +65,6 @@ export default function Login({ onLogin, showRegister = true }) {
           <Form.Item>
             <Button type="primary" htmlType="submit" block>登录</Button>
           </Form.Item>
-          {showRegister && (
-            <Form.Item>
-              <Button block onClick={() => router.push('/register')}>没有账户？注册</Button>
-            </Form.Item>
-          )}
         </Form>
       </Card>
     </div>

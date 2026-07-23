@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Layout, Menu, Breadcrumb, Button, Space } from 'antd';
-import { usePathname, useRouter } from 'next/navigation';
+import { Layout, Menu, Breadcrumb, Button } from 'antd';
+import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Login from '@/components/Login';
 import { message } from 'antd';
@@ -17,7 +17,6 @@ export default function GeoLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -100,7 +99,7 @@ export default function GeoLayout({
   }
 
   if (!token) {
-    return <Login onLogin={handleLogin} showRegister={true} />;
+    return <Login onLogin={handleLogin} />;
   }
 
   return (
@@ -115,10 +114,7 @@ export default function GeoLayout({
           />
           <span>GEO 项目工作台</span>
         </div>
-        <Space>
-          <Button onClick={() => router.push('/')}>返回首页</Button>
-          <Button onClick={handleLogout}>退出登录</Button>
-        </Space>
+        <Button onClick={handleLogout}>退出登录</Button>
       </Header>
       <Layout style={{ marginTop: 64 }}>
         <Sider

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Layout, Button, Space, Menu, message } from 'antd';
+import { Layout, Button, Menu, message } from 'antd';
 import { useRouter, usePathname } from 'next/navigation';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import Login from '@/components/Login';
@@ -94,7 +94,7 @@ export default function AdminLayout({
 
   // 未登录时显示登录页面
   if (!token || !currentUser) {
-    return <Login onLogin={handleLogin} showRegister={false} />;
+    return <Login onLogin={handleLogin} />;
   }
 
   // 验证管理员权限
@@ -116,10 +116,7 @@ export default function AdminLayout({
           />
           <span>管理员后台</span>
         </div>
-        <Space>
-          <Button onClick={() => router.push('/')}>返回首页</Button>
-          <Button onClick={handleLogout}>退出登录</Button>
-        </Space>
+        <Button onClick={handleLogout}>退出登录</Button>
       </Header>
       <Layout style={{ marginTop: 64 }}>
         <Sider
