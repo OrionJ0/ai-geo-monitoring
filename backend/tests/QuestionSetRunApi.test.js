@@ -135,6 +135,40 @@ test('用户可以分页查看问题集运行历史并打开单次独立报告',
   assert.equal(detailResponse.payload.data.rows[0].answer, '广拓是一家周界报警厂商。');
 });
 
+test('用户可以按问题集筛选运行历史', async () => {
+  const firstQuestionSetRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: 101,
+    question_set_name: '采购决策问题集',
+    source: 'native',
+    record_ids: []
+  });
+  await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: 202,
+    question_set_name: '品牌认知问题集',
+    source: 'native',
+    record_ids: []
+  });
+
+  const filteredResponse = await requestRoute('get', '/:projectId/question-set-runs', {
+    params: { projectId: project.id },
+    query: { page: 1, pageSize: 20, questionSetId: 101 }
+  });
+
+  assert.equal(filteredResponse.statusCode, 200);
+  assert.equal(filteredResponse.payload.pagination.totalItems, 1);
+  assert.deepEqual(filteredResponse.payload.data.map((item) => item.id), [firstQuestionSetRun.id]);
+
+  const invalidResponse = await requestRoute('get', '/:projectId/question-set-runs', {
+    params: { projectId: project.id },
+    query: { questionSetId: 'invalid' }
+  });
+  assert.equal(invalidResponse.statusCode, 400);
+});
+
 test('用户可以从报告接口导出标准 CSV 并安全回导', async () => {
   const exportResponse = await requestRoute('get', '/:projectId/question-set-runs/:runId/export', {
     params: { projectId: project.id, runId: run.id }

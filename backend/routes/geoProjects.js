@@ -752,8 +752,16 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
 
 router.get('/:projectId/question-set-runs', loadProject, async (req, res) => {
   try {
+    const rawQuestionSetId = req.query.questionSetId;
+    const questionSetId = rawQuestionSetId == null || rawQuestionSetId === ''
+      ? undefined
+      : Number(rawQuestionSetId);
+    if (questionSetId !== undefined && (!Number.isInteger(questionSetId) || questionSetId <= 0)) {
+      return res.status(400).json({ success: false, message: '问题集 ID 无效' });
+    }
     const result = await QuestionSetRunService.listReports({
       projectId: req.brandProject.id,
+      questionSetId,
       page: req.query.page,
       pageSize: req.query.pageSize
     });

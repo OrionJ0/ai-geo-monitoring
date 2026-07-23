@@ -158,12 +158,16 @@ class QuestionSetRunService {
     };
   }
 
-  async listReports({ projectId, page = 1, pageSize = 20, repositories = {} }) {
+  async listReports({ projectId, questionSetId, page = 1, pageSize = 20, repositories = {} }) {
     const Run = repositories.QuestionSetRun || QuestionSetRun;
     const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
     const safePageSize = Math.min(100, Math.max(1, Number.parseInt(pageSize, 10) || 20));
+    const where = { project_id: projectId };
+    if (Number.isInteger(questionSetId) && questionSetId > 0) {
+      where.question_set_id = questionSetId;
+    }
     const result = await Run.findAndCountAll({
-      where: { project_id: projectId },
+      where,
       order: [['created_at', 'DESC'], ['id', 'DESC']],
       limit: safePageSize,
       offset: (safePage - 1) * safePageSize
