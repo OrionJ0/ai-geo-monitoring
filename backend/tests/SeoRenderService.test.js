@@ -12,6 +12,7 @@ test('samples browser-rendered SEO fields and preserves source evidence', async 
   const renderedUrls = [];
   let closed = false;
   const service = createSeoRenderService({
+    enabled: true,
     executablePath: '/fake/chrome',
     browserFactory: async () => ({
       async render(url) {
@@ -48,6 +49,7 @@ test('samples browser-rendered SEO fields and preserves source evidence', async 
 
 test('returns an explicit unavailable state when no browser executable exists', async () => {
   const service = createSeoRenderService({
+    enabled: true,
     executablePath: '',
     browserFactory: async () => {
       throw new Error('不应启动');
@@ -68,6 +70,7 @@ test('returns an explicit unavailable state when no browser executable exists', 
 
 test('preserves failed samples and reports partial browser evidence', async () => {
   const service = createSeoRenderService({
+    enabled: true,
     executablePath: '/fake/chrome',
     browserFactory: async () => ({
       async render(url) {
@@ -96,6 +99,24 @@ test('preserves failed samples and reports partial browser evidence', async () =
   assert.equal(result.samples[1].errorCode, 'renderer_timeout');
 });
 
+test('requires an explicitly isolated network environment before browser rendering', async () => {
+  const service = createSeoRenderService({
+    enabled: false,
+    executablePath: '/fake/chrome',
+    browserFactory: async () => {
+      throw new Error('不应启动');
+    }
+  });
+
+  const result = await service.sample([{ url: 'https://example.com/', source: {} }]);
+
+  assert.deepEqual(result, {
+    status: 'unavailable',
+    reason: 'renderer_requires_network_isolation',
+    samples: []
+  });
+});
+
 test('executes page JavaScript through the installed headless Chrome', {
   skip: !discoverBrowserExecutable()
 }, async () => {
@@ -115,6 +136,7 @@ test('executes page JavaScript through the installed headless Chrome', {
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}/`;
   const service = createSeoRenderService({
+    enabled: true,
     executablePath: discoverBrowserExecutable(),
     browserFactory: (options) => createCdpBrowser({
       ...options,

@@ -190,7 +190,7 @@ test('全站专项检查和审计差异会进入标准长表并保持报告可�
   report.pages = [{ url: 'https://example.com/', status: 'completed', issues: [] }];
   report.issues = [];
   report.sitewide = {
-    version: 'sitewide-audit-v1',
+    version: 'sitewide-audit-v2',
     checks: [{
       id: 'duplicate-titles',
       title: '重复页面标题',

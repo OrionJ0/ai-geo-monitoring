@@ -850,7 +850,7 @@
 
 .sitewideComparison > div {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 14px;
 }
@@ -867,6 +867,7 @@
 .sitewideChange_added { border-left-color: #dc2626; }
 .sitewideChange_resolved { border-left-color: #15803d; }
 .sitewideChange_persisting { border-left-color: #d97706; }
+.sitewideChange_unverified { border-left-color: #64748b; }
 
 .sitewideChange > span {
   font-family: var(--font-geist-mono), monospace;

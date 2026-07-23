@@ -1,4 +1,4 @@
-const SITEWIDE_VERSION = 'sitewide-audit-v1';
+const SITEWIDE_VERSION = 'sitewide-audit-v2';
 
 function normalizedText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
@@ -21,20 +21,23 @@ function duplicateGroups(pages, field) {
   return Array.from(groups.values()).filter((group) => group.pages.length > 1);
 }
 
-function check({ id, title, severity, groups, emptyFinding, recommendation }) {
+function check({ id, title, severity, groups, emptyFinding, recommendation, complete = true }) {
   const affectedPages = Array.from(new Set(groups.flatMap((group) => group.pages)));
+  const failed = groups.length > 0;
   return {
     id,
     title,
     severity,
-    status: groups.length ? 'failed' : 'passed',
-    finding: groups.length ? `${groups.length} 组重复内容` : emptyFinding,
-    value: groups.length
+    status: failed ? 'failed' : (complete ? 'passed' : 'unknown'),
+    finding: failed
+      ? `${groups.length} 组重复内容`
+      : (complete ? emptyFinding : '审计范围不完整，无法确认全站没有重复'),
+    value: failed
       ? `${affectedPages.length} 个页面受影响`
-      : '未发现跨页重复',
+      : (complete ? '未发现跨页重复' : '证据不完整'),
     affectedPages,
     details: groups,
-    recommendation: groups.length ? recommendation : ''
+    recommendation: failed ? recommendation : ''
   };
 }
 
@@ -141,15 +144,19 @@ function evidenceCheck({
   value,
   affectedPages,
   details,
-  recommendation
+  recommendation,
+  complete = true,
+  unknownFinding = '审计证据不完整，无法确认全站状态',
+  unknownValue = '证据不完整'
 }) {
+  const status = failed ? 'failed' : (complete ? 'passed' : 'unknown');
   return {
     id,
     title,
     severity,
-    status: failed ? 'failed' : 'passed',
-    finding: failed ? finding : passedFinding,
-    value: failed ? value : '未发现问题',
+    status,
+    finding: failed ? finding : (complete ? passedFinding : unknownFinding),
+    value: failed ? value : (complete ? '未发现问题' : unknownValue),
     affectedPages: failed ? Array.from(new Set(affectedPages || [])) : [],
     details: details || [],
     recommendation: failed ? recommendation : ''
@@ -191,7 +198,7 @@ function brokenLinkAnalysis(linkChecks) {
   };
 }
 
-function sitemapAnalysis({ origin, pages, sitemapUrls, truncated }) {
+function sitemapAnalysis({ origin, pages, sitemapUrls, truncated, inventoryComplete = true }) {
   const sitemapSet = new Set(
     (Array.isArray(sitemapUrls) ? sitemapUrls : [])
       .map((url) => normalizedUrl(url))
@@ -200,7 +207,7 @@ function sitemapAnalysis({ origin, pages, sitemapUrls, truncated }) {
   const pageByRequestedUrl = new Map(
     pages.map((page) => [normalizedUrl(page.url), page]).filter(([url]) => url)
   );
-  const missingFromSitemap = pages
+  const missingFromSitemap = (inventoryComplete ? pages : [])
     .filter((page) => page.status === 'completed' && page.indexable !== false)
     .map((page) => normalizedUrl(page.finalUrl || page.url))
     .filter((url) => url && new URL(url).origin === origin && !sitemapSet.has(url));
@@ -227,7 +234,7 @@ function sitemapAnalysis({ origin, pages, sitemapUrls, truncated }) {
   return {
     missing_from_sitemap: Array.from(new Set(missingFromSitemap)),
     invalid_entries: invalidEntries,
-    inventory_complete: !truncated
+    inventory_complete: !truncated && inventoryComplete
   };
 }
 
@@ -268,6 +275,7 @@ function hreflangAnalysis(pages) {
       .filter(([url]) => url)
   );
   const errors = [];
+  const unverified = [];
   successful.forEach((page) => {
     const pageUrl = normalizedUrl(page.finalUrl || page.url);
     const entries = (Array.isArray(page.hreflang) ? page.hreflang : [])
@@ -303,12 +311,12 @@ function hreflangAnalysis(pages) {
 
       const targetPage = pageByUrl.get(entry.url);
       if (!targetPage) {
-        errors.push({
+        unverified.push({
           type: 'target-not-audited',
           page: pageUrl,
           language: entry.language,
           target: entry.url,
-          message: 'hreflang 目标不在本次可访问页面中'
+          message: 'hreflang 目标未进入本次审计范围，无法验证回链'
         });
         return;
       }
@@ -336,7 +344,7 @@ function hreflangAnalysis(pages) {
       }
     });
   });
-  return { errors };
+  return { errors, unverified };
 }
 
 function renderingAnalysis(renderAnalysis) {
@@ -392,14 +400,28 @@ function analyzeSitewideEvidence({
   sitemapUrls = [],
   linkChecks = [],
   renderAnalysis,
-  truncated = false
+  truncated = false,
+  linkInventoryComplete = true,
+  sitemapInventoryComplete = true
 } = {}) {
+  const hasFailedPages = pages.some((page) => page.status === 'failed');
+  const siteInventoryComplete = !truncated && !hasFailedPages;
   const duplicateTitles = duplicateGroups(pages, 'title');
   const duplicateDescriptions = duplicateGroups(pages, 'description');
   const canonical = canonicalAnalysis(pages);
   const redirects = redirectAnalysis(pages);
   const brokenLinks = brokenLinkAnalysis(linkChecks);
-  const sitemap = sitemapAnalysis({ origin, pages, sitemapUrls, truncated });
+  brokenLinks.coverage = {
+    checked_targets: Array.isArray(linkChecks) ? linkChecks.length : 0,
+    complete: siteInventoryComplete && linkInventoryComplete
+  };
+  const sitemap = sitemapAnalysis({
+    origin,
+    pages,
+    sitemapUrls,
+    truncated,
+    inventoryComplete: sitemapInventoryComplete
+  });
   const orphans = orphanPages({ origin, pages, sitemapUrls });
   const hreflang = hreflangAnalysis(pages);
   const rendering = renderingAnalysis(renderAnalysis);
@@ -410,7 +432,8 @@ function analyzeSitewideEvidence({
       severity: 'high',
       groups: duplicateTitles,
       emptyFinding: '页面标题保持唯一',
-      recommendation: '为每个可索引页面设置能准确概括其主题的唯一标题。'
+      recommendation: '为每个可索引页面设置能准确概括其主题的唯一标题。',
+      complete: siteInventoryComplete
     }),
     check({
       id: 'duplicate-descriptions',
@@ -418,7 +441,8 @@ function analyzeSitewideEvidence({
       severity: 'medium',
       groups: duplicateDescriptions,
       emptyFinding: 'Meta 描述保持唯一',
-      recommendation: '为每个重要页面编写与该页面内容一致的独特 Meta 描述。'
+      recommendation: '为每个重要页面编写与该页面内容一致的独特 Meta 描述。',
+      complete: siteInventoryComplete
     }),
     evidenceCheck({
       id: 'canonical-conflicts',
@@ -433,7 +457,8 @@ function analyzeSitewideEvidence({
         ...(conflict.targets || [])
       ]),
       details: canonical.conflicts,
-      recommendation: '每个页面只声明一个最终规范 URL，避免 Canonical 链与循环。'
+      recommendation: '每个页面只声明一个最终规范 URL，避免 Canonical 链与循环。',
+      complete: siteInventoryComplete
     }),
     evidenceCheck({
       id: 'redirects',
@@ -448,7 +473,8 @@ function analyzeSitewideEvidence({
         ...redirects.loops.map((entry) => entry.page)
       ],
       details: [...redirects.loops, ...redirects.chains],
-      recommendation: '把内部链接直接指向最终 URL，并消除循环和多跳重定向。'
+      recommendation: '把内部链接直接指向最终 URL，并消除循环和多跳重定向。',
+      complete: siteInventoryComplete
     }),
     evidenceCheck({
       id: 'broken-links',
@@ -461,19 +487,24 @@ function analyzeSitewideEvidence({
       affectedPages: [...brokenLinks.internal, ...brokenLinks.external]
         .flatMap((link) => link.sourcePages || []),
       details: [...brokenLinks.internal, ...brokenLinks.external],
-      recommendation: '修复或移除失效链接，并将重定向链接更新为最终可访问地址。'
+      recommendation: '修复或移除失效链接，并将重定向链接更新为最终可访问地址。',
+      complete: siteInventoryComplete && linkInventoryComplete,
+      unknownFinding: '链接抽查未覆盖完整站点，无法确认没有失效链接',
+      unknownValue: `已检查 ${brokenLinks.coverage.checked_targets} 个唯一目标，证据不完整`
     }),
     evidenceCheck({
       id: 'orphan-pages',
       title: '孤儿页面',
       severity: 'medium',
-      failed: orphans.length > 0,
+      failed: siteInventoryComplete && sitemapInventoryComplete && orphans.length > 0,
       finding: `${orphans.length} 个 Sitemap 页面没有内部入口`,
       passedFinding: 'Sitemap 页面均有内部链接入口',
       value: `${orphans.length} 个孤儿页面`,
       affectedPages: orphans,
       details: orphans.map((url) => ({ url })),
-      recommendation: '从相关栏目、导航或正文为重要页面增加可抓取的内部链接。'
+      recommendation: '从相关栏目、导航或正文为重要页面增加可抓取的内部链接。',
+      complete: siteInventoryComplete && sitemapInventoryComplete,
+      unknownFinding: '站点或 Sitemap 清单不完整，无法可靠判断孤儿页面'
     }),
     evidenceCheck({
       id: 'sitemap-coverage',
@@ -491,7 +522,9 @@ function analyzeSitewideEvidence({
         ...sitemap.missing_from_sitemap.map((url) => ({ url, reason: 'missing_from_sitemap' })),
         ...sitemap.invalid_entries
       ],
-      recommendation: '把重要可索引页面加入 Sitemap，并移除失效、重定向或 noindex 条目。'
+      recommendation: '把重要可索引页面加入 Sitemap，并移除失效、重定向或 noindex 条目。',
+      complete: sitemap.inventory_complete && !hasFailedPages,
+      unknownFinding: 'Sitemap 或抓取清单不完整，无法确认两者完全一致'
     }),
     evidenceCheck({
       id: 'hreflang',
@@ -502,8 +535,11 @@ function analyzeSitewideEvidence({
       passedFinding: 'hreflang 语言、目标与回链有效',
       value: `${hreflang.errors.length} 个错误`,
       affectedPages: hreflang.errors.map((error) => error.page),
-      details: hreflang.errors,
-      recommendation: '使用有效语言代码、唯一目标 URL，并确保语言版本页面互相声明回链。'
+      details: [...hreflang.errors, ...hreflang.unverified],
+      recommendation: '使用有效语言代码、唯一目标 URL，并确保语言版本页面互相声明回链。',
+      complete: siteInventoryComplete && hreflang.unverified.length === 0,
+      unknownFinding: '部分 hreflang 目标不在本次审计范围，无法验证回链',
+      unknownValue: `${hreflang.unverified.length} 个目标未验证`
     }),
     (
       rendering.status === 'unavailable'
@@ -566,20 +602,57 @@ function issueOccurrences(report) {
         ? issue.affectedPages
         : [''];
       pages.forEach((url) => {
+        const matchingDetails = scope === 'sitewide' && Array.isArray(issue.details)
+          ? issue.details.filter((detail) => (
+              String(detail?.page || detail?.url || '') === String(url || '')
+              || (Array.isArray(detail?.sourcePages) && detail.sourcePages.includes(url))
+            ))
+          : [];
+        const evidence = matchingDetails
+          .map((detail) => JSON.stringify({
+            type: detail?.type || '',
+            target: detail?.target || detail?.url || '',
+            targets: Array.isArray(detail?.targets) ? detail.targets : [],
+            reason: detail?.reason || ''
+          }))
+          .sort()
+          .join('|');
         const item = {
           id: issue.id,
           title: issue.title,
           scope,
-          url: String(url || '')
+          url: String(url || ''),
+          ...(evidence ? { evidence } : {})
         };
         occurrences.push({
           ...item,
-          key: `${scope}:${item.id}:${item.url}`
+          key: `${scope}:${item.id}:${item.url}:${evidence}`
         });
       });
     });
   });
   return occurrences.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function comparisonIncompatibilities(currentReport, previousReport) {
+  const reasons = [];
+  if (currentReport?.mode !== 'site' || previousReport?.mode !== 'site') reasons.push('mode');
+  if (String(currentReport?.ruleVersion || '') !== String(previousReport?.ruleVersion || '')) {
+    reasons.push('rule_version');
+  }
+  if (String(currentReport?.scoreVersion || '') !== String(previousReport?.scoreVersion || '')) {
+    reasons.push('score_version');
+  }
+  if (String(currentReport?.sitewide?.version || '') !== String(previousReport?.sitewide?.version || '')) {
+    reasons.push('sitewide_version');
+  }
+  if (String(currentReport?.site?.origin || '') !== String(previousReport?.site?.origin || '')) {
+    reasons.push('origin');
+  }
+  if (currentReport?.site?.truncated === true || previousReport?.site?.truncated === true) {
+    reasons.push('truncated_scope');
+  }
+  return reasons;
 }
 
 function compareAuditIssues(currentReport, previousReport) {
@@ -590,20 +663,60 @@ function compareAuditIssues(currentReport, previousReport) {
       previous_checked_at: null,
       added: [],
       resolved: [],
-      persisting: []
+      persisting: [],
+      unverified: []
+    };
+  }
+  const incompatibilities = comparisonIncompatibilities(currentReport, previousReport);
+  if (incompatibilities.length) {
+    return {
+      status: 'not_comparable',
+      reason_codes: incompatibilities,
+      previous_audit_id: previousReport.auditId || null,
+      previous_checked_at: previousReport.checkedAt || null,
+      added: [],
+      resolved: [],
+      persisting: [],
+      unverified: []
     };
   }
   const current = issueOccurrences(currentReport);
   const previous = issueOccurrences(previousReport);
   const currentKeys = new Set(current.map((item) => item.key));
   const previousKeys = new Set(previous.map((item) => item.key));
+  const unknownSitewideIds = new Set(
+    (Array.isArray(currentReport?.sitewide?.checks) ? currentReport.sitewide.checks : [])
+      .filter((item) => item?.status === 'unknown')
+      .map((item) => item.id)
+  );
+  const failedPageUrls = new Set(
+    (Array.isArray(currentReport?.pages) ? currentReport.pages : [])
+      .filter((page) => page?.status === 'failed')
+      .flatMap((page) => [page?.url, page?.finalUrl])
+      .map((url) => normalizedUrl(url))
+      .filter(Boolean)
+  );
+  const unverified = previous.filter((item) => (
+    item.scope === 'sitewide'
+    && (
+      unknownSitewideIds.has(item.id)
+      || failedPageUrls.has(normalizedUrl(item.url))
+    )
+    && !currentKeys.has(item.key)
+  ) || (
+    item.scope === 'page-rule'
+    && failedPageUrls.has(normalizedUrl(item.url))
+    && !currentKeys.has(item.key)
+  ));
+  const unverifiedKeys = new Set(unverified.map((item) => item.key));
   return {
-    status: 'compared',
+    status: unverified.length ? 'partial' : 'compared',
     previous_audit_id: previousReport.auditId || null,
     previous_checked_at: previousReport.checkedAt || null,
     added: current.filter((item) => !previousKeys.has(item.key)),
-    resolved: previous.filter((item) => !currentKeys.has(item.key)),
-    persisting: current.filter((item) => previousKeys.has(item.key))
+    resolved: previous.filter((item) => !currentKeys.has(item.key) && !unverifiedKeys.has(item.key)),
+    persisting: current.filter((item) => previousKeys.has(item.key)),
+    unverified
   };
 }
 

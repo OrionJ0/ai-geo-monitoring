@@ -146,7 +146,7 @@ function buildRows(report, exportedAt) {
   (Array.isArray(issues) ? issues : []).forEach((issue) => add('issue', issue));
   (Array.isArray(report.sitewide?.checks) ? report.sitewide.checks : [])
     .forEach((item) => add('sitewide_check', item, { category: 'sitewide' }));
-  ['added', 'resolved', 'persisting'].forEach((kind) => {
+  ['added', 'resolved', 'persisting', 'unverified'].forEach((kind) => {
     (Array.isArray(report.comparison?.[kind]) ? report.comparison[kind] : [])
       .forEach((item) => add(`comparison_${kind}`, item, {
         pageUrl: item.url,

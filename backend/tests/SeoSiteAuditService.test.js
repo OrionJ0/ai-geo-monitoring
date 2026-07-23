@@ -71,6 +71,7 @@ test('discovers and audits unique same-origin pages from links and recursive sit
     'https://example.com/product',
     'https://example.com/sitemap-only'
   ]);
+  assert.equal(report.pages.every((page) => !Object.hasOwn(page, 'links')), true);
 });
 
 test('continues link discovery when the first homepage link points back to the homepage', async () => {
@@ -118,6 +119,39 @@ test('full-site audit always includes the homepage when started from a subpage',
     'https://example.com/'
   ]);
   assert.equal(report.pages.find((page) => page.url === 'https://example.com/').isHomepage, true);
+});
+
+test('uses the final entry origin after a cross-origin homepage redirect', async () => {
+  const pages = new Map([
+    ['https://example.com/', {
+      ...htmlPage('https://www.example.com/', ['/about']),
+      requestedUrl: 'https://example.com/',
+      finalUrl: 'https://www.example.com/',
+      redirectChain: [{
+        from: 'https://example.com/',
+        statusCode: 301,
+        to: 'https://www.example.com/'
+      }]
+    }],
+    ['https://www.example.com/about', htmlPage('https://www.example.com/about')]
+  ]);
+  const siteClient = {
+    async fetchPage(url) {
+      if (!pages.has(url)) throw new Error(`unexpected page ${url}`);
+      return pages.get(url);
+    },
+    async probe() {
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+
+  assert.equal(report.site.origin, 'https://www.example.com');
+  assert.deepEqual(report.pages.map((page) => page.finalUrl), [
+    'https://www.example.com/',
+    'https://www.example.com/about'
+  ]);
 });
 
 test('continues after page failures and aggregates issues with affected URLs', async () => {
@@ -253,6 +287,34 @@ test('respects page limit, reports truncation and emits crawl progress', async (
   assert.equal(calls.probes.get('https://example.com/sitemap.xml'), 1);
 });
 
+test('probes internal link targets outside the audited page limit', async () => {
+  const pages = new Map([
+    ['https://example.com/', htmlPage('https://example.com/', ['/a', '/missing'])],
+    ['https://example.com/a', htmlPage('https://example.com/a')]
+  ]);
+  const probed = [];
+  const siteClient = {
+    async fetchPage(url) {
+      return pages.get(url);
+    },
+    async probe(url) {
+      probed.push(url);
+      if (url === 'https://example.com/missing') return { statusCode: 404, finalUrl: url };
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/', {
+    maxPages: 1
+  });
+
+  assert.equal(probed.includes('https://example.com/missing'), true);
+  assert.equal(
+    report.sitewide.broken_links.internal.some((link) => link.url === 'https://example.com/missing'),
+    true
+  );
+});
+
 test('rejects invalid crawl configuration before creating an audit', () => {
   assert.throws(() => createSeoSiteAuditService({
     siteClient: {},
@@ -319,7 +381,7 @@ test('adds cross-page SEO evidence and JavaScript render sampling to the formal 
   const report = await createSeoSiteAuditService({ siteClient, renderService })
     .audit('https://example.com/');
 
-  assert.equal(report.sitewide.version, 'sitewide-audit-v1');
+  assert.equal(report.sitewide.version, 'sitewide-audit-v2');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'duplicate-titles').status, 'failed');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'canonical-conflicts').status, 'failed');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'broken-links').status, 'failed');

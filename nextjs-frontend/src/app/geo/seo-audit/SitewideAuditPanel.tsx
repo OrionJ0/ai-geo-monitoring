@@ -68,8 +68,16 @@ export default function SitewideAuditPanel({ sitewide, comparison }) {
     status: 'no_baseline',
     added: [],
     resolved: [],
-    persisting: []
+    persisting: [],
+    unverified: []
   };
+  const comparisonLabel = change.status === 'compared'
+    ? `对比报告 #${change.previous_audit_id || '-'}`
+    : change.status === 'partial'
+      ? `部分对比报告 #${change.previous_audit_id || '-'}，证据不足项不判定为已解决`
+      : change.status === 'not_comparable'
+        ? '审计版本或覆盖范围不同，本次不做问题增减判断'
+        : '首次审计，暂无可比基线';
 
   return (
     <section className={styles.sitewidePanel} aria-labelledby="sitewide-audit-title">
@@ -121,15 +129,14 @@ export default function SitewideAuditPanel({ sitewide, comparison }) {
             <h3>本次与上次问题差异</h3>
           </div>
           <small>
-            {change.status === 'compared'
-              ? `对比报告 #${change.previous_audit_id || '-'}`
-              : '首次审计，暂无可比基线'}
+            {comparisonLabel}
           </small>
         </header>
         <div>
           <ChangeColumn title="新增问题" items={change.added || []} tone="added" />
           <ChangeColumn title="已解决" items={change.resolved || []} tone="resolved" />
           <ChangeColumn title="持续存在" items={change.persisting || []} tone="persisting" />
+          <ChangeColumn title="本次未验证" items={change.unverified || []} tone="unverified" />
         </div>
       </div>
     </section>

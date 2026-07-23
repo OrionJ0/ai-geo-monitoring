@@ -15,6 +15,7 @@ function discoverBrowserExecutable() {
 }
 
 function createSeoRenderService({
+  enabled = process.env.SEO_RENDER_NETWORK_ISOLATED === 'true',
   executablePath = discoverBrowserExecutable(),
   browserFactory = createCdpBrowser
 } = {}) {
@@ -23,6 +24,13 @@ function createSeoRenderService({
       const requested = Array.isArray(entries) ? entries.filter((entry) => entry?.url) : [];
       if (!requested.length) {
         return { status: 'completed', samples: [] };
+      }
+      if (!enabled) {
+        return {
+          status: 'unavailable',
+          reason: 'renderer_requires_network_isolation',
+          samples: []
+        };
       }
       if (!executablePath) {
         return {

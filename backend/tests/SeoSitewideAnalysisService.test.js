@@ -176,6 +176,27 @@ test('finds sitemap pages with no incoming internal links as orphan pages', () =
   assert.equal(result.checks.find((check) => check.id === 'orphan-pages').status, 'failed');
 });
 
+test('does not claim orphan or hreflang health when a page crawl failed', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [
+      page('https://example.com/'),
+      page('https://example.com/source', { status: 'failed' }),
+      page('https://example.com/target')
+    ],
+    sitemapUrls: [
+      'https://example.com/',
+      'https://example.com/source',
+      'https://example.com/target'
+    ],
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] }
+  });
+
+  assert.equal(result.checks.find((check) => check.id === 'orphan-pages').status, 'unknown');
+  assert.equal(result.checks.find((check) => check.id === 'hreflang').status, 'unknown');
+});
+
 test('compares sitemap inventory with accessible and indexable crawled pages', () => {
   const result = analyzeSitewideEvidence({
     origin: 'https://example.com',
@@ -240,6 +261,45 @@ test('detects invalid, duplicate and non-reciprocal hreflang declarations', () =
   assert.equal(result.hreflang.errors.some((error) => error.type === 'duplicate-language'), true);
   assert.equal(result.hreflang.errors.some((error) => error.type === 'missing-return'), true);
   assert.equal(result.checks.find((check) => check.id === 'hreflang').status, 'failed');
+});
+
+test('treats unaudited and cross-origin hreflang targets as unverified instead of errors', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [
+      page('https://example.com/zh', {
+        hreflang: [
+          { language: 'en', url: 'https://example.com/en' },
+          { language: 'fr', url: 'https://example.fr/' }
+        ]
+      })
+    ],
+    sitemapUrls: [],
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] }
+  });
+
+  assert.deepEqual(result.hreflang.errors, []);
+  assert.equal(result.hreflang.unverified.length, 2);
+  assert.equal(result.checks.find((check) => check.id === 'hreflang').status, 'unknown');
+});
+
+test('does not report incomplete sitewide evidence as passed', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [page('https://example.com/')],
+    sitemapUrls: ['https://example.com/'],
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] },
+    truncated: true,
+    linkInventoryComplete: false,
+    sitemapInventoryComplete: false
+  });
+
+  ['duplicate-titles', 'duplicate-descriptions', 'canonical-conflicts', 'redirects',
+    'broken-links', 'orphan-pages', 'sitemap-coverage', 'hreflang'].forEach((id) => {
+    assert.equal(result.checks.find((check) => check.id === id).status, 'unknown', id);
+  });
 });
 
 test('reports material differences found by JavaScript rendering samples', () => {
@@ -333,12 +393,17 @@ test('compares current issue occurrences with the previous site audit', () => {
   const previous = {
     auditId: 10,
     checkedAt: '2026-07-20T00:00:00.000Z',
+    mode: 'site',
+    ruleVersion: 'rules-v1',
+    site: { origin: 'https://example.com', truncated: false },
     issues: [{
       id: 'title',
       title: '页面标题',
       affectedPages: ['https://example.com/a']
     }],
     sitewide: {
+      version: 'sitewide-audit-v2',
+      checks: [],
       issues: [{
         id: 'broken-links',
         title: '失效内链与外链',
@@ -347,12 +412,17 @@ test('compares current issue occurrences with the previous site audit', () => {
     }
   };
   const current = {
+    mode: 'site',
+    ruleVersion: 'rules-v1',
+    site: { origin: 'https://example.com', truncated: false },
     issues: [{
       id: 'title',
       title: '页面标题',
       affectedPages: ['https://example.com/a']
     }],
     sitewide: {
+      version: 'sitewide-audit-v2',
+      checks: [],
       issues: [{
         id: 'duplicate-titles',
         title: '重复页面标题',
@@ -367,4 +437,165 @@ test('compares current issue occurrences with the previous site audit', () => {
   assert.deepEqual(comparison.added.map((item) => item.id), ['duplicate-titles']);
   assert.deepEqual(comparison.resolved.map((item) => item.id), ['broken-links']);
   assert.deepEqual(comparison.persisting.map((item) => item.id), ['title']);
+});
+
+test('does not claim resolved issues when audit scope or evidence is not comparable', () => {
+  const previous = {
+    auditId: 10,
+    mode: 'site',
+    ruleVersion: 'rules-v1',
+    site: { origin: 'https://example.com', truncated: false },
+    issues: [],
+    sitewide: {
+      version: 'sitewide-audit-v2',
+      checks: [],
+      issues: [{ id: 'broken-links', title: '失效链接', affectedPages: ['https://example.com/'] }]
+    }
+  };
+  const current = {
+    mode: 'site',
+    ruleVersion: 'rules-v2',
+    site: { origin: 'https://example.com', truncated: false },
+    issues: [],
+    sitewide: { version: 'sitewide-audit-v2', checks: [], issues: [] }
+  };
+
+  const comparison = compareAuditIssues(current, previous);
+
+  assert.equal(comparison.status, 'not_comparable');
+  assert.deepEqual(comparison.resolved, []);
+});
+
+test('does not compare issue changes across scoring versions', () => {
+  const base = {
+    mode: 'site',
+    ruleVersion: 'rules-v1',
+    site: { origin: 'https://example.com', truncated: false },
+    issues: [],
+    sitewide: { version: 'sitewide-audit-v2', checks: [], issues: [] }
+  };
+  const previous = {
+    ...base,
+    auditId: 10,
+    scoreVersion: 'score-v1'
+  };
+  const current = {
+    ...base,
+    scoreVersion: 'score-v2'
+  };
+
+  const comparison = compareAuditIssues(current, previous);
+
+  assert.equal(comparison.status, 'not_comparable');
+  assert.deepEqual(comparison.reason_codes, ['score_version']);
+});
+
+test('keeps previously failed checks unverified when current evidence is unknown', () => {
+  const base = {
+    mode: 'site',
+    ruleVersion: 'rules-v1',
+    site: { origin: 'https://example.com', truncated: false },
+    issues: []
+  };
+  const previous = {
+    ...base,
+    auditId: 10,
+    sitewide: {
+      version: 'sitewide-audit-v2',
+      checks: [],
+      issues: [{ id: 'broken-links', title: '失效链接', affectedPages: ['https://example.com/'] }]
+    }
+  };
+  const current = {
+    ...base,
+    sitewide: {
+      version: 'sitewide-audit-v2',
+      checks: [{ id: 'broken-links', status: 'unknown' }],
+      issues: []
+    }
+  };
+
+  const comparison = compareAuditIssues(current, previous);
+
+  assert.equal(comparison.status, 'partial');
+  assert.deepEqual(comparison.resolved, []);
+  assert.deepEqual(comparison.unverified.map((item) => item.id), ['broken-links']);
+});
+
+test('keeps page-rule issues unverified when the current page crawl failed', () => {
+  const base = {
+    mode: 'site',
+    ruleVersion: 'rules-v1',
+    scoreVersion: 'score-v1',
+    site: { origin: 'https://example.com', truncated: false }
+  };
+  const previous = {
+    ...base,
+    auditId: 10,
+    pages: [{ url: 'https://example.com/a', status: 'completed' }],
+    issues: [{ id: 'title', title: '页面标题', affectedPages: ['https://example.com/a'] }],
+    sitewide: { version: 'sitewide-audit-v2', checks: [], issues: [] }
+  };
+  const current = {
+    ...base,
+    pages: [{ url: 'https://example.com/a', status: 'failed' }],
+    issues: [{ id: 'http-status', title: '页面访问状态', affectedPages: ['https://example.com/a'] }],
+    sitewide: { version: 'sitewide-audit-v2', checks: [], issues: [] }
+  };
+
+  const comparison = compareAuditIssues(current, previous);
+
+  assert.equal(comparison.status, 'partial');
+  assert.deepEqual(comparison.resolved, []);
+  assert.deepEqual(comparison.unverified.map((item) => item.id), ['title']);
+});
+
+test('keeps a failed page sitewide occurrence unverified while the same check still fails elsewhere', () => {
+  const base = {
+    mode: 'site',
+    ruleVersion: 'rules-v1',
+    scoreVersion: 'score-v1',
+    site: { origin: 'https://example.com', truncated: false },
+    issues: []
+  };
+  const previous = {
+    ...base,
+    auditId: 10,
+    pages: [
+      { url: 'https://example.com/a', status: 'completed' },
+      { url: 'https://example.com/b', status: 'completed' }
+    ],
+    sitewide: {
+      version: 'sitewide-audit-v2',
+      checks: [],
+      issues: [{
+        id: 'broken-links',
+        title: '失效内链与外链',
+        affectedPages: ['https://example.com/a', 'https://example.com/b']
+      }]
+    }
+  };
+  const current = {
+    ...base,
+    pages: [
+      { url: 'https://example.com/a', status: 'failed' },
+      { url: 'https://example.com/b', status: 'completed' }
+    ],
+    sitewide: {
+      version: 'sitewide-audit-v2',
+      checks: [{ id: 'broken-links', status: 'failed' }],
+      issues: [{
+        id: 'broken-links',
+        title: '失效内链与外链',
+        affectedPages: ['https://example.com/b']
+      }]
+    }
+  };
+
+  const comparison = compareAuditIssues(current, previous);
+
+  assert.equal(comparison.status, 'partial');
+  assert.deepEqual(comparison.resolved, []);
+  assert.deepEqual(comparison.persisting.map((item) => item.url), ['https://example.com/b']);
+  assert.deepEqual(comparison.unverified.map((item) => item.url), ['https://example.com/a']);
 });

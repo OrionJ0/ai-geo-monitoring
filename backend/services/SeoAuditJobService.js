@@ -3,6 +3,7 @@ const SeoAuditJob = require('../models/SeoAuditJob');
 const { normalizeWebsiteUrl } = require('./SeoAuditService');
 const { createSeoSiteAuditService } = require('./SeoSiteAuditService');
 const { createSeoAuditHistoryService } = require('./SeoAuditHistoryService');
+const { compareAuditIssues } = require('./SeoSitewideAnalysisService');
 
 function defaultSchedule(callback) {
   setImmediate(() => Promise.resolve(callback()).catch((error) => {
@@ -61,13 +62,17 @@ function createSeoAuditJobService({
     });
 
     try {
-      const previousReport = typeof historyService.findPreviousSiteReport === 'function'
-        ? await historyService.findPreviousSiteReport(Number(job.user_id), job.requested_url)
-        : null;
       const report = await siteAuditService.audit(job.requested_url, {
-        onProgress: (progress) => job.update({ progress }),
-        previousReport
+        onProgress: (progress) => job.update({ progress })
       });
+      const previousReport = typeof historyService.findPreviousSiteReport === 'function'
+        ? await historyService.findPreviousSiteReport(
+          Number(job.user_id),
+          report.site?.origin || report.finalUrl || job.requested_url,
+          { before: report.checkedAt }
+        )
+        : null;
+      report.comparison = compareAuditIssues(report, previousReport);
       const stored = await historyService.save(Number(job.user_id), report);
       await job.update({
         status: 'completed',

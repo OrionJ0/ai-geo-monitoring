@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { Op } = require('sequelize');
 
 const { createSeoAuditHistoryService } = require('../services/SeoAuditHistoryService');
 
@@ -210,10 +211,40 @@ test('finds the latest previous full-site report for the same origin and user', 
   };
   const service = createSeoAuditHistoryService({ model });
 
-  const report = await service.findPreviousSiteReport(7, 'https://example.com/product');
+  const report = await service.findPreviousSiteReport(7, 'https://example.com/product', {
+    before: '2026-07-24T00:00:00.000Z'
+  });
 
-  assert.deepEqual(receivedQuery.where, { user_id: 7 });
+  assert.equal(receivedQuery.where.user_id, 7);
+  assert.equal(receivedQuery.where[Op.or].length, 4);
+  assert.equal(
+    receivedQuery.where.checked_at[Op.lt].toISOString(),
+    '2026-07-24T00:00:00.000Z'
+  );
   assert.deepEqual(receivedQuery.order, [['checked_at', 'DESC'], ['id', 'DESC']]);
+  assert.equal(receivedQuery.limit, 50);
   assert.equal(report.auditId, 29);
   assert.equal(report.mode, 'site');
+});
+
+test('finds a previous site report when the submitted origin redirected to www', async () => {
+  const model = {
+    async findAll() {
+      return [{
+        id: 41,
+        report: {
+          mode: 'site',
+          requestedUrl: 'https://example.com/',
+          finalUrl: 'https://www.example.com/',
+          site: { origin: 'https://www.example.com' }
+        }
+      }];
+    }
+  };
+  const service = createSeoAuditHistoryService({ model });
+
+  const report = await service.findPreviousSiteReport(7, 'https://example.com/product');
+
+  assert.equal(report.auditId, 41);
+  assert.equal(report.site.origin, 'https://www.example.com');
 });

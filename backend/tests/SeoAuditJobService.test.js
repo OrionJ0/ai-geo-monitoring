@@ -35,14 +35,22 @@ test('creates an async site audit job, persists progress and saves the completed
     }
   };
   const report = {
-    mode: 'site', requestedUrl: 'https://example.com/', finalUrl: 'https://example.com/',
+    mode: 'site', requestedUrl: 'https://example.com/', finalUrl: 'https://www.example.com/',
     checkedAt: '2026-07-23T01:02:00Z', statusCode: 200, durationMs: 120000,
-    score: 80, grade: 'good', summary: { issues: 2 }, site: { auditedPages: 5 }
+    score: 80, grade: 'good', summary: { issues: 2 },
+    site: {
+      origin: 'https://www.example.com',
+      auditedPages: 5,
+      failedPages: 0,
+      truncated: false
+    },
+    pages: [],
+    issues: [],
+    sitewide: { checks: [], issues: [] }
   };
   const siteAuditService = {
-    async audit(url, { onProgress, previousReport }) {
+    async audit(url, { onProgress }) {
       assert.equal(url, 'https://example.com/');
-      assert.equal(previousReport.auditId, 55);
       await onProgress({ phase: 'crawling', auditedPages: 2, discoveredPages: 5, failedPages: 0 });
       return report;
     }
@@ -56,10 +64,18 @@ test('creates an async site audit job, persists progress and saves the completed
     async get(userId, auditId) {
       return userId === 7 && auditId === 77 ? { ...report, auditId } : null;
     },
-    async findPreviousSiteReport(userId, url) {
+    async findPreviousSiteReport(userId, url, { before }) {
       assert.equal(userId, 7);
-      assert.equal(url, 'https://example.com/');
-      return { auditId: 55, mode: 'site', issues: [] };
+      assert.equal(url, 'https://www.example.com');
+      assert.equal(before, report.checkedAt);
+      return {
+        auditId: 55,
+        mode: 'site',
+        site: { origin: 'https://www.example.com', truncated: false },
+        pages: [],
+        issues: [],
+        sitewide: { checks: [], issues: [] }
+      };
     }
   };
   const service = createSeoAuditJobService({
@@ -81,6 +97,7 @@ test('creates an async site audit job, persists progress and saves the completed
   assert.equal(completed.status, 'completed');
   assert.equal(completed.auditId, 77);
   assert.equal(completed.progress.phase, 'completed');
+  assert.equal(completed.report.comparison.previous_audit_id, 55);
   assert.deepEqual(completed.report, { ...report, auditId: 77 });
   assert.equal(await service.get(8, created.id), null);
 });

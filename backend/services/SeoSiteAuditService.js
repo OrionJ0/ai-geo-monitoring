@@ -133,18 +133,21 @@ function createSeoSiteAuditService({
 
       const startedAt = Date.now();
       const requestedUrl = normalizeWebsiteUrl(inputUrl);
-      const origin = new URL(requestedUrl).origin;
+      const entryResponse = await client.fetchPage(requestedUrl);
+      const entryFinalUrl = normalizeHttpUrl(entryResponse.finalUrl || requestedUrl, requestedUrl) || requestedUrl;
+      const origin = new URL(entryFinalUrl).origin;
       const discovered = [];
       const discoveredSet = new Set();
-      const addPage = (value, baseUrl = requestedUrl) => {
+      const addPage = (value, baseUrl = entryFinalUrl) => {
         const normalized = normalizeSameOriginUrl(value, baseUrl, origin);
         if (!normalized || discoveredSet.has(normalized)) return false;
         discoveredSet.add(normalized);
         discovered.push(normalized);
         return true;
       };
-      addPage(requestedUrl);
-      addPage(`${origin}/`);
+      discoveredSet.add(requestedUrl);
+      discovered.push(requestedUrl);
+      if (new URL(entryFinalUrl).pathname !== '/') addPage(`${origin}/`);
 
       await emit(onProgress, { phase: 'discovering', discoveredPages: discovered.length, auditedPages: 0, failedPages: 0 });
 
@@ -181,6 +184,7 @@ function createSeoSiteAuditService({
           });
         }
       }
+      const sitemapInventoryComplete = sitemapQueue.length === 0;
 
       await emit(onProgress, { phase: 'crawling', discoveredPages: discovered.length, auditedPages: 0, failedPages: 0 });
 
@@ -330,21 +334,20 @@ function createSeoSiteAuditService({
         });
       });
       const linkEntries = Array.from(linkTargets.values()).slice(0, rules.crawl.linkProbeLimit);
+      const linkInventoryComplete = linkTargets.size <= rules.crawl.linkProbeLimit;
       const linkChecks = [];
       const probeLink = async (entry) => {
         if (entry.internal) {
           const targetPage = pageByUrl.get(entry.url);
-          if (!targetPage) {
-            linkChecks.push({ ...entry, skipped: true, reason: 'outside_audit_limit' });
+          if (targetPage) {
+            linkChecks.push({
+              ...entry,
+              statusCode: targetPage.statusCode,
+              finalUrl: targetPage.finalUrl || targetPage.url,
+              errorCode: targetPage.status === 'failed' ? targetPage.errorCode : null
+            });
             return;
           }
-          linkChecks.push({
-            ...entry,
-            statusCode: targetPage.statusCode,
-            finalUrl: targetPage.finalUrl || targetPage.url,
-            errorCode: targetPage.status === 'failed' ? targetPage.errorCode : null
-          });
-          return;
         }
         try {
           const response = await client.probe(entry.url);
@@ -387,7 +390,9 @@ function createSeoSiteAuditService({
         sitemapUrls: Array.from(sitemapUrls),
         linkChecks,
         renderAnalysis,
-        truncated
+        truncated,
+        linkInventoryComplete,
+        sitemapInventoryComplete
       });
 
       const totalWeight = checkInstances.reduce((sum, { check }) => sum + check.weight, 0);
@@ -438,6 +443,7 @@ function createSeoSiteAuditService({
           : priority
       ));
       const health = { ...scoredHealth, issues, priorities };
+      const persistedPages = pages.map(({ links: _links, ...page }) => page);
 
       const report = {
         mode: 'site',
@@ -477,7 +483,7 @@ function createSeoSiteAuditService({
         health,
         priorities,
         issues,
-        pages,
+        pages: persistedPages,
         sitewide
       };
       report.comparison = compareAuditIssues(report, previousReport);

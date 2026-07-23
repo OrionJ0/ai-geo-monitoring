@@ -1,4 +1,5 @@
 const SeoAuditRecord = require('../models/SeoAuditRecord');
+const { Op } = require('sequelize');
 
 function positiveInteger(value, fallback, maximum) {
   const parsed = Number(value);
@@ -99,15 +100,26 @@ function createSeoAuditHistoryService({ model = SeoAuditRecord } = {}) {
       return { ...value.report, auditId: value.id };
     },
 
-    async findPreviousSiteReport(userId, inputUrl) {
+    async findPreviousSiteReport(userId, inputUrl, { before } = {}) {
       let origin;
       try {
         origin = new URL(inputUrl).origin;
       } catch {
         return null;
       }
+      const beforeDate = before ? new Date(before) : null;
+      const beforeIsValid = beforeDate && !Number.isNaN(beforeDate.getTime());
       const rows = await model.findAll({
-        where: { user_id: userId },
+        where: {
+          user_id: userId,
+          ...(beforeIsValid ? { checked_at: { [Op.lt]: beforeDate } } : {}),
+          [Op.or]: [
+            { requested_url: origin },
+            { requested_url: { [Op.like]: `${origin}/%` } },
+            { final_url: origin },
+            { final_url: { [Op.like]: `${origin}/%` } }
+          ]
+        },
         attributes: ['id', 'report', 'checked_at'],
         order: [['checked_at', 'DESC'], ['id', 'DESC']],
         limit: 50
@@ -116,13 +128,15 @@ function createSeoAuditHistoryService({ model = SeoAuditRecord } = {}) {
         const value = plainRow(row);
         const report = value?.report;
         if (report?.mode !== 'site') continue;
-        try {
-          if (new URL(report.finalUrl || report.requestedUrl).origin === origin) {
-            return { ...report, auditId: value.id };
-          }
-        } catch {
-          // Ignore malformed historical imports and continue to an older usable baseline.
-        }
+        const reportOrigins = [report.requestedUrl, report.finalUrl, report.site?.origin]
+          .map((url) => {
+            try {
+              return new URL(url).origin;
+            } catch {
+              return '';
+            }
+          });
+        if (reportOrigins.includes(origin)) return { ...report, auditId: value.id };
       }
       return null;
     }
