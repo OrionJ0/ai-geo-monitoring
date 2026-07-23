@@ -170,7 +170,7 @@ test('用户可以编辑问题集，删除问题集后其中的单问题仍然�
   assert.equal(remainingQuestions.every((item) => item.prompt_group_id == null), true);
 });
 
-test('问题集内的启用问题可以一起入队，单问题仍可独立运行', async () => {
+test('问题集内每个启用问题使用项目全部模型入队，单问题仍保留自己的模型范围', async () => {
   const questions = await TrackedPrompt.findAll({
     where: { project_id: project.id },
     order: [['id', 'ASC']]
@@ -213,6 +213,7 @@ test('问题集内的启用问题可以一起入队，单问题仍可独立运�
     assert.equal(setRunResponse.payload.success, true);
     assert.equal(calls[0].type, 'set');
     assert.deepEqual(calls[0].options.prompts.map((item) => item.id), [questions[0].id]);
+    assert.deepEqual(calls[0].options.prompts[0].platforms, ['doubao', 'deepseek']);
     assert.equal(calls[0].options.promptSelectionExplicit, true);
     assert.ok(Number(setRunResponse.payload.data.question_set_run_id) > 0);
     assert.match(setRunResponse.payload.data.report_url, /\/geo\/question-set-reports\?/);
@@ -225,6 +226,7 @@ test('问题集内的启用问题可以一起入队，单问题仍可独立运�
     assert.equal(singleRunResponse.payload.success, true);
     assert.equal(calls[1].type, 'single');
     assert.deepEqual(calls[1].options.prompts.map((item) => item.id), [questions[0].id]);
+    assert.deepEqual(calls[1].options.prompts[0].platforms, ['doubao']);
   } finally {
     ProjectRunService.enqueueProjectRun = originalEnqueue;
     ProjectRunService.runProject = originalRun;

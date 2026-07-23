@@ -720,10 +720,14 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
     if (!questions.length) {
       return res.status(400).json({ success: false, message: '问题集中没有可运行的启用问题' });
     }
+    const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
     const result = await ProjectRunService.enqueueProjectRun({
       project: req.brandProject,
-      prompts: questions.map((item) => item.toJSON()),
-      platforms: cleanPlatforms(req.brandProject.platforms),
+      prompts: questions.map((item) => ({
+        ...item.toJSON(),
+        platforms: projectPlatforms
+      })),
+      platforms: projectPlatforms,
       user: req.user,
       promptSelectionExplicit: true
     });
