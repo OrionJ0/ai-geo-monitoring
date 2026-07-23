@@ -78,8 +78,9 @@
 - 有效性规则：`robots.txt`、Sitemap、Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 和图片 Alt 均校验实际内容，文件返回 200、标签存在或 `robots.txt` 声明 Sitemap 本身不等于通过
 - 爬虫权限：按每个被检测路径解析 `robots.txt`，展示 Googlebot、Bingbot、Baiduspider 和重要 AI 搜索、用户触发、训练类 token；搜索/AI 搜索阻断纳入评分，其余作为授权信息不计分。全开放只表示 robots 未声明限制，不能证明真实抓取、收录或引用
 - 搜索平台：固定从站点首页分别检查 Google、Bing、百度非空 HTML 验证标签；该结果只表示页面源码信号，不能证明平台后台当前已验证，也不检测 DNS 或验证文件方式
-- 权重维护：`backend/config/seoAuditRules.js` 集中维护规则版本、严重程度、权重、阈值、爬虫画像、页面上限、并发和 Sitemap 深度；Keywords 默认权重为 1，爬虫权限默认权重为 7
+- 权重维护：`backend/config/seoAuditRules.js` 集中维护规则版本、严重程度、权重、阈值、爬虫画像、页面上限、并发和 Sitemap 深度；Keywords 默认权重为 1，Sitemap 和爬虫权限默认权重均为 7
 - 历史与任务：全站任务进度和成功报告均写入本地 SQLite（生产仍兼容 Postgres），服务重启会重新入队未完成任务；历史按当前用户隔离，并兼容旧单页报告
+- 数据往返：当前报告可导出 `seo_audit_report_v1` 标准长表 CSV；表格按 report、issue、check、page、platform、crawler 等记录类型展开，固定列可用于筛选分析，原文件可重新导入为当前账户的新历史报告
 - 当前边界：不执行浏览器渲染，不提供真实 Core Web Vitals、关键词排名、收录量或外链数据库
 - 竞品调研见 `solutions/2026-07-22-seo-audit-mvp.md`；正式全站实现见 `solutions/2026-07-23-seo-site-audit.md`
 

@@ -38,7 +38,7 @@
   - 不把服务器响应时间等同于真实 Core Web Vitals。
   - 本期不运行浏览器渲染，不保证发现仅在复杂客户端交互后出现的 URL。
 - Later:
-  - PageSpeed/CrUX/Lighthouse、JavaScript 渲染抽样、IndexNow 状态、Hreflang 双向验证、定时复测、报告对比与导出。
+  - PageSpeed/CrUX/Lighthouse、JavaScript 渲染抽样、IndexNow 状态、Hreflang 双向验证、定时复测与报告对比。
 
 ## Product Behavior
 
@@ -124,4 +124,12 @@
 - 报告按当前页面路径展示 Google、Bing、百度、OpenAI、Anthropic、Perplexity、Google-Extended 与 CCBot 的 robots 权限和命中规则；全站检测逐路径计算并聚合受影响 URL。
 - 用户触发访问的 robots 约束可能不适用，AI 训练/数据开放属于站点授权选择，两类均展示但不计分。
 - `robots.txt` 全开放、普通 4xx 或空内容只判为“未声明限制”，不能表述为真实 UA 一定可访问、会收录或会引用；429、5xx、网络失败及无法解析的非空文件必须返回“无法判断”。
-- 爬虫画像、类别、是否计分、策略类型与官方说明链接统一维护在 `backend/config/seoAuditRules.js`；规则版本更新为 `2026-07-23-v2`，旧历史报告不重算且仍可打开。
+- 爬虫画像、类别、是否计分、策略类型与官方说明链接统一维护在 `backend/config/seoAuditRules.js`；规则版本更新为 `2026-07-23-v3`，旧历史报告不重算且仍可打开。
+
+## 2026-07-23 全站发现与数据往返补充需求（已交付）
+
+- 修复首页首个链接为重复 URL 时中止整个链接遍历的问题；真实 `gato.com.cn` 复测从 1 页恢复为发现 45 页。
+- Sitemap 提升为高优先级、权重 7；空 `urlset`、空文件、不可访问或无有效 URL 均不能通过。
+- 单页和全站历史报告均可导出 `seo_audit_report_v1` 固定 26 列长表 CSV；记录类型覆盖报告、问题、检查项、页面、平台和爬虫数据。
+- 标准 CSV 可重新导入为当前账户的新历史记录，不覆盖原报告；必须保留原报告编号、原检测时间、导入时间和完整结构化数据。
+- 导入必须执行 10MB/20000 行限制、固定表头和 schema 校验、唯一 report 行校验、报告必需字段校验及电子表格公式注入防护。

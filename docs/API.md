@@ -91,7 +91,7 @@ Authorization: Bearer <token>
   - 爬虫权限：响应的 `crawlerAccess` 按当前页面路径分别展示 Google、Bing、百度和重要 AI 爬虫在 `robots.txt` 中的允许、禁止或无法判断状态；搜索与 AI 搜索爬虫纳入评分，用户触发访问及 AI 训练/数据使用策略不计分
   - 判定边界：`robots.txt` 返回普通 4xx 或内容为空表示“未声明抓取限制”，但独立的 `robots-txt` 有效性检查仍会报缺失/空内容；429、5xx、网络失败或非空但无法解析的文件返回“无法判断”。允许状态不能证明真实 UA 已成功访问、收录或引用
   - 搜索平台标签：固定从站点首页分别检查 Google、Bing、百度 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不识别 DNS 或验证文件方式
-  - 评分配置：响应包含 `scoreVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`，Keywords 默认权重为 1，爬虫权限默认权重为 7
+  - 评分配置：响应包含 `scoreVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前 `2026-07-23-v3` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：拒绝带用户名/密码的网址、本机和私网 IP、解析到私网的域名，以及重定向到私网的目标；最多跟随 5 次重定向，超时 10 秒，页面响应体上限 2 MB
 - `POST /api/seo-audits/site` 创建全站异步检测任务
@@ -109,6 +109,13 @@ Authorization: Bearer <token>
   - 返回：`items` 与 `pagination`；`summary.mode` 区分 `site` / `page`，`summary.pages` 为检测页数，摘要不包含完整报告正文
 - `GET /api/seo-audits/:id` 获取一条完整历史报告
   - 权限验证：只能读取当前用户自己的记录；记录不存在或不属于当前用户时统一返回 404
+- `GET /api/seo-audits/:id/export` 导出当前用户的一条历史报告
+  - 返回：UTF-8 BOM 的 `text/csv` 文件，schema 为 `seo_audit_report_v1`
+  - 表格结构：固定 26 列，以 `record_type` 区分 report、issue、check、page、page_issue、platform、crawler、page_crawler；`record_json` 保留该行结构化数据，其中 report 行用于无损回导
+- `POST /api/seo-audits/import` 导入标准 SEO CSV
+  - 请求：原始 CSV 文本，`Content-Type: text/csv`，最大 10MB、20000 条数据行
+  - 校验：列顺序、schema 版本、唯一 report 行、报告模式、网址、分数、摘要和模式必需数据；公式型可见字段在导出时会加前缀防止电子表格执行
+  - 返回：`201 Created` 和新历史报告；导入记录归属当前用户，保留 `sourceAuditId`、`sourceCheckedAt`，并以导入时间作为新历史时间
 
 请求示例：
 
