@@ -273,7 +273,13 @@ test('uses the selected analysis window in citation gap evidence', () => {
       { id: 1, question: '静音轮胎怎么选', enabled: true, category: '购买决策' }
     ],
     promptPerformance: {
-      1: { checks: 3, brand_mention_rate: 80, avg_share_of_voice: 60, citation_rate: 0 }
+      1: {
+        checks: 3,
+        citation_eligible_checks: 3,
+        brand_mention_rate: 80,
+        avg_share_of_voice: 60,
+        citation_rate: 0
+      }
     },
     metrics: []
   });
@@ -513,6 +519,25 @@ test('does not classify citation gaps before enough prompt samples exist', () =>
   });
 
   assert.equal(opportunities.some((item) => item.type === '样本不足'), true);
+  assert.equal(opportunities.some((item) => item.type === '引用缺口'), false);
+});
+
+test('does not classify legacy-unverified analyses as a citation gap', () => {
+  const opportunities = OpportunityInsightService.build({
+    prompts: [{ id: 1, question: '静音轮胎怎么选', enabled: true }],
+    promptPerformance: {
+      1: {
+        checks: 10,
+        citation_eligible_checks: 0,
+        citation_unverified_checks: 10,
+        brand_mention_rate: 80,
+        avg_share_of_voice: 60,
+        citation_rate: 0
+      }
+    },
+    metrics: []
+  });
+
   assert.equal(opportunities.some((item) => item.type === '引用缺口'), false);
 });
 

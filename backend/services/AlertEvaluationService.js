@@ -132,14 +132,17 @@ class AlertEvaluationService {
         }
       }
 
-      if (rule.type === 'citation_gap' && hasEffectiveMetrics) {
+      if (
+        rule.type === 'citation_gap'
+        && Number(summary?.citation_eligible_checks || 0) >= MIN_EFFECTIVE_METRIC_ALERT_CHECKS
+      ) {
         const value = Number(summary?.citation_rate || 0);
         if (value < threshold) {
           decisions.push({
             rule_id: rule.id,
             type: rule.type,
             value,
-            message: `引用率 ${value}% 低于阈值 ${threshold}%`
+            message: `明确引用率 ${value}% 低于阈值 ${threshold}%`
           });
         }
       }

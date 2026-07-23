@@ -217,6 +217,7 @@ export default function GeoPromptsPage() {
     const statusColor = row.status === 'completed' ? 'success' : row.status === 'failed' ? 'error' : 'processing';
     const originalText = row?.resultDetail?.ai_response_original || '';
     const citationSources = normalizeHistoryCitationSources(row?.visibilityMetric?.citation_sources);
+    const citationEvidenceStatus = row?.visibilityMetric?.citation_evidence_status;
     const safeErrorMessage = formatHistoryErrorMessage(row.error_message);
     const safeParsingErrorMessage = formatHistoryParsingErrorMessage(row?.resultDetail?.parsing_error);
 
@@ -274,8 +275,10 @@ export default function GeoPromptsPage() {
               </Space>
             ) : <span>-</span>}
           </Descriptions.Item>
-          <Descriptions.Item label="引用来源" span={2}>
-            {citationSources.length ? (
+          <Descriptions.Item label="明确引用来源" span={2}>
+            {citationEvidenceStatus === 'legacy_unverified' ? (
+              <Text type="warning">历史混合来源无法区分证据角色，不计入明确引用 KPI</Text>
+            ) : citationSources.length ? (
               <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                 {citationSources.slice(0, 8).map((source) => (
                   <Space key={`${source.url || source.domain}-${source.source_type}`} size={[6, 4]} wrap>
@@ -857,11 +860,13 @@ export default function GeoPromptsPage() {
       sorter: (a, b) => Number(a.performance?.avg_brand_rank || 0) - Number(b.performance?.avg_brand_rank || 0),
     },
     {
-      title: '引用率',
+      title: '明确引用率',
       dataIndex: ['performance', 'citation_rate'],
       key: 'citation_rate',
       width: 100,
-      render: percent,
+      render: (value, row) => Number(row.performance?.citation_eligible_checks || 0) > 0
+        ? percent(value)
+        : '暂无可验证样本',
       sorter: (a, b) => Number(a.performance?.citation_rate || 0) - Number(b.performance?.citation_rate || 0),
     },
     {

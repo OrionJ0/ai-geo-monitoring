@@ -13,6 +13,12 @@ function formatRank(value) {
   return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '-';
 }
 
+function formatCitationRate(value, item) {
+  return Number(item?.citation_eligible_checks || 0) > 0
+    ? `${percent(value)}%`
+    : '暂无可验证样本';
+}
+
 function csvEscape(value) {
   const text = String(value ?? '');
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -60,28 +66,28 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ['失败率', `${percent(summary.failure_rate)}%`],
     ['品牌提及率', `${percent(summary.brand_mention_rate)}%`],
     ['平均声量占比（SOV）', `${percent(summary.avg_share_of_voice)}%`],
-    ['引用率', `${percent(summary.citation_rate)}%`],
+    ['明确引用率', formatCitationRate(summary.citation_rate, summary)],
     ['推荐率', `${percent(summary.recommendation_rate)}%`],
     ['负向情绪率', `${percent(summary.negative_sentiment_rate)}%`],
     ['平均品牌排名', formatRank(summary.avg_brand_rank)],
-    ['自有来源覆盖率', `${percent(summary.owned_citation_rate)}%`],
-    ['总引用来源', sourceSummary.total_citations || 0],
+    ['自有来源覆盖率', formatCitationRate(summary.owned_citation_rate, summary)],
+    ['明确引用来源总数', sourceSummary.total_citations || 0],
     ['来源域名数', sourceSummary.source_domain_count || 0],
     [],
     ['平台表现'],
-    ['平台', '有效分析数', '品牌提及率', '平均声量占比（SOV）', '引用率', '推荐率', '平均品牌排名'],
+    ['平台', '有效分析数', '品牌提及率', '平均声量占比（SOV）', '明确引用率', '推荐率', '平均品牌排名'],
     ...platforms.map((item) => [
       platformLabel[item.platform] || item.platform || '未知',
       item.checks || 0,
       `${percent(item.brand_mention_rate)}%`,
       `${percent(item.avg_share_of_voice)}%`,
-      `${percent(item.citation_rate)}%`,
+      formatCitationRate(item.citation_rate, item),
       `${percent(item.recommendation_rate)}%`,
       formatRank(item.avg_brand_rank),
     ]),
     [],
     ['分类覆盖'],
-    ['分类', '问题数', '启用问题数', '运行数', '失败数', '失败率', '有效分析数', '品牌提及率', '平均声量占比（SOV）', '引用率', '推荐率'],
+    ['分类', '问题数', '启用问题数', '运行数', '失败数', '失败率', '有效分析数', '品牌提及率', '平均声量占比（SOV）', '明确引用率', '推荐率'],
     ...categories.map((item) => [
       item.category || '未分类',
       item.prompt_count || 0,
@@ -92,7 +98,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
       item.checks || 0,
       `${percent(item.brand_mention_rate)}%`,
       `${percent(item.avg_share_of_voice)}%`,
-      `${percent(item.citation_rate)}%`,
+      formatCitationRate(item.citation_rate, item),
       `${percent(item.recommendation_rate)}%`,
     ]),
     [],
@@ -106,18 +112,18 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['趋势'],
-    ['日期', '有效分析数', '品牌提及率', '平均声量占比（SOV）', '引用率', '推荐率'],
+    ['日期', '有效分析数', '品牌提及率', '平均声量占比（SOV）', '明确引用率', '推荐率'],
     ...trend.map((item) => [
       item.date,
       item.checks || 0,
       `${percent(item.brand_mention_rate)}%`,
       `${percent(item.avg_share_of_voice)}%`,
-      `${percent(item.citation_rate)}%`,
+      formatCitationRate(item.citation_rate, item),
       `${percent(item.recommendation_rate)}%`,
     ]),
     [],
     ['来源类型'],
-    ['类型', '引用次数', '覆盖回答', '域名数'],
+    ['类型', '明确引用次数', '覆盖回答', '域名数'],
     ...sourceTypes.map((item) => [
       item.type || '未知来源',
       item.citation_count || 0,
@@ -126,7 +132,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['Top 引用域名'],
-    ['域名', '来源类型', '覆盖回答', '引用次数', '平台', '问题分类'],
+    ['域名', '来源类型', '覆盖回答', '明确引用次数', '平台', '问题分类'],
     ...sourceDomains.map((item) => [
       item.domain || '',
       item.source_type || '未知来源',
@@ -137,7 +143,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['Top 引用 URL'],
-    ['URL', '域名', '来源类型', '覆盖回答', '引用次数', '平台', '问题分类'],
+    ['URL', '域名', '来源类型', '覆盖回答', '明确引用次数', '平台', '问题分类'],
     ...sourceUrls.map((item) => [
       item.url || '',
       item.domain || '',
@@ -149,7 +155,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['新增引用域名'],
-    ['域名', '来源类型', '引用次数', '平台', '问题分类'],
+    ['域名', '来源类型', '明确引用次数', '平台', '问题分类'],
     ...newDomains.map((item) => [
       item.domain || '',
       item.source_type || '未知来源',
@@ -159,7 +165,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['流失引用域名'],
-    ['域名', '来源类型', '引用次数', '平台', '问题分类'],
+    ['域名', '来源类型', '明确引用次数', '平台', '问题分类'],
     ...droppedDomains.map((item) => [
       item.domain || '',
       item.source_type || '未知来源',
@@ -169,7 +175,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['保留引用域名'],
-    ['域名', '来源类型', '引用次数', '平台', '问题分类'],
+    ['域名', '来源类型', '明确引用次数', '平台', '问题分类'],
     ...retainedDomains.map((item) => [
       item.domain || '',
       item.source_type || '未知来源',
@@ -179,7 +185,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['新增引用 URL'],
-    ['URL', '域名', '来源类型', '引用次数', '平台', '问题分类'],
+    ['URL', '域名', '来源类型', '明确引用次数', '平台', '问题分类'],
     ...newUrls.map((item) => [
       item.url || '',
       item.domain || '',
@@ -190,7 +196,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['流失引用 URL'],
-    ['URL', '域名', '来源类型', '引用次数', '平台', '问题分类'],
+    ['URL', '域名', '来源类型', '明确引用次数', '平台', '问题分类'],
     ...droppedUrls.map((item) => [
       item.url || '',
       item.domain || '',
@@ -201,7 +207,7 @@ function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel
     ]),
     [],
     ['保留引用 URL'],
-    ['URL', '域名', '来源类型', '引用次数', '平台', '问题分类'],
+    ['URL', '域名', '来源类型', '明确引用次数', '平台', '问题分类'],
     ...retainedUrls.map((item) => [
       item.url || '',
       item.domain || '',

@@ -14,7 +14,7 @@ const ruleTypes = [
   { value: 'visibility_drop', label: '可见度下降', description: '品牌提及率或声量占比（SOV）低于阈值' },
   { value: 'competitor_ahead', label: '竞品领先', description: '竞品可见度得分领先品牌达到阈值' },
   { value: 'negative_sentiment', label: '负面情绪', description: '品牌被提及回答中的负向占比超过阈值' },
-  { value: 'citation_gap', label: '引用率低', description: 'AI 回答引用率低于阈值' },
+  { value: 'citation_gap', label: '明确引用率低', description: 'AI 回答明确引用率低于阈值' },
   { value: 'platform_gap', label: '平台差异', description: '不同监测平台的品牌提及率差距超过阈值' },
   { value: 'source_drop', label: '来源流失', description: '流失引用域名或 URL 数达到阈值' },
   { value: 'task_failure', label: '任务失败', description: '检测任务失败次数超过阈值' },

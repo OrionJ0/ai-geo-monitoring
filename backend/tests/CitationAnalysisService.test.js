@@ -60,6 +60,21 @@ test('separates explicit citations, response links, retrieval candidates and ana
   ]);
 });
 
+test('does not promote unclassified legacy provider sources to explicit citations', () => {
+  const result = CitationAnalysisService.extractSources({
+    responseText: '历史回答没有明确引用标记。',
+    aiResponse: [
+      { url: 'https://legacy.example.com/result', title: '旧平台混合来源' }
+    ],
+    brand: { website: 'https://brand.cn' },
+    competitors: []
+  });
+
+  assert.equal(result.citation_count, 0);
+  assert.deepEqual(result.sources, []);
+  assert.deepEqual(result.source_groups.retrieval_sources, []);
+});
+
 test('deduplicates explicit citations separately from response links', () => {
   const result = CitationAnalysisService.extractSources({
     responseText: '参考 https://www.michelin.com.cn/tyres 和 https://example.com/a?x=1。',

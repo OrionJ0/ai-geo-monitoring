@@ -66,7 +66,7 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.match(source, /analysis_diagnostics/);
   assert.match(source, /错误代码/);
   assert.match(source, /输出长度/);
-  assert.match(source, /官网引用率/);
+  assert.match(source, /官网明确引用率/);
   assert.match(source, /summary\.owned_citation_rate/);
   assert.match(source, /summary\.total_owned_citations/);
   assert.match(source, /source\.owned/);
@@ -75,6 +75,8 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.match(source, /回答正文链接（不计入 KPI）/);
   assert.match(source, /平台检索候选（不计入 KPI）/);
   assert.match(source, /分析模型补充来源（不计入 KPI）/);
+  assert.match(source, /历史混合来源.*不计入明确引用 KPI/);
+  assert.match(source, /有效分析.*明确引用/);
 });
 
 test('问题集运行历史从右侧抽屉打开，主页面只保留单次报告', () => {

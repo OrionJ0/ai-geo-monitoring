@@ -61,6 +61,8 @@ type ReportSummary = {
   failed?: number;
   pending?: number;
   valid_analyses?: number;
+  citation_valid_analyses?: number;
+  citation_unverified_analyses?: number;
   competitor_baseline_count?: number;
   brand_mention_rate?: number;
   recommendation_rate?: number;
@@ -114,6 +116,9 @@ type ReportRow = {
   brand_rank?: number | null;
   citation_count?: number;
   owned_citation_count?: number;
+  citation_evidence_status?: 'explicit' | 'legacy_unverified' | 'none';
+  legacy_citation_count?: number;
+  legacy_citation_sources?: CitationSource[];
   sentiment?: string;
   analysis_method?: string;
   analysis_platform?: string;
@@ -628,7 +633,7 @@ export default function QuestionSetReportsPage() {
       render: formatRank,
     },
     {
-      title: '引用',
+      title: '明确引用',
       dataIndex: 'citation_count',
       width: pdfLayout ? 60 : 70,
       render: (value: number) => Number(value || 0),
@@ -840,7 +845,7 @@ export default function QuestionSetReportsPage() {
                       label: (
                         <span className={styles.moreMetricsLabel}>
                           <Text strong>更多指标</Text>
-                          <Text type="secondary">{hasCompetitorBaseline ? '竞品声量、引用和执行情况' : '引用和执行情况'}</Text>
+                          <Text type="secondary">{hasCompetitorBaseline ? '竞品声量、明确引用和执行情况' : '明确引用和执行情况'}</Text>
                         </span>
                       ),
                       children: (
@@ -853,26 +858,30 @@ export default function QuestionSetReportsPage() {
                             />
                           ) : null}
                           <MetricItem
-                            label="引用率"
-                            value={`${percent(summary.citation_rate)}%`}
-                            help="至少包含 1 条可核验引用来源的有效分析数 ÷ 有效分析数。"
+                            label="明确引用率"
+                            value={Number(summary.citation_valid_analyses || 0) > 0
+                              ? `${percent(summary.citation_rate)}%`
+                              : '暂无可验证样本'}
+                            help="回答中至少包含 1 条平台明确引用标记的可验证分析数 ÷ 明确引用口径可验证分析数。正文链接、检索候选、分析模型补充来源和历史混合来源均不计入。"
                           />
                           <MetricItem
-                            label="官网引用率"
+                            label="官网明确引用率"
                             value={selectedProject?.website
-                              ? `${percent(summary.owned_citation_rate)}%`
+                              ? (Number(summary.citation_valid_analyses || 0) > 0
+                                  ? `${percent(summary.owned_citation_rate)}%`
+                                  : '暂无可验证样本')
                               : '未配置官网'}
-                            help="至少引用 1 次品牌官网的有效分析数 ÷ 有效分析数。引用域名等于品牌项目中配置的官网域名或其子域名时，计为官网引用；未配置官网时无法识别。"
+                            help="至少明确引用 1 次品牌官网的可验证分析数 ÷ 明确引用口径可验证分析数。引用域名等于品牌项目中配置的官网域名或其子域名时，计为官网引用；未配置官网时无法识别。"
                           />
                           <MetricItem
-                            label="官网引用次数"
+                            label="官网明确引用次数"
                             value={selectedProject?.website ? (summary.total_owned_citations || 0) : '未配置官网'}
                             help="本次所有有效分析中，引用域名属于品牌官网或其子域名的引用条数合计。"
                           />
                           <MetricItem
-                            label="总引用次数"
+                            label="明确引用总次数"
                             value={summary.total_citations || 0}
-                            help="本次所有有效分析中识别到的可核验引用来源条数合计，同一回答中的多条来源分别计数。"
+                            help="本次所有有效分析中，平台明确标注为引用的来源条数合计；历史混合来源不进入此指标。"
                           />
                           <MetricItem
                             label="执行状态"
@@ -891,7 +900,7 @@ export default function QuestionSetReportsPage() {
                       <Text className={styles.panelKicker}>每个问题 × 全部项目模型</Text>
                       <Title level={4} id="run-results-title">逐问题结果</Title>
                     </div>
-                    <Text type="secondary">有效分析 {summary.valid_analyses || 0} · 引用 {summary.total_citations || 0}</Text>
+                    <Text type="secondary">有效分析 {summary.valid_analyses || 0} · 明确引用 {summary.total_citations || 0}</Text>
                   </div>
                   <Table<ReportRow>
                     size="small"
@@ -1048,6 +1057,14 @@ export default function QuestionSetReportsPage() {
                           ) : null}
                           <Text className={styles.answerLabel}>AI 原始回答</Text>
                           <Paragraph className={styles.answerText}>{row.answer || '暂无回答内容'}</Paragraph>
+                          {row.citation_evidence_status === 'legacy_unverified' ? (
+                            <Alert
+                              type="warning"
+                              showIcon
+                              title={`历史混合来源${row.legacy_citation_count ? ` · ${row.legacy_citation_count} 条` : ''}，不计入明确引用 KPI`}
+                              description="旧记录无法可靠区分明确引用、正文链接和检索候选，因此只作历史参考，不再计入引用率和引用次数。"
+                            />
+                          ) : null}
                           {Array.isArray(row.citation_sources) && row.citation_sources.length ? (
                             <Space orientation="vertical" size={4}>
                               <Text className={styles.answerLabel}>明确引用来源（计入核心 KPI）</Text>
@@ -1060,6 +1077,27 @@ export default function QuestionSetReportsPage() {
                                 </Space>
                               ) : null)}
                             </Space>
+                          ) : null}
+                          {Array.isArray(row.legacy_citation_sources) && row.legacy_citation_sources.length ? (
+                            <Collapse
+                              size="small"
+                              items={[{
+                                key: 'legacy-mixed-sources',
+                                label: `历史混合来源（仅供参考）· ${row.legacy_citation_sources.length}`,
+                                children: (
+                                  <Space orientation="vertical" size={4}>
+                                    {row.legacy_citation_sources.slice(0, 20).map((source, index) => (
+                                      <Text key={`${source.url || source.domain || 'legacy'}-${index}`}>
+                                        {source.title || source.domain || source.url || '未知来源'}
+                                      </Text>
+                                    ))}
+                                    {row.legacy_citation_sources.length > 20
+                                      ? <Text type="secondary">仅展示前 20 条历史来源</Text>
+                                      : null}
+                                  </Space>
+                                ),
+                              }]}
+                            />
                           ) : null}
                           {row.analysis_structure?.citations?.source_groups ? (
                             <Collapse

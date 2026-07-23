@@ -120,14 +120,15 @@ class OpportunityInsightService {
         });
       }
 
-      if (Number(perf.citation_rate || 0) === 0 && checks >= 3) {
+      const citationChecks = Number(perf.citation_eligible_checks || 0);
+      if (Number(perf.citation_rate || 0) === 0 && citationChecks >= 3) {
         add({
           type: '引用缺口',
           priority: 'medium',
           prompt_id: prompt.id,
           prompt: prompt.question,
           prompt_category: PromptCategoryService.derive(prompt),
-          evidence: `近 ${analysisDays} 天 ${checks} 次分析均未引用来源`,
+          evidence: `近 ${analysisDays} 天 ${citationChecks} 次可验证分析均未获得明确引用`,
           recommendation: '优先建设可被引用的产品页、FAQ、评测材料或权威第三方内容'
         });
       }

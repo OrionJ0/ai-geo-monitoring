@@ -34,6 +34,7 @@ const ProjectDeletionService = require('../services/ProjectDeletionService');
 const ProjectLifecycleService = require('../services/ProjectLifecycleService');
 const ProjectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
 const QuestionSetRunService = require('../services/QuestionSetRunService');
+const CitationMetricSemanticsService = require('../services/CitationMetricSemanticsService');
 const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
 const { CsvValidationError } = require('../services/QuestionSetRunCsvService');
 
@@ -1352,7 +1353,14 @@ router.get('/:projectId/prompts/:promptId/history', loadProject, async (req, res
       order: [['created_at', 'DESC']],
       limit
     });
-    return res.json({ success: true, data: rows });
+    const data = rows.map((item) => {
+      const row = item?.toJSON ? item.toJSON() : item;
+      return {
+        ...row,
+        visibilityMetric: CitationMetricSemanticsService.normalizeForRead(row.visibilityMetric)
+      };
+    });
+    return res.json({ success: true, data });
   } catch (error) {
     return res.status(500).json({ success: false, message: '获取问题历史失败' });
   }
@@ -1438,7 +1446,10 @@ router.get('/:projectId/dashboard', loadProject, async (req, res) => {
         summary,
         trend: ProjectMetricsService.buildTrend(plain, days, { referenceDate: periodEnd }),
         opportunities,
-        recent_metrics: plain.slice(-20).reverse()
+        recent_metrics: plain
+          .slice(-20)
+          .reverse()
+          .map((metric) => CitationMetricSemanticsService.normalizeForRead(metric))
       }
     });
   } catch (error) {

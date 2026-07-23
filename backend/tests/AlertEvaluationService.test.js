@@ -43,6 +43,7 @@ test('evaluates alert rules from recent metrics and failures', () => {
     { id: 7, type: 'platform_gap', threshold: 80, enabled: true }
   ], {
     total_checks: 4,
+    citation_eligible_checks: 4,
     brand_mentioned_checks: 4,
     brand_mention_rate: 50,
     avg_share_of_voice: 35,
@@ -215,6 +216,19 @@ test('does not trigger metric-based alerts without effective analysis data', () 
   });
 
   assert.deepEqual(decisions.map((item) => item.rule_id), [4]);
+});
+
+test('does not trigger citation alerts from legacy-unverified samples', () => {
+  const decisions = AlertEvaluationService.evaluateRules([
+    { id: 1, type: 'citation_gap', threshold: 30, enabled: true }
+  ], {
+    total_checks: 10,
+    citation_eligible_checks: 0,
+    citation_unverified_checks: 10,
+    citation_rate: 0
+  });
+
+  assert.deepEqual(decisions, []);
 });
 
 test('does not trigger metric-based alerts before enough effective samples exist', () => {

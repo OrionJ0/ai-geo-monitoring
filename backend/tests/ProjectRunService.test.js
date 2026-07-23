@@ -459,7 +459,7 @@ test('builds complete visibility metric payload for any project detection path',
     assert.equal(payload.analysis_platform, 'analysis-ai');
     assert.equal(payload.analysis_model, 'analysis-model');
     assert.equal(payload.analysis_structure.citations.count, 1);
-    assert.equal(payload.analysis_structure.citations.semantics_version, 'explicit-citation-v1');
+    assert.equal(payload.analysis_structure.citations.semantics_version, 'explicit-citation-v2');
     assert.equal(payload.analysis_structure.citations.official_website_cited, true);
     assert.equal(payload.analysis_structure.citations.sources[0].domain, 'michelin.com.cn');
     assert.deepEqual(
@@ -483,6 +483,31 @@ test('keeps provider retrieval candidates out of stored citation metrics', () =>
     'explicit_citation',
     'retrieval_candidate',
     'retrieval_candidate'
+  ]);
+});
+
+test('preserves explicit citation when the same URL also appears as a retrieval candidate', () => {
+  const snapshot = ProjectRunService.snapshotProviderCitations({
+    output: [{
+      type: 'web_search_call',
+      action: {
+        sources: [{ url: 'https://example.com/report', title: '同一来源' }]
+      }
+    }, {
+      type: 'message',
+      content: [{
+        type: 'output_text',
+        annotations: [{
+          type: 'url_citation',
+          url_citation: { url: 'https://example.com/report', title: '同一来源' }
+        }]
+      }]
+    }]
+  });
+
+  assert.deepEqual(snapshot.map((source) => source.source_role), [
+    'retrieval_candidate',
+    'explicit_citation'
   ]);
 });
 

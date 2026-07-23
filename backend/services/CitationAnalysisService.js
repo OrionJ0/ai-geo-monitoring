@@ -294,23 +294,14 @@ class CitationAnalysisService {
       retrieval_sources: [],
       analysis_sources: []
     };
-    const providerEvidence = Array.isArray(aiResponse)
-      ? aiResponse.map((source) => ({
-          ...source,
-          source_role: source?.source_role
-            || (source?.source_origin === 'web_search'
-              ? this.SOURCE_ROLES.retrieval
-              : this.SOURCE_ROLES.explicit)
-        }))
-      : aiResponse;
-    this.collectMetadataSources(providerEvidence).forEach((source) => {
+    this.collectMetadataSources(aiResponse).forEach((source) => {
       const role = source.source_role
         || (source.source_origin === 'web_search'
           ? this.SOURCE_ROLES.retrieval
-          : this.SOURCE_ROLES.explicit);
+          : '');
       if (role === this.SOURCE_ROLES.retrieval) {
         groupedRawSources.retrieval_sources.push(source);
-      } else {
+      } else if (role === this.SOURCE_ROLES.explicit) {
         groupedRawSources.explicit_citations.push(source);
       }
     });

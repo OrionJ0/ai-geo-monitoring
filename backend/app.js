@@ -67,7 +67,6 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 // 数据库连接与模型
 const { sequelize, User, MembershipPlan, Setting } = require('./models');
 const { DataTypes } = require('sequelize');
-const { createCitationMetricRepairService } = require('./services/CitationMetricRepairService');
 
 // 路由
 const detectionRoutes = require('./routes/detection');
@@ -416,14 +415,6 @@ async function ensureDefaultSettings() {
     await sequelize.sync();
     await ensureGeoMonitoringColumns();
     await ensureDynamicPlatformColumns();
-    try {
-      const repairedCitationMetrics = await createCitationMetricRepairService().repairLegacyMetrics();
-      if (repairedCitationMetrics > 0) {
-        console.log(`已按明确引用口径修复 ${repairedCitationMetrics} 条历史 GEO 指标`);
-      }
-    } catch (error) {
-      console.warn('修复历史 GEO 引用指标失败:', error.message);
-    }
     // 确保 users 表存在会员到期列
     try {
       const qi = sequelize.getQueryInterface();

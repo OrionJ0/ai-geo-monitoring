@@ -3,8 +3,33 @@ const assert = require('node:assert/strict');
 
 const SourceAnalysisService = require('../services/SourceAnalysisService');
 
+function explicitMetric(row) {
+  return {
+    ...row,
+    analysis_structure: {
+      ...(row?.analysis_structure || {}),
+      citations: {
+        ...(row?.analysis_structure?.citations || {}),
+        semantics_version: 'explicit-citation-v2'
+      }
+    }
+  };
+}
+
+function summarizeExplicit(metrics, context = {}) {
+  return SourceAnalysisService.summarize(
+    (Array.isArray(metrics) ? metrics : []).map(explicitMetric),
+    {
+      ...context,
+      ...(Array.isArray(context.changeMetrics)
+        ? { changeMetrics: context.changeMetrics.map(explicitMetric) }
+        : {})
+    }
+  );
+}
+
 test('summarizes citation sources by owner, domain, url and opportunity rows', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_id: 1,
@@ -58,8 +83,28 @@ test('summarizes citation sources by owner, domain, url and opportunity rows', (
   ]);
 });
 
-test('detects new and dropped citation domains between source periods', () => {
+test('excludes legacy mixed source lists from source KPI', () => {
   const result = SourceAnalysisService.summarize([
+    {
+      citation_sources: [{ url: 'https://legacy.example.com/a' }],
+      analysis_structure: {
+        citations: { semantics_version: 'explicit-citation-v1' }
+      }
+    },
+    {
+      citation_sources: [{ url: 'https://explicit.example.com/a' }],
+      analysis_structure: {
+        citations: { semantics_version: 'explicit-citation-v2' }
+      }
+    }
+  ]);
+
+  assert.equal(result.summary.total_citations, 1);
+  assert.deepEqual(result.domains.map((item) => item.domain), ['explicit.example.com']);
+});
+
+test('detects new and dropped citation domains between source periods', () => {
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -118,7 +163,7 @@ test('uses wider change metrics without expanding current source summary', () =>
     created_at: '2026-05-04T00:00:00.000Z'
   };
 
-  const result = SourceAnalysisService.summarize([currentMetric], {
+  const result = summarizeExplicit([currentMetric], {
     days: 7,
     referenceDate: '2026-05-15T00:00:00.000Z',
     changeMetrics: [previousMetric, currentMetric]
@@ -131,7 +176,7 @@ test('uses wider change metrics without expanding current source summary', () =>
 });
 
 test('sorts changed citation urls deterministically within the same domain', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'doubao',
       prompt_category: '购买决策',
@@ -193,7 +238,7 @@ test('falls back to a safe source comparison window for invalid days', () => {
 });
 
 test('counts source response coverage once per AI answer', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -218,7 +263,7 @@ test('counts source response coverage once per AI answer', () => {
 });
 
 test('normalizes stored metric categories in source analytics', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_id: 1,
@@ -238,7 +283,7 @@ test('normalizes stored metric categories in source analytics', () => {
 });
 
 test('uses current prompt catalog category before stale stored metric category in source analytics', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_id: 1,
@@ -261,7 +306,7 @@ test('uses current prompt catalog category before stale stored metric category i
 });
 
 test('classifies common mainland content citation domains as media sources', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -298,7 +343,7 @@ test('uses a media allowlist and labels unmatched external domains as other thir
 });
 
 test('aggregates leading-www and bare domains as the same citation domain', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -322,7 +367,7 @@ test('aggregates leading-www and bare domains as the same citation domain', () =
 });
 
 test('uses citation url domain before stale source domain metadata', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -349,7 +394,7 @@ test('uses citation url domain before stale source domain metadata', () => {
 });
 
 test('normalizes citation urls before grouping source url analytics', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -389,7 +434,7 @@ test('normalizes citation urls before grouping source url analytics', () => {
 });
 
 test('normalizes bare citation urls before grouping source url analytics', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -424,7 +469,7 @@ test('normalizes bare citation urls before grouping source url analytics', () =>
 });
 
 test('keeps root citation urls in the same canonical format as citation extraction', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -451,7 +496,7 @@ test('keeps root citation urls in the same canonical format as citation extracti
 });
 
 test('deduplicates repeated normalized citation urls within one AI answer', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -481,7 +526,7 @@ test('deduplicates repeated normalized citation urls within one AI answer', () =
 });
 
 test('counts domain-only citation sources when source urls are unavailable', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_id: 7,
@@ -516,7 +561,7 @@ test('counts domain-only citation sources when source urls are unavailable', () 
 });
 
 test('ignores invalid stored domain-only citation sources', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -535,7 +580,7 @@ test('ignores invalid stored domain-only citation sources', () => {
 });
 
 test('ignores stored citation urls whose domain is a technology suffix', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       id: 1,
       question_record_id: 10,
@@ -554,7 +599,7 @@ test('ignores stored citation urls whose domain is a technology suffix', () => {
 });
 
 test('deduplicates domain-only citation sources when the same answer already has a URL for that domain', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_category: '购买决策',
@@ -581,7 +626,7 @@ test('deduplicates domain-only citation sources when the same answer already has
 });
 
 test('surfaces competitor source opportunities when brand is mentioned but no owned source is cited', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'doubao',
       prompt_id: 8,
@@ -613,7 +658,7 @@ test('surfaces competitor source opportunities when brand is mentioned but no ow
 });
 
 test('does not surface source opportunities for disabled prompts', () => {
-  const result = SourceAnalysisService.summarize([
+  const result = summarizeExplicit([
     {
       platform: 'deepseek',
       prompt_id: 1,

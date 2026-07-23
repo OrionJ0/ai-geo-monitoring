@@ -135,6 +135,11 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     analysis_method: 'ai_structured_v1',
     analysis_platform: 'analysis-ai',
     analysis_model: 'analysis-model',
+    analysis_structure: {
+      citations: {
+        semantics_version: 'explicit-citation-v2'
+      }
+    },
     analysis_evidence: {
       brand: {
         mention: ['广拓'],
@@ -202,6 +207,53 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   const durableReport = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
   assert.equal(durableReport.rows.length, 2);
   assert.equal(durableReport.rows[0].answer, '广拓可以作为周界报警方案的候选。');
+});
+
+test('历史混合引用不进入问题集核心 KPI，但保留可解释的旧口径提示', async () => {
+  const record = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    platform: 'qwen',
+    question: '历史引用口径测试',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'completed'
+  });
+  await VisibilityMetric.create({
+    project_id: project.id,
+    prompt_id: prompt.id,
+    question_record_id: record.id,
+    user_id: user.id,
+    platform: 'qwen',
+    citation_count: 56,
+    owned_citation_count: 4,
+    citation_sources: [{ url: 'https://legacy.example.com/a', domain: 'legacy.example.com' }],
+    analysis_structure: {
+      citations: { semantics_version: 'explicit-citation-v1' }
+    }
+  });
+  const run = await QuestionSetRunService.createNativeRun({
+    project,
+    questionSet,
+    user,
+    runData: { record_ids: [record.id] }
+  });
+
+  const report = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
+
+  assert.equal(report.summary.total_citations, 0);
+  assert.equal(report.summary.citation_rate, 0);
+  assert.equal(report.summary.citation_valid_analyses, 0);
+  assert.equal(report.summary.citation_unverified_analyses, 1);
+  assert.equal(report.rows[0].citation_evidence_status, 'legacy_unverified');
+  assert.equal(report.rows[0].citation_count, 0);
+  assert.equal(report.rows[0].legacy_citation_count, 56);
+  assert.deepEqual(report.rows[0].citation_sources, []);
+  assert.equal(report.rows[0].legacy_citation_sources.length, 1);
+
+  await run.destroy();
+  await record.destroy();
 });
 
 test('旧执行器生成的终态快照不能覆盖已进入新一轮重试的运行', async () => {

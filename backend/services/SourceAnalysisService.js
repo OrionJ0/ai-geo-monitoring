@@ -1,4 +1,5 @@
 const CitationAnalysisService = require('./CitationAnalysisService');
+const CitationMetricSemanticsService = require('./CitationMetricSemanticsService');
 const ProjectMetricsService = require('./ProjectMetricsService');
 const PromptCategoryService = require('./PromptCategoryService');
 
@@ -121,7 +122,8 @@ class SourceAnalysisService {
   }
 
   buildSourceRecords(metrics, context = {}) {
-    const rows = Array.isArray(metrics) ? metrics : [];
+    const rows = (Array.isArray(metrics) ? metrics : [])
+      .filter((row) => CitationMetricSemanticsService.isCoreKpiEligible(row));
     const records = [];
     const promptCategoryLookup = context.promptCategoryLookup instanceof Map
       ? context.promptCategoryLookup
@@ -268,7 +270,8 @@ class SourceAnalysisService {
   }
 
   summarize(metrics, context = {}) {
-    const rows = Array.isArray(metrics) ? metrics : [];
+    const rows = (Array.isArray(metrics) ? metrics : [])
+      .filter((row) => CitationMetricSemanticsService.isCoreKpiEligible(row));
     const promptCategoryLookup = this.buildPromptCategoryLookup(context.prompts);
     const changeRecords = Array.isArray(context.changeMetrics)
       ? this.buildSourceRecords(context.changeMetrics, { ...context, promptCategoryLookup })

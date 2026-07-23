@@ -1,4 +1,5 @@
 const PromptCategoryService = require('./PromptCategoryService');
+const CitationMetricSemanticsService = require('./CitationMetricSemanticsService');
 
 class ProjectMetricsService {
   normalizeDays(value, fallback = 30) {
@@ -45,6 +46,14 @@ class ProjectMetricsService {
     return Number((nums.reduce((sum, n) => sum + n, 0) / nums.length).toFixed(2));
   }
 
+  citationCount(row, field = 'citation_count') {
+    return CitationMetricSemanticsService.citationCount(row, field);
+  }
+
+  isCitationEligible(row) {
+    return CitationMetricSemanticsService.isCoreKpiEligible(row);
+  }
+
   formatDateKey(date) {
     const value = date instanceof Date ? date : new Date(date || Date.now());
     return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
@@ -53,9 +62,10 @@ class ProjectMetricsService {
   summarize(metrics) {
     const rows = Array.isArray(metrics) ? metrics : [];
     const total = rows.length;
+    const citationRows = rows.filter((row) => this.isCitationEligible(row));
     const mentioned = rows.filter((row) => !!row.brand_mentioned).length;
-    const cited = rows.filter((row) => Number(row.citation_count || 0) > 0).length;
-    const ownedCited = rows.filter((row) => Number(row.owned_citation_count || 0) > 0).length;
+    const cited = citationRows.filter((row) => this.citationCount(row) > 0).length;
+    const ownedCited = citationRows.filter((row) => this.citationCount(row, 'owned_citation_count') > 0).length;
     const recommended = rows.filter((row) => !!row.brand_recommended).length;
     const sentimentRows = rows.filter((row) => !!row.brand_mentioned);
     const negative = sentimentRows.filter((row) => row.sentiment === 'negative').length;
@@ -68,6 +78,7 @@ class ProjectMetricsService {
       const platformEntry = platformMap.get(platform) || {
         platform,
         checks: 0,
+        citationChecks: 0,
         mentions: 0,
         cited: 0,
         recommended: 0,
@@ -75,8 +86,9 @@ class ProjectMetricsService {
         rankValues: []
       };
       platformEntry.checks += 1;
+      if (this.isCitationEligible(row)) platformEntry.citationChecks += 1;
       if (row.brand_mentioned) platformEntry.mentions += 1;
-      if (Number(row.citation_count || 0) > 0) platformEntry.cited += 1;
+      if (this.citationCount(row) > 0) platformEntry.cited += 1;
       if (row.brand_recommended) platformEntry.recommended += 1;
       platformEntry.shareValues.push(Number(row.share_of_voice || 0));
       if (Number(row.brand_rank || 0) > 0) platformEntry.rankValues.push(Number(row.brand_rank));
@@ -90,14 +102,16 @@ class ProjectMetricsService {
       const categoryEntry = categoryMap.get(category) || {
         category,
         checks: 0,
+        citationChecks: 0,
         mentions: 0,
         cited: 0,
         recommended: 0,
         shareValues: []
       };
       categoryEntry.checks += 1;
+      if (this.isCitationEligible(row)) categoryEntry.citationChecks += 1;
       if (row.brand_mentioned) categoryEntry.mentions += 1;
-      if (Number(row.citation_count || 0) > 0) categoryEntry.cited += 1;
+      if (this.citationCount(row) > 0) categoryEntry.cited += 1;
       if (row.brand_recommended) categoryEntry.recommended += 1;
       categoryEntry.shareValues.push(Number(row.share_of_voice || 0));
       categoryMap.set(category, categoryEntry);
@@ -120,9 +134,11 @@ class ProjectMetricsService {
       .map((item) => ({
         platform: item.platform,
         checks: item.checks,
+        citation_eligible_checks: item.citationChecks,
+        citation_unverified_checks: item.checks - item.citationChecks,
         brand_mention_rate: this.pct(item.mentions, item.checks),
         avg_share_of_voice: this.avg(item.shareValues),
-        citation_rate: this.pct(item.cited, item.checks),
+        citation_rate: this.pct(item.cited, item.citationChecks),
         recommendation_rate: this.pct(item.recommended, item.checks),
         avg_brand_rank: this.avg(item.rankValues)
       }))
@@ -147,20 +163,24 @@ class ProjectMetricsService {
       .map((item) => ({
         category: item.category,
         checks: item.checks,
+        citation_eligible_checks: item.citationChecks,
+        citation_unverified_checks: item.checks - item.citationChecks,
         brand_mention_rate: this.pct(item.mentions, item.checks),
         avg_share_of_voice: this.avg(item.shareValues),
-        citation_rate: this.pct(item.cited, item.checks),
+        citation_rate: this.pct(item.cited, item.citationChecks),
         recommendation_rate: this.pct(item.recommended, item.checks)
       }))
       .sort((a, b) => a.category.localeCompare(b.category, 'zh-Hans-CN'));
 
     return {
       total_checks: total,
+      citation_eligible_checks: citationRows.length,
+      citation_unverified_checks: total - citationRows.length,
       brand_mentioned_checks: mentioned,
       brand_mention_rate: this.pct(mentioned, total),
       avg_share_of_voice: this.avg(rows.map((row) => row.share_of_voice || 0)),
-      citation_rate: this.pct(cited, total),
-      owned_citation_rate: this.pct(ownedCited, total),
+      citation_rate: this.pct(cited, citationRows.length),
+      owned_citation_rate: this.pct(ownedCited, citationRows.length),
       recommendation_rate: this.pct(recommended, total),
       avg_brand_rank: this.avg(rows.map((row) => row.brand_rank || 0).filter((rank) => Number(rank) > 0)),
       negative_sentiment_rate: this.pct(negative, sentimentRows.length),
@@ -224,6 +244,7 @@ class ProjectMetricsService {
         prompt_count: 0,
         enabled_prompt_count: 0,
         checks: 0,
+        citationChecks: 0,
         mentions: 0,
         cited: 0,
         recommended: 0,
@@ -247,8 +268,9 @@ class ProjectMetricsService {
 	      const entry = category ? categoryMap.get(category) : null;
 	      if (!entry) continue;
 	      entry.checks += 1;
+	      if (this.isCitationEligible(row)) entry.citationChecks += 1;
 	      if (row.brand_mentioned) entry.mentions += 1;
-	      if (Number(row.citation_count || 0) > 0) entry.cited += 1;
+	      if (this.citationCount(row) > 0) entry.cited += 1;
 	      if (row.brand_recommended) entry.recommended += 1;
 	      entry.shareValues.push(Number(row.share_of_voice || 0));
 	    }
@@ -275,9 +297,11 @@ class ProjectMetricsService {
         failed_runs: item.failedRuns,
         failure_rate: this.pct(item.failedRuns, item.totalRuns),
         checks: item.checks,
+        citation_eligible_checks: item.citationChecks,
+        citation_unverified_checks: item.checks - item.citationChecks,
         brand_mention_rate: this.pct(item.mentions, item.checks),
         avg_share_of_voice: this.avg(item.shareValues),
-        citation_rate: this.pct(item.cited, item.checks),
+        citation_rate: this.pct(item.cited, item.citationChecks),
         recommendation_rate: this.pct(item.recommended, item.checks)
       }))
 	      .sort((a, b) => b.prompt_count - a.prompt_count || a.category.localeCompare(b.category, 'zh-Hans-CN'));
@@ -296,6 +320,8 @@ class ProjectMetricsService {
 	    for (const id of promptIds) {
 	      result[id] = {
 	        checks: 0,
+	        citation_eligible_checks: 0,
+	        citation_unverified_checks: 0,
 	        total_runs: 0,
 	        completed_runs: 0,
 	        failed_runs: 0,
@@ -315,6 +341,7 @@ class ProjectMetricsService {
 	    const ensureBucket = (key) => {
 	      const bucket = buckets.get(key) || {
 	        checks: 0,
+	        citationChecks: 0,
 	        mentions: 0,
 	        cited: 0,
 	        recommended: 0,
@@ -345,8 +372,9 @@ class ProjectMetricsService {
 	      if (!promptIds.has(key)) continue;
 	      const bucket = ensureBucket(key);
 	      bucket.checks += 1;
+	      if (this.isCitationEligible(row)) bucket.citationChecks += 1;
 	      if (row.brand_mentioned) bucket.mentions += 1;
-	      if (Number(row.citation_count || 0) > 0) bucket.cited += 1;
+	      if (this.citationCount(row) > 0) bucket.cited += 1;
 	      if (row.brand_recommended) bucket.recommended += 1;
 	      bucket.shareValues.push(Number(row.share_of_voice || 0));
 	      if (Number(row.brand_rank || 0) > 0) bucket.rankValues.push(Number(row.brand_rank));
@@ -376,12 +404,14 @@ class ProjectMetricsService {
 	    for (const [key, bucket] of buckets.entries()) {
 	      result[key] = {
 	        checks: bucket.checks,
+	        citation_eligible_checks: bucket.citationChecks,
+	        citation_unverified_checks: bucket.checks - bucket.citationChecks,
 	        total_runs: bucket.totalRuns,
 	        completed_runs: bucket.completedRuns,
 	        failed_runs: bucket.failedRuns,
 	        brand_mention_rate: this.pct(bucket.mentions, bucket.checks),
 	        avg_share_of_voice: this.avg(bucket.shareValues),
-	        citation_rate: this.pct(bucket.cited, bucket.checks),
+	        citation_rate: this.pct(bucket.cited, bucket.citationChecks),
 	        recommendation_rate: this.pct(bucket.recommended, bucket.checks),
 	        avg_brand_rank: this.avg(bucket.rankValues),
 	        positive_sentiment_count: bucket.positive,
@@ -402,10 +432,19 @@ class ProjectMetricsService {
     for (const row of rows) {
       const date = new Date(row.created_at || row.createdAt || Date.now());
       const key = this.formatDateKey(date);
-      const entry = bucket.get(key) || { date: key, checks: 0, mentions: 0, cited: 0, recommended: 0, shareValues: [] };
+      const entry = bucket.get(key) || {
+        date: key,
+        checks: 0,
+        citationChecks: 0,
+        mentions: 0,
+        cited: 0,
+        recommended: 0,
+        shareValues: []
+      };
       entry.checks += 1;
+      if (this.isCitationEligible(row)) entry.citationChecks += 1;
       if (row.brand_mentioned) entry.mentions += 1;
-      if (Number(row.citation_count || 0) > 0) entry.cited += 1;
+      if (this.citationCount(row) > 0) entry.cited += 1;
       if (row.brand_recommended) entry.recommended += 1;
       entry.shareValues.push(Number(row.share_of_voice || 0));
       bucket.set(key, entry);
@@ -417,13 +456,23 @@ class ProjectMetricsService {
       date.setHours(0, 0, 0, 0);
       date.setDate(date.getDate() - index);
       const key = this.formatDateKey(date);
-      const item = bucket.get(key) || { date: key, checks: 0, mentions: 0, cited: 0, recommended: 0, shareValues: [] };
+      const item = bucket.get(key) || {
+        date: key,
+        checks: 0,
+        citationChecks: 0,
+        mentions: 0,
+        cited: 0,
+        recommended: 0,
+        shareValues: []
+      };
       trend.push({
         date: item.date,
         checks: item.checks,
+        citation_eligible_checks: item.citationChecks,
+        citation_unverified_checks: item.checks - item.citationChecks,
         brand_mention_rate: this.pct(item.mentions, item.checks),
         avg_share_of_voice: this.avg(item.shareValues),
-        citation_rate: this.pct(item.cited, item.checks),
+        citation_rate: this.pct(item.cited, item.citationChecks),
         recommendation_rate: this.pct(item.recommended, item.checks)
       });
     }

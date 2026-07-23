@@ -7,6 +7,7 @@ const {
   VisibilityMetric
 } = require('../models');
 const QuestionSetRunCsvService = require('./QuestionSetRunCsvService');
+const CitationMetricSemanticsService = require('./CitationMetricSemanticsService');
 
 const SCHEMA_VERSION = 'question_set_run_v1';
 const STRUCTURED_ANALYSIS_METHODS = new Set(['ai_structured_v1', 'ai_structured_v2']);
@@ -65,6 +66,52 @@ function normalizeFailure(value) {
   };
 }
 
+function normalizeCitationSemantics(row) {
+  if (row?.has_metrics === false) {
+    return {
+      ...row,
+      citation_count: 0,
+      owned_citation_count: 0,
+      competitor_citation_count: 0,
+      citation_sources: [],
+      citation_evidence_status: 'none'
+    };
+  }
+  const eligible = CitationMetricSemanticsService.isCoreKpiEligible(row);
+  const rawSources = Array.isArray(row?.citation_sources) ? row.citation_sources : [];
+  const rawCount = finiteNumber(row?.citation_count);
+  if (eligible) {
+    const ownedCount = row?.owned_citation_count !== undefined && row?.owned_citation_count !== null
+      ? finiteNumber(row.owned_citation_count)
+      : rawSources.filter((source) => source?.owned === true).length;
+    const competitorCount = row?.competitor_citation_count !== undefined && row?.competitor_citation_count !== null
+      ? finiteNumber(row.competitor_citation_count)
+      : rawSources.filter((source) => source?.competitor_owned === true).length;
+    return {
+      ...row,
+      citation_count: rawCount,
+      owned_citation_count: ownedCount,
+      competitor_citation_count: competitorCount,
+      citation_sources: rawSources,
+      citation_evidence_status: 'explicit'
+    };
+  }
+  return {
+    ...row,
+    citation_count: 0,
+    owned_citation_count: 0,
+    competitor_citation_count: 0,
+    citation_sources: [],
+    citation_evidence_status: 'legacy_unverified',
+    ...(rawCount > 0 || rawSources.length
+      ? {
+          legacy_citation_count: rawCount || rawSources.length,
+          legacy_citation_sources: rawSources
+        }
+      : {})
+  };
+}
+
 function deriveStatus(rows, pausedAt = null) {
   const total = rows.length;
   const pending = rows.filter((row) => row.status === 'pending').length;
@@ -80,13 +127,14 @@ function deriveStatus(rows, pausedAt = null) {
 function summarize(rows) {
   const completedRows = rows.filter((row) => row.status === 'completed');
   const metricRows = completedRows.filter((row) => row.has_metrics);
+  const citationRows = metricRows.filter((row) => row.citation_evidence_status === 'explicit');
   const rankedRows = metricRows.filter((row) => finiteNumber(row.brand_rank) > 0);
   const competitorBaselineCount = metricRows.reduce(
     (maximum, row) => Math.max(maximum, Array.isArray(row.competitor_mentions) ? row.competitor_mentions.length : 0),
     0
   );
   const sum = (key, list = metricRows) => list.reduce((total, row) => total + finiteNumber(row[key]), 0);
-  const totalOwnedCitations = metricRows.reduce((total, row) => total + ownedCitationCount(row), 0);
+  const totalOwnedCitations = citationRows.reduce((total, row) => total + ownedCitationCount(row), 0);
 
   return {
     total: rows.length,
@@ -94,14 +142,16 @@ function summarize(rows) {
     failed: rows.filter((row) => row.status === 'failed').length,
     pending: rows.filter((row) => row.status === 'pending').length,
     valid_analyses: metricRows.length,
+    citation_valid_analyses: citationRows.length,
+    citation_unverified_analyses: metricRows.length - citationRows.length,
     competitor_baseline_count: competitorBaselineCount,
     brand_mention_rate: percent(metricRows.filter((row) => row.brand_mentioned).length, metricRows.length),
     recommendation_rate: percent(metricRows.filter((row) => row.brand_recommended).length, metricRows.length),
     avg_share_of_voice: metricRows.length ? Number((sum('share_of_voice') / metricRows.length).toFixed(2)) : 0,
-    citation_rate: percent(metricRows.filter((row) => finiteNumber(row.citation_count) > 0).length, metricRows.length),
-    owned_citation_rate: percent(metricRows.filter((row) => ownedCitationCount(row) > 0).length, metricRows.length),
+    citation_rate: percent(citationRows.filter((row) => finiteNumber(row.citation_count) > 0).length, citationRows.length),
+    owned_citation_rate: percent(citationRows.filter((row) => ownedCitationCount(row) > 0).length, citationRows.length),
     avg_brand_rank: rankedRows.length ? Number((sum('brand_rank', rankedRows) / rankedRows.length).toFixed(2)) : null,
-    total_citations: sum('citation_count'),
+    total_citations: sum('citation_count', citationRows),
     total_owned_citations: totalOwnedCitations
   };
 }
@@ -119,7 +169,7 @@ function normalizeNativeRow(record) {
         kind: String(row.result_summary.retry.kind || '').slice(0, 40)
       }
     : null;
-  return {
+  return normalizeCitationSemantics({
     record_id: row.id,
     question_id: row.tracked_prompt_id,
     question: row.question || '',
@@ -160,7 +210,7 @@ function normalizeNativeRow(record) {
     citation_sources: Array.isArray(metric?.citation_sources) ? metric.citation_sources : [],
     created_at: row.created_at || null,
     updated_at: row.updated_at || null
-  };
+  });
 }
 
 class QuestionSetRunService {
@@ -214,7 +264,7 @@ class QuestionSetRunService {
     const sourceRows = run.source === 'imported' || cachedRows.length
       ? cachedRows
       : await this.getNativeRows(run, repositories);
-    const rows = sourceRows.map((row) => {
+    const rows = sourceRows.map(normalizeCitationSemantics).map((row) => {
       if (STRUCTURED_ANALYSIS_METHODS.has(row?.analysis_method)) return row;
       const hasCompetitorBaseline = Array.isArray(row?.competitor_mentions) && row.competitor_mentions.length > 0;
       return hasCompetitorBaseline ? row : { ...row, brand_rank: null };

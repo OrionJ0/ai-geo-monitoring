@@ -192,4 +192,11 @@ test('dashboard recent metrics include prompt question context for review', () =
   assert.match(dashboardBlock, /QuestionRecord,\s*as:\s*'questionRecord'/);
   assert.match(dashboardBlock, /TrackedPrompt,\s*as:\s*'prompt'/);
   assert.match(dashboardBlock, /attributes:\s*\[\s*'id',\s*'question'\s*\]/);
+  assert.match(dashboardBlock, /CitationMetricSemanticsService\.normalizeForRead/);
+});
+
+test('prompt history sanitizes legacy mixed citation evidence before returning it', () => {
+  const promptHistoryBlock = routeBlock('get', '/:projectId/prompts/:promptId/history');
+
+  assert.match(promptHistoryBlock, /CitationMetricSemanticsService\.normalizeForRead\(row\.visibilityMetric\)/);
 });

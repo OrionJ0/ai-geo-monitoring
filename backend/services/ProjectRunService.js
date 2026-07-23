@@ -17,6 +17,7 @@ const AIResponseAnalysisService = require('./AIResponseAnalysisService');
 const { AIResponseAnalysisError } = require('./AIResponseAnalysisService');
 const { AIAnalysisConfigError } = require('./AIAnalysisConfigService');
 const CitationAnalysisService = require('./CitationAnalysisService');
+const { SEMANTICS_VERSION: CITATION_SEMANTICS_VERSION } = require('./CitationMetricSemanticsService');
 const AlertEvaluationService = require('./AlertEvaluationService');
 const PromptCategoryService = require('./PromptCategoryService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
@@ -197,7 +198,7 @@ function normalizeProviderCitations(value) {
         ...(item.source_role ? { source_role: String(item.source_role).slice(0, 40) } : {})
       };
       if (!citation.url && !citation.domain) return null;
-      const key = `${citation.url || ''}|${citation.domain || ''}|${citation.title || ''}`;
+      const key = `${citation.source_role || ''}|${citation.url || ''}|${citation.domain || ''}|${citation.title || ''}`;
       if (seen.has(key)) return null;
       seen.add(key);
       return citation;
@@ -319,7 +320,7 @@ class ProjectRunService {
       ? {
         ...analysis.analysis_structure,
         citations: {
-          semantics_version: 'explicit-citation-v1',
+          semantics_version: CITATION_SEMANTICS_VERSION,
           count: citationAnalysis.citation_count,
           official_count: citationAnalysis.owned_citation_count,
           competitor_count: citationAnalysis.competitor_citation_count,

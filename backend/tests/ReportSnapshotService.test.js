@@ -143,6 +143,9 @@ test('stores top citation urls in generated report summaries', async () => {
       prompt_id: 7,
       prompt_category: '购买决策',
       citation_sources: [{ url: 'https://example.com/guide?utm_source=ai' }],
+      analysis_structure: {
+        citations: { semantics_version: 'explicit-citation-v2' }
+      },
       created_at: '2026-05-14T00:00:00.000Z'
     })
   };

@@ -2,6 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const ProjectMetricsService = require('../services/ProjectMetricsService');
+const CitationMetricSemanticsService = require('../services/CitationMetricSemanticsService');
+
+const EXPLICIT_CITATION = {
+  analysis_structure: {
+    citations: { semantics_version: 'explicit-citation-v2' }
+  }
+};
 
 test('normalizes analytics day windows safely', () => {
   assert.equal(ProjectMetricsService.normalizeDays(undefined), 30);
@@ -36,6 +43,7 @@ test('summarizes project visibility metrics by platform and competitor', () => {
       brand_recommended: true,
       citation_count: 2,
       owned_citation_count: 1,
+      ...EXPLICIT_CITATION,
       prompt_category: '购买决策',
       competitor_mentions: [{ name: 'DeepSeek', mentions: 1, mentioned: true, visibility_score: 2 }]
     },
@@ -57,21 +65,65 @@ test('summarizes project visibility metrics by platform and competitor', () => {
   assert.equal(summary.brand_mentioned_checks, 1);
   assert.equal(summary.brand_mention_rate, 50);
   assert.equal(summary.avg_share_of_voice, 33.34);
-  assert.equal(summary.citation_rate, 50);
-  assert.equal(summary.owned_citation_rate, 50);
+  assert.equal(summary.citation_rate, 100);
+  assert.equal(summary.owned_citation_rate, 100);
+  assert.equal(summary.citation_eligible_checks, 1);
+  assert.equal(summary.citation_unverified_checks, 1);
   assert.equal(summary.recommendation_rate, 50);
   assert.equal(summary.avg_brand_rank, 1);
   assert.deepEqual(summary.platforms, [
-    { platform: 'deepseek', checks: 1, brand_mention_rate: 0, avg_share_of_voice: 0, citation_rate: 0, recommendation_rate: 0, avg_brand_rank: 0 },
-    { platform: 'doubao', checks: 1, brand_mention_rate: 100, avg_share_of_voice: 66.67, citation_rate: 100, recommendation_rate: 100, avg_brand_rank: 1 }
+    { platform: 'deepseek', checks: 1, citation_eligible_checks: 0, citation_unverified_checks: 1, brand_mention_rate: 0, avg_share_of_voice: 0, citation_rate: 0, recommendation_rate: 0, avg_brand_rank: 0 },
+    { platform: 'doubao', checks: 1, citation_eligible_checks: 1, citation_unverified_checks: 0, brand_mention_rate: 100, avg_share_of_voice: 66.67, citation_rate: 100, recommendation_rate: 100, avg_brand_rank: 1 }
   ]);
   assert.deepEqual(summary.competitors, [
     { name: 'DeepSeek', mentions: 3, appeared_checks: 2, visibility_score: 7 }
   ]);
   assert.deepEqual(summary.categories, [
-    { category: '购买决策', checks: 1, brand_mention_rate: 100, avg_share_of_voice: 66.67, citation_rate: 100, recommendation_rate: 100 },
-    { category: '竞品对比', checks: 1, brand_mention_rate: 0, avg_share_of_voice: 0, citation_rate: 0, recommendation_rate: 0 }
+    { category: '购买决策', checks: 1, citation_eligible_checks: 1, citation_unverified_checks: 0, brand_mention_rate: 100, avg_share_of_voice: 66.67, citation_rate: 100, recommendation_rate: 100 },
+    { category: '竞品对比', checks: 1, citation_eligible_checks: 0, citation_unverified_checks: 1, brand_mention_rate: 0, avg_share_of_voice: 0, citation_rate: 0, recommendation_rate: 0 }
   ]);
+});
+
+test('excludes legacy mixed citation counts from core KPI', () => {
+  const summary = ProjectMetricsService.summarize([
+    {
+      citation_count: 56,
+      owned_citation_count: 12,
+      analysis_structure: {
+        citations: { semantics_version: 'explicit-citation-v1' }
+      }
+    },
+    {
+      citation_count: 1,
+      owned_citation_count: 1,
+      analysis_structure: {
+        citations: { semantics_version: 'explicit-citation-v2' }
+      }
+    }
+  ]);
+
+  assert.equal(summary.citation_rate, 100);
+  assert.equal(summary.owned_citation_rate, 100);
+  assert.equal(summary.citation_eligible_checks, 1);
+  assert.equal(summary.citation_unverified_checks, 1);
+});
+
+test('normalizes legacy mixed citation evidence before direct API display', () => {
+  const normalized = CitationMetricSemanticsService.normalizeForRead({
+    citation_count: 43,
+    owned_citation_count: 3,
+    citation_sources: [{ url: 'https://legacy.example/a' }],
+    analysis_structure: {
+      citations: { semantics_version: 'explicit-citation-v1' }
+    }
+  });
+
+  assert.equal(normalized.citation_evidence_status, 'legacy_unverified');
+  assert.equal(normalized.citation_count, 0);
+  assert.equal(normalized.owned_citation_count, 0);
+  assert.deepEqual(normalized.citation_sources, []);
+  assert.equal(normalized.legacy_citation_count, 43);
+  assert.equal(normalized.legacy_citation_sources.length, 1);
 });
 
 test('omits competitors with no mentions from dashboard summaries', () => {
@@ -166,7 +218,7 @@ test('builds prompt library coverage with analyzed performance by category', () 
     { id: 2, enabled: false, category: '购买决策' },
     { id: 3, enabled: true, category: '竞品对比' }
   ], [
-    { prompt_id: 1, prompt_category: '购买决策', brand_mentioned: true, share_of_voice: 80, citation_count: 1, brand_recommended: true },
+    { prompt_id: 1, prompt_category: '购买决策', brand_mentioned: true, share_of_voice: 80, citation_count: 1, brand_recommended: true, ...EXPLICIT_CITATION },
     { prompt_id: 999, prompt_category: '历史分类', brand_mentioned: true, share_of_voice: 100, citation_count: 1, brand_recommended: true }
   ]);
 
@@ -179,6 +231,8 @@ test('builds prompt library coverage with analyzed performance by category', () 
       failed_runs: 0,
       failure_rate: 0,
       checks: 1,
+      citation_eligible_checks: 1,
+      citation_unverified_checks: 0,
       brand_mention_rate: 100,
       avg_share_of_voice: 80,
       citation_rate: 100,
@@ -192,6 +246,8 @@ test('builds prompt library coverage with analyzed performance by category', () 
       failed_runs: 0,
       failure_rate: 0,
       checks: 0,
+      citation_eligible_checks: 0,
+      citation_unverified_checks: 0,
       brand_mention_rate: 0,
       avg_share_of_voice: 0,
       citation_rate: 0,
@@ -254,6 +310,7 @@ test('builds prompt-level performance for prompt library rows', () => {
       brand_mentioned: true,
       share_of_voice: 80,
       citation_count: 2,
+      ...EXPLICIT_CITATION,
       brand_recommended: true,
       brand_rank: 1,
       sentiment: 'positive',
@@ -274,6 +331,7 @@ test('builds prompt-level performance for prompt library rows', () => {
       brand_mentioned: true,
       share_of_voice: 100,
       citation_count: 1,
+      ...EXPLICIT_CITATION,
       brand_recommended: true,
       brand_rank: 1,
       sentiment: 'positive',
@@ -284,12 +342,14 @@ test('builds prompt-level performance for prompt library rows', () => {
   assert.deepEqual(performance, {
     1: {
       checks: 2,
+      citation_eligible_checks: 1,
+      citation_unverified_checks: 1,
       total_runs: 0,
       completed_runs: 0,
       failed_runs: 0,
       brand_mention_rate: 50,
       avg_share_of_voice: 40,
-      citation_rate: 50,
+      citation_rate: 100,
       recommendation_rate: 50,
       avg_brand_rank: 1,
       positive_sentiment_count: 1,
@@ -299,6 +359,8 @@ test('builds prompt-level performance for prompt library rows', () => {
     },
     2: {
       checks: 0,
+      citation_eligible_checks: 0,
+      citation_unverified_checks: 0,
       total_runs: 0,
       completed_runs: 0,
       failed_runs: 0,
@@ -395,16 +457,17 @@ test('builds calendar-complete trend rows for the selected period', () => {
       brand_mentioned: true,
       share_of_voice: 80,
       citation_count: 1,
-      brand_recommended: true
+      brand_recommended: true,
+      ...EXPLICIT_CITATION
     }
   ], 3, {
     referenceDate: new Date('2026-05-15T12:00:00.000+08:00')
   });
 
   assert.deepEqual(trend, [
-    { date: '2026-05-13', checks: 0, brand_mention_rate: 0, avg_share_of_voice: 0, citation_rate: 0, recommendation_rate: 0 },
-    { date: '2026-05-14', checks: 1, brand_mention_rate: 100, avg_share_of_voice: 80, citation_rate: 100, recommendation_rate: 100 },
-    { date: '2026-05-15', checks: 0, brand_mention_rate: 0, avg_share_of_voice: 0, citation_rate: 0, recommendation_rate: 0 }
+    { date: '2026-05-13', checks: 0, citation_eligible_checks: 0, citation_unverified_checks: 0, brand_mention_rate: 0, avg_share_of_voice: 0, citation_rate: 0, recommendation_rate: 0 },
+    { date: '2026-05-14', checks: 1, citation_eligible_checks: 1, citation_unverified_checks: 0, brand_mention_rate: 100, avg_share_of_voice: 80, citation_rate: 100, recommendation_rate: 100 },
+    { date: '2026-05-15', checks: 0, citation_eligible_checks: 0, citation_unverified_checks: 0, brand_mention_rate: 0, avg_share_of_voice: 0, citation_rate: 0, recommendation_rate: 0 }
   ]);
 });
 
@@ -418,6 +481,7 @@ test('builds dashboard summary with prompt coverage and source analysis fields',
         share_of_voice: 80,
         citation_count: 1,
         owned_citation_count: 1,
+        ...EXPLICIT_CITATION,
         brand_recommended: true
       }
     ],
@@ -449,6 +513,8 @@ test('builds dashboard summary with prompt coverage and source analysis fields',
       failed_runs: 0,
       failure_rate: 0,
       checks: 1,
+      citation_eligible_checks: 1,
+      citation_unverified_checks: 0,
       brand_mention_rate: 100,
       avg_share_of_voice: 80,
       citation_rate: 100,
