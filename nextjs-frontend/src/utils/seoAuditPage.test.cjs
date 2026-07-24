@@ -92,6 +92,21 @@ test('全站报告把整站问题地图放在技术健康分之后和其他分�
   assert.ok(priorityPanelIndex < source.indexOf('<SitewideAuditPanel sitewide={report.sitewide} comparison={report.comparison} />'));
 });
 
+test('单页报告把优先修复放在技术健康分之后和四阶段检测项目之前', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+  const healthPanelIndex = source.indexOf('<TechnicalHealthOverview report={report} />');
+  const priorityPanelIndex = source.indexOf(
+    '<section className={styles.priorityPanel} aria-label={`从 ${report.summary.total} 项检查中生成的修复清单`}>'
+  );
+  const stageChecksIndex = source.indexOf('<StageChecksPanel report={report} />');
+
+  assert.notEqual(healthPanelIndex, -1);
+  assert.notEqual(priorityPanelIndex, -1);
+  assert.notEqual(stageChecksIndex, -1);
+  assert.ok(healthPanelIndex < priorityPanelIndex);
+  assert.ok(priorityPanelIndex < stageChecksIndex);
+});
+
 test('全站报告展示九类跨页专项审计和本次与上次问题差异', () => {
   const siteReportSource = fs.readFileSync(siteReportPath, 'utf8');
   assert.equal(fs.existsSync(sitewidePanelPath), true, '全站专项审计组件应存在');

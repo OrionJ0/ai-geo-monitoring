@@ -435,7 +435,6 @@ export default function SeoAuditPage() {
           </section>
 
           <TechnicalHealthOverview report={report} />
-          <StageChecksPanel report={report} />
 
           <section className={styles.priorityPanel} aria-label={`从 ${report.summary.total} 项检查中生成的修复清单`}>
             <header className={styles.sectionHeading}>
@@ -485,6 +484,8 @@ export default function SeoAuditPage() {
               </ol>
             )}
           </section>
+
+          <StageChecksPanel report={report} />
 
           <SearchPlatformPanel platforms={report.platforms} />
           <CrawlerAccessPanel access={report.crawlerAccess} />
