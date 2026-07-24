@@ -4,6 +4,7 @@
 import React from 'react';
 import { Progress } from 'antd';
 import { CheckCircleFilled, LoadingOutlined } from '@ant-design/icons';
+import { calculateSeoAuditProgressPercent } from '@/utils/seoAuditProgress.cjs';
 import styles from './seo-audit.module.css';
 
 const PHASES = [
@@ -21,9 +22,7 @@ export default function SeoAuditJobProgress({ job, progress = {} }) {
   const discovered = Number(progress.discoveredPages || 0);
   const audited = Number(progress.auditedPages || 0);
   const failed = Number(progress.failedPages || 0);
-  const percent = phase === 'completed' ? 100
-    : discovered > 0 ? Math.min(96, Math.max(12, Math.round((audited / discovered) * 100)))
-      : currentIndex * 18 + 6;
+  const percent = calculateSeoAuditProgressPercent(progress, job?.status);
 
   return (
     <section className={styles.jobPanel} aria-live="polite" aria-label="全站检测进度">
@@ -56,7 +55,7 @@ export default function SeoAuditJobProgress({ job, progress = {} }) {
       {phase === 'failed' && job?.error?.message && (
         <div className={styles.jobError} role="alert">{job.error.message}</div>
       )}
-      <p>任务已保存在当前账户。离开或刷新页面后，系统会通过任务编号继续读取进度。</p>
+      <p>发现路由数量可能持续增加；进度按当前执行阶段和已检测页数前进，不会因新增路由回退。</p>
     </section>
   );
 }

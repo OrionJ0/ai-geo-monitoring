@@ -11,6 +11,7 @@ const siteReportPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoSiteAudi
 const healthOverviewPath = path.resolve(__dirname, '../app/geo/seo-audit/TechnicalHealthOverview.tsx');
 const stageChecksPath = path.resolve(__dirname, '../app/geo/seo-audit/StageChecksPanel.tsx');
 const sitewidePanelPath = path.resolve(__dirname, '../app/geo/seo-audit/SitewideAuditPanel.tsx');
+const jobProgressPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoAuditJobProgress.tsx');
 
 test('SEO audit page uses the authenticated API and leads with prioritized fixes', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
@@ -87,6 +88,13 @@ test('SEO audit page renders crawl progress and a site-level report contract', (
   assert.match(source, /SeoSiteAuditReport/);
   assert.match(source, /SeoAuditJobProgress/);
   assert.match(source, /job\.progress/);
+});
+
+test('全站检测进度不再用动态发现页数作为实时分母', () => {
+  const source = fs.readFileSync(jobProgressPath, 'utf8');
+
+  assert.match(source, /calculateSeoAuditProgressPercent/);
+  assert.doesNotMatch(source, /audited\s*\/\s*discovered/);
 });
 
 test('全站报告把页面、跨页和平台问题合并进顶部优先修复内容', () => {
