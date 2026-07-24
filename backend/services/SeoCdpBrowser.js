@@ -149,14 +149,118 @@ async function createCdpBrowser({
         await loaded;
         await new Promise((resolve) => setTimeout(resolve, 500));
         const evaluation = await connection.send('Runtime.evaluate', {
-          expression: `(() => {
+          expression: `(async () => {
             const description = document.querySelector('meta[name="description"]');
             const bodyText = document.body ? document.body.innerText.replace(/\\s+/g, ' ').trim() : '';
+            const normalizedText = (value) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, 160);
+            const regionFor = (element) => {
+              if (element.closest('footer')) return 'footer';
+              if (element.closest('header')) return 'header';
+              if (element.closest('nav, [role="navigation"], [role="menu"]')) return 'navigation';
+              if (element.closest('main, article')) return 'content';
+              return 'other';
+            };
+            const snapshotLinks = () => Array.from(document.querySelectorAll('a[href]')).map((link) => ({
+              url: link.href,
+              text: normalizedText(link.textContent),
+              region: regionFor(link)
+            })).slice(0, 200);
+            const initialLinks = snapshotLinks();
+            const candidateSelector = [
+              'header span',
+              'header div',
+              'nav span',
+              'nav div',
+              '[role="navigation"] span',
+              '[role="navigation"] div',
+              '[role="menu"] span',
+              '[role="menu"] div',
+              'header button',
+              'nav button',
+              '[role="navigation"] button',
+              '[role="menu"] button',
+              'a[aria-haspopup]',
+              '[role="link"]'
+            ].join(',');
+            const isNonSemanticCandidate = (element) => {
+              const tag = element.tagName.toLowerCase();
+              if (tag === 'a' || tag === 'button') return false;
+              const role = (element.getAttribute('role') || '').toLowerCase();
+              const style = getComputedStyle(element);
+              return role === 'link'
+                || element.hasAttribute('onclick')
+                || style.cursor === 'pointer';
+            };
+            const isInteractionCandidate = (element) => {
+              const tag = element.tagName.toLowerCase();
+              return tag === 'button'
+                || (tag === 'a' && element.hasAttribute('aria-haspopup'))
+                || isNonSemanticCandidate(element);
+            };
+            const candidates = Array.from(document.querySelectorAll(candidateSelector))
+              .filter(isInteractionCandidate)
+              .filter((element) => {
+                if (!isNonSemanticCandidate(element)) return true;
+                if (element.closest('button, a')) return false;
+                return !Array.from(element.querySelectorAll('span, div, [role="link"]'))
+                  .some(isNonSemanticCandidate);
+              })
+              .filter((element) => normalizedText(element.textContent))
+              .slice(0, 30);
+            const nonSemanticControls = candidates
+              .filter(isNonSemanticCandidate)
+              .map((element) => ({
+                tag: element.tagName.toLowerCase(),
+                text: normalizedText(element.textContent),
+                region: regionFor(element),
+                reason: 'clickable_non_link'
+              }));
+            const interactionDependentLinks = [];
+            for (const element of candidates) {
+              const before = new Set(snapshotLinks().map((link) => link.url));
+              element.dispatchEvent(new MouseEvent('mouseover', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+              }));
+              element.dispatchEvent(new MouseEvent('mouseenter', {
+                bubbles: false,
+                cancelable: true,
+                view: window
+              }));
+              if (typeof element.focus === 'function') element.focus({ preventScroll: true });
+              await new Promise((resolve) => setTimeout(resolve, 80));
+              const links = snapshotLinks()
+                .filter((link) => !before.has(link.url))
+                .map(({ url, text }) => ({ url, text }));
+              if (links.length) {
+                interactionDependentLinks.push({
+                  triggerText: normalizedText(element.textContent),
+                  links: links.slice(0, 50)
+                });
+              }
+              element.dispatchEvent(new MouseEvent('mouseout', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+              }));
+              element.dispatchEvent(new MouseEvent('mouseleave', {
+                bubbles: false,
+                cancelable: true,
+                view: window
+              }));
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
             return {
               title: (document.title || '').trim(),
               description: (description?.getAttribute('content') || '').trim(),
               contentCharacters: bodyText.replace(/\\s/g, '').length,
-              linkCount: document.querySelectorAll('a[href]').length
+              linkCount: document.querySelectorAll('a[href]').length,
+              navigation: {
+                initialLinks,
+                nonSemanticControls,
+                interactionDependentLinks
+              }
             };
           })()`,
           returnByValue: true,

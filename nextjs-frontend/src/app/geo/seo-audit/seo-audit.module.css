@@ -804,6 +804,20 @@
   font-size: 11px;
 }
 
+.sitewideEvidence {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.sitewideEvidence li {
+  overflow-wrap: anywhere;
+}
+
 .sitewideCheckGrid article > small {
   display: block;
   margin-top: 12px;

@@ -114,7 +114,7 @@ test('单页报告把优先修复放在技术健康分之后和四阶段检测�
   assert.ok(priorityPanelIndex < stageChecksIndex);
 });
 
-test('全站报告展示九类跨页专项审计和本次与上次问题差异', () => {
+test('全站报告展示跨页专项审计和本次与上次问题差异', () => {
   const siteReportSource = fs.readFileSync(siteReportPath, 'utf8');
   assert.equal(fs.existsSync(sitewidePanelPath), true, '全站专项审计组件应存在');
   const panelSource = fs.readFileSync(sitewidePanelPath, 'utf8');
@@ -128,6 +128,9 @@ test('全站报告展示九类跨页专项审计和本次与上次问题差异',
   assert.match(panelSource, /重定向链与循环/);
   assert.match(panelSource, /失效内链与外链/);
   assert.match(panelSource, /孤儿页面/);
+  assert.match(panelSource, /内部链接来源质量/);
+  assert.match(panelSource, /导航链接可抓取性/);
+  assert.match(panelSource, /站点 URL 一致性/);
   assert.match(panelSource, /hreflang 国际化声明/);
   assert.match(panelSource, /Sitemap 与可访问页面差异/);
   assert.match(panelSource, /JavaScript 渲染抽样/);

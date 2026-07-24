@@ -1,4 +1,4 @@
-const SITEWIDE_VERSION = 'sitewide-audit-v2';
+const SITEWIDE_VERSION = 'sitewide-audit-v3';
 
 function normalizedText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
@@ -238,27 +238,73 @@ function sitemapAnalysis({ origin, pages, sitemapUrls, truncated, inventoryCompl
   };
 }
 
-function orphanPages({ origin, pages, sitemapUrls }) {
+const INTERNAL_LINK_REGIONS = ['header', 'navigation', 'content', 'footer', 'other'];
+
+function internalLinkQuality({ origin, pages, sitemapUrls }) {
   const homepage = normalizedUrl(`${origin}/`);
   const sitemapSet = new Set(
     (Array.isArray(sitemapUrls) ? sitemapUrls : [])
       .map((url) => normalizedUrl(url))
       .filter(Boolean)
   );
-  const incoming = new Set();
+  const incoming = new Map();
   pages.forEach((page) => {
     const sourceUrl = normalizedUrl(page.finalUrl || page.url);
     (Array.isArray(page.links) ? page.links : [])
       .filter((link) => link.internal === true)
       .forEach((link) => {
         const target = normalizedUrl(link.url, sourceUrl);
-        if (target && target !== sourceUrl) incoming.add(target);
+        if (!target || target === sourceUrl) return;
+        const region = INTERNAL_LINK_REGIONS.includes(link.region) ? link.region : 'other';
+        const text = String(link.text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+        const evidence = incoming.get(target) || new Map();
+        const key = `${sourceUrl}|${region}|${text}`;
+        if (!evidence.has(key)) {
+          evidence.set(key, {
+            source_url: sourceUrl,
+            region,
+            text
+          });
+        }
+        incoming.set(target, evidence);
       });
   });
-  return pages
+
+  const pageEvidence = pages
     .filter((page) => page.status === 'completed')
     .map((page) => normalizedUrl(page.finalUrl || page.url))
-    .filter((url) => url && url !== homepage && sitemapSet.has(url) && !incoming.has(url));
+    .filter((url) => url && url !== homepage && sitemapSet.has(url))
+    .map((url) => {
+      const sources = Array.from(incoming.get(url)?.values() || []);
+      const sourcePages = new Set(sources.map((source) => source.source_url));
+      const regions = Object.fromEntries(INTERNAL_LINK_REGIONS.map((region) => [
+        region,
+        sources.filter((source) => source.region === region).length
+      ]));
+      const classification = sources.length === 0
+        ? 'orphan'
+        : sources.every((source) => source.region === 'footer')
+          ? 'footer_only'
+          : 'structural';
+      return {
+        url,
+        inbound_count: sources.length,
+        source_page_count: sourcePages.size,
+        regions,
+        classification,
+        sources: sources.slice(0, 50)
+      };
+    });
+
+  return {
+    pages: pageEvidence,
+    orphan_pages: pageEvidence
+      .filter((page) => page.classification === 'orphan')
+      .map((page) => page.url),
+    footer_only_pages: pageEvidence
+      .filter((page) => page.classification === 'footer_only')
+      .map((page) => page.url)
+  };
 }
 
 function isValidHreflang(value) {
@@ -394,10 +440,190 @@ function renderingAnalysis(renderAnalysis) {
   };
 }
 
+function navigationCrawlability(pages, rendering) {
+  const staticIssueMap = new Map();
+  pages
+    .filter((page) => page.status === 'completed')
+    .forEach((page) => {
+      const sourceUrl = normalizedUrl(page.finalUrl || page.url);
+      (Array.isArray(page.navigationIssues) ? page.navigationIssues : []).forEach((issue) => {
+        const normalizedIssue = {
+          type: String(issue?.type || 'non-semantic-navigation-control'),
+          tag: String(issue?.tag || ''),
+          text: String(issue?.text || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+          region: String(issue?.region || 'navigation'),
+          reason: String(issue?.reason || 'clickable_non_link')
+        };
+        const key = JSON.stringify(normalizedIssue);
+        const entry = staticIssueMap.get(key) || {
+          ...normalizedIssue,
+          sourcePageCount: 0,
+          sourcePages: [],
+          sourcePageKeys: new Set()
+        };
+        if (sourceUrl && !entry.sourcePageKeys.has(sourceUrl)) {
+          entry.sourcePageKeys.add(sourceUrl);
+          entry.sourcePageCount += 1;
+          if (entry.sourcePages.length < 50) entry.sourcePages.push(sourceUrl);
+        }
+        staticIssueMap.set(key, entry);
+      });
+    });
+
+  const renderedControls = [];
+  const interactionDependentLinks = [];
+  (Array.isArray(rendering?.samples) ? rendering.samples : []).forEach((sample) => {
+    const navigation = sample?.rendered?.navigation;
+    (Array.isArray(navigation?.nonSemanticControls) ? navigation.nonSemanticControls : [])
+      .forEach((control) => {
+        renderedControls.push({
+          page: sample.url,
+          tag: String(control?.tag || ''),
+          text: String(control?.text || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+          reason: String(control?.reason || 'clickable_non_link')
+        });
+      });
+    (Array.isArray(navigation?.interactionDependentLinks)
+      ? navigation.interactionDependentLinks
+      : [])
+      .forEach((entry) => {
+        interactionDependentLinks.push({
+          page: sample.url,
+          triggerText: String(entry?.triggerText || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+          links: (Array.isArray(entry?.links) ? entry.links : []).map((link) => ({
+            url: normalizedUrl(link?.url, sample.url),
+            text: String(link?.text || '').replace(/\s+/g, ' ').trim().slice(0, 160)
+          })).filter((link) => link.url)
+        });
+      });
+  });
+  const staticControlKeys = new Set(Array.from(staticIssueMap.values()).map((issue) => (
+    `${issue.tag}|${issue.text}|${issue.reason}`
+  )));
+  const renderedOnlyControls = renderedControls.filter((control) => (
+    !staticControlKeys.has(`${control.tag}|${control.text}|${control.reason}`)
+  ));
+
+  return {
+    static_issues: Array.from(staticIssueMap.values()).map(({
+      sourcePageKeys: _sourcePageKeys,
+      ...issue
+    }) => issue),
+    rendered_controls: renderedOnlyControls,
+    interaction_dependent_links: interactionDependentLinks
+  };
+}
+
+function isNonPublicHostname(value) {
+  const hostname = String(value || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    hostname === 'localhost'
+    || hostname.endsWith('.localhost')
+    || hostname === '::1'
+    || /^127\./.test(hostname)
+    || /^10\./.test(hostname)
+    || /^192\.168\./.test(hostname)
+    || /^169\.254\./.test(hostname)
+  ) {
+    return true;
+  }
+  const match = hostname.match(/^172\.(\d{1,3})\./);
+  return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31);
+}
+
+function urlConsistencyAnalysis({
+  origin,
+  pages,
+  declaredSitemaps,
+  sitemapReferences
+}) {
+  const expectedOrigin = new URL(origin).origin;
+  const issues = [];
+  if (isNonPublicHostname(new URL(expectedOrigin).hostname)) {
+    issues.push({
+      type: 'non-public-origin',
+      page: `${expectedOrigin}/`,
+      target: expectedOrigin,
+      expectedOrigin,
+      message: '检测入口使用 localhost、回环地址或私网地址'
+    });
+  }
+
+  const compareOrigin = ({ type, page, target, message }) => {
+    const normalized = normalizedUrl(target, page || `${expectedOrigin}/`);
+    if (!normalized) {
+      issues.push({
+        type: `${type}-invalid`,
+        page: page || '',
+        target: String(target || ''),
+        expectedOrigin,
+        message: `${message} URL 无效`
+      });
+      return;
+    }
+    if (new URL(normalized).origin !== expectedOrigin) {
+      issues.push({
+        type,
+        page: page || '',
+        target: normalized,
+        expectedOrigin,
+        message
+      });
+    }
+  };
+
+  (Array.isArray(declaredSitemaps) ? declaredSitemaps : []).forEach((url) => {
+    compareOrigin({
+      type: 'robots-sitemap-origin',
+      page: `${expectedOrigin}/robots.txt`,
+      target: url,
+      message: 'robots.txt 声明的 Sitemap 与检测入口不同源'
+    });
+  });
+  (Array.isArray(sitemapReferences) ? sitemapReferences : []).forEach((entry) => {
+    compareOrigin({
+      type: entry?.kind === 'sitemap' ? 'sitemap-index-origin' : 'sitemap-entry-origin',
+      page: entry?.source || '',
+      target: entry?.url,
+      message: entry?.kind === 'sitemap'
+        ? 'Sitemap index 子清单与检测入口不同源'
+        : 'Sitemap 页面条目与检测入口不同源'
+    });
+  });
+  pages
+    .filter((page) => page.status === 'completed')
+    .forEach((page) => {
+      const pageUrl = normalizedUrl(page.finalUrl || page.url);
+      (Array.isArray(page.canonicalUrls) ? page.canonicalUrls : []).forEach((url) => {
+        compareOrigin({
+          type: 'canonical-origin',
+          page: pageUrl,
+          target: url,
+          message: 'Canonical 与检测入口不同源'
+        });
+      });
+      if (page.openGraphUrl) {
+        compareOrigin({
+          type: 'open-graph-origin',
+          page: pageUrl,
+          target: page.openGraphUrl,
+          message: 'og:url 与检测入口不同源'
+        });
+      }
+    });
+
+  return {
+    expected_origin: expectedOrigin,
+    issues
+  };
+}
+
 function analyzeSitewideEvidence({
   origin,
   pages = [],
   sitemapUrls = [],
+  declaredSitemaps = [],
+  sitemapReferences = [],
   linkChecks = [],
   renderAnalysis,
   truncated = false,
@@ -422,9 +648,20 @@ function analyzeSitewideEvidence({
     truncated,
     inventoryComplete: sitemapInventoryComplete
   });
-  const orphans = orphanPages({ origin, pages, sitemapUrls });
+  const linkQuality = internalLinkQuality({ origin, pages, sitemapUrls });
+  const orphans = linkQuality.orphan_pages;
   const hreflang = hreflangAnalysis(pages);
   const rendering = renderingAnalysis(renderAnalysis);
+  const navigation = navigationCrawlability(pages, rendering);
+  const navigationIssueCount = navigation.static_issues.length
+    + navigation.rendered_controls.length
+    + navigation.interaction_dependent_links.length;
+  const urlConsistency = urlConsistencyAnalysis({
+    origin,
+    pages,
+    declaredSitemaps,
+    sitemapReferences
+  });
   const checks = [
     check({
       id: 'duplicate-titles',
@@ -494,17 +731,35 @@ function analyzeSitewideEvidence({
     }),
     evidenceCheck({
       id: 'orphan-pages',
-      title: '孤儿页面',
+      title: '疑似孤儿页面',
       severity: 'medium',
       failed: siteInventoryComplete && sitemapInventoryComplete && orphans.length > 0,
-      finding: `${orphans.length} 个 Sitemap 页面没有内部入口`,
+      finding: `${orphans.length} 个 Sitemap 页面未发现可抓取内部入口`,
       passedFinding: 'Sitemap 页面均有内部链接入口',
-      value: `${orphans.length} 个孤儿页面`,
+      value: `${orphans.length} 个疑似孤儿页面`,
       affectedPages: orphans,
-      details: orphans.map((url) => ({ url })),
+      details: orphans.map((url) => ({
+        url,
+        discoveredBy: 'sitemap',
+        inboundCount: 0
+      })),
       recommendation: '从相关栏目、导航或正文为重要页面增加可抓取的内部链接。',
       complete: siteInventoryComplete && sitemapInventoryComplete,
       unknownFinding: '站点或 Sitemap 清单不完整，无法可靠判断孤儿页面'
+    }),
+    evidenceCheck({
+      id: 'internal-link-quality',
+      title: '内部链接来源质量',
+      severity: 'low',
+      failed: linkQuality.footer_only_pages.length > 0,
+      finding: `${linkQuality.footer_only_pages.length} 个 Sitemap 页面仅有 Footer 入链`,
+      passedFinding: 'Sitemap 页面具有导航、栏目、正文或其他结构性入链',
+      value: `${linkQuality.footer_only_pages.length} 个页面仅依赖 Footer`,
+      affectedPages: linkQuality.footer_only_pages,
+      details: linkQuality.pages.filter((page) => page.classification === 'footer_only'),
+      recommendation: '从主导航、栏目列表、面包屑、正文或相关推荐为重要页面增加上下文内链。',
+      complete: siteInventoryComplete && sitemapInventoryComplete,
+      unknownFinding: '站点或 Sitemap 清单不完整，无法可靠判断内链来源质量'
     }),
     evidenceCheck({
       id: 'sitemap-coverage',
@@ -527,6 +782,20 @@ function analyzeSitewideEvidence({
       unknownFinding: 'Sitemap 或抓取清单不完整，无法确认两者完全一致'
     }),
     evidenceCheck({
+      id: 'url-consistency',
+      title: '站点 URL 一致性',
+      severity: 'high',
+      failed: urlConsistency.issues.length > 0,
+      finding: `${urlConsistency.issues.length} 个 Sitemap、Canonical、Open Graph 或站点来源不一致问题`,
+      passedFinding: 'Sitemap、Canonical、Open Graph 与检测入口同源且使用公开地址',
+      value: `${urlConsistency.issues.length} 个 URL 配置问题`,
+      affectedPages: urlConsistency.issues.map((issue) => issue.page || issue.target),
+      details: urlConsistency.issues,
+      recommendation: '使用统一的公开 HTTPS 站点地址生成 robots、Sitemap、Canonical 与 og:url，正式环境不得使用 localhost 或私网地址。',
+      complete: siteInventoryComplete && sitemapInventoryComplete,
+      unknownFinding: '站点或 Sitemap 清单不完整，无法确认 URL 配置完全一致'
+    }),
+    evidenceCheck({
       id: 'hreflang',
       title: 'hreflang 国际化声明',
       severity: 'medium',
@@ -540,6 +809,28 @@ function analyzeSitewideEvidence({
       complete: siteInventoryComplete && hreflang.unverified.length === 0,
       unknownFinding: '部分 hreflang 目标不在本次审计范围，无法验证回链',
       unknownValue: `${hreflang.unverified.length} 个目标未验证`
+    }),
+    evidenceCheck({
+      id: 'navigation-crawlability',
+      title: '导航链接可抓取性',
+      severity: 'medium',
+      failed: navigationIssueCount > 0,
+      finding: `${navigation.static_issues.length + navigation.rendered_controls.length} 类无效或非语义化导航，${navigation.interaction_dependent_links.length} 组链接依赖用户交互`,
+      passedFinding: '未发现无效 a、非语义化控件或依赖用户交互的关键导航链接',
+      value: `${navigationIssueCount} 个导航问题`,
+      affectedPages: [
+        ...navigation.static_issues.flatMap((issue) => issue.sourcePages),
+        ...navigation.rendered_controls.map((entry) => entry.page),
+        ...navigation.interaction_dependent_links.map((entry) => entry.page)
+      ],
+      details: [
+        ...navigation.static_issues,
+        ...navigation.rendered_controls,
+        ...navigation.interaction_dependent_links
+      ],
+      recommendation: 'URL 跳转使用带 href 的 a/Link；菜单开关使用 button；子菜单链接应在初始 DOM 中存在。',
+      complete: navigationIssueCount > 0 || rendering.status === 'completed',
+      unknownFinding: '未取得完整浏览器导航证据，无法确认交互菜单均可抓取'
     }),
     (
       rendering.status === 'unavailable'
@@ -584,9 +875,12 @@ function analyzeSitewideEvidence({
     redirects,
     broken_links: brokenLinks,
     orphan_pages: orphans,
+    internal_link_quality: linkQuality,
     sitemap,
+    url_consistency: urlConsistency,
     hreflang,
-    rendering
+    rendering,
+    navigation_crawlability: navigation
   };
 }
 

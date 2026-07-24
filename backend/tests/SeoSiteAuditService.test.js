@@ -381,7 +381,7 @@ test('adds cross-page SEO evidence and JavaScript render sampling to the formal 
   const report = await createSeoSiteAuditService({ siteClient, renderService })
     .audit('https://example.com/');
 
-  assert.equal(report.sitewide.version, 'sitewide-audit-v2');
+  assert.equal(report.sitewide.version, 'sitewide-audit-v3');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'duplicate-titles').status, 'failed');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'canonical-conflicts').status, 'failed');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'broken-links').status, 'failed');
@@ -390,4 +390,80 @@ test('adds cross-page SEO evidence and JavaScript render sampling to the formal 
   assert.equal(report.sitewide.checks.find((check) => check.id === 'sitemap-coverage').status, 'failed');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'javascript-rendering').status, 'failed');
   assert.equal(report.summary.sitewideIssues, report.sitewide.issues.length);
+});
+
+test('collects navigation semantics, link regions and URL consistency evidence', async () => {
+  const root = htmlPage('https://example.com/');
+  root.html = root.html
+    .replace(
+      '<body>',
+      '<body><nav><span class="cursor-pointer">解决方案</span><a href="#">占位链接</a></nav><main><a href="/content">正文入口</a></main><footer><a href="/footer-only">页脚入口</a></footer>'
+    )
+    .replace(
+      '<link rel="canonical" href="https://example.com/">',
+      '<link rel="canonical" href="https://wrong.example/"><meta property="og:url" content="https://wrong.example/">'
+    );
+  const pages = new Map([
+    ['https://example.com/', root],
+    ['https://example.com/content', htmlPage('https://example.com/content')],
+    ['https://example.com/footer-only', htmlPage('https://example.com/footer-only')]
+  ]);
+  const siteClient = {
+    async fetchPage(url) {
+      return pages.get(url);
+    },
+    async probe(url) {
+      if (url === 'https://example.com/robots.txt') {
+        return {
+          statusCode: 200,
+          body: 'User-agent: *\nAllow: /\nSitemap: https://wrong.example/sitemap.xml'
+        };
+      }
+      if (url === 'https://example.com/sitemap.xml') {
+        return {
+          statusCode: 200,
+          body: [
+            '<urlset>',
+            '<url><loc>https://example.com/</loc></url>',
+            '<url><loc>https://example.com/content</loc></url>',
+            '<url><loc>https://example.com/footer-only</loc></url>',
+            '<url><loc>https://wrong.example/external</loc></url>',
+            '</urlset>'
+          ].join('')
+        };
+      }
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+
+  assert.equal(
+    report.sitewide.checks.find((check) => check.id === 'navigation-crawlability').status,
+    'failed'
+  );
+  assert.equal(
+    report.sitewide.navigation_crawlability.static_issues.some((issue) => (
+      issue.tag === 'span' && issue.text === '解决方案'
+    )),
+    true
+  );
+  assert.equal(
+    report.sitewide.navigation_crawlability.static_issues.some((issue) => (
+      issue.type === 'invalid-anchor' && issue.reason === 'fragment_placeholder'
+    )),
+    true
+  );
+  assert.deepEqual(report.sitewide.internal_link_quality.footer_only_pages, [
+    'https://example.com/footer-only'
+  ]);
+  assert.deepEqual(
+    new Set(report.sitewide.url_consistency.issues.map((issue) => issue.type)),
+    new Set([
+      'robots-sitemap-origin',
+      'sitemap-entry-origin',
+      'canonical-origin',
+      'open-graph-origin'
+    ])
+  );
 });

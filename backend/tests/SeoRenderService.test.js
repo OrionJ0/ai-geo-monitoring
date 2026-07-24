@@ -129,7 +129,9 @@ test('executes page JavaScript through the installed headless Chrome', {
       document.title = '渲染标题';
       document.querySelector('meta[name="description"]').content = '渲染描述';
       document.querySelector('main').textContent = '浏览器执行 JavaScript 后的正文内容';
-      document.body.insertAdjacentHTML('beforeend', '<a href="/next">下一页</a>');
+      for (let index = 0; index < 205; index += 1) {
+        document.body.insertAdjacentHTML('beforeend', '<a href="/next-' + index + '">下一页</a>');
+      }
     </script></body></html>`);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -158,7 +160,72 @@ test('executes page JavaScript through the installed headless Chrome', {
     assert.equal(result.status, 'completed');
     assert.equal(result.samples[0].rendered.title, '渲染标题');
     assert.equal(result.samples[0].rendered.description, '渲染描述');
-    assert.equal(result.samples[0].rendered.linkCount, 1);
+    assert.equal(result.samples[0].rendered.linkCount, 205);
+    assert.equal(result.samples[0].rendered.navigation.initialLinks.length, 200);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('detects navigation links that only appear after hover interaction', {
+  skip: !discoverBrowserExecutable()
+}, async () => {
+  const server = http.createServer((_request, response) => {
+    response.setHeader('content-type', 'text/html; charset=utf-8');
+    response.end(`<!doctype html><html><head><title>导航抽样</title></head><body>
+      <header><nav id="nav">
+        <span id="solutions" style="cursor:pointer">解决方案</span>
+        <button id="products" type="button">产品中心</button>
+      </nav></header>
+      <script>
+        document.querySelector('#products').addEventListener('mouseover', () => {
+          if (!document.querySelector('#energy')) {
+            document.querySelector('#nav').insertAdjacentHTML(
+              'beforeend',
+              '<a id="energy" href="/solutions/energy">能源</a>'
+            );
+          }
+        });
+      </script>
+    </body></html>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const url = `http://127.0.0.1:${address.port}/`;
+  const service = createSeoRenderService({
+    enabled: true,
+    executablePath: discoverBrowserExecutable(),
+    browserFactory: (options) => createCdpBrowser({
+      ...options,
+      urlGuard: async (value) => value
+    })
+  });
+
+  try {
+    const result = await service.sample([{
+      url,
+      source: {
+        title: '导航抽样',
+        description: '',
+        contentCharacters: 6,
+        linkCount: 0
+      }
+    }]);
+
+    const navigation = result.samples[0].rendered.navigation;
+    assert.equal(
+      navigation.nonSemanticControls.some((control) => (
+        control.tag === 'span' && control.text === '解决方案'
+      )),
+      true
+    );
+    assert.deepEqual(navigation.interactionDependentLinks, [{
+      triggerText: '产品中心',
+      links: [{
+        url: `${url}solutions/energy`,
+        text: '能源'
+      }]
+    }]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

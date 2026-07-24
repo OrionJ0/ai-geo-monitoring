@@ -15,7 +15,10 @@ const CHECK_LABELS = {
   'canonical-conflicts': 'Canonical 冲突与聚类',
   redirects: '重定向链与循环',
   'broken-links': '失效内链与外链',
-  'orphan-pages': '孤儿页面',
+  'orphan-pages': '疑似孤儿页面',
+  'internal-link-quality': '内部链接来源质量',
+  'navigation-crawlability': '导航链接可抓取性',
+  'url-consistency': '站点 URL 一致性',
   hreflang: 'hreflang 国际化声明',
   'sitemap-coverage': 'Sitemap 与可访问页面差异',
   'javascript-rendering': 'JavaScript 渲染抽样'
@@ -40,6 +43,38 @@ function StatusIcon({ status }) {
   if (status === 'passed') return <CheckCircleFilled aria-hidden="true" />;
   if (status === 'failed') return <ExclamationCircleFilled aria-hidden="true" />;
   return <QuestionCircleFilled aria-hidden="true" />;
+}
+
+function evidenceText(checkId, detail) {
+  if (checkId === 'orphan-pages') {
+    return `Sitemap 发现 · 入链 ${detail.inboundCount ?? 0}`;
+  }
+  if (checkId === 'internal-link-quality') {
+    return `仅 Footer 入链 · ${detail.source_page_count || 0} 个来源页面 · ${detail.inbound_count || 0} 条链接`;
+  }
+  if (checkId === 'navigation-crawlability') {
+    if (detail.triggerText) {
+      return `“${detail.triggerText}”交互后才出现 ${detail.links?.length || 0} 个链接`;
+    }
+    return `<${detail.tag || 'element'}> “${detail.text || '无文本'}” · ${detail.reason || '不可抓取导航'}`;
+  }
+  if (checkId === 'url-consistency') {
+    return `${detail.message || detail.type || 'URL 不一致'}${detail.target ? ` · ${detail.target}` : ''}`;
+  }
+  return '';
+}
+
+function CheckEvidence({ check }) {
+  const evidence = (Array.isArray(check.details) ? check.details : [])
+    .map((detail) => evidenceText(check.id, detail))
+    .filter(Boolean)
+    .slice(0, 3);
+  if (!evidence.length) return null;
+  return (
+    <ul className={styles.sitewideEvidence}>
+      {evidence.map((item, index) => <li key={`${check.id}-${index}`}>{item}</li>)}
+    </ul>
+  );
 }
 
 function ChangeColumn({ title, items, tone }) {
@@ -104,6 +139,7 @@ export default function SitewideAuditPanel({ sitewide, comparison }) {
             </header>
             <strong>{check.finding}</strong>
             <p>{check.value}</p>
+            <CheckEvidence check={check} />
             {(check.affectedPages || []).length ? (
               <div className={styles.sitewideUrls}>
                 {check.affectedPages.slice(0, 4).map((url) => {

@@ -124,6 +124,8 @@ Authorization: Bearer <token>
   - 返回：`202 Accepted`，`data.id` 为任务编号，初始 `status` 为 `queued`，`progress.phase` 为 `queued`
   - 发现来源：提交 URL、页面内链、根目录 `/sitemap.xml`、robots 声明的 Sitemap；支持 Sitemap index、URL 去重和片段移除
   - 抓取限制：默认上限 200 页、并发 3、最多读取 20 个 Sitemap、递归深度 3；达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
+  - 专项报告：`report.sitewide.version` 当前为 `sitewide-audit-v3`；在原有跨页检查之外，`internal_link_quality` 区分零入链、仅 Footer 入链和结构性入链，`navigation_crawlability` 返回无效 `<a>`、非语义化导航控件及交互后才出现的链接，`url_consistency` 校验检测入口、robots Sitemap、Sitemap 条目、Canonical 与 `og:url` 的来源一致性
+  - 证据边界：浏览器导航抽样只触发 Header/Nav 控件的 hover/focus，不点击链接或业务按钮；渲染器不可用且静态 HTML 没有确定问题时，导航检查返回 `unknown`，不会伪装为通过
   - 容错：单页失败写入逐页账本并继续；所有入口均失败时任务标记 `failed`，且不写入伪成功历史
 - `GET /api/seo-audits/jobs/:jobId` 查询当前用户的全站任务
   - 运行中返回 `status` 与 `progress`（发现、检测和失败页数）

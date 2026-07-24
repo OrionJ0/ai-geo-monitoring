@@ -176,6 +176,203 @@ test('finds sitemap pages with no incoming internal links as orphan pages', () =
   assert.equal(result.checks.find((check) => check.id === 'orphan-pages').status, 'failed');
 });
 
+test('classifies sitemap pages by internal link source quality', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [
+      page('https://example.com/', {
+        links: [
+          {
+            url: 'https://example.com/footer-only',
+            internal: true,
+            region: 'footer',
+            text: '页脚入口'
+          },
+          {
+            url: 'https://example.com/structural',
+            internal: true,
+            region: 'content',
+            text: '正文入口'
+          }
+        ]
+      }),
+      page('https://example.com/footer-only'),
+      page('https://example.com/structural'),
+      page('https://example.com/orphan')
+    ],
+    sitemapUrls: [
+      'https://example.com/',
+      'https://example.com/footer-only',
+      'https://example.com/structural',
+      'https://example.com/orphan'
+    ],
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] }
+  });
+
+  assert.deepEqual(result.internal_link_quality.footer_only_pages, [
+    'https://example.com/footer-only'
+  ]);
+  assert.deepEqual(result.internal_link_quality.orphan_pages, [
+    'https://example.com/orphan'
+  ]);
+  assert.deepEqual(
+    result.internal_link_quality.pages.find((entry) => (
+      entry.url === 'https://example.com/structural'
+    )),
+    {
+      url: 'https://example.com/structural',
+      inbound_count: 1,
+      source_page_count: 1,
+      regions: { header: 0, navigation: 0, content: 1, footer: 0, other: 0 },
+      classification: 'structural',
+      sources: [{
+        source_url: 'https://example.com/',
+        region: 'content',
+        text: '正文入口'
+      }]
+    }
+  );
+  assert.equal(
+    result.checks.find((check) => check.id === 'internal-link-quality').status,
+    'failed'
+  );
+});
+
+test('reports non-semantic navigation controls and interaction-dependent links', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [
+      page('https://example.com/', {
+        navigationIssues: [{
+          type: 'non-semantic-navigation-control',
+          tag: 'span',
+          text: '解决方案',
+          region: 'navigation',
+          reason: 'clickable_non_link'
+        }]
+      })
+    ],
+    sitemapUrls: ['https://example.com/'],
+    linkChecks: [],
+    renderAnalysis: {
+      status: 'completed',
+      samples: [{
+        url: 'https://example.com/',
+        source: {
+          title: '首页',
+          description: '',
+          contentCharacters: 100,
+          linkCount: 1
+        },
+        rendered: {
+          title: '首页',
+          description: '',
+          contentCharacters: 100,
+          linkCount: 1,
+          navigation: {
+            nonSemanticControls: [{
+              tag: 'span',
+              text: '解决方案',
+              reason: 'clickable_non_link'
+            }],
+            interactionDependentLinks: [{
+              triggerText: '解决方案',
+              links: [{
+                url: 'https://example.com/solutions/energy',
+                text: '能源'
+              }]
+            }]
+          }
+        }
+      }]
+    }
+  });
+
+  assert.equal(
+    result.checks.find((check) => check.id === 'navigation-crawlability').status,
+    'failed'
+  );
+  assert.deepEqual(result.navigation_crawlability.static_issues, [{
+    type: 'non-semantic-navigation-control',
+    tag: 'span',
+    text: '解决方案',
+    region: 'navigation',
+    reason: 'clickable_non_link',
+    sourcePageCount: 1,
+    sourcePages: ['https://example.com/']
+  }]);
+  assert.equal(result.navigation_crawlability.interaction_dependent_links.length, 1);
+  assert.deepEqual(
+    result.navigation_crawlability.interaction_dependent_links[0].links,
+    [{
+      url: 'https://example.com/solutions/energy',
+      text: '能源'
+    }]
+  );
+});
+
+test('bounds repeated navigation source-page evidence while retaining the total count', () => {
+  const pages = Array.from({ length: 60 }, (_, index) => page(
+    `https://example.com/page-${index}`,
+    {
+      navigationIssues: [{
+        type: 'non-semantic-navigation-control',
+        tag: 'span',
+        text: '产品中心',
+        region: 'header',
+        reason: 'clickable_non_link'
+      }]
+    }
+  ));
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages,
+    sitemapUrls: pages.map((entry) => entry.url),
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] }
+  });
+  const [issue] = result.navigation_crawlability.static_issues;
+
+  assert.equal(issue.sourcePageCount, 60);
+  assert.equal(issue.sourcePages.length, 50);
+});
+
+test('reports cross-origin and non-public SEO URL declarations', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'http://localhost:3003',
+    pages: [
+      page('http://localhost:3003/', {
+        canonicalUrls: ['https://www.example.com/'],
+        openGraphUrl: 'https://www.example.com/'
+      })
+    ],
+    sitemapUrls: ['http://localhost:3003/'],
+    declaredSitemaps: ['https://www.example.com/sitemap.xml'],
+    sitemapReferences: [{
+      source: 'http://localhost:3003/sitemap.xml',
+      url: 'https://www.example.com/product',
+      kind: 'url'
+    }],
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] }
+  });
+
+  const check = result.checks.find((item) => item.id === 'url-consistency');
+  assert.equal(check.status, 'failed');
+  assert.deepEqual(
+    new Set(result.url_consistency.issues.map((issue) => issue.type)),
+    new Set([
+      'non-public-origin',
+      'robots-sitemap-origin',
+      'sitemap-entry-origin',
+      'canonical-origin',
+      'open-graph-origin'
+    ])
+  );
+  assert.equal(result.url_consistency.expected_origin, 'http://localhost:3003');
+});
+
 test('does not claim orphan or hreflang health when a page crawl failed', () => {
   const result = analyzeSitewideEvidence({
     origin: 'https://example.com',
@@ -297,7 +494,8 @@ test('does not report incomplete sitewide evidence as passed', () => {
   });
 
   ['duplicate-titles', 'duplicate-descriptions', 'canonical-conflicts', 'redirects',
-    'broken-links', 'orphan-pages', 'sitemap-coverage', 'hreflang'].forEach((id) => {
+    'broken-links', 'orphan-pages', 'internal-link-quality', 'sitemap-coverage',
+    'url-consistency', 'hreflang', 'navigation-crawlability'].forEach((id) => {
     assert.equal(result.checks.find((check) => check.id === id).status, 'unknown', id);
   });
 });

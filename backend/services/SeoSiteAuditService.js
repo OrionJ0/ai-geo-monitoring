@@ -39,6 +39,68 @@ function normalizeHttpUrl(value, baseUrl) {
   }
 }
 
+function elementRegion($, element) {
+  if ($(element).closest('footer').length) return 'footer';
+  if ($(element).closest('header').length) return 'header';
+  if ($(element).closest('nav, [role="navigation"], [role="menu"]').length) return 'navigation';
+  if ($(element).closest('main, article').length) return 'content';
+  return 'other';
+}
+
+function navigationIssues($, finalUrl) {
+  const issues = [];
+  $('a').each((_, element) => {
+    const rawHref = $(element).attr('href');
+    const href = String(rawHref || '').trim();
+    let reason = '';
+    if (typeof rawHref !== 'string') reason = 'missing_href';
+    else if (!href) reason = 'empty_href';
+    else if (href === '#') reason = 'fragment_placeholder';
+    else if (/^javascript:/i.test(href)) reason = 'javascript_url';
+    else if (!normalizeHttpUrl(href, finalUrl) && !/^(?:mailto|tel):/i.test(href)) {
+      reason = 'invalid_url';
+    }
+    if (!reason) return;
+    issues.push({
+      type: 'invalid-anchor',
+      tag: 'a',
+      text: $(element).text().replace(/\s+/g, ' ').trim().slice(0, 160),
+      region: elementRegion($, element),
+      reason
+    });
+  });
+
+  const candidates = $('header span, header div, nav span, nav div, [role="navigation"] span, [role="navigation"] div, [role="menu"] span, [role="menu"] div, [role="link"]')
+    .toArray();
+  const isClickableCandidate = (element) => {
+    const tag = String(element?.tagName || '').toLowerCase();
+    if (['a', 'button'].includes(tag)) return false;
+    const role = String($(element).attr('role') || '').toLowerCase();
+    const className = String($(element).attr('class') || '');
+    const style = String($(element).attr('style') || '');
+    return role === 'link'
+      || $(element).is('[onclick]')
+      || /(?:^|\s)cursor-pointer(?:\s|$)/.test(className)
+      || /cursor\s*:\s*pointer/i.test(style);
+  };
+  candidates
+    .filter(isClickableCandidate)
+    .filter((element) => !$(element).find('span, div, [role="link"]').toArray().some(isClickableCandidate))
+    .forEach((element) => {
+      const text = $(element).text().replace(/\s+/g, ' ').trim().slice(0, 160);
+      if (!text) return;
+      issues.push({
+        type: 'non-semantic-navigation-control',
+        tag: String(element.tagName || '').toLowerCase(),
+        text,
+        region: elementRegion($, element),
+        reason: 'clickable_non_link'
+      });
+    });
+
+  return issues;
+}
+
 function createCachedClient(siteClient) {
   const pageCache = new Map();
   const probeCache = new Map();
@@ -160,6 +222,7 @@ function createSeoSiteAuditService({
         .filter((entry) => entry.url);
       const visitedSitemaps = new Set();
       const sitemapUrls = new Set();
+      const sitemapReferences = [];
 
       while (sitemapQueue.length && visitedSitemaps.size < rules.crawl.sitemapLimit) {
         const current = sitemapQueue.shift();
@@ -171,14 +234,29 @@ function createSeoSiteAuditService({
         if (parsed.type === 'urlset') {
           parsed.locations.forEach((url) => {
             const normalized = normalizeSameOriginUrl(url, current.url, origin);
-            if (!normalized) return;
+            if (!normalized) {
+              sitemapReferences.push({
+                source: current.url,
+                url: normalizeHttpUrl(url, current.url) || url,
+                kind: 'url'
+              });
+              return;
+            }
             sitemapUrls.add(normalized);
             addPage(normalized, current.url);
           });
         } else if (parsed.type === 'index' && current.depth < rules.crawl.sitemapDepth) {
           parsed.locations.forEach((url) => {
             const normalized = normalizeSameOriginUrl(url, current.url, origin);
-            if (normalized && !visitedSitemaps.has(normalized)) {
+            if (!normalized) {
+              sitemapReferences.push({
+                source: current.url,
+                url: normalizeHttpUrl(url, current.url) || url,
+                kind: 'sitemap'
+              });
+              return;
+            }
+            if (!visitedSitemaps.has(normalized)) {
               sitemapQueue.push({ url: normalized, depth: current.depth + 1 });
             }
           });
@@ -204,7 +282,12 @@ function createSeoSiteAuditService({
             const normalized = normalizeHttpUrl($(element).attr('href'), finalUrl);
             if (!normalized) return;
             const internal = new URL(normalized).origin === origin;
-            links.push({ url: normalized, internal });
+            links.push({
+              url: normalized,
+              internal,
+              text: $(element).text().replace(/\s+/g, ' ').trim().slice(0, 160),
+              region: elementRegion($, element)
+            });
             if (internal) addPage(normalized, finalUrl);
           });
           const canonicalUrls = $('link[rel~="canonical"][href]')
@@ -218,6 +301,8 @@ function createSeoSiteAuditService({
             }))
             .get();
           const description = $('meta[name="description"]').first().attr('content')?.trim() || '';
+          const openGraphUrl = $('meta[property="og:url"]').first().attr('content')?.trim() || '';
+          const pageNavigationIssues = navigationIssues($, finalUrl);
 
           const report = await pageAudit.audit(url);
           const checks = pageChecks(report);
@@ -242,8 +327,10 @@ function createSeoSiteAuditService({
             indexable: report.page.indexable,
             isHomepage,
             canonicalUrls,
+            openGraphUrl,
             hreflang,
             links,
+            navigationIssues: pageNavigationIssues,
             redirectChain: Array.isArray(response.redirectChain) ? response.redirectChain : [],
             issues: report.health.issues.map(compactIssue),
             platforms: report.platforms,
@@ -388,6 +475,8 @@ function createSeoSiteAuditService({
         origin,
         pages,
         sitemapUrls: Array.from(sitemapUrls),
+        declaredSitemaps,
+        sitemapReferences,
         linkChecks,
         renderAnalysis,
         truncated,
@@ -443,7 +532,11 @@ function createSeoSiteAuditService({
           : priority
       ));
       const health = { ...scoredHealth, issues, priorities };
-      const persistedPages = pages.map(({ links: _links, ...page }) => page);
+      const persistedPages = pages.map(({
+        links: _links,
+        navigationIssues: _navigationIssues,
+        ...page
+      }) => page);
 
       const report = {
         mode: 'site',

@@ -77,7 +77,7 @@
 
 - 页面入口：`/geo/seo-audit`（需登录）
 - 检测模式：默认“全站检测”异步扫描同域链接、默认 Sitemap、robots 声明 Sitemap 和 Sitemap index，最多检测 200 页；“单页检测”只分析输入的精确 URL
-- 当前能力：执行 23 项页面基础检查，返回带版本号的技术健康度；全站报告另有不改写 v4 分数的专项审计层，检测重复标题/描述、Canonical 聚类与冲突、重定向链/循环、失效内外链、孤儿页、hreflang、Sitemap 差异、JavaScript 渲染抽样及相对上次报告的问题变化
+- 当前能力：执行 23 项页面基础检查，返回带版本号的技术健康度；全站报告另有不改写 v4 分数的专项审计层，检测重复标题/描述、Canonical 聚类与冲突、重定向链/循环、失效内外链、疑似孤儿页、内链来源质量、导航链接可抓取性、站点 URL 一致性、hreflang、Sitemap 差异、JavaScript 渲染抽样及相对上次报告的问题变化
 - 有效性规则：`robots.txt`、Sitemap、Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 和图片 Alt 均校验实际内容，文件返回 200、标签存在或 `robots.txt` 声明 Sitemap 本身不等于通过
 - 爬虫权限：按每个被检测路径解析 `robots.txt`，展示 Googlebot、Bingbot、Baiduspider 和重要 AI 搜索、用户触发、训练类 token；搜索/AI 搜索阻断纳入评分，其余作为授权信息不计分。全开放只表示 robots 未声明限制，不能证明真实抓取、收录或引用
 - 搜索平台：固定从站点首页分别检查 Google、Bing、百度非空 HTML 验证标签；该结果只表示页面源码信号，不能证明平台后台当前已验证，也不检测 DNS 或验证文件方式
