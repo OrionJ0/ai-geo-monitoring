@@ -19,3 +19,15 @@ test('default administrator bootstrap uses the documented local credentials', ()
   assert.match(envExample, /^DEFAULT_ADMIN_USERNAME=admin$/m);
   assert.match(envExample, /^DEFAULT_ADMIN_PASSWORD=admin123456$/m);
 });
+
+test('private SEO mode disables public self-registration', () => {
+  const { selfRegistrationEnabled } = require('../config/seoAuditNetworkPolicy');
+  const source = fs.readFileSync(path.resolve(__dirname, '../routes/user.js'), 'utf8');
+
+  assert.equal(selfRegistrationEnabled('true'), false);
+  assert.equal(selfRegistrationEnabled('TRUE'), false);
+  assert.equal(selfRegistrationEnabled('false'), true);
+  assert.equal(selfRegistrationEnabled(''), true);
+  assert.match(source, /router\.post\('\/register'[\s\S]*selfRegistrationEnabled\(\)/);
+  assert.match(source, /SELF_REGISTRATION_DISABLED/);
+});

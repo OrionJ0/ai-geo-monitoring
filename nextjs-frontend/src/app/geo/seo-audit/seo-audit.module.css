@@ -374,6 +374,27 @@
   margin-top: 18px;
 }
 
+.networkPolicyNote {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid #f0c987;
+  border-left: 4px solid #d98a16;
+  background: #fff8e8;
+  color: #6f4a10;
+}
+
+.networkPolicyNote strong {
+  flex: 0 0 auto;
+  color: #9a5c00;
+}
+
+.networkPolicyNote span {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .reportMeta {
   display: flex;
   align-items: center;

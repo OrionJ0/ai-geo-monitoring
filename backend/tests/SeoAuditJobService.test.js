@@ -161,3 +161,83 @@ test('requeues interrupted jobs after a service restart', async () => {
   assert.equal(jobs[0].progress.phase, 'queued');
   assert.equal(jobs[0].progress.recovered, true);
 });
+
+test('rebuilds a private audit runtime from the stored URL after restart', async () => {
+  const job = createRow({
+    id: 12,
+    user_id: 7,
+    requested_url: 'http://192.168.9.206:3003/',
+    status: 'running',
+    progress: { phase: 'crawling', auditedPages: 1 },
+    created_at: new Date('2026-07-23T01:00:00Z')
+  });
+  const scheduled = [];
+  const savedReports = [];
+  const service = createSeoAuditJobService({
+    model: {
+      async findAll() { return [job]; },
+      async findByPk(id) { return id === job.id ? job : null; },
+      async findOne() { return job; }
+    },
+    targetResolver(url) {
+      assert.equal(url, 'http://192.168.9.206:3003/');
+      return {
+        requestedUrl: url,
+        policy: {
+          networkScope: 'private',
+          allowedPrivateOrigin: 'http://192.168.9.206:3003'
+        }
+      };
+    },
+    runtimeFactory(url) {
+      assert.equal(url, 'http://192.168.9.206:3003/');
+      return {
+        requestedUrl: url,
+        policy: {
+          networkScope: 'private',
+          allowedPrivateOrigin: 'http://192.168.9.206:3003'
+        },
+        service: {
+          async audit() {
+            return {
+              mode: 'site',
+              requestedUrl: url,
+              finalUrl: url,
+              checkedAt: '2026-07-23T01:02:00Z',
+              site: {
+                origin: 'http://192.168.9.206:3003',
+                discoveredPages: 2,
+                auditedPages: 2,
+                failedPages: 0,
+                truncated: false
+              },
+              pages: [],
+              issues: [],
+              sitewide: { checks: [], issues: [] }
+            };
+          }
+        }
+      };
+    },
+    historyService: {
+      async findPreviousSiteReport() { return null; },
+      async save(userId, report) {
+        savedReports.push({ userId, report });
+        return { id: 91 };
+      },
+      async get() { return null; }
+    },
+    schedule: (callback) => scheduled.push(callback)
+  });
+
+  await service.recoverInterruptedJobs();
+  await scheduled[0]();
+
+  assert.equal(job.status, 'completed');
+  assert.equal(savedReports[0].userId, 7);
+  assert.deepEqual(savedReports[0].report.networkPolicy, {
+    scope: 'private',
+    externalLinkProbes: 'not_checked',
+    javascriptRendering: 'not_checked'
+  });
+});

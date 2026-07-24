@@ -3,6 +3,7 @@ const dns = require('node:dns');
 const http = require('node:http');
 const https = require('node:https');
 const net = require('node:net');
+const { privateTargetsEnabled } = require('../config/seoAuditNetworkPolicy');
 
 const PAGE_TIMEOUT_MS = 10000;
 const PAGE_LIMIT_BYTES = 2 * 1024 * 1024;
@@ -65,19 +66,14 @@ function isPublicIpv6(address) {
   const expanded = expandIpv6(address);
   if (!expanded || expanded.mappedPrivateIpv4) return false;
   const value = expanded;
-  if (value === 0n || value === 1n) return false;
-  if ((value >> 120n) === 0xffn) return false; // multicast
-  if ((value >> 121n) === 0x7en) return false; // unique local fc00::/7
-  if ((value >> 118n) === 0x3fan) return false; // link-local fe80::/10
-  if ((value >> 32n) === 0x64ff9b000000000000000000n) return false; // NAT64 well-known prefix
-  if ((value >> 96n) === 0x20010db8n) return false; // documentation prefix
+  if ((value >> 125n) !== 1n) return false; // Current global unicast allocation: 2000::/3.
 
-  const mappedPrefix = value >> 32n;
-  if (mappedPrefix === 0xffffn) {
-    const ipv4Number = Number(value & 0xffffffffn);
-    const mapped = [24, 16, 8, 0].map((shift) => (ipv4Number >>> shift) & 255).join('.');
-    return isPublicIpv4(mapped);
-  }
+  const firstGroup = Number(value >> 112n);
+  const secondGroup = Number((value >> 96n) & 0xffffn);
+  if (firstGroup === 0x2001 && secondGroup <= 0x01ff) return false; // IETF protocol assignments.
+  if (firstGroup === 0x2002 || firstGroup === 0x3ffe) return false; // 6to4 and retired 6bone.
+  if (firstGroup === 0x3fff && secondGroup <= 0x0fff) return false; // Documentation prefix.
+  if ((value >> 96n) === 0x20010db8n) return false; // documentation prefix
   return true;
 }
 
@@ -88,27 +84,73 @@ function isPublicAddress(address) {
   return false;
 }
 
-function parsePrivateHostAllowlist(rawAllowlist = process.env.SEO_AUDIT_PRIVATE_HOST_ALLOWLIST) {
-  return new Set(
-    String(rawAllowlist || '')
-      .split(',')
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean)
-  );
-}
-
 function normalizedHostname(hostname) {
   return String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
 }
 
-function hostPortForUrl(parsed) {
-  const hostname = normalizedHostname(parsed.hostname);
-  const host = hostname.includes(':') ? `[${hostname}]` : hostname;
-  const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
-  return `${host}:${port}`;
+function isPrivateAuditAddress(address) {
+  const hostname = normalizedHostname(address);
+  const family = net.isIP(hostname);
+  if (family === 6) return expandIpv6(hostname) === 1n;
+  if (family !== 4) return false;
+  const [a, b] = hostname.split('.').map(Number);
+  return a === 127
+    || a === 10
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168);
 }
 
-function assertAllowedUrl(input, { privateHostAllowlist } = {}) {
+function isLoopbackAddress(address) {
+  const hostname = normalizedHostname(address);
+  const family = net.isIP(hostname);
+  if (family === 6) return expandIpv6(hostname) === 1n;
+  return family === 4 && Number(hostname.split('.')[0]) === 127;
+}
+
+function normalizedPrivateOrigin(input) {
+  if (!input) return '';
+  const parsed = input instanceof URL ? new URL(input.toString()) : new URL(String(input));
+  const hostname = normalizedHostname(parsed.hostname);
+  if (
+    !['http:', 'https:'].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+    || (hostname !== 'localhost' && !isPrivateAuditAddress(hostname))
+  ) {
+    throw new SeoAuditRequestError('私网检测目标必须是 localhost、回环地址或局域网 IP', 'PRIVATE_TARGET_NOT_ALLOWED');
+  }
+  return parsed.origin;
+}
+
+function createSeoAuditTargetPolicy(input, {
+  allowPrivateTargets = privateTargetsEnabled()
+} = {}) {
+  let parsed;
+  try {
+    parsed = input instanceof URL ? new URL(input.toString()) : new URL(String(input));
+  } catch {
+    throw new SeoAuditRequestError('网址格式不正确', 'INVALID_URL');
+  }
+
+  const hostname = normalizedHostname(parsed.hostname);
+  const privateTarget = hostname === 'localhost' || isPrivateAuditAddress(hostname);
+  if (privateTarget) {
+    const allowedPrivateOrigin = normalizedPrivateOrigin(parsed);
+    if (!allowPrivateTargets) {
+      throw new SeoAuditRequestError(
+        '当前部署未开启本机或局域网检测',
+        'PRIVATE_TARGETS_DISABLED',
+        403
+      );
+    }
+    return Object.freeze({ networkScope: 'private', allowedPrivateOrigin });
+  }
+
+  assertAllowedUrl(parsed);
+  return Object.freeze({ networkScope: 'public', allowedPrivateOrigin: '' });
+}
+
+function assertAllowedUrl(input, { allowedPrivateOrigin = '' } = {}) {
   let parsed;
   try {
     parsed = input instanceof URL ? new URL(input.toString()) : new URL(String(input));
@@ -124,17 +166,23 @@ function assertAllowedUrl(input, { privateHostAllowlist } = {}) {
   }
 
   const hostname = normalizedHostname(parsed.hostname);
-  const allowedPrivateHosts = privateHostAllowlist instanceof Set
-    ? privateHostAllowlist
-    : parsePrivateHostAllowlist(privateHostAllowlist);
-  const allowPrivate = allowedPrivateHosts.has(hostPortForUrl(parsed));
-  if (!hostname || (!allowPrivate && (
-    hostname === 'localhost'
-    || BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))
-  ))) {
+  const privateOrigin = normalizedPrivateOrigin(allowedPrivateOrigin);
+  if (privateOrigin && parsed.origin !== privateOrigin) {
+    throw new SeoAuditRequestError(
+      '私网检测不能跳转或访问其他站点',
+      'PRIVATE_TARGET_ORIGIN_CHANGED'
+    );
+  }
+  if (privateOrigin) {
+    if (hostname !== 'localhost' && !isPrivateAuditAddress(hostname)) {
+      throw new SeoAuditRequestError('私网检测目标超出本次授权范围', 'PRIVATE_NETWORK_URL');
+    }
+    return parsed;
+  }
+  if (!hostname || hostname === 'localhost' || BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) {
     throw new SeoAuditRequestError('不能检测本机或内网地址', 'PRIVATE_NETWORK_URL');
   }
-  if (!allowPrivate && net.isIP(hostname) && !isPublicAddress(hostname)) {
+  if (net.isIP(hostname) && !isPublicAddress(hostname)) {
     throw new SeoAuditRequestError('不能检测本机或内网地址', 'PRIVATE_NETWORK_URL');
   }
   return parsed;
@@ -168,13 +216,12 @@ function responseHeaders(headers) {
 function createSeoSiteClient({
   resolveHostname = defaultResolveHostname,
   request = axios.request,
-  privateHostAllowlist = process.env.SEO_AUDIT_PRIVATE_HOST_ALLOWLIST
+  allowedPrivateOrigin = ''
 } = {}) {
-  const allowedPrivateHosts = parsePrivateHostAllowlist(privateHostAllowlist);
+  const privateOrigin = normalizedPrivateOrigin(allowedPrivateOrigin);
 
   async function resolvePublicTarget(parsed) {
     const hostname = normalizedHostname(parsed.hostname);
-    const allowPrivate = allowedPrivateHosts.has(hostPortForUrl(parsed));
     if (net.isIP(hostname)) return [{ address: hostname, family: net.isIP(hostname) }];
 
     let records;
@@ -184,7 +231,13 @@ function createSeoSiteClient({
       throw new SeoAuditRequestError('无法解析该网站域名', 'DNS_LOOKUP_FAILED', 422);
     }
     if (!records.length) throw new SeoAuditRequestError('无法解析该网站域名', 'DNS_LOOKUP_FAILED', 422);
-    if (!allowPrivate && records.some((record) => !isPublicAddress(record.address))) {
+    if (privateOrigin) {
+      if (hostname !== 'localhost' || records.some((record) => !isLoopbackAddress(record.address))) {
+        throw new SeoAuditRequestError('localhost 没有解析到回环地址', 'PRIVATE_NETWORK_URL');
+      }
+      return records;
+    }
+    if (records.some((record) => !isPublicAddress(record.address))) {
       throw new SeoAuditRequestError('不能检测解析到内网的地址', 'PRIVATE_NETWORK_URL');
     }
     return records;
@@ -192,7 +245,7 @@ function createSeoSiteClient({
 
   async function requestWithRedirects(inputUrl, { maxBytes, accept }) {
     const startedAt = Date.now();
-    let currentUrl = assertAllowedUrl(inputUrl, { privateHostAllowlist: allowedPrivateHosts });
+    let currentUrl = assertAllowedUrl(inputUrl, { allowedPrivateOrigin: privateOrigin });
     const redirectChain = [];
     const visitedUrls = new Set([currentUrl.toString()]);
 
@@ -229,13 +282,27 @@ function createSeoSiteClient({
         if (/maxContentLength|maxBodyLength|larger than/i.test(error.message || '')) {
           throw new SeoAuditRequestError('页面内容超过 2 MB，暂不支持检测', 'PAGE_TOO_LARGE', 422);
         }
+        if (privateOrigin && error.code === 'ECONNREFUSED') {
+          throw new SeoAuditRequestError(
+            '目标服务拒绝连接，请检查服务是否监听局域网地址以及端口是否正确',
+            'TARGET_CONNECTION_REFUSED',
+            502
+          );
+        }
+        if (privateOrigin && (error.code === 'EHOSTUNREACH' || error.code === 'ENETUNREACH')) {
+          throw new SeoAuditRequestError(
+            '后端服务器无法到达目标网络，请检查局域网路由和防火墙',
+            'TARGET_NETWORK_UNREACHABLE',
+            502
+          );
+        }
         throw new SeoAuditRequestError('无法连接该网站，请检查网址后重试', 'UPSTREAM_UNAVAILABLE', 502);
       }
 
       const headers = responseHeaders(response.headers);
       if (REDIRECT_STATUSES.has(response.status) && headers.location) {
         const nextUrl = assertAllowedUrl(new URL(headers.location, currentUrl), {
-          privateHostAllowlist: allowedPrivateHosts
+          allowedPrivateOrigin: privateOrigin
         });
         redirectChain.push({
           from: currentUrl.toString(),
@@ -271,7 +338,7 @@ function createSeoSiteClient({
 
   return {
     async assertPublicUrl(url) {
-      const parsed = assertAllowedUrl(url, { privateHostAllowlist: allowedPrivateHosts });
+      const parsed = assertAllowedUrl(url, { allowedPrivateOrigin: privateOrigin });
       await resolvePublicTarget(parsed);
       return parsed.toString();
     },
@@ -313,5 +380,8 @@ module.exports = {
   SeoAuditRequestError,
   assertAllowedUrl,
   isPublicAddress,
-  parsePrivateHostAllowlist
+  isPrivateAuditAddress,
+  normalizedPrivateOrigin,
+  privateTargetsEnabled,
+  createSeoAuditTargetPolicy
 };

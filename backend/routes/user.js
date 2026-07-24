@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 const { adminRequired, authRequired } = require('../middleware/auth');
 const CaptchaService = require('../services/CaptchaService');
 const AccessControlService = require('../services/AccessControlService');
+const { selfRegistrationEnabled } = require('../config/seoAuditNetworkPolicy');
 
 // 登录速率限制
 const loginLimiter = rateLimit({
@@ -19,6 +20,14 @@ const loginLimiter = rateLimit({
 // 用户注册
 router.post('/register', async (req, res) => {
   try {
+    if (!selfRegistrationEnabled()) {
+      return res.status(403).json({
+        success: false,
+        code: 'SELF_REGISTRATION_DISABLED',
+        message: '当前内部部署不开放自助注册，请联系内部负责人创建账号'
+      });
+    }
+
     const { username, email, password, captcha_id, captcha_answer } = req.body;
 
     if (!username || !email || !password) {

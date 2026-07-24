@@ -74,6 +74,40 @@ test('discovers and audits unique same-origin pages from links and recursive sit
   assert.equal(report.pages.every((page) => !Object.hasOwn(page, 'links')), true);
 });
 
+test('private site audits skip external probes and browser rendering without hiding the evidence gap', async () => {
+  const origin = 'http://192.168.9.206:3003';
+  const pages = new Map([
+    [`${origin}/`, htmlPage(`${origin}/`, ['/about', 'http://192.168.9.207:4000/secret'])],
+    [`${origin}/about`, htmlPage(`${origin}/about`)]
+  ]);
+  const probed = [];
+  const siteClient = {
+    async fetchPage(url) {
+      if (!pages.has(url)) throw Object.assign(new Error('页面不存在'), { code: 'UPSTREAM_UNAVAILABLE', status: 502 });
+      return pages.get(url);
+    },
+    async probe(url) {
+      probed.push(url);
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({
+    siteClient,
+    networkScope: 'private'
+  }).audit(`${origin}/`);
+
+  assert.equal(probed.includes('http://192.168.9.207:4000/secret'), false);
+  assert.equal(
+    report.sitewide.checks.find((check) => check.id === 'broken-links').status,
+    'unknown'
+  );
+  assert.equal(
+    report.sitewide.checks.find((check) => check.id === 'javascript-rendering').value,
+    'private_target_not_rendered'
+  );
+});
+
 test('continues link discovery when the first homepage link points back to the homepage', async () => {
   const pages = new Map([
     ['https://example.com/', htmlPage('https://example.com/', ['/', '/news', '/products/item'])],

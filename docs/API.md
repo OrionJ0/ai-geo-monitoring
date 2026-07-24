@@ -32,6 +32,7 @@ Authorization: Bearer <token>
 ## 用户
 - `POST /api/users/register` 注册（公开）
   - 参数：`username`、`email`、`password`、`captcha_id`、`captcha_answer`
+  - 开启 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=true` 的内部部署会关闭自助注册，返回 `403 SELF_REGISTRATION_DISABLED`；内部账号由用户管理创建
 - `POST /api/users/login` 登录（公开，有速率限制）
   - 返回：`token` 与用户信息
 - `GET /api/users/profile/:userId` 获取用户信息（需登录）
@@ -108,7 +109,7 @@ Authorization: Bearer <token>
 
 ## SEO 检测（需认证）
 
-- `POST /api/seo-audits` 检测一个公开 HTML 页面
+- `POST /api/seo-audits` 检测一个 HTML 页面
   - 请求体：`url` 必填，可省略 `http://` 或 `https://`
   - 返回：新保存的 `auditId`、最终 URL、状态码、响应时间、0–100 基础分、问题统计、优先修复项、六类检查结果与搜索/分享预览
   - 检查项：每项包含 `title`（检查对象）、`finding`（具体发现）、`status`、`severity`、`value`（检测事实）、`description`（影响）和 `recommendation`（建议）
@@ -118,7 +119,7 @@ Authorization: Bearer <token>
   - 搜索平台标签：固定从站点首页分别检查 Google、Bing、百度 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不识别 DNS 或验证文件方式
   - 评分配置：响应包含 `scoreVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前 `2026-07-23-v3` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
-  - 安全边界：拒绝带用户名/密码的网址、本机和私网 IP、解析到私网的域名，以及重定向到私网的目标；最多跟随 5 次重定向，超时 10 秒，页面响应体上限 2 MB
+  - 安全边界：默认拒绝本机和私网目标。内部部署设置 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=true` 后，允许所有已登录用户检测后端 `localhost`、loopback 和 RFC1918 IPv4 字面地址；单次任务只能访问提交 URL 的精确来源。带用户名/密码的网址、链路本地/云元数据等特殊地址始终拒绝
 - `POST /api/seo-audits/site` 创建全站异步检测任务
   - 请求体：`url` 必填；以该 URL 为入口，只发现同源 HTTP/HTTPS 页面
   - 返回：`202 Accepted`，`data.id` 为任务编号，初始 `status` 为 `queued`，`progress.phase` 为 `queued`
@@ -126,7 +127,10 @@ Authorization: Bearer <token>
   - 抓取限制：默认上限 200 页、并发 3、最多读取 20 个 Sitemap、递归深度 3；达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
   - 专项报告：`report.sitewide.version` 当前为 `sitewide-audit-v3`；在原有跨页检查之外，`internal_link_quality` 区分零入链、仅 Footer 入链和结构性入链，`navigation_crawlability` 返回无效 `<a>`、非语义化导航控件及交互后才出现的链接，`url_consistency` 校验检测入口、robots Sitemap、Sitemap 条目、Canonical 与 `og:url` 的来源一致性
   - 证据边界：浏览器导航抽样只触发 Header/Nav 控件的 hover/focus，不点击链接或业务按钮；渲染器不可用且静态 HTML 没有确定问题时，导航检查返回 `unknown`，不会伪装为通过
+  - 私网边界：私网全站任务不会探测站外链接，也不会执行 JavaScript 渲染抽样；报告的 `networkPolicy` 会明确标记这两项为 `not_checked`
   - 容错：单页失败写入逐页账本并继续；所有入口均失败时任务标记 `failed`，且不写入伪成功历史
+- `GET /api/seo-audits/runtime` 获取当前 SEO 检测运行能力
+  - `privateTargetsEnabled` 表示后端是否开启本机和局域网检测
 - `GET /api/seo-audits/jobs/:jobId` 查询当前用户的全站任务
   - 运行中返回 `status` 与 `progress`（发现、检测和失败页数）
   - 完成后返回 `auditId` 与完整 `report`；失败时返回安全的 `error.code`、`error.message`
@@ -209,9 +213,14 @@ Authorization: Bearer <token>
 - `UNSUPPORTED_PROTOCOL`：不是 HTTP/HTTPS 地址
 - `URL_CREDENTIALS_NOT_ALLOWED`：网址包含用户名或密码
 - `PRIVATE_NETWORK_URL`：目标或重定向地址属于本机/私网
+- `PRIVATE_TARGETS_DISABLED`：目标是允许类型的本机/局域网地址，但部署未开启私网检测
+- `PRIVATE_TARGET_ORIGIN_CHANGED`：私网任务跳转或访问了不同协议、主机或端口
+- `SELF_REGISTRATION_DISABLED`：当前内部部署已开启私网检测，因此不接受公开自助注册
 - `DNS_LOOKUP_FAILED`：域名无法解析
 - `UPSTREAM_TIMEOUT`：目标网站响应超时
 - `UPSTREAM_UNAVAILABLE`：无法连接目标网站
+- `TARGET_CONNECTION_REFUSED`：私网目标主机可达，但对应端口没有服务监听
+- `TARGET_NETWORK_UNREACHABLE`：私网检测时，后端服务器没有到目标局域网的可用网络路径
 - `PAGE_TOO_LARGE`：页面内容超过限制
 - `UNSUPPORTED_CONTENT_TYPE`：目标不是 HTML 页面
 

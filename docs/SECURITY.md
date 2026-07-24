@@ -85,6 +85,15 @@
 - 使用 `crypto.randomBytes` 生成随机 ID
 - 不可预测，防止暴力破解
 
+#### SEO 私网检测
+- 默认 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=false`，只允许检测公网目标
+- 内部部署显式设为 `true` 后，所有已登录用户均可检测后端 `localhost`、loopback 和 RFC1918 IPv4 字面地址，不区分管理员和普通用户
+- 开启私网检测后公开自助注册自动关闭，防止不可信访问者自行获得私网检测能力；内部账号由用户管理创建
+- 私网任务只允许访问提交 URL 的精确来源，跨协议、跨主机或跨端口跳转会被拒绝
+- 链路本地、云元数据和其他特殊地址不可通过该开关放行
+- 私网全站任务不探测站外链接，也不执行 JavaScript 渲染抽样
+- 这是受控 SSRF 能力：公网部署、存在不可信账号或内网含敏感 HTTP 管理面时必须关闭
+
 ### 6. 数据保护
 
 #### 敏感文件保护
@@ -127,6 +136,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 - [ ] JWT_SECRET 已设置为强随机值（至少32字符）
 - [ ] DEFAULT_ADMIN_PASSWORD 已更改
 - [ ] 分域或非 loopback 代理部署时，ALLOWED_ORIGINS 已配置为实际域名
+- [ ] 公网或存在不可信账号时，SEO_AUDIT_ALLOW_PRIVATE_TARGETS 保持为 false
 - [ ] 所有 API 密钥已检查并更新
 - [ ] HTTPS 已启用（生产环境）
 - [ ] .env 文件不在 Git 仓库中

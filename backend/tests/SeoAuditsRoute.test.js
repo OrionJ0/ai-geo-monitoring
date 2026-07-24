@@ -71,6 +71,51 @@ test('POST handler validates the URL and returns the SEO report contract', async
   }]);
 });
 
+test('POST handler applies a request-local private target policy to the saved report', async () => {
+  const savedReports = [];
+  const handler = createAuditHandler({
+    runtimeFactory(url) {
+      assert.equal(url, 'http://192.168.9.206:3003/');
+      return {
+        requestedUrl: url,
+        policy: {
+          networkScope: 'private',
+          allowedPrivateOrigin: 'http://192.168.9.206:3003'
+        },
+        service: {
+          async audit(requestedUrl) {
+            return {
+              mode: 'page',
+              requestedUrl,
+              finalUrl: requestedUrl,
+              score: 82,
+              categories: []
+            };
+          }
+        }
+      };
+    },
+    historyService: {
+      async save(userId, report) {
+        savedReports.push({ userId, report });
+        return { id: 42 };
+      }
+    }
+  });
+  const response = createResponse();
+
+  await handler({
+    body: { url: 'http://192.168.9.206:3003/' },
+    user: { id: 7 }
+  }, response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.data.networkPolicy.scope, 'private');
+  assert.deepEqual(savedReports[0].report.networkPolicy, {
+    scope: 'private'
+  });
+});
+
 test('POST handler exposes safe SEO audit errors without leaking internals', async () => {
   const service = {
     async audit() {
@@ -228,9 +273,18 @@ test('SEO runtime endpoint exposes the active score contract', () => {
     success: true,
     data: {
       scoreVersion: '2026-07-23-v4',
-      scoreModel: 'technical-health-v4'
+      scoreModel: 'technical-health-v4',
+      privateTargetsEnabled: false
     }
   });
+});
+
+test('SEO runtime endpoint exposes whether this deployment allows private targets', () => {
+  const response = createResponse();
+
+  createRuntimeInfoHandler({ allowPrivateTargets: () => true })({}, response);
+
+  assert.equal(response.payload.data.privateTargetsEnabled, true);
 });
 
 test('GET job handler returns only a job owned by the current user', async () => {

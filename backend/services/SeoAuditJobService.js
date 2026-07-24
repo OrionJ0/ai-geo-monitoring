@@ -1,9 +1,13 @@
 const { Op } = require('sequelize');
 const SeoAuditJob = require('../models/SeoAuditJob');
 const { normalizeWebsiteUrl } = require('./SeoAuditService');
-const { createSeoSiteAuditService } = require('./SeoSiteAuditService');
 const { createSeoAuditHistoryService } = require('./SeoAuditHistoryService');
 const { compareAuditIssues } = require('./SeoSitewideAnalysisService');
+const {
+  createSiteAuditRuntime,
+  resolveSeoAuditTarget,
+  withNetworkPolicy
+} = require('./SeoAuditRuntimeService');
 
 function defaultSchedule(callback) {
   setImmediate(() => Promise.resolve(callback()).catch((error) => {
@@ -44,7 +48,9 @@ function safeFailure(error) {
 
 function createSeoAuditJobService({
   model = SeoAuditJob,
-  siteAuditService = createSeoSiteAuditService(),
+  siteAuditService,
+  runtimeFactory = createSiteAuditRuntime,
+  targetResolver = resolveSeoAuditTarget,
   historyService = createSeoAuditHistoryService(),
   schedule = defaultSchedule
 } = {}) {
@@ -62,9 +68,17 @@ function createSeoAuditJobService({
     });
 
     try {
-      const report = await siteAuditService.audit(job.requested_url, {
+      const runtime = siteAuditService
+        ? {
+            requestedUrl: job.requested_url,
+            policy: { networkScope: 'public' },
+            service: siteAuditService
+          }
+        : runtimeFactory(job.requested_url);
+      const audited = await runtime.service.audit(runtime.requestedUrl, {
         onProgress: (progress) => job.update({ progress })
       });
+      const report = withNetworkPolicy(audited, runtime.policy, { mode: 'site' });
       const previousReport = typeof historyService.findPreviousSiteReport === 'function'
         ? await historyService.findPreviousSiteReport(
           Number(job.user_id),
@@ -101,6 +115,7 @@ function createSeoAuditJobService({
   return {
     async create(userId, inputUrl) {
       const requestedUrl = normalizeWebsiteUrl(inputUrl);
+      targetResolver(requestedUrl);
       const job = await model.create({
         user_id: Number(userId),
         requested_url: requestedUrl,

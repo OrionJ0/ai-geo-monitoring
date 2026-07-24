@@ -33,6 +33,12 @@ export default function SeoSiteAuditReport({ report }) {
   const finalUrl = safeReportUrl(report.finalUrl);
   return (
     <div className={styles.report} aria-live="polite">
+      {report.networkPolicy?.scope === 'private' && (
+        <section className={styles.networkPolicyNote}>
+          <strong>私网检测报告</strong>
+          <span>本次只访问输入站点的精确范围；未探测站外链接，未执行 JavaScript 渲染抽样。</span>
+        </section>
+      )}
       <section className={styles.reportMeta}>
         <div>
           <span>{report.auditId ? `全站报告 #${report.auditId}` : '全站检测报告'}</span>

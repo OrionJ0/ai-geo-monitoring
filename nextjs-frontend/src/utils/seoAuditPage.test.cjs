@@ -75,6 +75,18 @@ test('SEO audit page explains that localhost belongs to the backend server', () 
   assert.match(source, /其他电脑请填写后端可访问的局域网 IP/);
 });
 
+test('SEO audit page exposes private-target availability and report limitations', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+  const siteReportSource = fs.readFileSync(siteReportPath, 'utf8');
+
+  assert.match(pageSource, /privateTargetsEnabled/);
+  assert.match(pageSource, /本机与局域网检测已开启/);
+  assert.match(pageSource, /当前仅允许检测公网地址/);
+  assert.match(siteReportSource, /私网检测报告/);
+  assert.match(siteReportSource, /未探测站外链接/);
+  assert.match(siteReportSource, /未执行 JavaScript 渲染抽样/);
+});
+
 test('SEO audit checks the live backend score contract before creating a report', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 

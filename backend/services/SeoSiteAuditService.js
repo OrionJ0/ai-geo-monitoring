@@ -151,11 +151,19 @@ function compactIssue(check) {
 function createSeoSiteAuditService({
   siteClient,
   renderService,
+  networkScope = 'public',
   ruleConfig = defaultSeoAuditRules,
   scoreConfig = defaultSeoHealthScoreConfig
 } = {}) {
+  const privateTarget = networkScope === 'private';
   const client = createCachedClient(siteClient || require('./SeoSiteClient'));
-  const renderer = renderService || (siteClient
+  const renderer = renderService || (privateTarget
+    ? {
+        async sample() {
+          return { status: 'unavailable', reason: 'private_target_not_rendered', samples: [] };
+        }
+      }
+    : siteClient
     ? {
         async sample() {
           return { status: 'unavailable', reason: 'renderer_not_injected', samples: [] };
@@ -420,8 +428,13 @@ function createSeoSiteAuditService({
           linkTargets.set(link.url, entry);
         });
       });
-      const linkEntries = Array.from(linkTargets.values()).slice(0, rules.crawl.linkProbeLimit);
-      const linkInventoryComplete = linkTargets.size <= rules.crawl.linkProbeLimit;
+      const eligibleLinkTargets = Array.from(linkTargets.values())
+        .filter((entry) => !privateTarget || entry.internal);
+      const linkEntries = eligibleLinkTargets.slice(0, rules.crawl.linkProbeLimit);
+      const linkInventoryComplete = (
+        eligibleLinkTargets.length <= rules.crawl.linkProbeLimit
+        && (!privateTarget || eligibleLinkTargets.length === linkTargets.size)
+      );
       const linkChecks = [];
       const probeLink = async (entry) => {
         if (entry.internal) {

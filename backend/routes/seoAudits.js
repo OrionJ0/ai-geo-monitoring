@@ -1,24 +1,34 @@
 const express = require('express');
-const { createSeoAuditService } = require('../services/SeoAuditService');
 const { createSeoAuditHistoryService } = require('../services/SeoAuditHistoryService');
 const { createSeoAuditJobService } = require('../services/SeoAuditJobService');
+const {
+  createPageAuditRuntime,
+  withNetworkPolicy
+} = require('../services/SeoAuditRuntimeService');
+const { privateTargetsEnabled } = require('../config/seoAuditNetworkPolicy');
 const SeoAuditExchangeService = require('../services/SeoAuditExchangeService');
 const { defaultSeoHealthScoreConfig } = require('../config/seoAuditRules');
 
 function createRuntimeInfoHandler({
   scoreVersion = defaultSeoHealthScoreConfig.version,
-  scoreModel = 'technical-health-v4'
+  scoreModel = 'technical-health-v4',
+  allowPrivateTargets = privateTargetsEnabled
 } = {}) {
   return function runtimeInfoHandler(req, res) {
     return res.json({
       success: true,
-      data: { scoreVersion, scoreModel }
+      data: {
+        scoreVersion,
+        scoreModel,
+        privateTargetsEnabled: Boolean(allowPrivateTargets())
+      }
     });
   };
 }
 
 function createAuditHandler({
-  service = createSeoAuditService(),
+  service,
+  runtimeFactory = createPageAuditRuntime,
   historyService = createSeoAuditHistoryService()
 } = {}) {
   return async function auditHandler(req, res) {
@@ -28,7 +38,15 @@ function createAuditHandler({
     }
 
     try {
-      const report = await service.audit(url);
+      const runtime = service
+        ? {
+            requestedUrl: url,
+            policy: { networkScope: 'public' },
+            service
+          }
+        : runtimeFactory(url);
+      const audited = await runtime.service.audit(runtime.requestedUrl);
+      const report = withNetworkPolicy(audited, runtime.policy, { mode: 'page' });
       const stored = await historyService.save(Number(req.user.id), report);
       return res.json({ success: true, data: { ...report, auditId: stored.id } });
     } catch (error) {

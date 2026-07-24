@@ -115,7 +115,7 @@ async function ensureCurrentScoreRuntime() {
     runtime?.scoreVersion === EXPECTED_SCORE_VERSION
     && runtime?.scoreModel === EXPECTED_SCORE_MODEL
   ) {
-    return;
+    return runtime;
   }
 
   const error = new Error('后端评分服务仍为旧版，请重启后端后重试');
@@ -133,6 +133,7 @@ export default function SeoAuditPage() {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [privateTargetsEnabled, setPrivateTargetsEnabled] = useState(null);
   const pollRef = useRef(0);
 
   const priorities = useMemo(
@@ -178,6 +179,16 @@ export default function SeoAuditPage() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    ensureCurrentScoreRuntime()
+      .then((runtime) => {
+        if (active) setPrivateTargetsEnabled(Boolean(runtime?.privateTargetsEnabled));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     const storedJobId = Number(window.localStorage.getItem(ACTIVE_JOB_KEY));
     if (!Number.isInteger(storedJobId) || storedJobId < 1) return undefined;
     const pollId = pollRef.current + 1;
@@ -197,7 +208,8 @@ export default function SeoAuditPage() {
     setLoading(true);
     setJob(null);
     try {
-      await ensureCurrentScoreRuntime();
+      const runtime = await ensureCurrentScoreRuntime();
+      setPrivateTargetsEnabled(Boolean(runtime?.privateTargetsEnabled));
       if (mode === 'site') {
         const response = await axios.post('/api/seo-audits/site', { url });
         const createdJob = response?.data?.data;
@@ -361,6 +373,12 @@ export default function SeoAuditPage() {
             ? '只抓取同域页面；单页失败不会中断任务，达到上限会在报告中明确标记。'
             : '只检测输入页面；额外验证根目录 robots.txt、Sitemap 与首页平台标签。'}
           {' '}检测请求由后端服务器发出；localhost 指后端所在机器，其他电脑请填写后端可访问的局域网 IP。
+          {' '}
+          {privateTargetsEnabled === true
+            ? '本机与局域网检测已开启。'
+            : privateTargetsEnabled === false
+              ? '当前仅允许检测公网地址。'
+              : '正在确认本机与局域网检测状态。'}
         </div>
       </section>
 
@@ -422,6 +440,12 @@ export default function SeoAuditPage() {
 
       {report && report.mode !== 'site' && (
         <div className={styles.report} aria-live="polite" aria-busy={loading}>
+          {report.networkPolicy?.scope === 'private' && (
+            <section className={styles.networkPolicyNote}>
+              <strong>私网检测报告</strong>
+              <span>本次只访问输入页面的精确站点范围。</span>
+            </section>
+          )}
           <section className={styles.reportMeta}>
             <div>
               <span>{report.auditId ? `检测报告 #${report.auditId}` : '检测页面'}</span>

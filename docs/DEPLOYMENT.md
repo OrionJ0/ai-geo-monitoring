@@ -32,8 +32,8 @@
   # 用于加密数据库中的 AI 平台密钥（32 字节 Base64 或 64 位十六进制）
   CONFIG_ENCRYPTION_KEY=<加密主密钥>
 
-  # 可选：允许检测的受控本机/私网网站，必须精确到 host:port
-  SEO_AUDIT_PRIVATE_HOST_ALLOWLIST=localhost:4173,127.0.0.1:4173,192.168.1.50:4173
+  # 内部部署可设为 true；公网或存在不可信账号时必须保持 false
+  SEO_AUDIT_ALLOW_PRIVATE_TARGETS=false
 
   # 可选代理
   HTTPS_PROXY=http://proxy.example.com:8080
@@ -49,7 +49,9 @@
   - `API_BASE_URL` 是 Next.js 服务端代理目标；同机部署保持 `http://127.0.0.1:3002`
   - `HOST=127.0.0.1` 让 Express 不接受局域网或公网直连；代理位于另一个容器或另一台机器时才改为 `0.0.0.0`，并同时使用私有网络、防火墙和 `ALLOWED_ORIGINS`
   - `ALLOWED_ORIGINS` 用于前后端分域、非 loopback 代理或直接跨域调试，多个域名用逗号分隔
-  - SEO 检测请求由后端服务器发出；`localhost` 指后端服务器。检测另一台开发机时应填写该机器可被后端访问的局域网 IP，并在 `SEO_AUDIT_PRIVATE_HOST_ALLOWLIST` 中加入对应的精确 `IP:端口`
+  - SEO 检测请求由后端服务器发出；`localhost` 指后端服务器。内部环境如需检测本机或局域网站点，可将 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=true`，重启后直接填写目标局域网 URL，无需维护逐 IP 白名单
+  - 开启私网检测后，公开自助注册会自动关闭；内部账号由现有用户管理入口创建，不需要增加管理员/普通用户的检测权限分层
+  - 私网检测是一项受控 SSRF 能力：所有登录用户都能请求后端可达的普通 Web 服务，因此公网部署、存在外部账号或内网含敏感 HTTP 管理面时必须关闭
   - **部署后立即修改默认管理员密码**
 - 生产建议配置 `DATABASE_URL` 使用托管 Postgres（如 Supabase）。未配置时会使用 SQLite（`backend/config/database.js`，默认 `database.sqlite`）。
 
