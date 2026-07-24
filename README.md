@@ -124,6 +124,15 @@ npm test
 
 ## 生产部署
 
+内部单机环境可以使用仓库自带的原地部署命令：
+
+```bash
+npm run deploy:check
+npm run deploy
+```
+
+该流程支持 macOS 和 Linux，允许部署期间停机，只保留一份经过完整性检查的 SQLite 最新快照，并使用脱离终端的生产进程。服务器重启或进程崩溃后需要人工执行 `npm run prod:start`。首次接管、失败处理和运行限制见 [单机原地部署](docs/SINGLE_HOST_DEPLOYMENT.md)。
+
 生产环境建议：
 
 - 浏览器只访问同源 `/api/*`；Next.js 默认在服务端转发到 `http://127.0.0.1:3002`
