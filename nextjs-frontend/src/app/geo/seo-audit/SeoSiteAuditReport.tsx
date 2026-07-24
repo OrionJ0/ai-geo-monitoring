@@ -46,6 +46,8 @@ export default function SeoSiteAuditReport({ report }) {
         </dl>
       </section>
 
+      <TechnicalHealthOverview report={report} />
+
       <section className={styles.priorityPanel}>
         <header className={styles.sectionHeading}>
           <div><span className={styles.sectionKicker}>整站问题地图</span><h2>按技术链路优先修复</h2></div>
@@ -95,7 +97,6 @@ export default function SeoSiteAuditReport({ report }) {
         )}
       </section>
 
-      <TechnicalHealthOverview report={report} />
       <StageChecksPanel report={report} />
       <SitewideAuditPanel sitewide={report.sitewide} comparison={report.comparison} />
 
