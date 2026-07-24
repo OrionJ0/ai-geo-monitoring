@@ -6,7 +6,13 @@
     "dev:backend": "npm --prefix backend start",
     "dev:frontend": "npm --prefix nextjs-frontend run dev",
     "build": "npm --prefix nextjs-frontend run build",
-    "lint": "npm --prefix nextjs-frontend run lint"
+    "lint": "npm --prefix nextjs-frontend run lint",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:check": "node scripts/deploy.mjs --check",
+    "prod:start": "node scripts/production.mjs start",
+    "prod:stop": "node scripts/production.mjs stop",
+    "prod:status": "node scripts/production.mjs status",
+    "test:deployment": "node --test tests/*.test.mjs backend/tests/BackupSqlite.test.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
