@@ -7,6 +7,7 @@ import {
   ExclamationCircleFilled,
   QuestionCircleFilled
 } from '@ant-design/icons';
+import { buildCheckEvidence } from '@/utils/seoSitewideEvidence.cjs';
 import styles from './seo-audit.module.css';
 
 const CHECK_LABELS = {
@@ -45,34 +46,67 @@ function StatusIcon({ status }) {
   return <QuestionCircleFilled aria-hidden="true" />;
 }
 
-function evidenceText(checkId, detail) {
-  if (checkId === 'orphan-pages') {
-    return `Sitemap 发现 · 入链 ${detail.inboundCount ?? 0}`;
-  }
-  if (checkId === 'internal-link-quality') {
-    return `仅 Footer 入链 · ${detail.source_page_count || 0} 个来源页面 · ${detail.inbound_count || 0} 条链接`;
-  }
-  if (checkId === 'navigation-crawlability') {
-    if (detail.triggerText) {
-      return `“${detail.triggerText}”交互后才出现 ${detail.links?.length || 0} 个链接`;
-    }
-    return `<${detail.tag || 'element'}> “${detail.text || '无文本'}” · ${detail.reason || '不可抓取导航'}`;
-  }
-  if (checkId === 'url-consistency') {
-    return `${detail.message || detail.type || 'URL 不一致'}${detail.target ? ` · ${detail.target}` : ''}`;
-  }
-  return '';
-}
-
 function CheckEvidence({ check }) {
-  const evidence = (Array.isArray(check.details) ? check.details : [])
-    .map((detail) => evidenceText(check.id, detail))
-    .filter(Boolean)
-    .slice(0, 3);
+  const evidence = buildCheckEvidence(check);
   if (!evidence.length) return null;
+  if (check.id === 'navigation-crawlability') {
+    return (
+      <div className={styles.navigationEvidence}>
+        <p>
+          以下列出全部导航入口。“出现页面”表示这段错误导航代码出现在哪里，不是跳转目标；
+          因为元素没有 href，目标地址无法从 HTML 读取。
+        </p>
+        <ol>
+          {evidence.map((item, index) => (
+            <li key={`${check.id}-${item.title}-${index}`}>
+              <strong>{item.title}</strong>
+              <span>{item.explanation}</span>
+              {item.occurrenceCount > 0 && (
+                <small>在 {item.occurrenceCount} 个页面出现</small>
+              )}
+              {item.occurrencePages?.length > 0 && (
+                <details>
+                  <summary>查看出现页面</summary>
+                  <div>
+                    {item.occurrencePages.slice(0, 10).map((url) => {
+                      const href = safeReportUrl(url);
+                      return href
+                        ? <a key={url} href={href} target="_blank" rel="noreferrer">{url}</a>
+                        : <span key={url}>{url}</span>;
+                    })}
+                    {item.occurrenceCount > item.occurrencePages.length && (
+                      <small>报告保留了 {item.occurrencePages.length} 个示例，共影响 {item.occurrenceCount} 个页面。</small>
+                    )}
+                  </div>
+                </details>
+              )}
+              {item.targetLinks?.length > 0 && (
+                <details>
+                  <summary>查看交互后出现的链接</summary>
+                  <div>
+                    {item.targetLinks.map((link) => (
+                      <a key={link.url} href={link.url} target="_blank" rel="noreferrer">
+                        {link.text || link.url}
+                      </a>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+  const visibleEvidence = evidence.filter((_, index) => index < 3);
   return (
     <ul className={styles.sitewideEvidence}>
-      {evidence.map((item, index) => <li key={`${check.id}-${index}`}>{item}</li>)}
+      {visibleEvidence.map((item, index) => (
+        <li key={`${check.id}-${index}`}>
+          <strong>{item.title}</strong>
+          {item.explanation && <span>{item.explanation}</span>}
+        </li>
+      ))}
     </ul>
   );
 }
@@ -140,7 +174,7 @@ export default function SitewideAuditPanel({ sitewide, comparison }) {
             <strong>{check.finding}</strong>
             <p>{check.value}</p>
             <CheckEvidence check={check} />
-            {(check.affectedPages || []).length ? (
+            {check.id !== 'navigation-crawlability' && (check.affectedPages || []).length ? (
               <div className={styles.sitewideUrls}>
                 {check.affectedPages.slice(0, 4).map((url) => {
                   const href = safeReportUrl(url);

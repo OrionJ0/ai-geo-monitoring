@@ -653,6 +653,12 @@ function analyzeSitewideEvidence({
   const hreflang = hreflangAnalysis(pages);
   const rendering = renderingAnalysis(renderAnalysis);
   const navigation = navigationCrawlability(pages, rendering);
+  const invalidAnchorCount = navigation.static_issues
+    .filter((issue) => issue.type === 'invalid-anchor').length;
+  const nonLinkNavigationCount = navigation.static_issues
+    .filter((issue) => issue.type !== 'invalid-anchor').length
+    + navigation.rendered_controls.length;
+  const directNavigationIssueCount = invalidAnchorCount + nonLinkNavigationCount;
   const navigationIssueCount = navigation.static_issues.length
     + navigation.rendered_controls.length
     + navigation.interaction_dependent_links.length;
@@ -815,9 +821,9 @@ function analyzeSitewideEvidence({
       title: '导航链接可抓取性',
       severity: 'medium',
       failed: navigationIssueCount > 0,
-      finding: `${navigation.static_issues.length + navigation.rendered_controls.length} 类无效或非语义化导航，${navigation.interaction_dependent_links.length} 组链接依赖用户交互`,
-      passedFinding: '未发现无效 a、非语义化控件或依赖用户交互的关键导航链接',
-      value: `${navigationIssueCount} 个导航问题`,
+      finding: `${directNavigationIssueCount} 类导航入口无法从 HTML 直接读取跳转地址；${navigation.interaction_dependent_links.length} 组链接只在交互后出现`,
+      passedFinding: '导航目标均可从带 href 的 a 标签直接读取',
+      value: `div/span 等点击跳转 ${nonLinkNavigationCount} 类 · 无有效 href 的 a ${invalidAnchorCount} 类`,
       affectedPages: [
         ...navigation.static_issues.flatMap((issue) => issue.sourcePages),
         ...navigation.rendered_controls.map((entry) => entry.page),
@@ -828,7 +834,7 @@ function analyzeSitewideEvidence({
         ...navigation.rendered_controls,
         ...navigation.interaction_dependent_links
       ],
-      recommendation: 'URL 跳转使用带 href 的 a/Link；菜单开关使用 button；子菜单链接应在初始 DOM 中存在。',
+      recommendation: '凡是跳转到新 URL 的入口都使用带 href 的 a/Link；只负责展开菜单的控件使用 button；子菜单链接保留在初始 DOM 中。',
       complete: navigationIssueCount > 0 || rendering.status === 'completed',
       unknownFinding: '未取得完整浏览器导航证据，无法确认交互菜单均可抓取'
     }),

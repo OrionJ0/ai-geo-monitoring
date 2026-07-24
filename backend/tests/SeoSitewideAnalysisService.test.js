@@ -293,6 +293,14 @@ test('reports non-semantic navigation controls and interaction-dependent links',
     result.checks.find((check) => check.id === 'navigation-crawlability').status,
     'failed'
   );
+  assert.equal(
+    result.checks.find((check) => check.id === 'navigation-crawlability').finding,
+    '1 类导航入口无法从 HTML 直接读取跳转地址；1 组链接只在交互后出现'
+  );
+  assert.equal(
+    result.checks.find((check) => check.id === 'navigation-crawlability').value,
+    'div/span 等点击跳转 1 类 · 无有效 href 的 a 0 类'
+  );
   assert.deepEqual(result.navigation_crawlability.static_issues, [{
     type: 'non-semantic-navigation-control',
     tag: 'span',

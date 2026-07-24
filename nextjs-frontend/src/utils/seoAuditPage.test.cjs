@@ -141,6 +141,15 @@ test('全站报告展示跨页专项审计和本次与上次问题差异', () =>
   assert.match(panelSource, /\['http:', 'https:'\]\.includes/);
 });
 
+test('导航可抓取性展示全部入口并说明出现页面不是跳转目标', () => {
+  const panelSource = fs.readFileSync(sitewidePanelPath, 'utf8');
+
+  assert.match(panelSource, /buildCheckEvidence/);
+  assert.match(panelSource, /出现页面.*不是跳转目标/s);
+  assert.match(panelSource, /目标地址无法从 HTML 读取/);
+  assert.doesNotMatch(panelSource, /evidence\.slice\(0,\s*3\)/);
+});
+
 test('SEO reports show separate Google, Bing and Baidu verification tag states', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 
