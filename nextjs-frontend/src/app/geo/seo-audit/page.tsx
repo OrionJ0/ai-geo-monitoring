@@ -358,8 +358,9 @@ export default function SeoAuditPage() {
         <div className={styles.scopeNote}>
           <SafetyCertificateOutlined aria-hidden="true" />
           {mode === 'site'
-            ? '只抓取同域公开页面；单页失败不会中断任务，达到上限会在报告中明确标记。'
-            : '只检测输入的公开页面；额外验证根目录 robots.txt、Sitemap 与首页平台标签。'}
+            ? '只抓取同域页面；单页失败不会中断任务，达到上限会在报告中明确标记。'
+            : '只检测输入页面；额外验证根目录 robots.txt、Sitemap 与首页平台标签。'}
+          {' '}检测请求由后端服务器发出；localhost 指后端所在机器，其他电脑请填写后端可访问的局域网 IP。
         </div>
       </section>
 

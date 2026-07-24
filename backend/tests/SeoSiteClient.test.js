@@ -17,6 +17,30 @@ test('rejects loopback and credential-bearing URLs before making a request', asy
   assert.equal(requestCount, 0);
 });
 
+test('allows private SEO targets only by exact host and port allowlist', async () => {
+  const requestedUrls = [];
+  const client = createSeoSiteClient({
+    privateHostAllowlist: 'localhost:3101',
+    resolveHostname: async () => [{ address: '127.0.0.1', family: 4 }],
+    request: async (config) => {
+      requestedUrls.push(config.url);
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+        data: '<html><title>Local test site</title></html>'
+      };
+    }
+  });
+
+  const response = await client.fetchPage('http://localhost:3101/');
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(requestedUrls, ['http://localhost:3101/']);
+  await assert.rejects(() => client.fetchPage('http://localhost:3102/'), {
+    code: 'PRIVATE_NETWORK_URL'
+  });
+});
+
 test('rejects hostnames when DNS resolves to a private address', async () => {
   const client = createSeoSiteClient({
     resolveHostname: async () => [{ address: '10.0.0.8', family: 4 }],

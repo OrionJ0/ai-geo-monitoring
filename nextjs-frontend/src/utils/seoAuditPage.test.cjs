@@ -66,6 +66,13 @@ test('SEO audit page defaults to full-site mode and polls persisted asynchronous
   assert.match(source, /localStorage/);
 });
 
+test('SEO audit page explains that localhost belongs to the backend server', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /localhost 指后端所在机器/);
+  assert.match(source, /其他电脑请填写后端可访问的局域网 IP/);
+});
+
 test('SEO audit checks the live backend score contract before creating a report', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 

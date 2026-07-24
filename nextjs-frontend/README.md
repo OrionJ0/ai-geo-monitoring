@@ -24,19 +24,15 @@ npm run dev
 开发环境可在 `.env.local` 中配置：
 
 ```bash
-NEXT_PUBLIC_API_BASE_URL=http://localhost:3002
-NEXT_PUBLIC_API_URL=http://localhost:3002
-NEXT_PUBLIC_SITE_URL=http://localhost:3001
-API_BASE_URL=http://localhost:3002
+NEXT_PUBLIC_SITE_URL=
+API_BASE_URL=http://127.0.0.1:3002
 ```
 
-生产同域部署时，客户端 API 地址建议使用 `/api`，由 Nginx 或 Vercel rewrites 反向代理到后端。
+浏览器始终请求当前站点的 `/api/*`，不读取后端 IP 配置。Next.js 在服务端把请求转发给 `API_BASE_URL`；未配置时默认使用同机 `http://127.0.0.1:3002`。开发与生产启动命令都监听 `0.0.0.0:3001`，因此局域网可通过服务器当前 IP 访问。
 
 Vercel 部署时：
 
 ```bash
-NEXT_PUBLIC_API_BASE_URL=/api
-NEXT_PUBLIC_API_URL=/api
 NEXT_PUBLIC_SITE_URL=https://your-vercel-domain.vercel.app
 API_BASE_URL=https://api.example.com
 ```
@@ -47,7 +43,7 @@ API_BASE_URL=https://api.example.com
 
 ```bash
 npm run build
-PORT=3001 npm run start
+npm run start
 npm run lint
 ```
 

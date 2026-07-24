@@ -3,7 +3,8 @@
 import React from 'react';
 import { Card, Form, Input, Button, Typography, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import axios from '@/lib/axiosConfig';
+import { getLoginErrorMessage } from '@/utils/loginErrorMessage.cjs';
 
 const { Title, Paragraph } = Typography;
 
@@ -27,13 +28,7 @@ export default function Login({ onLogin }) {
       if (onLogin) onLogin({ token, user });
       message.success('登录成功');
     } catch (e) {
-      const backendMsg = e?.response?.data?.message;
-      // 针对被禁用场景给出更明确提示；否则展示后端消息或回退到通用提示
-      if (typeof backendMsg === 'string' && /禁用|禁止/.test(backendMsg)) {
-        message.error('被禁止登录：请联系管理员');
-      } else {
-        message.error(backendMsg || '登录失败，请检查用户名或密码');
-      }
+      message.error(getLoginErrorMessage(e));
     }
   };
 

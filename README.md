@@ -86,7 +86,7 @@ cp nextjs-frontend/.env.example nextjs-frontend/.env.local
 
 本地开发也可以在 `backend/` 目录运行 `npm run setup:local-key`，生成不会回显内容的本机专用加密主密钥；生产环境仍应由部署系统安全注入。
 
-生产环境还应配置 `ALLOWED_ORIGINS`，并通过环境变量注入 `DATABASE_URL` 等部署配置。预置平台的非敏感接口信息会在启动时初始化；模型和 API Key 由管理员登录后在 `/admin/settings` 维护，系统不会从 `.env` 自动导入或回退读取平台密钥。
+生产环境还应通过环境变量注入 `DATABASE_URL` 等部署配置。只有前后端分域、代理不在本机 loopback 或需要直接跨域访问后端时，才需要把实际前端域名加入 `ALLOWED_ORIGINS`。预置平台的非敏感接口信息会在启动时初始化；模型和 API Key 由管理员登录后在 `/admin/settings` 维护，系统不会从 `.env` 自动导入或回退读取平台密钥。
 
 JavaScript SEO 渲染抽样会启动真实浏览器访问目标站点。只有部署环境已通过容器、网络命名空间或等价出口策略隔离浏览器网络时，才应设置 `SEO_RENDER_NETWORK_ISOLATED=true`；否则该检查返回“证据不足”。可用 `SEO_RENDER_BROWSER_EXECUTABLE` 指定 Chrome/Chromium 路径。
 
@@ -100,8 +100,10 @@ npm run dev
 
 - 前端登录页：`http://localhost:3001`
 - SEO 检测页（登录后）：`http://localhost:3001/geo/seo-audit`
-- 后端：`http://localhost:3002`
-- 健康检查：`http://localhost:3002/api/health`
+- 浏览器 API：当前前端地址下的 `/api/*`，例如 `http://localhost:3001/api/health`
+- 后端内部地址：`http://127.0.0.1:3002`（只供同机代理和运维检查，不应对公网开放）
+
+前端显式监听 `0.0.0.0:3001`。局域网其他电脑可直接访问 `http://<服务器局域网IP>:3001`，浏览器仍请求同源 `/api/*`，无需因服务器 IP 变化修改前端代码。
 
 ## 常用命令
 
@@ -124,12 +126,13 @@ npm test
 
 生产环境建议：
 
-- 前端和后端可以分离部署，也可以由同一台服务器反向代理
+- 浏览器只访问同源 `/api/*`；Next.js 默认在服务端转发到 `http://127.0.0.1:3002`
+- 公网使用 Nginx/Caddy 只开放 80/443，3001/3002 不直接暴露
+- 前端和后端也可以分离部署，此时通过 `API_BASE_URL` 指定后端源站并配置 CORS 白名单
 - 后端需要运行在支持常驻 Node.js 进程的环境中
 - 数据库建议使用外部 Postgres，并通过 `DATABASE_URL` 配置
-- 前端如需同域调用后端 API，可配置 `API_BASE_URL` 作为代理目标
 
-后端生产环境必须配置强随机 `JWT_SECRET`、生产域名白名单 `ALLOWED_ORIGINS`、`DATABASE_URL` 和实际使用的 AI 平台密钥。不要把真实配置文件、访问令牌、数据库连接串或 API Key 提交到仓库。
+后端生产环境必须配置强随机 `JWT_SECRET`、`DATABASE_URL` 和实际使用的 AI 平台密钥；前后端分域或非 loopback 代理部署还必须配置生产域名白名单 `ALLOWED_ORIGINS`。不要把真实配置文件、访问令牌、数据库连接串或 API Key 提交到仓库。
 
 更多部署细节见 [部署与运维](docs/DEPLOYMENT.md)。
 

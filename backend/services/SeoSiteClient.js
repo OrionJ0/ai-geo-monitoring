@@ -88,7 +88,27 @@ function isPublicAddress(address) {
   return false;
 }
 
-function assertAllowedUrl(input) {
+function parsePrivateHostAllowlist(rawAllowlist = process.env.SEO_AUDIT_PRIVATE_HOST_ALLOWLIST) {
+  return new Set(
+    String(rawAllowlist || '')
+      .split(',')
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function normalizedHostname(hostname) {
+  return String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+}
+
+function hostPortForUrl(parsed) {
+  const hostname = normalizedHostname(parsed.hostname);
+  const host = hostname.includes(':') ? `[${hostname}]` : hostname;
+  const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+  return `${host}:${port}`;
+}
+
+function assertAllowedUrl(input, { privateHostAllowlist } = {}) {
   let parsed;
   try {
     parsed = input instanceof URL ? new URL(input.toString()) : new URL(String(input));
@@ -103,11 +123,18 @@ function assertAllowedUrl(input) {
     throw new SeoAuditRequestError('网址不能包含用户名或密码', 'URL_CREDENTIALS_NOT_ALLOWED');
   }
 
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
-  if (!hostname || hostname === 'localhost' || BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) {
+  const hostname = normalizedHostname(parsed.hostname);
+  const allowedPrivateHosts = privateHostAllowlist instanceof Set
+    ? privateHostAllowlist
+    : parsePrivateHostAllowlist(privateHostAllowlist);
+  const allowPrivate = allowedPrivateHosts.has(hostPortForUrl(parsed));
+  if (!hostname || (!allowPrivate && (
+    hostname === 'localhost'
+    || BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))
+  ))) {
     throw new SeoAuditRequestError('不能检测本机或内网地址', 'PRIVATE_NETWORK_URL');
   }
-  if (net.isIP(hostname) && !isPublicAddress(hostname)) {
+  if (!allowPrivate && net.isIP(hostname) && !isPublicAddress(hostname)) {
     throw new SeoAuditRequestError('不能检测本机或内网地址', 'PRIVATE_NETWORK_URL');
   }
   return parsed;
@@ -138,9 +165,16 @@ function responseHeaders(headers) {
   return { ...headers };
 }
 
-function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request = axios.request } = {}) {
+function createSeoSiteClient({
+  resolveHostname = defaultResolveHostname,
+  request = axios.request,
+  privateHostAllowlist = process.env.SEO_AUDIT_PRIVATE_HOST_ALLOWLIST
+} = {}) {
+  const allowedPrivateHosts = parsePrivateHostAllowlist(privateHostAllowlist);
+
   async function resolvePublicTarget(parsed) {
-    const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+    const hostname = normalizedHostname(parsed.hostname);
+    const allowPrivate = allowedPrivateHosts.has(hostPortForUrl(parsed));
     if (net.isIP(hostname)) return [{ address: hostname, family: net.isIP(hostname) }];
 
     let records;
@@ -150,7 +184,7 @@ function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request
       throw new SeoAuditRequestError('无法解析该网站域名', 'DNS_LOOKUP_FAILED', 422);
     }
     if (!records.length) throw new SeoAuditRequestError('无法解析该网站域名', 'DNS_LOOKUP_FAILED', 422);
-    if (records.some((record) => !isPublicAddress(record.address))) {
+    if (!allowPrivate && records.some((record) => !isPublicAddress(record.address))) {
       throw new SeoAuditRequestError('不能检测解析到内网的地址', 'PRIVATE_NETWORK_URL');
     }
     return records;
@@ -158,7 +192,7 @@ function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request
 
   async function requestWithRedirects(inputUrl, { maxBytes, accept }) {
     const startedAt = Date.now();
-    let currentUrl = assertAllowedUrl(inputUrl);
+    let currentUrl = assertAllowedUrl(inputUrl, { privateHostAllowlist: allowedPrivateHosts });
     const redirectChain = [];
     const visitedUrls = new Set([currentUrl.toString()]);
 
@@ -200,7 +234,9 @@ function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request
 
       const headers = responseHeaders(response.headers);
       if (REDIRECT_STATUSES.has(response.status) && headers.location) {
-        const nextUrl = assertAllowedUrl(new URL(headers.location, currentUrl));
+        const nextUrl = assertAllowedUrl(new URL(headers.location, currentUrl), {
+          privateHostAllowlist: allowedPrivateHosts
+        });
         redirectChain.push({
           from: currentUrl.toString(),
           statusCode: response.status,
@@ -235,7 +271,7 @@ function createSeoSiteClient({ resolveHostname = defaultResolveHostname, request
 
   return {
     async assertPublicUrl(url) {
-      const parsed = assertAllowedUrl(url);
+      const parsed = assertAllowedUrl(url, { privateHostAllowlist: allowedPrivateHosts });
       await resolvePublicTarget(parsed);
       return parsed.toString();
     },
@@ -276,5 +312,6 @@ module.exports = {
   createSeoSiteClient,
   SeoAuditRequestError,
   assertAllowedUrl,
-  isPublicAddress
+  isPublicAddress,
+  parsePrivateHostAllowlist
 };

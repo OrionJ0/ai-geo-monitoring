@@ -4,27 +4,13 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
+const { createCorsOptionsDelegate } = require('./config/corsPolicy');
 
 const app = express();
 
 // 中间件
-// CORS 配置白名单
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['http://localhost:5173', 'http://localhost:3000'];
-
-app.use(cors({
-  origin: function(origin, callback) {
-    // 允许没有 origin 的请求（如移动应用、服务器间调用）
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('不允许的跨域请求'));
-    }
-  },
-  credentials: true
-}));
+// 同机 Next.js/Nginx 代理通过 TCP loopback 受信；外部跨域请求仍需显式白名单。
+app.use(cors(createCorsOptionsDelegate()));
 
 // 安全头
 app.use(helmet({
@@ -116,10 +102,11 @@ app.get('/api/health', (req, res) => {
 app.use((err, req, res, next) => {
   console.error(err.stack);
   const isDev = process.env.NODE_ENV === 'development';
+  const isSafeCorsError = err.code === 'CORS_ORIGIN_DENIED';
 
   res.status(err.status || 500).json({
     success: false,
-    message: isDev ? err.message : '请求处理失败',
+    message: isDev || isSafeCorsError ? err.message : '请求处理失败',
     ...(isDev && { stack: err.stack })
   });
 });

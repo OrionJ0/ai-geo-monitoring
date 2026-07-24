@@ -1,22 +1,7 @@
 import axios from 'axios';
 
-function normalizeApiBase(value) {
-  const base = (value || '').trim().replace(/\/+$/, '');
-
-  if (!base || base === '/api') {
-    return '';
-  }
-
-  return base.endsWith('/api') ? base.slice(0, -4) : base;
-}
-
-const API_BASE = normalizeApiBase(
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  ''
-);
-
-axios.defaults.baseURL = API_BASE;
+// 浏览器始终请求当前站点的 /api/*，由 Next.js 或入口反向代理转发到后端。
+axios.defaults.baseURL = '';
 
 // 确保拦截器只注册一次
 let interceptorsInitialized = false;
@@ -63,7 +48,8 @@ if (!interceptorsInitialized) {
   axios.interceptors.response.use(
     response => response,
     error => {
-      if (error.response?.status === 401) {
+      const isLoginRequest = String(error.config?.url || '').includes('/api/users/login');
+      if (error.response?.status === 401 && !isLoginRequest) {
         if (typeof window !== 'undefined') {
           localStorage.removeItem('agd_token');
           localStorage.removeItem('agd_user');

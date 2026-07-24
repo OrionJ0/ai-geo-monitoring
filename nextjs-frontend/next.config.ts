@@ -6,13 +6,9 @@ const nextConfig: NextConfig = {
     root: path.join(__dirname),
   },
   async rewrites() {
-    const API_BASE_URL =
-      process.env.API_BASE_URL ||
-      (process.env.NODE_ENV === 'production' ? undefined : 'http://localhost:3002');
-
-    if (!API_BASE_URL) {
-      return [];
-    }
+    const API_BASE_URL = (
+      process.env.API_BASE_URL || 'http://127.0.0.1:3002'
+    ).replace(/\/+$/, '');
 
     return [
       {

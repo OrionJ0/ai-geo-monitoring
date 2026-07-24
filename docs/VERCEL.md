@@ -54,8 +54,6 @@ Vercel 官方 monorepo 文档建议导入仓库时为每个项目选择对应的
 在 Vercel Project Settings -> Environment Variables 添加：
 
 ```bash
-NEXT_PUBLIC_API_BASE_URL=/api
-NEXT_PUBLIC_API_URL=/api
 NEXT_PUBLIC_SITE_URL=https://your-vercel-domain.vercel.app
 API_BASE_URL=https://api.example.com
 ```
@@ -87,6 +85,6 @@ https://your-vercel-domain.vercel.app/login
 ## 常见问题
 
 - `/api/health` 404：检查 Vercel 的 `API_BASE_URL` 是否已配置，并重新部署。
-- CORS 报错：检查后端 `ALLOWED_ORIGINS` 是否包含 Vercel 生产域名和自定义域名。
+- CORS 报错：Vercel 代理不在后端本机 loopback，必须检查后端 `ALLOWED_ORIGINS` 是否包含 Vercel 生产域名和自定义域名。
 - 登录失败或 401：确认 `JWT_SECRET` 在后端生产环境已设置，并且后端服务使用的是同一个数据库。
 - 数据丢失：不要把生产 SQLite 放在临时文件系统；使用持久化磁盘，或迁移到托管数据库。

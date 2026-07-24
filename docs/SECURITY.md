@@ -59,7 +59,8 @@
 ### 4. CORS 配置
 
 #### 白名单机制
-- 仅允许配置的域名跨域访问
+- 同机 Next.js/Nginx 代理通过 TCP loopback 访问后端时受信任，不使用可伪造的 `X-Forwarded-For`
+- 外部直接跨域访问仅允许显式配置的域名；拒绝时返回 403
 - 环境变量：`ALLOWED_ORIGINS`
 - 格式：逗号分隔的域名列表
 - 示例：`https://example.com,https://www.example.com`
@@ -109,7 +110,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 首次登录后建议立即修改。
 
 ### 3. 配置 CORS 白名单
-在 `.env` 中设置 `ALLOWED_ORIGINS` 为实际使用的域名。
+同机 loopback 代理不依赖白名单。前后端分域、代理位于容器网络或需要直接跨域访问后端时，在 `.env` 中设置 `ALLOWED_ORIGINS` 为实际使用的域名。
 
 ### 4. 撤销泄露的 API 密钥
 如果 `.env` 中的 API 密钥已泄露：
@@ -125,7 +126,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 - [ ] JWT_SECRET 已设置为强随机值（至少32字符）
 - [ ] DEFAULT_ADMIN_PASSWORD 已更改
-- [ ] ALLOWED_ORIGINS 已配置为实际域名
+- [ ] 分域或非 loopback 代理部署时，ALLOWED_ORIGINS 已配置为实际域名
 - [ ] 所有 API 密钥已检查并更新
 - [ ] HTTPS 已启用（生产环境）
 - [ ] .env 文件不在 Git 仓库中
@@ -159,7 +160,7 @@ for i in {1..550}; do curl -H "Authorization: Bearer <token>" http://localhost:3
 ### CORS 测试
 ```bash
 # 从非白名单域名访问应被拒绝
-curl -H "Origin: https://evil.com" http://localhost:3002/api/health
+curl -H "Origin: https://evil.com" http://<后端局域网IP>:3002/api/health
 ```
 
 ## 🛡️ 安全最佳实践

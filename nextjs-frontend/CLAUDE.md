@@ -12,17 +12,16 @@ This is an AI GEO Monitoring System for Generative Engine Optimization, with a N
 - **Port**: 3001 in the unified dev script
 - **Environment**: `.env.local` contains API configuration
 - **Key env vars**:
-  - `NEXT_PUBLIC_API_URL`: Backend API URL for client-side axios (default: http://localhost:3002)
-  - `NEXT_PUBLIC_API_BASE_URL`: Alias for `NEXT_PUBLIC_API_URL` (default: http://localhost:3002)
-  - `API_BASE_URL`: Used for Next.js rewrites in `next.config.ts` (default: http://localhost:3002)
-  - `NEXT_PUBLIC_SITE_URL`: Frontend site URL (default: http://localhost:3001)
+  - Browser API calls are always relative `/api/*`; do not add a public backend URL
+  - `API_BASE_URL`: Server-only Next.js rewrite target (default: http://127.0.0.1:3002)
+  - `NEXT_PUBLIC_SITE_URL`: Public frontend URL; leave empty for local/LAN access
 
 **Commands**:
 ```bash
 cd nextjs-frontend
 npm run dev                         # Start dev on port 3001 with Turbopack
 npm run build    # Build for production
-PORT=3001 npm run start # Start production server
+npm run start    # Start production on 0.0.0.0:3001
 npm run lint     # Run ESLint
 ```
 
@@ -106,11 +105,10 @@ backend/
   - General API: 500 requests/15 minutes
   - Schedules API: 1000 requests/15 minutes (higher limit for batch operations)
   - Public endpoints excluded: `/health`, `/captcha`, `/settings/seo`, `/settings/notice`
-- **CORS**: Configured with allowed origins from `ALLOWED_ORIGINS` env var
+- **CORS**: Trusts same-machine loopback proxies; other cross-origin requests use `ALLOWED_ORIGINS`
 - **API Proxy**: Next.js rewrites `/api/*` to backend (configured in `next.config.ts`)
-  - Rewrites use `API_BASE_URL` env var
-  - Client-side axios uses `NEXT_PUBLIC_API_URL` env var
-  - **Important**: Both should point to the same backend URL
+  - Rewrites use the server-only `API_BASE_URL` env var
+  - Client-side axios must remain same-origin and must not contain a backend IP
 
 ## Key Technical Patterns
 
@@ -195,7 +193,7 @@ backend/
 3. Check backend logs for errors
 4. Test endpoint directly with curl:
    ```bash
-   curl -H "Authorization: Bearer <token>" http://localhost:3002/api/endpoint
+   curl -H "Authorization: Bearer <token>" http://localhost:3001/api/endpoint
    ```
 
 ### Handling Rate Limit Errors
@@ -217,7 +215,7 @@ backend/
 ### Port Configuration
 - Default: Frontend 3001, Backend 3002
 - Change via environment variables:
-  - Frontend: Update `NEXT_PUBLIC_API_URL` and `API_BASE_URL`
+  - Frontend proxy target: Update server-only `API_BASE_URL`
   - Backend: Update `PORT` in `.env`
 
 ## Troubleshooting
@@ -226,7 +224,7 @@ backend/
 1. **"React has detected a change in the order of Hooks"**: Ensure all hooks are called before any conditional returns
 2. **API 401 errors**: Check token expiration, clear localStorage and re-login (auto-handled by interceptors)
 3. **Rate limit errors**: Implement `sequentialWithDelay()` for batch operations, increase delays
-4. **CORS errors**: Verify `ALLOWED_ORIGINS` includes frontend URL
+4. **CORS errors**: On one host verify `API_BASE_URL` uses `127.0.0.1`; for split/container deployments verify `ALLOWED_ORIGINS`
 5. **TypeScript errors**: Fix type annotations before proceeding
 6. **Ant Design deprecation warnings**:
    - `direction="vertical"` → `orientation="vertical"`
