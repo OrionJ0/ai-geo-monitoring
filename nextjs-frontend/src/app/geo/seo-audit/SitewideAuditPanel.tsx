@@ -7,7 +7,11 @@ import {
   ExclamationCircleFilled,
   QuestionCircleFilled
 } from '@ant-design/icons';
-import { buildCheckEvidence } from '@/utils/seoSitewideEvidence.cjs';
+import {
+  buildCheckEvidence,
+  normalizeSitewideCheckForDisplay,
+  safeReportUrl,
+} from '@/utils/seoSitewideEvidence.cjs';
 import styles from './seo-audit.module.css';
 
 const CHECK_LABELS = {
@@ -30,15 +34,6 @@ const STATUS_LABELS = {
   failed: '需处理',
   unknown: '证据不足'
 };
-
-function safeReportUrl(value) {
-  try {
-    const url = new URL(String(value || ''));
-    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
-  } catch {
-    return '';
-  }
-}
 
 function StatusIcon({ status }) {
   if (status === 'passed') return <CheckCircleFilled aria-hidden="true" />;
@@ -84,11 +79,16 @@ function CheckEvidence({ check }) {
                 <details>
                   <summary>查看交互后出现的链接</summary>
                   <div>
-                    {item.targetLinks.map((link) => (
-                      <a key={link.url} href={link.url} target="_blank" rel="noreferrer">
-                        {link.text || link.url}
-                      </a>
-                    ))}
+                    {item.targetLinks.map((link) => {
+                      const href = safeReportUrl(link.url);
+                      return href
+                        ? (
+                            <a key={link.url} href={href} target="_blank" rel="noreferrer">
+                              {link.text || link.url}
+                            </a>
+                          )
+                        : <span key={link.url}>{link.text || link.url}</span>;
+                    })}
                   </div>
                 </details>
               )}
@@ -132,7 +132,9 @@ function ChangeColumn({ title, items, tone }) {
 
 export default function SitewideAuditPanel({ sitewide, comparison }) {
   if (!sitewide) return null;
-  const checks = Array.isArray(sitewide.checks) ? sitewide.checks : [];
+  const checks = Array.isArray(sitewide.checks)
+    ? sitewide.checks.map(normalizeSitewideCheckForDisplay)
+    : [];
   const change = comparison || {
     status: 'no_baseline',
     added: [],

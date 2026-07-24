@@ -6,6 +6,15 @@ const ANCHOR_REASON_COPY = {
   invalid_url: 'href 不是有效的 HTTP/HTTPS 页面地址',
 };
 
+function safeReportUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
 function buildNavigationEvidence(detail = {}) {
   if (detail.triggerText) {
     return {
@@ -58,4 +67,27 @@ function buildCheckEvidence(check = {}) {
   return [];
 }
 
-module.exports = { buildCheckEvidence };
+function normalizeSitewideCheckForDisplay(check = {}) {
+  if (check.id !== 'navigation-crawlability' || check.status !== 'failed') return check;
+
+  const details = Array.isArray(check.details) ? check.details : [];
+  if (details.length === 0) return check;
+  const interactionCount = details.filter((detail) => detail.triggerText).length;
+  const invalidAnchorCount = details.filter((detail) => detail.type === 'invalid-anchor').length;
+  const nonSemanticCount = details.filter(
+    (detail) => !detail.triggerText && detail.type !== 'invalid-anchor'
+  ).length;
+  const unreadableTargetCount = invalidAnchorCount + nonSemanticCount;
+
+  return {
+    ...check,
+    finding: `${unreadableTargetCount} 类导航入口无法从 HTML 直接读取跳转地址；${interactionCount} 组链接只在交互后出现`,
+    value: `div/span 等点击跳转 ${nonSemanticCount} 类 · 无有效 href 的 a ${invalidAnchorCount} 类`,
+  };
+}
+
+module.exports = {
+  buildCheckEvidence,
+  normalizeSitewideCheckForDisplay,
+  safeReportUrl,
+};

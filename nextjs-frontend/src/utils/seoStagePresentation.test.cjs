@@ -276,6 +276,12 @@ test('全站优先修复内容合并技术问题、跨页问题和缺失的平�
         finding: '6 类导航入口无法读取跳转地址',
         value: 'div/span 等点击跳转 6 类',
         affectedPages: ['https://example.com/'],
+        details: [{
+          type: 'non-semantic-navigation-control',
+          tag: 'span',
+          text: '产品中心',
+          sourcePageCount: 125,
+        }],
         recommendation: '使用带 href 的 a。',
       }],
     },
@@ -313,6 +319,10 @@ test('全站优先修复内容合并技术问题、跨页问题和缺失的平�
   assert.equal(
     priorities.find((item) => item.id === 'navigation-crawlability').sourceLabel,
     '跨页专项'
+  );
+  assert.equal(
+    priorities.find((item) => item.id === 'navigation-crawlability').count,
+    125
   );
   assert.equal(
     priorities.find((item) => item.id === 'search-verification').finding,

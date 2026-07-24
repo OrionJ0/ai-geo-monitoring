@@ -9,6 +9,7 @@ import TechnicalHealthOverview from './TechnicalHealthOverview';
 import StageChecksPanel from './StageChecksPanel';
 import SitewideAuditPanel from './SitewideAuditPanel';
 import { buildPriorityContent } from '@/utils/seoStagePresentation.cjs';
+import { safeReportUrl } from '@/utils/seoSitewideEvidence.cjs';
 import styles from './seo-audit.module.css';
 
 const SEVERITY_LABELS = { critical: '严重', high: '高优先级', medium: '中优先级', low: '建议优化' };
@@ -29,12 +30,15 @@ function SeverityBadge({ severity }) {
 export default function SeoSiteAuditReport({ report }) {
   const pages = Array.isArray(report.pages) ? report.pages : [];
   const issues = buildPriorityContent(report);
+  const finalUrl = safeReportUrl(report.finalUrl);
   return (
     <div className={styles.report} aria-live="polite">
       <section className={styles.reportMeta}>
         <div>
           <span>{report.auditId ? `全站报告 #${report.auditId}` : '全站检测报告'}</span>
-          <a href={report.finalUrl} target="_blank" rel="noreferrer">{report.finalUrl}</a>
+          {finalUrl
+            ? <a href={finalUrl} target="_blank" rel="noreferrer">{report.finalUrl}</a>
+            : <span>{report.finalUrl}</span>}
         </div>
         <dl>
           <div><dt>已检测</dt><dd>{report.site.auditedPages} / {report.site.discoveredPages} 页</dd></div>
@@ -107,12 +111,19 @@ export default function SeoSiteAuditReport({ report }) {
                       ))}
                     </div>
                   )}
-                  <div className={styles.affectedUrls}>
-                    {(item.affectedPages || []).slice(0, 6).map((url) => (
-                      <a key={url} href={url} target="_blank" rel="noreferrer">{url}</a>
-                    ))}
-                    {(item.affectedPages?.length || 0) > 6 && <span>另有 {item.affectedPages.length - 6} 个页面</span>}
-                  </div>
+                  {item.id !== 'navigation-crawlability' && (
+                    <div className={styles.affectedUrls}>
+                      {(item.affectedPages || []).slice(0, 6).map((url) => {
+                        const href = safeReportUrl(url);
+                        return href
+                          ? <a key={url} href={href} target="_blank" rel="noreferrer">{url}</a>
+                          : <span key={url}>{url}</span>;
+                      })}
+                      {(item.affectedPages?.length || 0) > 6 && (
+                        <span>另有 {item.affectedPages.length - 6} 个页面</span>
+                      )}
+                    </div>
+                  )}
                   {item.detailHref && (
                     <a className={styles.priorityDetailLink} href={item.detailHref}>查看下方详细证据</a>
                   )}

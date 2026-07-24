@@ -12,6 +12,7 @@ const healthOverviewPath = path.resolve(__dirname, '../app/geo/seo-audit/Technic
 const stageChecksPath = path.resolve(__dirname, '../app/geo/seo-audit/StageChecksPanel.tsx');
 const sitewidePanelPath = path.resolve(__dirname, '../app/geo/seo-audit/SitewideAuditPanel.tsx');
 const jobProgressPath = path.resolve(__dirname, '../app/geo/seo-audit/SeoAuditJobProgress.tsx');
+const sitewideEvidencePath = path.resolve(__dirname, './seoSitewideEvidence.cjs');
 
 test('SEO audit page uses the authenticated API and leads with prioritized fixes', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
@@ -150,7 +151,7 @@ test('全站报告展示跨页专项审计和本次与上次问题差异', () =>
   assert.match(panelSource, /已解决/);
   assert.match(panelSource, /持续存在/);
   assert.match(panelSource, /safeReportUrl/);
-  assert.match(panelSource, /\['http:', 'https:'\]\.includes/);
+  assert.match(fs.readFileSync(sitewideEvidencePath, 'utf8'), /\['http:', 'https:'\]\.includes/);
 });
 
 test('导航可抓取性展示全部入口并说明出现页面不是跳转目标', () => {

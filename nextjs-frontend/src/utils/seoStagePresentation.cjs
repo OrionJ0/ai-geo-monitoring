@@ -1,3 +1,8 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+const {
+  normalizeSitewideCheckForDisplay,
+} = require('./seoSitewideEvidence.cjs');
+
 const CHECK_DEFINITIONS = {
   'http-status': {
     title: '页面访问状态',
@@ -202,17 +207,25 @@ function buildPriorityContent(report = {}) {
   const sitewide = (Array.isArray(report.sitewide?.checks) ? report.sitewide.checks : [])
     .filter((check) => check.status === 'failed' && !seenIds.has(check.id))
     .map((check) => {
-      const [stage, stageLabel] = SITEWIDE_STAGE[check.id] || ['enhancement', '跨页专项'];
-      seenIds.add(check.id);
+      const displayCheck = normalizeSitewideCheckForDisplay(check);
+      const [stage, stageLabel] = SITEWIDE_STAGE[displayCheck.id]
+        || ['enhancement', '跨页专项'];
+      const detailPageCount = displayCheck.id === 'navigation-crawlability'
+        ? Math.max(
+            0,
+            ...(displayCheck.details || []).map((detail) => Number(detail.sourcePageCount || 0))
+          )
+        : 0;
+      seenIds.add(displayCheck.id);
       return {
-        ...check,
+        ...displayCheck,
         kind: 'issue',
         stage,
         stageLabel,
         sourceKind: 'sitewide',
         sourceLabel: '跨页专项',
-        detailHref: `#sitewide-check-${check.id}`,
-        count: check.affectedPages?.length || 0,
+        detailHref: `#sitewide-check-${displayCheck.id}`,
+        count: Math.max(displayCheck.affectedPages?.length || 0, detailPageCount),
         applicablePages: report.site?.auditedPages || 0,
       };
     });
