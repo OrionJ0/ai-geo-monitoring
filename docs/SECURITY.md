@@ -157,10 +157,13 @@ curl -H "Authorization: Bearer <userA_token>" http://localhost:3002/api/detectio
 for i in {1..550}; do curl -H "Authorization: Bearer <token>" http://localhost:3002/api/ai-platforms; done
 ```
 
-### CORS 测试
+### 监听与 CORS 测试
 ```bash
-# 从非白名单域名访问应被拒绝
-curl -H "Origin: https://evil.com" http://<后端局域网IP>:3002/api/health
+# 默认部署从局域网直连后端应连接失败
+curl http://<后端局域网IP>:3002/api/health
+
+# 只有显式设置 HOST=0.0.0.0 的分域/容器部署，才继续验证非白名单 Origin 返回 403
+curl -H "Origin: https://evil.com" http://<后端私网IP>:3002/api/health
 ```
 
 ## 🛡️ 安全最佳实践

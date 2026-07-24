@@ -28,6 +28,7 @@ npm run setup:local-key
 真实 `.env` 文件已被 `.gitignore` 忽略，模板文件 `.env.example` 可以提交。
 
 ## 基本
+- `HOST` 后端监听地址，默认 `127.0.0.1`，同机 Next.js/Nginx 代理无需修改；只有容器或跨机器私网代理才显式设置 `0.0.0.0`
 - `PORT` 后端服务端口，开发环境当前使用 `3002`；代码默认值为 `3000`
 - `NODE_ENV` 运行环境（`development`/`production`）
 - `JWT_SECRET` **用户登录令牌签名密钥（必须设置强随机值，至少32字符）**

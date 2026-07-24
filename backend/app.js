@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const { createCorsOptionsDelegate } = require('./config/corsPolicy');
+const { resolveServerHost } = require('./config/serverBinding');
 
 const app = express();
 
@@ -120,6 +121,7 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const HOST = resolveServerHost();
 
 // 数据库同步并启动服务器
 async function ensureExistingTableProjectColumns() {
@@ -473,9 +475,9 @@ async function ensureDefaultSettings() {
     } catch (e) {
       console.warn('启动调度器失败:', e.message);
     }
-    app.listen(PORT, () => {
-      console.log(`服务器运行在端口 ${PORT}`);
-      console.log(`健康检查: http://localhost:${PORT}/api/health`);
+    app.listen(PORT, HOST, () => {
+      console.log(`服务器运行在 http://${HOST}:${PORT}`);
+      console.log(`健康检查: http://${HOST}:${PORT}/api/health`);
     });
   } catch (err) {
     console.error('数据库连接失败:', err);
