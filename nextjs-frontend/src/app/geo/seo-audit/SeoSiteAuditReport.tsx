@@ -8,7 +8,7 @@ import CrawlerAccessPanel from './CrawlerAccessPanel';
 import TechnicalHealthOverview from './TechnicalHealthOverview';
 import StageChecksPanel from './StageChecksPanel';
 import SitewideAuditPanel from './SitewideAuditPanel';
-import { sortPriorities } from '@/utils/seoStagePresentation.cjs';
+import { buildPriorityContent } from '@/utils/seoStagePresentation.cjs';
 import styles from './seo-audit.module.css';
 
 const SEVERITY_LABELS = { critical: '严重', high: '高优先级', medium: '中优先级', low: '建议优化' };
@@ -28,9 +28,7 @@ function SeverityBadge({ severity }) {
 
 export default function SeoSiteAuditReport({ report }) {
   const pages = Array.isArray(report.pages) ? report.pages : [];
-  const issues = sortPriorities(
-    Array.isArray(report.priorities) ? report.priorities : report.issues || []
-  );
+  const issues = buildPriorityContent(report);
   return (
     <div className={styles.report} aria-live="polite">
       <section className={styles.reportMeta}>
@@ -50,46 +48,75 @@ export default function SeoSiteAuditReport({ report }) {
 
       <section className={styles.priorityPanel}>
         <header className={styles.sectionHeading}>
-          <div><span className={styles.sectionKicker}>整站问题地图</span><h2>按技术链路优先修复</h2></div>
+          <div><span className={styles.sectionKicker}>行动清单</span><h2>优先修复内容</h2></div>
           <span className={styles.issueCount}>{issues.length} 类问题</span>
         </header>
         {issues.length === 0 ? (
-          <div className={styles.allPassed}><CheckCircleFilled /> 已检测页面的关键项均通过</div>
+          <div className={styles.allPassed}><CheckCircleFilled /> 当前没有需要优先处理的问题</div>
         ) : (
           <ol className={styles.siteIssueList}>
-            {issues.map((issue, index) => (
-              <li key={issue.id} className={`${styles.siteIssue} ${styles[`rail_${issue.severity}`]}`}>
+            {issues.map((item, index) => (
+              <li key={item.id} className={`${styles.siteIssue} ${styles[`rail_${item.severity}`]}`}>
                 <span className={styles.priorityNumber}>{String(index + 1).padStart(2, '0')}</span>
                 <div>
-                  <span className={styles.prioritySubject}>{issue.title}</span>
+                  <span className={styles.prioritySubject}>{item.sourceLabel} · {item.title}</span>
                   <div className={styles.priorityTitle}>
-                    <strong>{issue.finding || `${issue.title}未通过`}</strong>
-                    <SeverityBadge severity={issue.severity} />
+                    <strong>{item.finding || `${item.title}未通过`}</strong>
+                    <SeverityBadge severity={item.severity} />
                   </div>
                   <div className={styles.issueMetrics}>
-                    <span>{issue.stageLabel || '旧版问题'}</span>
-                    <span>覆盖率 {Math.round(Number(issue.coverage || 0) * 100)}%</span>
-                    <span>{issue.affectsHomepage ? '影响首页' : '不影响首页'}</span>
-                    <strong>
-                      {issue.deduction === null || issue.deduction === undefined
-                        ? issue.cap ? `分数上限 ${issue.cap}` : '旧版未记录扣分'
-                        : `实际扣分 ${Number(issue.deduction).toFixed(2)}`}
-                    </strong>
+                    <span>{item.stageLabel || '其他问题'}</span>
+                    {item.sourceKind === 'technical' ? (
+                      <>
+                        <span>覆盖率 {Math.round(Number(item.coverage || 0) * 100)}%</span>
+                        <span>{item.affectsHomepage ? '影响首页' : '不影响首页'}</span>
+                        <strong>
+                          {item.deduction === null || item.deduction === undefined
+                            ? item.cap ? `分数上限 ${item.cap}` : '旧版未记录扣分'
+                            : `实际扣分 ${Number(item.deduction).toFixed(2)}`}
+                        </strong>
+                      </>
+                    ) : (
+                      <>
+                        <span>
+                          {item.sourceKind === 'platform'
+                            ? `${item.platforms?.length || 0} 个平台需处理`
+                            : `${item.count || item.affectedPages?.length || 0} 个页面受影响`}
+                        </span>
+                        <strong>专项提示，不计入技术健康分</strong>
+                      </>
+                    )}
                   </div>
                   <p className={styles.siteIssueScope}>
-                    影响 {issue.count || issue.affectedPages?.length || 0} / {issue.applicablePages || report.site.auditedPages} 个适用页面
+                    {item.sourceKind === 'platform'
+                      ? '检查站点首页提供给搜索平台的所有权验证标签'
+                      : `影响 ${item.count || item.affectedPages?.length || 0} / ${item.applicablePages || report.site.auditedPages} 个适用页面`}
                   </p>
                   <div className={styles.priorityFact}>
                     <span>检测事实</span>
-                    <p>{issue.findings?.[0]?.value || issue.value || issue.finding || '未返回事实数据'}</p>
+                    <p>{item.findings?.[0]?.value || item.value || item.finding || '未返回事实数据'}</p>
                   </div>
+                  {item.platforms?.length > 0 && (
+                    <div className={styles.priorityPlatformList}>
+                      {item.platforms.map((platform) => (
+                        <span key={platform.key}>
+                          <b>{platform.label}</b>
+                          {platform.status === 'empty' ? '标签内容为空' : '标签缺失'}
+                          <code>{platform.tag}</code>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className={styles.affectedUrls}>
-                    {(issue.affectedPages || []).slice(0, 6).map((url) => (
+                    {(item.affectedPages || []).slice(0, 6).map((url) => (
                       <a key={url} href={url} target="_blank" rel="noreferrer">{url}</a>
                     ))}
-                    {(issue.affectedPages?.length || 0) > 6 && <span>另有 {issue.affectedPages.length - 6} 个页面</span>}
+                    {(item.affectedPages?.length || 0) > 6 && <span>另有 {item.affectedPages.length - 6} 个页面</span>}
                   </div>
-                  {issue.recommendation && <p className={styles.priorityRecommendation}>建议：{issue.recommendation}</p>}
+                  {item.detailHref && (
+                    <a className={styles.priorityDetailLink} href={item.detailHref}>查看下方详细证据</a>
+                  )}
+                  {item.recommendation && <p className={styles.priorityRecommendation}>建议：{item.recommendation}</p>}
                 </div>
               </li>
             ))}

@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  buildPriorityContent,
   buildStageGroups,
   sortPriorities,
 } = require('./seoStagePresentation.cjs');
@@ -253,4 +254,73 @@ test('报告视图按阻断、阶段、严重级别和扣分稳定重排问题',
     'sitemap',
     'homepage-noindex',
   ]);
+});
+
+test('全站优先修复内容合并技术问题、跨页问题和缺失的平台标签', () => {
+  const report = {
+    priorities: [{
+      id: 'title',
+      title: '页面标题',
+      kind: 'issue',
+      stage: 'content',
+      stageLabel: '内容理解',
+      severity: 'high',
+      finding: '3 个页面标题过短',
+    }],
+    sitewide: {
+      checks: [{
+        id: 'navigation-crawlability',
+        title: '导航链接可抓取性',
+        status: 'failed',
+        severity: 'medium',
+        finding: '6 类导航入口无法读取跳转地址',
+        value: 'div/span 等点击跳转 6 类',
+        affectedPages: ['https://example.com/'],
+        recommendation: '使用带 href 的 a。',
+      }],
+    },
+    platforms: [
+      {
+        key: 'google',
+        label: 'Google',
+        tag: 'google-site-verification',
+        status: 'missing',
+        sourceUrl: 'https://example.com/',
+      },
+      {
+        key: 'bing',
+        label: 'Bing',
+        tag: 'msvalidate.01',
+        status: 'detected',
+        sourceUrl: 'https://example.com/',
+      },
+      {
+        key: 'baidu',
+        label: '百度',
+        tag: 'baidu-site-verification',
+        status: 'empty',
+        sourceUrl: 'https://example.com/',
+      },
+    ],
+  };
+
+  const priorities = buildPriorityContent(report);
+
+  assert.deepEqual(
+    new Set(priorities.map((item) => item.id)),
+    new Set(['title', 'navigation-crawlability', 'search-verification'])
+  );
+  assert.equal(
+    priorities.find((item) => item.id === 'navigation-crawlability').sourceLabel,
+    '跨页专项'
+  );
+  assert.equal(
+    priorities.find((item) => item.id === 'search-verification').finding,
+    'Google、百度的首页验证标签缺失或为空'
+  );
+  assert.deepEqual(
+    priorities.find((item) => item.id === 'search-verification').platforms
+      .map((platform) => platform.label),
+    ['Google', '百度']
+  );
 });

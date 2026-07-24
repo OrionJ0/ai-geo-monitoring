@@ -89,11 +89,15 @@ test('SEO audit page renders crawl progress and a site-level report contract', (
   assert.match(source, /job\.progress/);
 });
 
-test('全站报告把整站问题地图放在技术健康分之后和其他分析面板之前', () => {
+test('全站报告把页面、跨页和平台问题合并进顶部优先修复内容', () => {
   const source = fs.readFileSync(siteReportPath, 'utf8');
   const priorityPanelIndex = source.indexOf('<section className={styles.priorityPanel}>');
 
   assert.notEqual(priorityPanelIndex, -1);
+  assert.match(source, /buildPriorityContent/);
+  assert.match(source, /优先修复内容/);
+  assert.match(source, /sourceLabel/);
+  assert.match(source, /item\.platforms/);
   assert.ok(source.indexOf('<TechnicalHealthOverview report={report} />') < priorityPanelIndex);
   assert.ok(priorityPanelIndex < source.indexOf('<StageChecksPanel report={report} />'));
   assert.ok(priorityPanelIndex < source.indexOf('<SitewideAuditPanel sitewide={report.sitewide} comparison={report.comparison} />'));

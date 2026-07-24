@@ -103,6 +103,21 @@ const SEVERITY_PRIORITY = {
   low: 3,
 };
 
+const SITEWIDE_STAGE = {
+  redirects: ['access', '访问与发现'],
+  'broken-links': ['access', '访问与发现'],
+  'orphan-pages': ['access', '访问与发现'],
+  'internal-link-quality': ['access', '访问与发现'],
+  'sitemap-coverage': ['access', '访问与发现'],
+  'url-consistency': ['access', '访问与发现'],
+  'navigation-crawlability': ['access', '访问与发现'],
+  'canonical-conflicts': ['index', '索引资格'],
+  hreflang: ['index', '索引资格'],
+  'duplicate-titles': ['content', '内容理解'],
+  'duplicate-descriptions': ['content', '内容理解'],
+  'javascript-rendering': ['enhancement', '展示与增强'],
+};
+
 function checkMatchesFilter(check, filter) {
   if (filter === 'urgent') {
     return check.status === 'failed' && ['critical', 'high'].includes(check.severity);
@@ -175,7 +190,63 @@ function sortPriorities(priorities = []) {
   });
 }
 
+function buildPriorityContent(report = {}) {
+  const technical = (
+    Array.isArray(report.priorities) ? report.priorities : report.issues || []
+  ).map((item) => ({
+    ...item,
+    sourceKind: 'technical',
+    sourceLabel: item.kind === 'blocker' ? '核心阻断' : '页面技术',
+  }));
+  const seenIds = new Set(technical.map((item) => item.id));
+  const sitewide = (Array.isArray(report.sitewide?.checks) ? report.sitewide.checks : [])
+    .filter((check) => check.status === 'failed' && !seenIds.has(check.id))
+    .map((check) => {
+      const [stage, stageLabel] = SITEWIDE_STAGE[check.id] || ['enhancement', '跨页专项'];
+      seenIds.add(check.id);
+      return {
+        ...check,
+        kind: 'issue',
+        stage,
+        stageLabel,
+        sourceKind: 'sitewide',
+        sourceLabel: '跨页专项',
+        detailHref: `#sitewide-check-${check.id}`,
+        count: check.affectedPages?.length || 0,
+        applicablePages: report.site?.auditedPages || 0,
+      };
+    });
+  const failedPlatforms = (Array.isArray(report.platforms) ? report.platforms : [])
+    .filter((platform) => platform.status !== 'detected');
+  const platformIssues = failedPlatforms.length > 0 && !seenIds.has('search-verification')
+    ? [{
+        id: 'search-verification',
+        title: '搜索平台验证标签',
+        status: 'failed',
+        kind: 'issue',
+        stage: 'access',
+        stageLabel: '访问与发现',
+        severity: 'low',
+        sourceKind: 'platform',
+        sourceLabel: '平台接入',
+        detailHref: '#platform-status-title',
+        finding: `${failedPlatforms.map((platform) => platform.label).join('、')}的首页验证标签缺失或为空`,
+        value: failedPlatforms.map((platform) => (
+          `${platform.label}：${platform.status === 'empty' ? '内容为空' : '缺失'}`
+        )).join(' · '),
+        recommendation: '在站点首页添加各搜索平台提供的非空 HTML 验证标签，并在对应站长平台完成验证。',
+        affectedPages: Array.from(new Set(failedPlatforms.map((platform) => platform.sourceUrl).filter(Boolean))),
+        count: failedPlatforms.length,
+        applicablePages: report.platforms?.length || failedPlatforms.length,
+        platforms: failedPlatforms,
+      }]
+    : [];
+
+  return sortPriorities([...technical, ...sitewide, ...platformIssues]);
+}
+
 module.exports = {
+  buildPriorityContent,
   buildStageGroups,
   sortPriorities,
 };

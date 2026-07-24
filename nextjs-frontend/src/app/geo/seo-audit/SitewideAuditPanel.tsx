@@ -163,7 +163,11 @@ export default function SitewideAuditPanel({ sitewide, comparison }) {
 
       <div className={styles.sitewideCheckGrid}>
         {checks.map((check) => (
-          <article key={check.id} className={styles[`sitewide_${check.status}`]}>
+          <article
+            id={`sitewide-check-${check.id}`}
+            key={check.id}
+            className={styles[`sitewide_${check.status}`]}
+          >
             <header>
               <span><StatusIcon status={check.status} /></span>
               <div>

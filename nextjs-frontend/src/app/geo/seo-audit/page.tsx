@@ -441,7 +441,7 @@ export default function SeoAuditPage() {
             <header className={styles.sectionHeading}>
               <div>
                 <span className={styles.sectionKicker}>行动清单</span>
-                <h2>优先修复</h2>
+                <h2>优先修复内容</h2>
               </div>
               <span className={styles.issueCount}>{priorities.length} 类问题</span>
             </header>
