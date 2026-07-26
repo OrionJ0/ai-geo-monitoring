@@ -298,17 +298,37 @@ class SchedulerService {
   constructor() {
     this._timer = null;
     this._started = false;
+    this._lastRecoveryAt = null;
+    this._lastErrorCode = null;
   }
 
   async start() {
     if (this._started) return;
-    this._started = true;
-    await this.refresh();
-    await this.recoverStalePendingRecords({
-      includeUnclaimed: true,
-      maxAgeMs: 1
-    });
-    this._timer = setInterval(() => this.tick().catch(() => { }), 30 * 1000);
+    try {
+      await this.refresh();
+      await this.recoverStalePendingRecords({
+        includeUnclaimed: true,
+        maxAgeMs: 1
+      });
+      this._lastRecoveryAt = new Date().toISOString();
+      this._timer = setInterval(() => this.tick().catch(() => { }), 30 * 1000);
+      this._started = true;
+      this._lastErrorCode = null;
+    } catch (error) {
+      if (this._timer) clearInterval(this._timer);
+      this._timer = null;
+      this._started = false;
+      this._lastErrorCode = 'scheduler_initialization_failed';
+      throw error;
+    }
+  }
+
+  getReadiness() {
+    return {
+      started: this._started,
+      last_recovery_at: this._lastRecoveryAt,
+      last_error_code: this._lastErrorCode
+    };
   }
 
   normalizeProjectMonitoring(project) {
@@ -485,6 +505,7 @@ class SchedulerService {
       }
     );
     if (count > 0) console.warn(`已恢复 ${count} 条超时未完成分析记录`);
+    this._lastRecoveryAt = now.toISOString();
     return count;
   }
 

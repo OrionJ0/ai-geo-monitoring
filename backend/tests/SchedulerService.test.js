@@ -237,6 +237,48 @@ test('periodic recovery only expires claimed executions, not old records still w
   assert.equal(recovered, 0);
   assert.ok(observedWhere.execution_started_at);
   assert.equal(observedWhere.created_at, undefined);
+  assert.equal(
+    SchedulerService.getReadiness().last_recovery_at,
+    '2026-05-19T13:30:00.000Z'
+  );
+});
+
+test('scheduler startup can be retried after initialization fails', async () => {
+  await SchedulerService.stop();
+  const previousRecoveryAt = SchedulerService.getReadiness().last_recovery_at;
+  const originalRefresh = SchedulerService.refresh;
+  const originalRecovery = SchedulerService.recoverStalePendingRecords;
+  let refreshCalls = 0;
+  let recoveryCalls = 0;
+
+  SchedulerService.refresh = async () => {
+    refreshCalls += 1;
+    if (refreshCalls === 1) throw new Error('refresh failed');
+  };
+  SchedulerService.recoverStalePendingRecords = async () => {
+    recoveryCalls += 1;
+    return 0;
+  };
+
+  try {
+    await assert.rejects(() => SchedulerService.start(), /refresh failed/);
+    assert.deepEqual(SchedulerService.getReadiness(), {
+      started: false,
+      last_recovery_at: previousRecoveryAt,
+      last_error_code: 'scheduler_initialization_failed'
+    });
+    await SchedulerService.start();
+    assert.equal(refreshCalls, 2);
+    assert.equal(recoveryCalls, 1);
+    const readiness = SchedulerService.getReadiness();
+    assert.equal(readiness.started, true);
+    assert.ok(readiness.last_recovery_at);
+    assert.equal(readiness.last_error_code, null);
+  } finally {
+    await SchedulerService.stop();
+    SchedulerService.refresh = originalRefresh;
+    SchedulerService.recoverStalePendingRecords = originalRecovery;
+  }
 });
 
 test('manual scheduled runs only succeed when at least one platform completes', () => {

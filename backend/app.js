@@ -22,6 +22,7 @@ app.use(helmet({
 // 注意：req.path 在挂载到 /api/ 后，不包含 /api 前缀
 const publicPaths = [
   '/health',
+  '/ready',
   '/captcha',
   '/settings/seo',
   '/settings/notice'
@@ -96,6 +97,23 @@ app.get('/api/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     version: '1.0.0'
+  });
+});
+
+app.get('/api/ready', (req, res) => {
+  const database = typeof sequelize.getReadiness === 'function'
+    ? sequelize.getReadiness()
+    : { status: 'error', dialect: sequelize.getDialect(), last_error_code: 'database_readiness_unavailable' };
+  const scheduler = SchedulerService.getReadiness();
+  const ready = database.status === 'ready' && scheduler.started === true;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    checks: {
+      database,
+      scheduler,
+      last_error: database.last_error_code || scheduler.last_error_code || null
+    },
+    timestamp: new Date().toISOString()
   });
 });
 

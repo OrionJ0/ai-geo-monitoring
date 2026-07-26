@@ -48,16 +48,78 @@ const sequelize = process.env.DATABASE_URL
       },
     });
 
+const databaseReadiness = {
+  status: 'initializing',
+  dialect: sequelize.getDialect(),
+  last_error_code: null
+};
+
+sequelize.getReadiness = () => ({ ...databaseReadiness });
+
+function runSqliteStatement(connection, sql) {
+  return new Promise((resolve, reject) => {
+    connection.run(sql, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+function readSqlitePragma(connection, sql) {
+  return new Promise((resolve, reject) => {
+    connection.get(sql, (error, row) => {
+      if (error) reject(error);
+      else resolve(row || {});
+    });
+  });
+}
+
 // SQLite WAL 模式：允许读写并发，大幅减少页面切换时的文件锁等待
 if (sequelize.getDialect() === 'sqlite') {
-  sequelize.afterConnect(async (connection) => {
-    try {
-      await connection.run('PRAGMA journal_mode=WAL;');
-      await connection.run('PRAGMA busy_timeout=5000;');
-      await connection.run('PRAGMA synchronous=NORMAL;');
-    } catch (_) {
-      // 静默忽略 PRAGMA 错误
+  const configuredConnections = new WeakSet();
+  const getConnection = sequelize.connectionManager.getConnection.bind(sequelize.connectionManager);
+  sequelize.connectionManager.getConnection = async (...args) => {
+    const connection = await getConnection(...args);
+    if (!configuredConnections.has(connection)) {
+      try {
+        const inMemory = connection.filename === ':memory:';
+        if (!inMemory) {
+          await runSqliteStatement(connection, 'PRAGMA journal_mode=WAL;');
+        }
+        await runSqliteStatement(connection, 'PRAGMA busy_timeout=5000;');
+        await runSqliteStatement(connection, 'PRAGMA synchronous=NORMAL;');
+        const journal = await readSqlitePragma(connection, 'PRAGMA journal_mode;');
+        const timeout = await readSqlitePragma(connection, 'PRAGMA busy_timeout;');
+        const synchronous = await readSqlitePragma(connection, 'PRAGMA synchronous;');
+        const journalMode = String(journal.journal_mode || '').toLowerCase();
+        const busyTimeout = Number(timeout.timeout);
+        const synchronousValue = Number(synchronous.synchronous);
+        const expectedJournalMode = inMemory ? 'memory' : 'wal';
+        if (journalMode !== expectedJournalMode || busyTimeout < 5000 || synchronousValue !== 1) {
+          const error = new Error('SQLite 并发配置未生效');
+          error.code = 'SQLITE_PRAGMA_VERIFICATION_FAILED';
+          throw error;
+        }
+        configuredConnections.add(connection);
+        Object.assign(databaseReadiness, {
+          status: 'ready',
+          journal_mode: journalMode,
+          busy_timeout_ms: busyTimeout,
+          synchronous: 'normal',
+          last_error_code: null
+        });
+      } catch (error) {
+        databaseReadiness.status = 'error';
+        databaseReadiness.last_error_code = error?.code || 'sqlite_configuration_failed';
+        throw error;
+      }
     }
+    return connection;
+  };
+} else {
+  sequelize.afterConnect(() => {
+    databaseReadiness.status = 'ready';
+    databaseReadiness.last_error_code = null;
   });
 }
 
