@@ -8,7 +8,6 @@ import {
   Descriptions,
   Empty,
   Popconfirm,
-  Progress,
   Select,
   Space,
   Table,
@@ -34,6 +33,10 @@ import axios from 'axios';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { downloadQuestionSetReportPdf } from '@/utils/downloadQuestionSetReportPdf';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
+import {
+  PDF_COLUMN_WIDTHS,
+  getRunStateNotice,
+} from '@/utils/questionSetRunPresentation.cjs';
 import QuestionSetRunHistoryDrawer, {
   type QuestionSetOption,
 } from './QuestionSetRunHistoryDrawer';
@@ -72,6 +75,18 @@ type ReportSummary = {
   avg_brand_rank?: number | null;
   total_citations?: number;
   total_owned_citations?: number;
+};
+type ExecutionSummary = {
+  total?: number;
+  completed?: number;
+  failed?: number;
+  pending?: number;
+  failure_stages?: Record<string, number>;
+};
+type RunStateNotice = {
+  type: 'info' | 'warning' | 'error' | 'success';
+  title: string;
+  description: string;
 };
 type RunCapabilities = {
   can_pause: boolean;
@@ -181,6 +196,7 @@ type RunReport = {
     error_code?: string | null;
   };
   capabilities?: RunCapabilities;
+  execution_summary?: ExecutionSummary;
   summary: ReportSummary;
   rows?: ReportRow[];
 };
@@ -199,17 +215,6 @@ const sentimentLabel: Record<string, string> = {
   positive: '正向',
   neutral: '中性',
   negative: '负向',
-};
-
-const capabilityReasonMessage: Record<string, string> = {
-  imported_report_read_only: '这是导入的只读报告，不能暂停、继续或重试。',
-  snapshot_only_report: '这份旧报告仅保留了快照，底层运行记录不完整，因此不能重试失败项。',
-  run_records_missing: '运行记录不完整，系统已将它收敛为失败；请保留此报告并联系管理员排查。',
-  run_not_terminal: '运行尚未结束，暂不能重试失败项。',
-  no_failed_records: '当前没有可重试的失败项。',
-  not_running: '当前运行不处于可暂停状态。',
-  not_paused: '当前运行未暂停。',
-  no_pending_records: '当前没有待处理任务。',
 };
 
 function extractList(response: unknown) {
@@ -477,9 +482,25 @@ export default function QuestionSetReportsPage() {
   const hasLegacyAnalysis = Boolean(report?.rows?.some(
     (row) => row.has_metrics && !['ai_structured_v1', 'ai_structured_v2'].includes(row.analysis_method || ''),
   ));
-  const progress = summary.total ? Math.round(((summary.completed || 0) + (summary.failed || 0)) / summary.total * 100) : 0;
+  const executionSummary: ExecutionSummary = report?.execution_summary || {
+    total: summary.total,
+    completed: summary.completed,
+    failed: summary.failed,
+    pending: summary.pending,
+    failure_stages: {},
+  };
+  const runStateNotice = report ? getRunStateNotice({
+    status: report.status,
+    source: report.source,
+    integrityStatus: report.integrity?.status,
+    capabilities: report.capabilities,
+    executionSummary,
+  }) as RunStateNotice : null;
 
   const selectRun = (nextRunId: number) => setRunId(nextRunId);
+  const reportRowKey = (row: ReportRow) => (
+    `${row.record_id || 'imported'}-${row.question_id || row.question}-${row.platform}`
+  );
 
   const brandEvidence = (row: ReportRow) => {
     const evidence = row.analysis_evidence?.brand || {};
@@ -610,7 +631,7 @@ export default function QuestionSetReportsPage() {
     {
       title: '问题',
       dataIndex: 'question',
-      width: pdfLayout ? 270 : 300,
+      width: pdfLayout ? PDF_COLUMN_WIDTHS.question : 300,
       render: (value: string, row: ReportRow) => (
         <Space orientation="vertical" size={2}>
           <Text strong>{value || '-'}</Text>
@@ -621,7 +642,7 @@ export default function QuestionSetReportsPage() {
     {
       title: '平台 / 模型',
       key: 'platform',
-      width: pdfLayout ? 160 : 180,
+      width: pdfLayout ? PDF_COLUMN_WIDTHS.platform : 180,
       render: (_: unknown, row: ReportRow) => (
         <Space orientation="vertical" size={2}>
           <Text>{row.platform_name || row.platform || '-'}</Text>
@@ -632,7 +653,7 @@ export default function QuestionSetReportsPage() {
     {
       title: '状态',
       dataIndex: 'status',
-      width: pdfLayout ? 80 : 90,
+      width: pdfLayout ? PDF_COLUMN_WIDTHS.status : 90,
       render: (value: string) => value === 'completed'
         ? <Tag color="success">完成</Tag>
         : value === 'failed'
@@ -642,7 +663,7 @@ export default function QuestionSetReportsPage() {
     {
       title: '品牌表现',
       key: 'brand',
-      width: pdfLayout ? 145 : 180,
+      width: pdfLayout ? PDF_COLUMN_WIDTHS.brand : 180,
       render: (_: unknown, row: ReportRow) => row.has_metrics ? (
         <Space wrap size={[4, 4]}>
           <Tag color={row.brand_mentioned ? 'blue' : 'default'}>{row.brand_mentioned ? '已提及' : '未提及'}</Tag>
@@ -654,19 +675,19 @@ export default function QuestionSetReportsPage() {
     {
       title: '排名',
       dataIndex: 'brand_rank',
-      width: pdfLayout ? 60 : 80,
+      width: pdfLayout ? PDF_COLUMN_WIDTHS.rank : 80,
       render: formatRank,
     },
     {
       title: '明确引用',
       dataIndex: 'citation_count',
-      width: pdfLayout ? 60 : 70,
+      width: pdfLayout ? PDF_COLUMN_WIDTHS.citations : 70,
       render: (value: number) => Number(value || 0),
     },
     {
       title: '情绪',
       dataIndex: 'sentiment',
-      width: pdfLayout ? 70 : 80,
+      width: pdfLayout ? PDF_COLUMN_WIDTHS.sentiment : 80,
       render: (value: string) => sentimentLabel[value] || '-',
     },
   ];
@@ -752,7 +773,12 @@ export default function QuestionSetReportsPage() {
                   <div>
                     <Space wrap size={8}>
                       {reportStatusTag(report.status)}
-                      {report.source === 'imported' ? <Tag>导入报告</Tag> : <Tag variant="filled">运行 #{report.id}</Tag>}
+                      {report.source === 'imported'
+                        ? <Tag>导入报告 · 只读</Tag>
+                        : <Tag variant="filled">运行 #{report.id}</Tag>}
+                      {report.integrity?.status === 'snapshot_only'
+                        ? <Tag color="warning">仅快照</Tag>
+                        : null}
                     </Space>
                     <Title level={2}>{report.question_set_name}</Title>
                     <Text type="secondary">
@@ -795,34 +821,12 @@ export default function QuestionSetReportsPage() {
                   </Space>
                 </header>
 
-                {['snapshot_only_report', 'run_records_missing'].includes(
-                  report.capabilities?.retry_disabled_reason || '',
-                ) ? (
+                {runStateNotice ? (
                   <Alert
-                    type="warning"
+                    type={runStateNotice.type}
                     showIcon
-                    title={report.integrity?.status === 'snapshot_only' ? '历史报告仅保留快照' : '运行记录不完整'}
-                    description={capabilityReasonMessage[report.capabilities?.retry_disabled_reason || '']}
-                    className={styles.runningAlert}
-                  />
-                ) : null}
-
-                {report.status === 'running' ? (
-                  <Alert
-                    type="info"
-                    showIcon
-                    title="问题集仍在运行，报告会自动更新"
-                    description={<Progress percent={progress} size="small" />}
-                    className={styles.runningAlert}
-                  />
-                ) : null}
-
-                {report.status === 'paused' ? (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    title="运行已暂停"
-                    description={`已完成 ${summary.completed || 0} / ${summary.failed || 0} 条，剩余 ${summary.pending || 0} 条待处理。点击"继续运行"恢复。`}
+                    title={runStateNotice.title}
+                    description={runStateNotice.description}
                     className={styles.runningAlert}
                   />
                 ) : null}
@@ -938,13 +942,17 @@ export default function QuestionSetReportsPage() {
                   </div>
                   <Table<ReportRow>
                     size="small"
-                    rowKey={(row) => `${row.record_id || 'imported'}-${row.question_id || row.question}-${row.platform}`}
+                    rowKey={reportRowKey}
                     columns={rowColumns}
                     dataSource={report.rows || []}
                     pagination={pdfLayout ? false : { pageSize: 20, showSizeChanger: false }}
                     scroll={{ x: pdfLayout ? 880 : 1080 }}
                     locale={{ emptyText: '本次运行暂无结果' }}
                     expandable={{
+                      showExpandColumn: !pdfLayout,
+                      expandedRowKeys: pdfLayout
+                        ? (report.rows || []).map(reportRowKey)
+                        : undefined,
                       expandedRowRender: (row) => (
                         <div className={styles.answerPanel}>
                           {row.error_message ? <Alert type="error" showIcon title={row.error_message} /> : null}
@@ -1090,7 +1098,19 @@ export default function QuestionSetReportsPage() {
                             </div>
                           ) : null}
                           <Text className={styles.answerLabel}>AI 原始回答</Text>
-                          <Paragraph className={styles.answerText}>{row.answer || '暂无回答内容'}</Paragraph>
+                          <Paragraph className={styles.answerText}>
+                            {pdfLayout
+                              ? (row.answer || '暂无回答内容').split(/\r?\n/).map((line, index) => (
+                                  <span
+                                    key={`answer-line-${index}`}
+                                    className={styles.pdfAnswerLine}
+                                    data-pdf-breakpoint="true"
+                                  >
+                                    {line || '\u00A0'}
+                                  </span>
+                                ))
+                              : (row.answer || '暂无回答内容')}
+                          </Paragraph>
                           {row.citation_evidence_status === 'legacy_unverified' ? (
                             <Alert
                               type="warning"

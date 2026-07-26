@@ -196,6 +196,27 @@ function summarize(rows) {
   };
 }
 
+function summarizeExecution(rows) {
+  const failureStages = new Map();
+  rows
+    .filter((row) => row.status === 'failed')
+    .forEach((row) => {
+      const stage = String(
+        row?.failure?.stage
+        || row?.analysis_diagnostics?.stage
+        || 'unknown'
+      ).trim() || 'unknown';
+      failureStages.set(stage, (failureStages.get(stage) || 0) + 1);
+    });
+  return {
+    total: rows.length,
+    completed: rows.filter((row) => row.status === 'completed').length,
+    failed: rows.filter((row) => row.status === 'failed').length,
+    pending: rows.filter((row) => row.status === 'pending').length,
+    failure_stages: Object.fromEntries(failureStages)
+  };
+}
+
 function normalizeNativeRow(record) {
   const row = plain(record);
   const detail = plain(row.resultDetail) || {};
@@ -327,6 +348,7 @@ class QuestionSetRunService {
         summary,
         integrityStatus
       }),
+      execution_summary: summarizeExecution(rows),
       summary,
       rows
     };
@@ -609,3 +631,4 @@ module.exports.SCHEMA_VERSION = SCHEMA_VERSION;
 module.exports.deriveStatus = deriveStatus;
 module.exports.deriveCapabilities = deriveCapabilities;
 module.exports.summarize = summarize;
+module.exports.summarizeExecution = summarizeExecution;

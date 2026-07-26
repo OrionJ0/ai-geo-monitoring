@@ -225,6 +225,11 @@
   white-space: pre-wrap;
 }
 
+.pdfAnswerLine {
+  display: block;
+  min-height: 1.75em;
+}
+
 .emptyIcon {
   color: #9ba8b8;
   font-size: 50px;

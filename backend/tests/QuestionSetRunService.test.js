@@ -185,6 +185,15 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   assert.equal(report.summary.total, 2);
   assert.equal(report.summary.completed, 1);
   assert.equal(report.summary.failed, 1);
+  assert.deepEqual(report.execution_summary, {
+    total: 2,
+    completed: 1,
+    failed: 1,
+    pending: 0,
+    failure_stages: {
+      analysis_validation: 1
+    }
+  });
   assert.equal(report.summary.brand_mention_rate, 100);
   assert.equal(report.summary.owned_citation_rate, 100);
   assert.equal(report.summary.total_owned_citations, 1);
@@ -539,6 +548,19 @@ test('执行能力由服务端状态机统一给出暂停和继续条件', () =>
     can_retry: false,
     retry_disabled_reason: 'run_not_terminal'
   });
+});
+
+test('失败阶段聚合把外部阶段名当作普通数据', () => {
+  const summary = QuestionSetRunService.summarizeExecution([
+    {
+      status: 'failed',
+      failure: { stage: '__proto__' }
+    }
+  ]);
+
+  assert.equal(Object.hasOwn(summary.failure_stages, '__proto__'), true);
+  assert.equal(summary.failure_stages.__proto__, 1);
+  assert.equal(Object.getPrototypeOf(summary.failure_stages), Object.prototype);
 });
 
 test('导入拒绝引用来源中的非网页协议', async () => {

@@ -7,6 +7,7 @@ const path = require('node:path');
 const pagePath = path.resolve(__dirname, '../app/geo/question-set-reports/page.tsx');
 const historyDrawerPath = path.resolve(__dirname, '../app/geo/question-set-reports/QuestionSetRunHistoryDrawer.tsx');
 const reportCssPath = path.resolve(__dirname, '../app/geo/question-set-reports/question-set-reports.module.css');
+const presentationPath = path.resolve(__dirname, 'questionSetRunPresentation.cjs');
 const layoutPath = path.resolve(__dirname, '../app/geo/layout.tsx');
 const promptPagePath = path.resolve(__dirname, '../app/geo/prompts/page.tsx');
 const dashboardCssPath = path.resolve(__dirname, '../app/geo/project-dashboard/project-dashboard.module.css');
@@ -129,6 +130,10 @@ test('问题集报告支持标准 CSV 导入导出并轮询运行中的报告', 
   assert.doesNotMatch(source, /window\.print\(\)|打印 \/ 导出 PDF|PrinterOutlined/);
   assert.match(fs.readFileSync(reportCssPath, 'utf8'), /\.pdfLayout\s*\{[\s\S]*width:\s*980px/);
   assert.match(source, /scroll=\{\{ x: pdfLayout \? 880 : 1080 \}\}/);
+  assert.match(source, /showExpandColumn:\s*!pdfLayout/);
+  assert.match(source, /expandedRowKeys:\s*pdfLayout/);
+  assert.match(source, /data-pdf-breakpoint="true"/);
+  assert.match(source, /styles\.pdfAnswerLine/);
   assert.match(drawer, /<Pagination/);
   assert.match(source, /pagination\?\.totalItems/);
 });
@@ -153,6 +158,18 @@ test('原生问题集报告可以确认后重试失败项', () => {
     source,
     /report\.source === 'native'[\s\S]{0,160}report\.status !== 'running'/
   );
+});
+
+test('partial、快照和导入报告共用一致的状态说明', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+  const presentation = fs.readFileSync(presentationPath, 'utf8');
+
+  assert.match(source, /execution_summary/);
+  assert.match(source, /getRunStateNotice/);
+  assert.match(presentation, /failure_stages/);
+  assert.match(presentation, /主要失败阶段/);
+  assert.match(presentation, /导入的只读报告/);
+  assert.match(presentation, /历史报告仅保留快照/);
 });
 
 test('运行中的报告和逐模型结果使用旋转图标提示仍在处理', () => {

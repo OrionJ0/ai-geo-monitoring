@@ -40,8 +40,10 @@ export async function downloadQuestionSetReportPdf(
   const elementRect = element.getBoundingClientRect();
   const canvasScale = elementRect.height > 0 ? canvas.height / elementRect.height : 1;
   const breakpoints = Array.from(
-    element.querySelectorAll<HTMLElement>('.ant-table-tbody > tr'),
-  ).map((row) => (row.getBoundingClientRect().top - elementRect.top) * canvasScale);
+    element.querySelectorAll<HTMLElement>(
+      '.ant-table-tbody > tr, [data-pdf-breakpoint="true"]',
+    ),
+  ).map((node) => (node.getBoundingClientRect().top - elementRect.top) * canvasScale);
   const slices = createPdfPageSlices({
     canvasWidth: canvas.width,
     canvasHeight: canvas.height,

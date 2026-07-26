@@ -97,5 +97,6 @@ test('浏览器导出器使用画布生成 PDF 文件而不是调用打印', () 
   assert.match(source, /link\.download/);
   assert.match(source, /A4_PORTRAIT_WIDTH/);
   assert.match(source, /A4_PORTRAIT_HEIGHT/);
+  assert.match(source, /data-pdf-breakpoint/);
   assert.doesNotMatch(source, /window\.print|print\(\)/);
 });
