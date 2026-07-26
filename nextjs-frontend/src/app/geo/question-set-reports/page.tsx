@@ -73,6 +73,14 @@ type ReportSummary = {
   total_citations?: number;
   total_owned_citations?: number;
 };
+type RunCapabilities = {
+  can_pause: boolean;
+  pause_disabled_reason?: string | null;
+  can_resume: boolean;
+  resume_disabled_reason?: string | null;
+  can_retry: boolean;
+  retry_disabled_reason?: string | null;
+};
 type ReportRow = {
   record_id?: number | null;
   question_id?: number | null;
@@ -167,6 +175,12 @@ type RunReport = {
   completed_at?: string | null;
   paused_at?: string | null;
   created_at?: string;
+  integrity?: {
+    status?: 'complete' | 'snapshot_only' | 'missing_records' | string;
+    missing_record_count?: number;
+    error_code?: string | null;
+  };
+  capabilities?: RunCapabilities;
   summary: ReportSummary;
   rows?: ReportRow[];
 };
@@ -185,6 +199,17 @@ const sentimentLabel: Record<string, string> = {
   positive: '正向',
   neutral: '中性',
   negative: '负向',
+};
+
+const capabilityReasonMessage: Record<string, string> = {
+  imported_report_read_only: '这是导入的只读报告，不能暂停、继续或重试。',
+  snapshot_only_report: '这份旧报告仅保留了快照，底层运行记录不完整，因此不能重试失败项。',
+  run_records_missing: '运行记录不完整，系统已将它收敛为失败；请保留此报告并联系管理员排查。',
+  run_not_terminal: '运行尚未结束，暂不能重试失败项。',
+  no_failed_records: '当前没有可重试的失败项。',
+  not_running: '当前运行不处于可暂停状态。',
+  not_paused: '当前运行未暂停。',
+  no_pending_records: '当前没有待处理任务。',
 };
 
 function extractList(response: unknown) {
@@ -505,7 +530,7 @@ export default function QuestionSetReportsPage() {
   };
 
   const pauseRun = async () => {
-    if (!projectId || !report) return;
+    if (!projectId || !report || !report.capabilities?.can_pause) return;
     try {
       await axios.post(`/api/geo-projects/${projectId}/question-set-runs/${report.id}/pause`);
       message.success('已发送暂停信号，运行会在当前任务完成后暂停');
@@ -516,7 +541,7 @@ export default function QuestionSetReportsPage() {
   };
 
   const resumeRun = async () => {
-    if (!projectId || !report) return;
+    if (!projectId || !report || !report.capabilities?.can_resume) return;
     try {
       await axios.post(`/api/geo-projects/${projectId}/question-set-runs/${report.id}/resume`);
       message.success('运行已恢复');
@@ -527,7 +552,7 @@ export default function QuestionSetReportsPage() {
   };
 
   const retryFailedRows = async () => {
-    if (!projectId || !report) return;
+    if (!projectId || !report || !report.capabilities?.can_retry) return;
     setRetrying(true);
     try {
       const idempotencyKey = window.crypto.randomUUID();
@@ -735,10 +760,7 @@ export default function QuestionSetReportsPage() {
                     </Text>
                   </div>
                   <Space wrap className={styles.reportActions} data-pdf-exclude="true">
-                    {report.source === 'native'
-                      && report.status !== 'running'
-                      && report.status !== 'paused'
-                      && Number(summary.failed || 0) > 0 ? (
+                    {report.capabilities?.can_retry ? (
                         <Popconfirm
                           title={`重试 ${summary.failed || 0} 条失败项？`}
                           description="已有完整原回答的分析失败项只会重做结构化分析；其余失败项才会使用当前设置中心的监测模型和参数重新调用。不可用平台会跳过。"
@@ -751,7 +773,7 @@ export default function QuestionSetReportsPage() {
                           </Button>
                         </Popconfirm>
                       ) : null}
-                    {report.status === 'running' ? (
+                    {report.capabilities?.can_pause ? (
                       <Button
                         icon={<PauseCircleOutlined />}
                         onClick={pauseRun}
@@ -759,7 +781,7 @@ export default function QuestionSetReportsPage() {
                         暂停
                       </Button>
                     ) : null}
-                    {report.status === 'paused' ? (
+                    {report.capabilities?.can_resume ? (
                       <Button
                         type="primary"
                         icon={<CaretRightOutlined />}
@@ -772,6 +794,18 @@ export default function QuestionSetReportsPage() {
                     <Button icon={<DownloadOutlined />} onClick={exportReport}>导出标准 CSV</Button>
                   </Space>
                 </header>
+
+                {['snapshot_only_report', 'run_records_missing'].includes(
+                  report.capabilities?.retry_disabled_reason || '',
+                ) ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    title={report.integrity?.status === 'snapshot_only' ? '历史报告仅保留快照' : '运行记录不完整'}
+                    description={capabilityReasonMessage[report.capabilities?.retry_disabled_reason || '']}
+                    className={styles.runningAlert}
+                  />
+                ) : null}
 
                 {report.status === 'running' ? (
                   <Alert

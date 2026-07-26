@@ -183,6 +183,21 @@ test('audits legacy ownership read-only and migrates complete and damaged runs w
   assert.equal(postflight.legacy_column_present, false);
   assert.equal(postflight.ownership_columns_present, true);
   assert.equal(postflight.migration_required, false);
+  assert.equal(postflight.native_run_count, 3);
+  assert.equal(postflight.dangling_owned_record_count, 0);
+  assert.equal(postflight.new_run_dangling_reference_count, 0);
+  assert.deepEqual(
+    postflight.details.map((detail) => ({
+      runId: detail.runId,
+      integrityStatus: detail.integrityStatus,
+      missingRecordCount: detail.missingRecordCount
+    })),
+    [
+      { runId: completeRun.id, integrityStatus: 'complete', missingRecordCount: 0 },
+      { runId: snapshotRun.id, integrityStatus: 'snapshot_only', missingRecordCount: 1 },
+      { runId: activeBrokenRun.id, integrityStatus: 'missing_records', missingRecordCount: 1 }
+    ]
+  );
 
   const migratedComplete = await QuestionRecord.findAll({
     where: { question_set_run_id: completeRun.id },
@@ -208,6 +223,8 @@ test('audits legacy ownership read-only and migrates complete and damaged runs w
     missing_record_count: 1,
     error_code: 'question_set_run_snapshot_only'
   });
+  assert.equal(snapshotReport.capabilities.can_retry, false);
+  assert.equal(snapshotReport.capabilities.retry_disabled_reason, 'snapshot_only_report');
 
   await activeBrokenRun.reload();
   assert.equal(activeBrokenRun.integrity_status, 'missing_records');
@@ -225,6 +242,8 @@ test('audits legacy ownership read-only and migrates complete and damaged runs w
     missing_record_count: 1,
     error_code: 'question_set_run_integrity_missing_records'
   });
+  assert.equal(brokenReport.capabilities.can_retry, false);
+  assert.equal(brokenReport.capabilities.retry_disabled_reason, 'run_records_missing');
   assert.equal(await QuestionRecord.count(), 3);
 
   await importedRun.reload();

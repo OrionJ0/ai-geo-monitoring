@@ -124,6 +124,46 @@ function deriveStatus(rows, pausedAt = null) {
   return 'partial';
 }
 
+function deriveCapabilities({ source, status, summary, integrityStatus }) {
+  const blockedReason = source === 'imported'
+    ? 'imported_report_read_only'
+    : integrityStatus === 'snapshot_only'
+      ? 'snapshot_only_report'
+      : integrityStatus === 'missing_records'
+        ? 'run_records_missing'
+        : null;
+  if (blockedReason) {
+    return {
+      can_pause: false,
+      pause_disabled_reason: blockedReason,
+      can_resume: false,
+      resume_disabled_reason: blockedReason,
+      can_retry: false,
+      retry_disabled_reason: blockedReason
+    };
+  }
+
+  const pending = Number(summary?.pending) || 0;
+  const failed = Number(summary?.failed) || 0;
+  const canPause = status === 'running' && pending > 0;
+  const canResume = status === 'paused' && pending > 0;
+  const canRetry = !['running', 'paused'].includes(status) && failed > 0;
+  return {
+    can_pause: canPause,
+    pause_disabled_reason: canPause
+      ? null
+      : (status !== 'running' ? 'not_running' : 'no_pending_records'),
+    can_resume: canResume,
+    resume_disabled_reason: canResume
+      ? null
+      : (status !== 'paused' ? 'not_paused' : 'no_pending_records'),
+    can_retry: canRetry,
+    retry_disabled_reason: canRetry
+      ? null
+      : (['running', 'paused'].includes(status) ? 'run_not_terminal' : 'no_failed_records')
+  };
+}
+
 function summarize(rows) {
   const completedRows = rows.filter((row) => row.status === 'completed');
   const metricRows = completedRows.filter((row) => row.has_metrics);
@@ -259,6 +299,7 @@ class QuestionSetRunService {
     const status = integrityStatus === 'missing_records'
       ? 'failed'
       : deriveStatus(rows, pausedAt);
+    const summary = summarize(rows);
     return {
       id: run.id,
       project_id: run.project_id,
@@ -280,7 +321,13 @@ class QuestionSetRunService {
         missing_record_count: Number(run.integrity_missing_record_count) || 0,
         error_code: run.integrity_error_code || null
       },
-      summary: summarize(rows),
+      capabilities: deriveCapabilities({
+        source: run.source,
+        status,
+        summary,
+        integrityStatus
+      }),
+      summary,
       rows
     };
   }
@@ -559,4 +606,5 @@ class QuestionSetRunService {
 module.exports = new QuestionSetRunService();
 module.exports.SCHEMA_VERSION = SCHEMA_VERSION;
 module.exports.deriveStatus = deriveStatus;
+module.exports.deriveCapabilities = deriveCapabilities;
 module.exports.summarize = summarize;

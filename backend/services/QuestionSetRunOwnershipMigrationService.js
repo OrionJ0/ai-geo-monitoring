@@ -176,23 +176,122 @@ class QuestionSetRunOwnershipMigrationService {
     );
   }
 
+  async auditCurrentOwnership(database) {
+    const quotedRuns = database.getQueryInterface().queryGenerator.quoteTable('question_set_runs');
+    const quotedRecords = database.getQueryInterface().queryGenerator.quoteTable('question_records');
+    const runs = await database.query(
+      `SELECT id, project_id, planned_record_count, integrity_status,
+              imported_rows, completed_at, idempotency_key_hash
+       FROM ${quotedRuns}
+       WHERE source = 'native'
+       ORDER BY id ASC`,
+      { type: QueryTypes.SELECT }
+    );
+    const recordCounts = await database.query(
+      `SELECT question_set_run_id AS run_id, COUNT(*) AS record_count
+       FROM ${quotedRecords}
+       WHERE question_set_run_id IS NOT NULL
+       GROUP BY question_set_run_id`,
+      { type: QueryTypes.SELECT }
+    );
+    const duplicateSlots = await database.query(
+      `SELECT question_set_run_id AS run_id, run_slot_index, COUNT(*) AS slot_count
+       FROM ${quotedRecords}
+       WHERE question_set_run_id IS NOT NULL
+         AND run_slot_index IS NOT NULL
+       GROUP BY question_set_run_id, run_slot_index
+       HAVING COUNT(*) > 1`,
+      { type: QueryTypes.SELECT }
+    );
+    const danglingRecords = await database.query(
+      `SELECT records.id, records.question_set_run_id, records.created_at
+       FROM ${quotedRecords} AS records
+       LEFT JOIN ${quotedRuns} AS runs ON runs.id = records.question_set_run_id
+       WHERE records.question_set_run_id IS NOT NULL
+         AND runs.id IS NULL`,
+      { type: QueryTypes.SELECT }
+    );
+    const countByRunId = new Map(
+      recordCounts.map((row) => [Number(row.run_id), Number(row.record_count) || 0])
+    );
+    const duplicateCountByRunId = new Map();
+    duplicateSlots.forEach((row) => {
+      const runId = Number(row.run_id);
+      duplicateCountByRunId.set(
+        runId,
+        (duplicateCountByRunId.get(runId) || 0) + Math.max(0, Number(row.slot_count) - 1)
+      );
+    });
+    const newRunStarts = runs
+      .filter((run) => String(run.idempotency_key_hash || '').trim())
+      .map((run) => Number(run.id));
+    const firstNewRunId = newRunStarts.length ? Math.min(...newRunStarts) : null;
+
+    const details = runs.map((run) => {
+      const runId = Number(run.id);
+      const plannedRecordCount = Number(run.planned_record_count) || 0;
+      const actualRecordCount = countByRunId.get(runId) || 0;
+      const missingRecordCount = Math.max(0, plannedRecordCount - actualRecordCount);
+      const duplicateRecordCount = duplicateCountByRunId.get(runId) || 0;
+      const cachedRows = parseJsonArray(run.imported_rows);
+      const countMismatch = actualRecordCount !== plannedRecordCount || duplicateRecordCount > 0;
+      const persistedStatus = run.integrity_status || 'complete';
+      const integrityStatus = persistedStatus !== 'complete'
+        ? persistedStatus
+        : countMismatch
+          ? (run.completed_at && cachedRows.length > 0 ? 'snapshot_only' : 'missing_records')
+          : 'complete';
+      return {
+        runId,
+        projectId: Number(run.project_id),
+        plannedRecordCount,
+        actualRecordCount,
+        integrityStatus,
+        persistedIntegrityStatus: persistedStatus,
+        missingRecordCount,
+        missingRecordIds: [],
+        duplicateRecordCount,
+        duplicateRecordIds: [],
+        ownershipConflictIds: [],
+        assignments: [],
+        isNewRun: Boolean(String(run.idempotency_key_hash || '').trim())
+      };
+    });
+    const newRunDanglingRecords = firstNewRunId === null
+      ? []
+      : danglingRecords.filter((record) => Number(record.question_set_run_id) >= firstNewRunId);
+
+    return {
+      legacy_column_present: false,
+      ownership_columns_present: await this.hasOwnershipColumns(database),
+      native_run_count: details.length,
+      complete_run_count: details.filter((detail) => detail.integrityStatus === 'complete').length,
+      snapshot_only_run_count: details.filter((detail) => detail.integrityStatus === 'snapshot_only').length,
+      integrity_failed_run_count: details.filter((detail) => detail.integrityStatus === 'missing_records').length,
+      missing_record_reference_count: details.reduce(
+        (total, detail) => total + detail.missingRecordCount,
+        0
+      ),
+      duplicate_record_reference_count: details.reduce(
+        (total, detail) => total + detail.duplicateRecordCount,
+        0
+      ),
+      ownership_conflict_count: 0,
+      dangling_owned_record_count: danglingRecords.length,
+      new_run_dangling_reference_count: newRunDanglingRecords.length,
+      new_run_integrity_issue_count: details.filter(
+        (detail) => detail.isNewRun && detail.integrityStatus !== 'complete'
+      ).length,
+      migration_required: false,
+      details
+    };
+  }
+
   async audit(options = {}) {
     const Database = options.sequelize || sequelize;
     const legacyColumnPresent = await this.hasLegacyColumn(Database);
     if (!legacyColumnPresent) {
-      return {
-        legacy_column_present: false,
-        ownership_columns_present: await this.hasOwnershipColumns(Database),
-        native_run_count: 0,
-        complete_run_count: 0,
-        snapshot_only_run_count: 0,
-        integrity_failed_run_count: 0,
-        missing_record_reference_count: 0,
-        duplicate_record_reference_count: 0,
-        ownership_conflict_count: 0,
-        migration_required: false,
-        details: []
-      };
+      return this.auditCurrentOwnership(Database);
     }
 
     const allRuns = await this.loadLegacyRuns(Database);

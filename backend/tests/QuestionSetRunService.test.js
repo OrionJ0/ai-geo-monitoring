@@ -174,6 +174,14 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     missing_record_count: 0,
     error_code: null
   });
+  assert.deepEqual(report.capabilities, {
+    can_pause: false,
+    pause_disabled_reason: 'not_running',
+    can_resume: false,
+    resume_disabled_reason: 'not_paused',
+    can_retry: true,
+    retry_disabled_reason: null
+  });
   assert.equal(report.summary.total, 2);
   assert.equal(report.summary.completed, 1);
   assert.equal(report.summary.failed, 1);
@@ -325,6 +333,14 @@ test('标准 CSV 导出后可以重新导入为内容等价的只读历史报告
   const restored = await QuestionSetRunService.getReport({ projectId: project.id, runId: imported.id });
 
   assert.equal(restored.source, 'imported');
+  assert.deepEqual(restored.capabilities, {
+    can_pause: false,
+    pause_disabled_reason: 'imported_report_read_only',
+    can_resume: false,
+    resume_disabled_reason: 'imported_report_read_only',
+    can_retry: false,
+    retry_disabled_reason: 'imported_report_read_only'
+  });
   assert.equal(restored.question_set_name, original.question_set_name);
   assert.equal(restored.rows.length, original.rows.length);
   assert.equal(restored.rows[0].question, original.rows[0].question);
@@ -494,6 +510,35 @@ test('报告汇总能够识别已配置的竞品基线', () => {
   }]);
 
   assert.equal(summary.competitor_baseline_count, 1);
+});
+
+test('执行能力由服务端状态机统一给出暂停和继续条件', () => {
+  assert.deepEqual(QuestionSetRunService.deriveCapabilities({
+    source: 'native',
+    status: 'running',
+    summary: { pending: 2, failed: 0 },
+    integrityStatus: 'complete'
+  }), {
+    can_pause: true,
+    pause_disabled_reason: null,
+    can_resume: false,
+    resume_disabled_reason: 'not_paused',
+    can_retry: false,
+    retry_disabled_reason: 'run_not_terminal'
+  });
+  assert.deepEqual(QuestionSetRunService.deriveCapabilities({
+    source: 'native',
+    status: 'paused',
+    summary: { pending: 2, failed: 0 },
+    integrityStatus: 'complete'
+  }), {
+    can_pause: false,
+    pause_disabled_reason: 'not_running',
+    can_resume: true,
+    resume_disabled_reason: null,
+    can_retry: false,
+    retry_disabled_reason: 'run_not_terminal'
+  });
 });
 
 test('导入拒绝引用来源中的非网页协议', async () => {

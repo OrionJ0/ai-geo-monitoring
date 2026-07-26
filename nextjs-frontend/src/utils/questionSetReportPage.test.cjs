@@ -145,6 +145,14 @@ test('原生问题集报告可以确认后重试失败项', () => {
   assert.match(source, /已有完整原回答/);
   assert.match(source, /summary\.failed/);
   assert.match(source, /setRetrying/);
+  assert.match(source, /report\.capabilities\?\.can_retry/);
+  assert.match(source, /report\.capabilities\?\.can_pause/);
+  assert.match(source, /report\.capabilities\?\.can_resume/);
+  assert.match(source, /retry_disabled_reason/);
+  assert.doesNotMatch(
+    source,
+    /report\.source === 'native'[\s\S]{0,160}report\.status !== 'running'/
+  );
 });
 
 test('运行中的报告和逐模型结果使用旋转图标提示仍在处理', () => {

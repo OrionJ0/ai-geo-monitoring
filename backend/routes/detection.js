@@ -538,9 +538,18 @@ router.delete('/record/:id', authRequired, async (req, res) => {
     if (req.user.role !== 'admin' && rec.user_id !== req.user.id) {
       return res.status(403).json({ success: false, message: '无权删除' });
     }
-    await VisibilityMetric.destroy({ where: { question_record_id: id } });
-    await ResultDetail.destroy({ where: { question_record_id: id } });
-    await QuestionRecord.destroy({ where: { id } });
+    if (rec.question_set_run_id) {
+      return res.status(409).json({
+        success: false,
+        message: '该记录属于问题集历史报告，不能从检测历史中单独删除',
+        error: { code: 'RUN_EVIDENCE_PROTECTED' }
+      });
+    }
+    await sequelize.transaction(async (transaction) => {
+      await VisibilityMetric.destroy({ where: { question_record_id: id }, transaction });
+      await ResultDetail.destroy({ where: { question_record_id: id }, transaction });
+      await QuestionRecord.destroy({ where: { id }, transaction });
+    });
     res.json({ success: true, message: '记录已删除' });
   } catch (error) {
     console.error('删除记录失败:', error);
@@ -567,15 +576,43 @@ router.delete('/history/:userId', authRequired, async (req, res) => {
       whereClause.question = { [Op.like]: `%${q}%` };
     }
     // 找出匹配的记录ID
-    const rows = await QuestionRecord.findAll({ where: whereClause, attributes: ['id'] });
-    const ids = rows.map(r => r.id);
+    const rows = await QuestionRecord.findAll({
+      where: whereClause,
+      attributes: ['id', 'question_set_run_id']
+    });
+    const protectedCount = rows.filter((row) => Boolean(row.question_set_run_id)).length;
+    const ids = rows
+      .filter((row) => !row.question_set_run_id)
+      .map((row) => row.id);
     if (ids.length === 0) {
-      return res.json({ success: true, message: '无匹配记录', data: { deleted: 0 } });
+      return res.json({
+        success: true,
+        message: protectedCount > 0 ? '匹配记录均属于问题集历史报告，已保留' : '无匹配记录',
+        data: { deleted: 0, protected: protectedCount }
+      });
     }
-    await VisibilityMetric.destroy({ where: { question_record_id: { [Op.in]: ids } } });
-    await ResultDetail.destroy({ where: { question_record_id: { [Op.in]: ids } } });
-    const del = await QuestionRecord.destroy({ where: { id: { [Op.in]: ids } } });
-    res.json({ success: true, message: '批量删除完成', data: { deleted: del } });
+    let deleted = 0;
+    await sequelize.transaction(async (transaction) => {
+      await VisibilityMetric.destroy({
+        where: { question_record_id: { [Op.in]: ids } },
+        transaction
+      });
+      await ResultDetail.destroy({
+        where: { question_record_id: { [Op.in]: ids } },
+        transaction
+      });
+      deleted = await QuestionRecord.destroy({
+        where: { id: { [Op.in]: ids } },
+        transaction
+      });
+    });
+    res.json({
+      success: true,
+      message: protectedCount > 0
+        ? `批量删除完成，已保留 ${protectedCount} 条问题集历史证据`
+        : '批量删除完成',
+      data: { deleted, protected: protectedCount }
+    });
   } catch (error) {
     console.error('批量删除失败:', error);
     res.status(500).json({ success: false, message: '批量删除失败' });

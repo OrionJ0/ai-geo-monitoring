@@ -127,6 +127,11 @@ test('用户可以分页查看问题集运行历史并打开单次独立报告',
   assert.equal(listResponse.payload.data.length, 1);
   assert.equal(listResponse.payload.data[0].id, run.id);
   assert.equal(listResponse.payload.data[0].rows, undefined);
+  assert.equal(listResponse.payload.data[0].capabilities.can_retry, false);
+  assert.equal(
+    listResponse.payload.data[0].capabilities.retry_disabled_reason,
+    'imported_report_read_only'
+  );
   assert.equal(listResponse.payload.pagination.totalItems, 1);
 
   const detailResponse = await requestRoute('get', '/:projectId/question-set-runs/:runId', {
@@ -136,6 +141,14 @@ test('用户可以分页查看问题集运行历史并打开单次独立报告',
   assert.equal(detailResponse.statusCode, 200);
   assert.equal(detailResponse.payload.data.id, run.id);
   assert.equal(detailResponse.payload.data.source, 'imported');
+  assert.deepEqual(detailResponse.payload.data.capabilities, {
+    can_pause: false,
+    pause_disabled_reason: 'imported_report_read_only',
+    can_resume: false,
+    resume_disabled_reason: 'imported_report_read_only',
+    can_retry: false,
+    retry_disabled_reason: 'imported_report_read_only'
+  });
   assert.equal(detailResponse.payload.data.rows[0].answer, '广拓是一家周界报警厂商。');
 });
 

@@ -16,9 +16,10 @@ function publicAudit(audit) {
     runs: details.map((detail) => ({
       run_id: detail.runId,
       planned_record_count: detail.plannedRecordCount,
+      actual_record_count: detail.actualRecordCount ?? detail.assignments.length,
       integrity_status: detail.integrityStatus,
-      missing_record_count: detail.missingRecordIds.length,
-      duplicate_record_count: detail.duplicateRecordIds.length,
+      missing_record_count: detail.missingRecordCount ?? detail.missingRecordIds.length,
+      duplicate_record_count: detail.duplicateRecordCount ?? detail.duplicateRecordIds.length,
       ownership_conflict_count: detail.ownershipConflictIds.length
     }))
   };
