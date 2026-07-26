@@ -1,6 +1,7 @@
 const SCHEMA_VERSION = 'question_set_run_v1';
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_ROWS = 5000;
+const MAX_JSON_CELL_CHARS = 100000;
 
 const REQUIRED_HEADERS = [
   'schema_version',
@@ -44,14 +45,37 @@ const DIAGNOSTIC_HEADERS = [
   'retry_json',
   'analysis_diagnostics_json'
 ];
-const HEADERS = [...REQUIRED_HEADERS, ...ANALYSIS_HEADERS, ...DIAGNOSTIC_HEADERS];
+const REVERSIBILITY_HEADERS = [
+  'analysis_contract_version',
+  'legacy_citation_count',
+  'legacy_citation_sources_json',
+  'owned_citation_count',
+  'competitor_citation_count',
+  'competitor_baseline_json'
+];
+const HEADERS = [
+  ...REQUIRED_HEADERS,
+  ...ANALYSIS_HEADERS,
+  ...DIAGNOSTIC_HEADERS,
+  ...REVERSIBILITY_HEADERS
+];
 
 class CsvValidationError extends Error {
-  constructor(code, message) {
+  constructor(code, message, details = {}) {
     super(message);
     this.name = 'CsvValidationError';
     this.code = code;
+    this.row = Number.isInteger(details.row) ? details.row : null;
+    this.column = details.column || null;
   }
+}
+
+function fieldError(code, line, column, message) {
+  return new CsvValidationError(
+    code,
+    `第 ${line} 行 ${column} ${message}`,
+    { row: line, column }
+  );
 }
 
 function dateValue(value) {
@@ -128,7 +152,13 @@ function buildCsv(report) {
         && !Array.isArray(row.analysis_diagnostics)
         ? row.analysis_diagnostics
         : {}
-    )
+    ),
+    report.analysis_contract_version || '',
+    row.legacy_citation_count ?? '',
+    JSON.stringify(Array.isArray(row.legacy_citation_sources) ? row.legacy_citation_sources : []),
+    row.owned_citation_count ?? '',
+    row.competitor_citation_count ?? '',
+    JSON.stringify(Array.isArray(row.competitor_mentions) ? row.competitor_mentions : [])
   ]);
   return `\uFEFF${[HEADERS, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')}`;
 }
@@ -178,35 +208,85 @@ function parseBoolean(value, column, line) {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'true' || normalized === '1') return true;
   if (normalized === 'false' || normalized === '0' || normalized === '') return false;
-  throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 ${column} 不是有效布尔值`);
+  throw fieldError('INVALID_FIELD', line, column, '不是有效布尔值');
 }
 
-function parseNumber(value, column, line, { nullable = false } = {}) {
-  if (value === '' && nullable) return null;
-  const parsed = Number(value || 0);
+function parseFiniteNumber(value, column, line, { nullable = false } = {}) {
+  const text = String(value ?? '').trim();
+  if (!text && nullable) return null;
+  const parsed = Number(text || 0);
   if (!Number.isFinite(parsed)) {
-    throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 ${column} 不是有效数字`);
+    throw fieldError('INVALID_FIELD', line, column, '不是有效数字');
   }
   return parsed;
 }
 
+function parsePositiveInteger(value, column, line, { nullable = false } = {}) {
+  const parsed = parseFiniteNumber(value, column, line, { nullable });
+  if (parsed === null) return null;
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw fieldError('INVALID_POSITIVE_INTEGER', line, column, '必须是正整数');
+  }
+  return parsed;
+}
+
+function parseNonNegativeInteger(value, column, line, { nullable = false } = {}) {
+  const parsed = parseFiniteNumber(value, column, line, { nullable });
+  if (parsed === null) return null;
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw fieldError('INVALID_NON_NEGATIVE_INTEGER', line, column, '必须是非负整数');
+  }
+  return parsed;
+}
+
+function parsePercentage(value, column, line) {
+  const parsed = parseFiniteNumber(value, column, line, { nullable: true });
+  if (parsed === null) return null;
+  if (parsed < 0 || parsed > 100) {
+    throw fieldError('OUT_OF_RANGE', line, column, '必须在 0 到 100 之间');
+  }
+  return parsed;
+}
+
+function parsePositiveNumber(value, column, line, { nullable = false } = {}) {
+  const parsed = parseFiniteNumber(value, column, line, { nullable });
+  if (parsed === null) return null;
+  if (parsed <= 0) {
+    throw fieldError('OUT_OF_RANGE', line, column, '必须是正数');
+  }
+  return parsed;
+}
+
+function validateJsonCellLength(value, column, line) {
+  if (String(value || '').length > MAX_JSON_CELL_CHARS) {
+    throw fieldError(
+      'JSON_FIELD_TOO_LARGE',
+      line,
+      column,
+      `不能超过 ${MAX_JSON_CELL_CHARS} 个字符`
+    );
+  }
+}
+
 function parseJsonArray(value, column, line) {
+  validateJsonCellLength(value, column, line);
   try {
     const parsed = JSON.parse(value || '[]');
     if (!Array.isArray(parsed)) throw new Error('not-array');
     return parsed;
   } catch {
-    throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 ${column} 不是有效 JSON 数组`);
+    throw fieldError('INVALID_FIELD', line, column, '不是有效 JSON 数组');
   }
 }
 
 function parseJsonObject(value, column, line) {
+  validateJsonCellLength(value, column, line);
   try {
     const parsed = JSON.parse(value || '{}');
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not-object');
     return parsed;
   } catch {
-    throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 ${column} 不是有效 JSON 对象`);
+    throw fieldError('INVALID_FIELD', line, column, '不是有效 JSON 对象');
   }
 }
 
@@ -215,18 +295,30 @@ function parseOptionalJsonObject(value, column, line) {
   return Object.keys(parsed).length ? parsed : null;
 }
 
-function parseCitationSources(value, line) {
-  const sources = parseJsonArray(value, 'citation_sources_json', line);
+function parseObjectArray(value, column, line) {
+  const rows = parseJsonArray(value, column, line);
+  rows.forEach((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw fieldError('INVALID_FIELD', line, column, '必须只包含 JSON 对象');
+    }
+  });
+  return rows;
+}
+
+function parseCitationSources(value, column, line) {
+  const sources = parseObjectArray(value, column, line);
   sources.forEach((source) => {
-    if (!source || typeof source !== 'object' || Array.isArray(source)) {
-      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 citation_sources_json 包含无效来源`);
+    for (const field of ['url', 'domain', 'title', 'source_origin', 'source_role']) {
+      if (source[field] !== undefined && typeof source[field] !== 'string') {
+        throw fieldError('INVALID_FIELD', line, column, `中的 ${field} 必须是字符串`);
+      }
     }
     if (!source.url) return;
     try {
       const parsed = new URL(String(source.url));
       if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported-protocol');
     } catch {
-      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 citation_sources_json 包含非网页链接`);
+      throw fieldError('INVALID_FIELD', line, column, '包含非网页链接');
     }
   });
   return sources;
@@ -236,7 +328,7 @@ function parseDate(value, column, line, { nullable = true } = {}) {
   if (!value && nullable) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 ${column} 不是有效时间`);
+    throw fieldError('INVALID_FIELD', line, column, '不是有效时间');
   }
   return date;
 }
@@ -257,55 +349,100 @@ function parseCsv(csv) {
   }
   const columnIndex = new Map(headers.map((header, index) => [header, index]));
   const valueAt = (row, column) => unprotectFormula(row[columnIndex.get(column)] ?? '');
-  const allowedStatuses = new Set(['pending', 'completed', 'failed']);
+  const allowedStatuses = new Set(['completed', 'failed']);
   let questionSetName = '';
-  let sourceRunId = '';
+  let sourceRunId = null;
   let startedAt = null;
   let completedAt = null;
+  let analysisContractVersion = null;
 
   const rows = table.slice(1).map((row, index) => {
     const line = index + 2;
     if (valueAt(row, 'schema_version') !== SCHEMA_VERSION) {
-      throw new CsvValidationError('UNSUPPORTED_VERSION', `第 ${line} 行 schema_version 不受支持`);
+      throw fieldError('UNSUPPORTED_VERSION', line, 'schema_version', '不受支持');
     }
     const currentName = valueAt(row, 'question_set_name').trim();
-    if (!currentName) throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行缺少问题集名称`);
+    if (!currentName) throw fieldError('INVALID_FIELD', line, 'question_set_name', '不能为空');
     if (questionSetName && questionSetName !== currentName) {
-      throw new CsvValidationError('MIXED_REPORTS', '一个 CSV 只能包含同一次问题集报告的数据');
+      throw fieldError('MIXED_REPORTS', line, 'question_set_name', '与前序行不一致');
     }
     if (currentName.length > 120) {
-      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行问题集名称不能超过 120 个字符`);
+      throw fieldError('INVALID_FIELD', line, 'question_set_name', '不能超过 120 个字符');
     }
     questionSetName = currentName;
-    const currentSourceRunId = valueAt(row, 'source_run_id').trim();
-    if (!currentSourceRunId) {
-      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行缺少 source_run_id`);
-    }
-    if (sourceRunId && sourceRunId !== currentSourceRunId) {
-      throw new CsvValidationError('MIXED_REPORTS', '一个 CSV 只能包含同一次问题集报告的数据');
+    const currentSourceRunId = parsePositiveInteger(
+      valueAt(row, 'source_run_id'),
+      'source_run_id',
+      line
+    );
+    if (sourceRunId !== null && sourceRunId !== currentSourceRunId) {
+      throw fieldError('MIXED_REPORTS', line, 'source_run_id', '与前序行不一致');
     }
     sourceRunId = currentSourceRunId;
     const currentStartedAt = parseDate(valueAt(row, 'run_started_at'), 'run_started_at', line, { nullable: false });
     const currentCompletedAt = parseDate(valueAt(row, 'run_completed_at'), 'run_completed_at', line);
+    if (currentCompletedAt && currentCompletedAt < currentStartedAt) {
+      throw fieldError(
+        'INVALID_DATE_ORDER',
+        line,
+        'run_completed_at',
+        '不能早于 run_started_at'
+      );
+    }
     if (startedAt && startedAt.getTime() !== currentStartedAt.getTime()) {
-      throw new CsvValidationError('MIXED_REPORTS', '一个 CSV 只能包含同一次问题集报告的数据');
+      throw fieldError('MIXED_REPORTS', line, 'run_started_at', '与前序行不一致');
     }
     if (
       index > 0
       && ((completedAt === null) !== (currentCompletedAt === null)
         || (completedAt && completedAt.getTime() !== currentCompletedAt.getTime()))
     ) {
-      throw new CsvValidationError('MIXED_REPORTS', '一个 CSV 只能包含同一次问题集报告的数据');
+      throw fieldError('MIXED_REPORTS', line, 'run_completed_at', '与前序行不一致');
     }
     startedAt = currentStartedAt;
     completedAt = currentCompletedAt;
     const status = valueAt(row, 'status').trim();
     if (!allowedStatuses.has(status)) {
-      throw new CsvValidationError('INVALID_FIELD', `第 ${line} 行 status 不受支持`);
+      throw fieldError(
+        status === 'pending' ? 'NON_TERMINAL_STATUS' : 'INVALID_FIELD',
+        line,
+        'status',
+        '只允许 completed 或 failed'
+      );
     }
+    const currentAnalysisContractVersion = valueAt(row, 'analysis_contract_version').trim() || null;
+    if (currentAnalysisContractVersion && currentAnalysisContractVersion.length > 40) {
+      throw fieldError('INVALID_FIELD', line, 'analysis_contract_version', '不能超过 40 个字符');
+    }
+    if (
+      index > 0
+      && analysisContractVersion !== currentAnalysisContractVersion
+    ) {
+      throw fieldError('MIXED_REPORTS', line, 'analysis_contract_version', '与前序行不一致');
+    }
+    analysisContractVersion = currentAnalysisContractVersion;
+    const recordCreatedAt = parseDate(valueAt(row, 'record_created_at'), 'record_created_at', line);
+    const recordUpdatedAt = parseDate(valueAt(row, 'record_updated_at'), 'record_updated_at', line);
+    if (recordCreatedAt && recordUpdatedAt && recordUpdatedAt < recordCreatedAt) {
+      throw fieldError(
+        'INVALID_DATE_ORDER',
+        line,
+        'record_updated_at',
+        '不能早于 record_created_at'
+      );
+    }
+    const competitorMentions = parseObjectArray(
+      valueAt(row, 'competitor_mentions_json'),
+      'competitor_mentions_json',
+      line
+    );
+    const competitorBaselineCell = valueAt(row, 'competitor_baseline_json');
+    const competitorBaseline = competitorBaselineCell.trim()
+      ? parseObjectArray(competitorBaselineCell, 'competitor_baseline_json', line)
+      : competitorMentions;
     return {
-      record_id: parseNumber(valueAt(row, 'record_id'), 'record_id', line, { nullable: true }),
-      question_id: parseNumber(valueAt(row, 'question_id'), 'question_id', line, { nullable: true }),
+      record_id: parsePositiveInteger(valueAt(row, 'record_id'), 'record_id', line, { nullable: true }),
+      question_id: parsePositiveInteger(valueAt(row, 'question_id'), 'question_id', line, { nullable: true }),
       question: valueAt(row, 'question'),
       question_category: valueAt(row, 'question_category'),
       platform: valueAt(row, 'platform'),
@@ -316,17 +453,44 @@ function parseCsv(csv) {
       answer: valueAt(row, 'answer'),
       has_metrics: parseBoolean(valueAt(row, 'has_metrics'), 'has_metrics', line),
       brand_mentioned: parseBoolean(valueAt(row, 'brand_mentioned'), 'brand_mentioned', line),
-      brand_mentions: parseNumber(valueAt(row, 'brand_mentions'), 'brand_mentions', line),
-      brand_rank: parseNumber(valueAt(row, 'brand_rank'), 'brand_rank', line, { nullable: true }),
+      brand_mentions: parseNonNegativeInteger(valueAt(row, 'brand_mentions'), 'brand_mentions', line),
+      brand_rank: parsePositiveNumber(valueAt(row, 'brand_rank'), 'brand_rank', line, { nullable: true }),
       brand_recommended: parseBoolean(valueAt(row, 'brand_recommended'), 'brand_recommended', line),
-      share_of_voice: parseNumber(valueAt(row, 'share_of_voice'), 'share_of_voice', line),
-      citation_count: parseNumber(valueAt(row, 'citation_count'), 'citation_count', line),
+      share_of_voice: parsePercentage(valueAt(row, 'share_of_voice'), 'share_of_voice', line),
+      citation_count: parseNonNegativeInteger(valueAt(row, 'citation_count'), 'citation_count', line),
+      owned_citation_count: parseNonNegativeInteger(
+        valueAt(row, 'owned_citation_count'),
+        'owned_citation_count',
+        line,
+        { nullable: true }
+      ),
+      competitor_citation_count: parseNonNegativeInteger(
+        valueAt(row, 'competitor_citation_count'),
+        'competitor_citation_count',
+        line,
+        { nullable: true }
+      ),
+      legacy_citation_count: parseNonNegativeInteger(
+        valueAt(row, 'legacy_citation_count'),
+        'legacy_citation_count',
+        line,
+        { nullable: true }
+      ),
       sentiment: valueAt(row, 'sentiment'),
       sentiment_reason: valueAt(row, 'sentiment_reason'),
-      competitor_mentions: parseJsonArray(valueAt(row, 'competitor_mentions_json'), 'competitor_mentions_json', line),
-      citation_sources: parseCitationSources(valueAt(row, 'citation_sources_json'), line),
-      created_at: parseDate(valueAt(row, 'record_created_at'), 'record_created_at', line),
-      updated_at: parseDate(valueAt(row, 'record_updated_at'), 'record_updated_at', line),
+      competitor_mentions: competitorBaseline,
+      citation_sources: parseCitationSources(
+        valueAt(row, 'citation_sources_json'),
+        'citation_sources_json',
+        line
+      ),
+      legacy_citation_sources: parseCitationSources(
+        valueAt(row, 'legacy_citation_sources_json'),
+        'legacy_citation_sources_json',
+        line
+      ),
+      created_at: recordCreatedAt,
+      updated_at: recordUpdatedAt,
       analysis_method: valueAt(row, 'analysis_method').trim() || 'legacy_rules_v1',
       analysis_platform: valueAt(row, 'analysis_platform').trim(),
       analysis_model: valueAt(row, 'analysis_model').trim(),
@@ -346,15 +510,24 @@ function parseCsv(csv) {
     };
   });
 
-  return { schemaVersion: SCHEMA_VERSION, questionSetName, startedAt, completedAt, rows };
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    questionSetName,
+    analysisContractVersion,
+    startedAt,
+    completedAt,
+    rows
+  };
 }
 
 module.exports = {
   SCHEMA_VERSION,
   HEADERS,
   REQUIRED_HEADERS,
+  REVERSIBILITY_HEADERS,
   MAX_CSV_BYTES,
   MAX_CSV_ROWS,
+  MAX_JSON_CELL_CHARS,
   CsvValidationError,
   buildCsv,
   parseCsv

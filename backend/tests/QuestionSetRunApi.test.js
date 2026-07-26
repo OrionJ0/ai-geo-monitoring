@@ -211,6 +211,23 @@ test('用户可以从报告接口导出标准 CSV 并安全回导', async () => 
   assert.equal(invalidResponse.statusCode, 422);
   assert.equal(invalidResponse.payload.error.code, 'MISSING_COLUMNS');
   assert.equal(await QuestionSetRun.count({ where: { project_id: project.id } }), beforeInvalidImport);
+
+  const pendingCsv = exportResponse.payload.replace(',completed,,', ',pending,,');
+  const pendingResponse = await requestRoute('post', '/:projectId/question-set-runs/import', {
+    params: { projectId: project.id },
+    body: pendingCsv
+  });
+  assert.equal(pendingResponse.statusCode, 422);
+  assert.deepEqual({
+    code: pendingResponse.payload.error.code,
+    row: pendingResponse.payload.error.row,
+    column: pendingResponse.payload.error.column
+  }, {
+    code: 'NON_TERMINAL_STATUS',
+    row: 2,
+    column: 'status'
+  });
+  assert.equal(await QuestionSetRun.count({ where: { project_id: project.id } }), beforeInvalidImport);
 });
 
 test('用户可以在原报告中重试失败项且重复提交不会创建第二批任务', async () => {

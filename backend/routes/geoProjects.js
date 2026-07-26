@@ -876,7 +876,12 @@ router.post(
         return res.status(422).json({
           success: false,
           message: error.message,
-          error: { code: error.code, message: error.message }
+          error: {
+            code: error.code,
+            message: error.message,
+            row: error.row,
+            column: error.column
+          }
         });
       }
       return res.status(500).json({ success: false, message: '导入问题集运行报告失败' });

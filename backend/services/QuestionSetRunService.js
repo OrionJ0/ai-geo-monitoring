@@ -592,6 +592,7 @@ class QuestionSetRunService {
       question_set_name: parsed.questionSetName,
       source: 'imported',
       schema_version: parsed.schemaVersion,
+      analysis_contract_version: parsed.analysisContractVersion,
       planned_record_count: 0,
       integrity_status: 'complete',
       integrity_missing_record_count: 0,
