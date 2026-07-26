@@ -933,6 +933,7 @@ test('queues runnable platforms and reports unavailable platforms as skipped', a
     assert.deepEqual(result.data.skipped_platforms, [{
       platform: 'doubao',
       name: '豆包',
+      reason_code: 'PLATFORM_UNAVAILABLE',
       reason: 'missing_api_key',
       message: '豆包未配置 API Key'
     }]);

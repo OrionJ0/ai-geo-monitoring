@@ -124,6 +124,7 @@ export default function GeoPromptsPage() {
   const historyRequestRef = useRef(0);
   const runRequestRef = useRef(0);
   const questionSetRunRequestRef = useRef(0);
+  const questionSetRunIdempotencyRef = useRef(new Map());
   const batchText = Form.useWatch('questions_text', batchForm);
 
   const selectedProject = useMemo(
@@ -655,13 +656,30 @@ export default function GeoPromptsPage() {
     const runProjectId = selectedProjectId;
     const requestId = questionSetRunRequestRef.current + 1;
     questionSetRunRequestRef.current = requestId;
+    const idempotencyScope = `${runProjectId}:${questionSet.id}`;
+    let idempotencyKey = questionSetRunIdempotencyRef.current.get(idempotencyScope);
+    if (!idempotencyKey) {
+      idempotencyKey = window.crypto.randomUUID();
+      questionSetRunIdempotencyRef.current.set(idempotencyScope, idempotencyKey);
+    }
     try {
       setRunningQuestionSetId(questionSet.id);
-      const res = await axios.post(`/api/geo-projects/${runProjectId}/question-sets/${questionSet.id}/run`);
+      const res = await axios.post(
+        `/api/geo-projects/${runProjectId}/question-sets/${questionSet.id}/run`,
+        { idempotency_key: idempotencyKey },
+        { headers: { 'Idempotency-Key': idempotencyKey } }
+      );
       const data = res?.data?.data || {};
+      if (questionSetRunIdempotencyRef.current.get(idempotencyScope) === idempotencyKey) {
+        questionSetRunIdempotencyRef.current.delete(idempotencyScope);
+      }
       if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
-        const notice = getRunResultNotice(data);
-        message[notice.type](notice.text);
+        if (data.idempotent_replay) {
+          message.info('已恢复同一次运行，正在读取最新报告');
+        } else {
+          const notice = getRunResultNotice(data);
+          message[notice.type](notice.text);
+        }
         const reportUrl = data.report_url || (data.question_set_run_id
           ? `/geo/question-set-reports?project_id=${runProjectId}&run_id=${data.question_set_run_id}`
           : null);
@@ -669,6 +687,13 @@ export default function GeoPromptsPage() {
       }
     } catch (error) {
       const data = getApiRunResultData(error);
+      const errorCode = error?.response?.data?.data?.error_code;
+      if (
+        ['IDEMPOTENCY_KEY_REUSED', 'INVALID_IDEMPOTENCY_KEY'].includes(errorCode)
+        && questionSetRunIdempotencyRef.current.get(idempotencyScope) === idempotencyKey
+      ) {
+        questionSetRunIdempotencyRef.current.delete(idempotencyScope);
+      }
       if (data && questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
         const notice = getRunResultNotice(data);
         message[notice.type](notice.text);

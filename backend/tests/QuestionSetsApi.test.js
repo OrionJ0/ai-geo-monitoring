@@ -24,10 +24,27 @@ let project;
 let user;
 const originalGetAvailablePlatforms = AIPlatformService.getAvailablePlatforms;
 
-async function requestRoute(method, routePath, { params = {}, body = {}, query = {} } = {}) {
+async function requestRoute(method, routePath, {
+  params = {},
+  body = {},
+  query = {},
+  headers = {}
+} = {}) {
   const layer = router.stack.find((item) => item.route?.path === routePath && item.route.methods?.[method]);
   assert.ok(layer, `route ${method.toUpperCase()} ${routePath} should exist`);
-  const req = { params, body, query, user: { id: user.id, role: 'user' } };
+  const normalizedHeaders = Object.fromEntries(
+    Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])
+  );
+  const req = {
+    params,
+    body,
+    query,
+    headers: normalizedHeaders,
+    get(name) {
+      return normalizedHeaders[String(name).toLowerCase()];
+    },
+    user: { id: user.id, role: 'user' }
+  };
   const response = {
     statusCode: 200,
     payload: null,
@@ -190,17 +207,30 @@ test('问题集内每个启用问题使用项目全部模型入队，单问题�
     }
   });
   const questionSetId = createResponse.payload.data.id;
+  const originalStartQuestionSetRun = ProjectRunService.startQuestionSetRun;
   const originalEnqueue = ProjectRunService.enqueueProjectRun;
   const originalRun = ProjectRunService.runProject;
   const calls = [];
-  ProjectRunService.enqueueProjectRun = async (options) => {
+  let legacyEnqueueCalls = 0;
+  ProjectRunService.startQuestionSetRun = async (options) => {
     calls.push({ type: 'set', options });
     return {
       ok: true,
       status: 202,
       message: '问题集分析已加入队列',
-      data: { status: 'queued', total: options.prompts.length, record_ids: [101] }
+      data: {
+        status: 'queued',
+        total: options.prompts.length,
+        accepted_count: options.prompts.length,
+        question_set_run_id: 101,
+        report_url: `/geo/question-set-reports?project_id=${project.id}&run_id=101`,
+        idempotent_replay: false
+      }
     };
+  };
+  ProjectRunService.enqueueProjectRun = async () => {
+    legacyEnqueueCalls += 1;
+    throw new Error('legacy question-set enqueue path should not run');
   };
   ProjectRunService.runProject = async (options) => {
     calls.push({ type: 'single', options });
@@ -213,8 +243,12 @@ test('问题集内每个启用问题使用项目全部模型入队，单问题�
   };
 
   try {
+    const runsBefore = await QuestionSetRun.count({
+      where: { question_set_id: questionSetId }
+    });
     const setRunResponse = await requestRoute('post', '/:projectId/question-sets/:questionSetId/run', {
-      params: { projectId: project.id, questionSetId }
+      params: { projectId: project.id, questionSetId },
+      headers: { 'Idempotency-Key': 'question-set-run-key-001' }
     });
     assert.equal(setRunResponse.statusCode, 202);
     assert.equal(setRunResponse.payload.success, true);
@@ -222,9 +256,14 @@ test('问题集内每个启用问题使用项目全部模型入队，单问题�
     assert.deepEqual(calls[0].options.prompts.map((item) => item.id), [questions[0].id]);
     assert.deepEqual(calls[0].options.prompts[0].platforms, ['doubao', 'deepseek']);
     assert.equal(calls[0].options.promptSelectionExplicit, true);
+    assert.equal(calls[0].options.idempotencyKey, 'question-set-run-key-001');
     assert.ok(Number(setRunResponse.payload.data.question_set_run_id) > 0);
     assert.match(setRunResponse.payload.data.report_url, /\/geo\/question-set-reports\?/);
-    assert.equal(await QuestionSetRun.count({ where: { question_set_id: questionSetId } }), 1);
+    assert.equal(legacyEnqueueCalls, 0);
+    assert.equal(
+      await QuestionSetRun.count({ where: { question_set_id: questionSetId } }),
+      runsBefore
+    );
 
     const singleRunResponse = await requestRoute('post', '/:projectId/prompts/:promptId/run', {
       params: { projectId: project.id, promptId: questions[0].id }
@@ -235,8 +274,53 @@ test('问题集内每个启用问题使用项目全部模型入队，单问题�
     assert.deepEqual(calls[1].options.prompts.map((item) => item.id), [questions[0].id]);
     assert.deepEqual(calls[1].options.prompts[0].platforms, ['doubao']);
   } finally {
+    ProjectRunService.startQuestionSetRun = originalStartQuestionSetRun;
     ProjectRunService.enqueueProjectRun = originalEnqueue;
     ProjectRunService.runProject = originalRun;
+  }
+});
+
+test('问题集运行拒绝缺失或头部与 body 冲突的幂等键', async () => {
+  const group = await PromptGroup.create({
+    project_id: project.id,
+    user_id: user.id,
+    name: '幂等键边界问题集'
+  });
+  const prompt = await TrackedPrompt.create({
+    project_id: project.id,
+    user_id: user.id,
+    prompt_group_id: group.id,
+    question: '幂等键边界问题',
+    tags: [],
+    platforms: ['doubao'],
+    enabled: true
+  });
+  const originalStartQuestionSetRun = ProjectRunService.startQuestionSetRun;
+  let startCalls = 0;
+  ProjectRunService.startQuestionSetRun = async () => {
+    startCalls += 1;
+    return { ok: true, status: 202, data: {} };
+  };
+
+  try {
+    const missing = await requestRoute('post', '/:projectId/question-sets/:questionSetId/run', {
+      params: { projectId: project.id, questionSetId: group.id }
+    });
+    assert.equal(missing.statusCode, 400);
+    assert.equal(missing.payload.data.error_code, 'INVALID_IDEMPOTENCY_KEY');
+
+    const conflict = await requestRoute('post', '/:projectId/question-sets/:questionSetId/run', {
+      params: { projectId: project.id, questionSetId: group.id },
+      headers: { 'Idempotency-Key': 'header-key-0001' },
+      body: { idempotency_key: 'body-key-000002' }
+    });
+    assert.equal(conflict.statusCode, 400);
+    assert.equal(conflict.payload.data.error_code, 'INVALID_IDEMPOTENCY_KEY');
+    assert.equal(startCalls, 0);
+  } finally {
+    ProjectRunService.startQuestionSetRun = originalStartQuestionSetRun;
+    await prompt.destroy();
+    await group.destroy();
   }
 });
 

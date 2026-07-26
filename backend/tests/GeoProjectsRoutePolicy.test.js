@@ -153,6 +153,16 @@ test('project batch runs use the queued project runner', () => {
   assert.match(block, /res\.status\(result\.status\s*\|\|\s*200\)\.json/);
 });
 
+test('question-set runs use only the atomic idempotent start entry', () => {
+  const block = routeBlock('post', '/:projectId/question-sets/:questionSetId/run');
+
+  assert.match(block, /ProjectRunService\.startQuestionSetRun/);
+  assert.match(block, /Idempotency-Key/);
+  assert.doesNotMatch(block, /QuestionSetRunService\.createNativeRun/);
+  assert.doesNotMatch(block, /ProjectRunService\.enqueueProjectRun/);
+  assert.doesNotMatch(block, /questionSetRun\.destroy/);
+});
+
 test('source analytics route loads prompt text and tags for category normalization', () => {
   const block = routeBlock('get', '/:projectId/sources');
 

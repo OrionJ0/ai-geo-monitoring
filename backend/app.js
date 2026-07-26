@@ -319,6 +319,39 @@ async function ensureGeoMonitoringColumns() {
     type: DataTypes.STRING(80),
     allowNull: true
   });
+  await ensureColumn('question_set_runs', 'idempotency_key_hash', {
+    type: DataTypes.STRING(64),
+    allowNull: true
+  });
+  await ensureColumn('question_set_runs', 'request_fingerprint', {
+    type: DataTypes.STRING(64),
+    allowNull: true
+  });
+  await ensureColumn('question_set_runs', 'planned_platforms', {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: []
+  });
+  await ensureColumn('question_set_runs', 'skipped_platforms', {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: []
+  });
+  await ensureColumn('question_set_runs', 'competitor_snapshot', {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: []
+  });
+  await ensureColumn('question_set_runs', 'analysis_contract_version', {
+    type: DataTypes.STRING(40),
+    allowNull: true
+  });
+  await ensureIndex(
+    'question_set_runs',
+    'question_set_runs_idempotency_unique',
+    ['user_id', 'project_id', 'idempotency_key_hash'],
+    { unique: true }
+  );
   await ensureIndex(
     'question_records',
     'question_records_run_slot_unique',

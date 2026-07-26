@@ -27,6 +27,19 @@ let project;
 let questionSet;
 let prompt;
 
+async function createNativeRun(plannedRecordCount) {
+  return QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: questionSet.id,
+    question_set_name: questionSet.name,
+    source: 'native',
+    schema_version: 'question_set_run_v1',
+    planned_record_count: plannedRecordCount,
+    started_at: new Date()
+  });
+}
+
 test.before(async () => {
   await sequelize.sync({ force: true });
   user = await User.create({
@@ -149,12 +162,7 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     }
   });
 
-  const run = await QuestionSetRunService.createNativeRun({
-    project,
-    questionSet,
-    user,
-    runData: { plannedRecordCount: 2 }
-  });
+  const run = await createNativeRun(2);
   await completed.update({ question_set_run_id: run.id, run_slot_index: 0 });
   await failed.update({ question_set_run_id: run.id, run_slot_index: 1 });
   const report = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
@@ -240,12 +248,7 @@ test('历史混合引用不进入问题集核心 KPI，但保留可解释的旧�
       citations: { semantics_version: 'explicit-citation-v1' }
     }
   });
-  const run = await QuestionSetRunService.createNativeRun({
-    project,
-    questionSet,
-    user,
-    runData: { plannedRecordCount: 1 }
-  });
+  const run = await createNativeRun(1);
   await record.update({ question_set_run_id: run.id, run_slot_index: 0 });
 
   const report = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
@@ -275,12 +278,7 @@ test('旧执行器生成的终态快照不能覆盖已进入新一轮重试的�
     brand_keywords: project.name,
     status: 'completed'
   });
-  const run = await QuestionSetRunService.createNativeRun({
-    project,
-    questionSet,
-    user,
-    runData: { plannedRecordCount: 1 }
-  });
+  const run = await createNativeRun(1);
   await record.update({ question_set_run_id: run.id, run_slot_index: 0 });
   const originalGetNativeRows = QuestionSetRunService.getNativeRows;
   QuestionSetRunService.getNativeRows = async (...args) => {

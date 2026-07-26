@@ -326,6 +326,7 @@ class SchedulerService {
     if (this._started) return;
     try {
       await this.refresh();
+      await this.dispatchPendingQuestionSetRuns();
       await this.recoverStalePendingRecords({
         includeUnclaimed: true,
         maxAgeMs: 1
@@ -396,6 +397,10 @@ class SchedulerService {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     this._started = false;
+  }
+
+  async dispatchPendingQuestionSetRuns() {
+    return ProjectRunService.dispatchPendingQuestionSetRuns();
   }
 
   async refresh(scheduleId) {
@@ -596,6 +601,7 @@ class SchedulerService {
 
   async _runTick() {
     const now = new Date();
+    await this.dispatchPendingQuestionSetRuns();
     await this.recoverStalePendingRecords({ now });
     await this.recoverStaleScheduledExecutions({ now });
     const due = await DetectionSchedule.findAll({
@@ -737,12 +743,14 @@ class SchedulerService {
     const staleTimeField = options.includeUnclaimed === true
       ? 'created_at'
       : 'execution_started_at';
-    const staleRecords = await RecordRepository.findAll({
-      where: {
-        status: 'pending',
-        [staleTimeField]: { [Op.lt]: cutoff }
-      }
-    });
+    const where = {
+      status: 'pending',
+      [staleTimeField]: { [Op.lt]: cutoff }
+    };
+    if (options.includeUnclaimed === true) {
+      where.question_set_run_id = null;
+    }
+    const staleRecords = await RecordRepository.findAll({ where });
     await Promise.all(staleRecords.map((record) => record.update({
       status: 'failed',
       error_message: '分析任务中断，请重新运行',

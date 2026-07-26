@@ -104,6 +104,24 @@ test('question-set records persist explicit run ownership and one current row pe
   )));
 });
 
+test('question-set runs persist idempotent launch plans with one key per user and project', async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const questionSetRun = await queryInterface.describeTable('question_set_runs');
+  const indexes = await queryInterface.showIndex('question_set_runs');
+
+  assert.ok(questionSetRun.idempotency_key_hash);
+  assert.ok(questionSetRun.request_fingerprint);
+  assert.ok(questionSetRun.planned_platforms);
+  assert.ok(questionSetRun.skipped_platforms);
+  assert.ok(questionSetRun.competitor_snapshot);
+  assert.ok(questionSetRun.analysis_contract_version);
+  assert.ok(indexes.some((index) => (
+    index.unique
+    && index.fields.map((field) => field.attribute).join(',')
+      === 'user_id,project_id,idempotency_key_hash'
+  )));
+});
+
 test('postgres startup migration detects Sequelize user-defined enum descriptions', () => {
   const appSource = fs.readFileSync(path.resolve(__dirname, '../app.js'), 'utf8');
 

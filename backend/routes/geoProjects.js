@@ -739,6 +739,27 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
       where: { id: questionSetId, project_id: req.brandProject.id }
     });
     if (!group) return res.status(404).json({ success: false, message: '问题集不存在' });
+    const headerIdempotencyKey = String(
+      req.get?.('Idempotency-Key')
+      || req.headers?.['idempotency-key']
+      || ''
+    ).trim();
+    const bodyIdempotencyKey = String(req.body?.idempotency_key || '').trim();
+    if (
+      (!headerIdempotencyKey && !bodyIdempotencyKey)
+      || (
+        headerIdempotencyKey
+        && bodyIdempotencyKey
+        && headerIdempotencyKey !== bodyIdempotencyKey
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: '幂等键格式无效',
+        data: { error_code: 'INVALID_IDEMPOTENCY_KEY' }
+      });
+    }
+    const idempotencyKey = headerIdempotencyKey || bodyIdempotencyKey;
 
     const questions = await TrackedPrompt.findAll({
       where: {
@@ -757,15 +778,9 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
     }
     const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
 
-    // 先创建 QuestionSetRun 聚合，以便任务直接写入关系归属和稳定槽位。
-    const questionSetRun = await QuestionSetRunService.createNativeRun({
+    const result = await ProjectRunService.startQuestionSetRun({
       project: req.brandProject,
       questionSet: group,
-      user: req.user
-    });
-
-    const result = await ProjectRunService.enqueueProjectRun({
-      project: req.brandProject,
       prompts: questions.map((item) => ({
         ...item.toJSON(),
         platforms: projectPlatforms
@@ -773,24 +788,23 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
       platforms: projectPlatforms,
       user: req.user,
       promptSelectionExplicit: true,
-      questionSetRunId: questionSetRun.id
+      idempotencyKey
     });
     if (!result.ok) {
-      // 运行失败时清理空的 run 记录
-      await questionSetRun.destroy().catch(() => {});
       return res.status(result.status || 400).json({ success: false, message: result.message, data: result.data });
     }
     return res.status(result.status || 202).json({
       success: true,
       message: result.message,
-      data: {
-        ...result.data,
-        question_set_run_id: questionSetRun.id,
-        report_url: `/geo/question-set-reports?project_id=${req.brandProject.id}&run_id=${questionSetRun.id}`
-      }
+      data: result.data
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: '运行问题集失败' });
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({
+      success: false,
+      message: status < 500 ? error.message : '运行问题集失败',
+      ...(error?.data ? { data: error.data } : {})
+    });
   }
 });
 

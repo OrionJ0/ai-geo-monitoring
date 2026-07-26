@@ -214,28 +214,6 @@ function normalizeNativeRow(record) {
 }
 
 class QuestionSetRunService {
-  async createNativeRun({ project, questionSet, user, runData, repositories = {} }) {
-    const Run = repositories.QuestionSetRun || QuestionSetRun;
-    const projectRow = plain(project);
-    const questionSetRow = plain(questionSet);
-    const userRow = plain(user);
-    return Run.create({
-      project_id: projectRow.id,
-      user_id: userRow.id,
-      question_set_id: questionSetRow.id,
-      question_set_name: questionSetRow.name,
-      source: 'native',
-      schema_version: SCHEMA_VERSION,
-      planned_record_count: Number.isInteger(runData?.plannedRecordCount)
-        ? Math.max(0, runData.plannedRecordCount)
-        : 0,
-      integrity_status: 'complete',
-      integrity_missing_record_count: 0,
-      integrity_error_code: null,
-      started_at: new Date()
-    });
-  }
-
   async findRun({ projectId, runId, repositories = {} }) {
     const Run = repositories.QuestionSetRun || QuestionSetRun;
     return Run.findOne({ where: { id: runId, project_id: projectId } });
@@ -288,6 +266,9 @@ class QuestionSetRunService {
       question_set_name: run.question_set_name,
       source: run.source,
       schema_version: run.schema_version,
+      analysis_contract_version: run.analysis_contract_version || null,
+      planned_platforms: Array.isArray(run.planned_platforms) ? run.planned_platforms : [],
+      skipped_platforms: Array.isArray(run.skipped_platforms) ? run.skipped_platforms : [],
       status,
       started_at: run.started_at,
       completed_at: run.completed_at,

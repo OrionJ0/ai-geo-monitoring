@@ -9,6 +9,12 @@ const QuestionSetRun = sequelize.define('QuestionSetRun', {
   question_set_name: { type: DataTypes.STRING(120), allowNull: false },
   source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'native' },
   schema_version: { type: DataTypes.STRING(40), allowNull: false, defaultValue: 'question_set_run_v1' },
+  idempotency_key_hash: { type: DataTypes.STRING(64), allowNull: true },
+  request_fingerprint: { type: DataTypes.STRING(64), allowNull: true },
+  planned_platforms: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
+  skipped_platforms: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
+  competitor_snapshot: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
+  analysis_contract_version: { type: DataTypes.STRING(40), allowNull: true },
   planned_record_count: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   integrity_status: { type: DataTypes.STRING(32), allowNull: false, defaultValue: 'complete' },
   integrity_missing_record_count: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
@@ -26,7 +32,12 @@ const QuestionSetRun = sequelize.define('QuestionSetRun', {
   indexes: [
     { fields: ['project_id', 'created_at'] },
     { fields: ['user_id'] },
-    { fields: ['question_set_id'] }
+    { fields: ['question_set_id'] },
+    {
+      name: 'question_set_runs_idempotency_unique',
+      unique: true,
+      fields: ['user_id', 'project_id', 'idempotency_key_hash']
+    }
   ]
 });
 

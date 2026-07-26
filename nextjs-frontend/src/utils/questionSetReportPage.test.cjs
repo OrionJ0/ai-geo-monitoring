@@ -185,6 +185,12 @@ test('问题集报告成为问题库后的主入口，旧汇总入口下沉且�
   assert.ok(alertsIndex > secondaryIndex && noticeIndex > alertsIndex && profileIndex > noticeIndex, '其他分组内顺序应正确');
   assert.doesNotMatch(layout.slice(layout.indexOf('const menuItems'), layout.indexOf('// 未登录')), /\/geo\/reports/);
   assert.match(questionSetRunBlock, /data\.report_url/);
+  assert.match(prompts, /const questionSetRunIdempotencyRef = useRef\(new Map\(\)\)/);
+  assert.match(questionSetRunBlock, /questionSetRunIdempotencyRef\.current\.get\(idempotencyScope\)/);
+  assert.match(questionSetRunBlock, /window\.crypto\.randomUUID\(\)/);
+  assert.match(questionSetRunBlock, /idempotency_key:\s*idempotencyKey/);
+  assert.match(questionSetRunBlock, /'Idempotency-Key':\s*idempotencyKey/);
+  assert.match(questionSetRunBlock, /data\.idempotent_replay/);
   assert.doesNotMatch(questionSetRunBlock, /project-dashboard/);
   assert.doesNotMatch(dashboardCss, /\.coreMetricCard::after/);
 });

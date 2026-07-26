@@ -9,7 +9,8 @@ const {
   VisibilityMetric,
   QuestionSetRetryBatch
 } = require('../models');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
+const { Op, Transaction } = require('sequelize');
 const AIPlatformService = require('./AIPlatformService');
 const ResultParserService = require('./ResultParserService');
 const VisibilityAnalysisService = require('./VisibilityAnalysisService');
@@ -125,6 +126,37 @@ function normalizeIdempotencyKey(value) {
     throw runError('幂等键格式无效', 400, { error_code: 'invalid_idempotency_key' });
   }
   return text;
+}
+
+function normalizeRequiredIdempotencyKey(value) {
+  const text = String(value || '').trim();
+  if (!text || text.length < 8 || text.length > 128 || !/^[A-Za-z0-9._:-]+$/u.test(text)) {
+    throw runError('幂等键格式无效', 400, { error_code: 'INVALID_IDEMPOTENCY_KEY' });
+  }
+  return text;
+}
+
+function sha256(value) {
+  return createHash('sha256').update(String(value)).digest('hex');
+}
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => (
+      `${JSON.stringify(key)}:${stableSerialize(value[key])}`
+    )).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function isUniqueConstraintError(error) {
+  return error?.name === 'SequelizeUniqueConstraintError'
+    || error?.original?.code === '23505'
+    || (
+      error?.original?.code === 'SQLITE_CONSTRAINT'
+      && /unique/i.test(String(error?.original?.message || error?.message || ''))
+    );
 }
 
 function retryReplayResult(batch) {
@@ -512,7 +544,8 @@ class ProjectRunService {
     keywords,
     scheduledExecutionId = null,
     questionSetRunId = null,
-    transaction = null
+    transaction = null,
+    afterRecordCreated = null
   }) {
     const rows = [];
     for (const [runSlotIndex, target] of targets.entries()) {
@@ -527,6 +560,9 @@ class ProjectRunService {
         transaction
       });
       rows.push({ target, record });
+      if (typeof afterRecordCreated === 'function') {
+        await afterRecordCreated({ target, record, runSlotIndex });
+      }
     }
     return rows;
   }
@@ -684,14 +720,12 @@ class ProjectRunService {
     return consumeQuotaDirect(userId, 'detection', amount, options);
   }
 
-  async prepareProjectRun({
+  async planProjectRun({
     project,
     prompts,
     platforms,
     user,
-    promptSelectionExplicit = false,
-    scheduledExecutionId = null,
-    questionSetRunId = null
+    promptSelectionExplicit = false
   }) {
     const projectData = project.toJSON ? project.toJSON() : project;
     const runUser = this.resolveRunUser(projectData, user);
@@ -743,6 +777,7 @@ class ProjectRunService {
       .map((item) => ({
         platform: item.code,
         name: item.platform_name,
+        reason_code: 'PLATFORM_UNAVAILABLE',
         reason: item.reason,
         message: skippedPlatformMessage(item)
       }));
@@ -758,42 +793,346 @@ class ProjectRunService {
     }
 
     const runtimeSettings = await this.getRuntimeSettings();
-
-    const quota = await this.consumeRunQuota(runUser.id, targets.length);
-    if (!quota.ok) {
-      const reasonMap = {
-        not_allowed: '当前会员等级不允许使用该功能',
-        exceeded: '今日可用检测次数不足',
-        error: '配额检查失败'
-      };
-      return { ok: false, status: 403, message: reasonMap[quota.reason] || '配额不足' };
-    }
-
     const competitors = await BrandCompetitor.findAll({
       where: { project_id: projectData.id },
       order: [['id', 'ASC']]
     });
     const keywords = this.buildBrandKeywordList(projectData);
-    const entries = await this.createRunEntries({
-      targets,
-      runUser,
-      projectData,
-      keywords,
-      scheduledExecutionId,
-      questionSetRunId
-    });
 
     return {
       ok: true,
       projectData,
       runUser,
       targets,
+      plannedPlatforms: normalizePlatformCodes(targets.map((target) => target.platform)),
       skippedPlatforms,
       runtimeSettings,
       competitors,
-      keywords,
-      entries
+      keywords
     };
+  }
+
+  quotaFailureResult(quota) {
+    const reasonMap = {
+      not_allowed: '当前会员等级不允许使用该功能',
+      exceeded: '今日可用检测次数不足',
+      error: '配额检查失败'
+    };
+    return {
+      ok: false,
+      status: quota?.reason === 'error' ? 500 : 403,
+      message: reasonMap[quota?.reason] || '配额不足',
+      data: {
+        error_code: quota?.reason === 'error'
+          ? 'RUN_START_TRANSACTION_FAILED'
+          : 'RUN_QUOTA_UNAVAILABLE'
+      }
+    };
+  }
+
+  async prepareProjectRun(options) {
+    const plan = await this.planProjectRun(options);
+    if (!plan.ok) return plan;
+    const quota = await this.consumeRunQuota(plan.runUser.id, plan.targets.length);
+    if (!quota.ok) return this.quotaFailureResult(quota);
+    const entries = await this.createRunEntries({
+      targets: plan.targets,
+      runUser: plan.runUser,
+      projectData: plan.projectData,
+      keywords: plan.keywords,
+      scheduledExecutionId: options.scheduledExecutionId,
+      questionSetRunId: options.questionSetRunId
+    });
+    return { ...plan, quota, entries };
+  }
+
+  buildQuestionSetRunFingerprint({ project, questionSet, prompts, platforms, user }) {
+    const projectData = project?.toJSON ? project.toJSON() : project;
+    const questionSetData = questionSet?.toJSON ? questionSet.toJSON() : questionSet;
+    const runUser = this.resolveRunUser(projectData, user);
+    const request = {
+      user_id: Number(runUser?.id) || null,
+      project_id: Number(projectData?.id) || null,
+      question_set_id: Number(questionSetData?.id) || null,
+      prompts: (Array.isArray(prompts) ? prompts : []).map((prompt) => ({
+        id: Number(prompt?.id) || null,
+        question: String(prompt?.question || ''),
+        enabled: prompt?.enabled !== false
+      })),
+      platforms: normalizePlatformCodes(
+        Array.isArray(platforms) && platforms.length ? platforms : projectData?.platforms
+      )
+    };
+    return sha256(stableSerialize(request));
+  }
+
+  buildQuestionSetRunStartResult(run, { replay = false, dispatchDeferred = false } = {}) {
+    const row = run?.toJSON ? run.toJSON() : run;
+    const skippedPlatforms = Array.isArray(row?.skipped_platforms) ? row.skipped_platforms : [];
+    const plannedPlatforms = Array.isArray(row?.planned_platforms) ? row.planned_platforms : [];
+    return {
+      ok: true,
+      status: 202,
+      message: dispatchDeferred
+        ? '运行命令已保存，任务将在调度器恢复后执行'
+        : (replay ? '已返回原运行命令' : '问题集分析已加入队列'),
+      data: {
+        status: 'queued',
+        question_set_run_id: Number(row.id),
+        accepted_count: Number(row.planned_record_count) || 0,
+        total: Number(row.planned_record_count) || 0,
+        queued: Number(row.planned_record_count) || 0,
+        pending: Number(row.planned_record_count) || 0,
+        completed: 0,
+        failed: 0,
+        planned_platforms: plannedPlatforms,
+        skipped_platforms: skippedPlatforms,
+        idempotent_replay: replay,
+        dispatch_deferred: dispatchDeferred,
+        report_url: `/geo/question-set-reports?project_id=${row.project_id}&run_id=${row.id}`
+      }
+    };
+  }
+
+  async startQuestionSetRun(options) {
+    const idempotencyKey = normalizeRequiredIdempotencyKey(options.idempotencyKey);
+    const idempotencyKeyHash = sha256(idempotencyKey);
+    const requestFingerprint = this.buildQuestionSetRunFingerprint(options);
+    const projectData = options.project?.toJSON ? options.project.toJSON() : options.project;
+    const questionSetData = options.questionSet?.toJSON
+      ? options.questionSet.toJSON()
+      : options.questionSet;
+    const runUser = this.resolveRunUser(projectData, options.user);
+    const idempotencyWhere = {
+      user_id: runUser.id,
+      project_id: projectData.id,
+      idempotency_key_hash: idempotencyKeyHash
+    };
+    const existing = await QuestionSetRun.findOne({ where: idempotencyWhere });
+    if (existing) {
+      if (existing.request_fingerprint !== requestFingerprint) {
+        throw runError('幂等键已用于不同的运行请求', 409, {
+          error_code: 'IDEMPOTENCY_KEY_REUSED'
+        });
+      }
+      return this.buildQuestionSetRunStartResult(existing, { replay: true });
+    }
+
+    const plan = await this.planProjectRun(options);
+    if (!plan.ok) return plan;
+    const competitorSnapshot = plan.competitors.map((competitor) => {
+      const row = competitor?.toJSON ? competitor.toJSON() : competitor;
+      return {
+        id: Number(row.id) || null,
+        name: String(row.name || ''),
+        aliases: Array.isArray(row.aliases) ? row.aliases : [],
+        website: row.website || null
+      };
+    });
+    const transactionOptions = sequelize.getDialect() === 'sqlite'
+      ? { type: Transaction.TYPES.IMMEDIATE }
+      : {};
+
+    let committed;
+    try {
+      committed = await sequelize.transaction(transactionOptions, async (transaction) => {
+        const replay = await QuestionSetRun.findOne({
+          where: idempotencyWhere,
+          transaction,
+          lock: transaction.LOCK.UPDATE
+        });
+        if (replay) {
+          if (replay.request_fingerprint !== requestFingerprint) {
+            throw runError('幂等键已用于不同的运行请求', 409, {
+              error_code: 'IDEMPOTENCY_KEY_REUSED'
+            });
+          }
+          return { replay };
+        }
+
+        const run = await QuestionSetRun.create({
+          project_id: projectData.id,
+          user_id: runUser.id,
+          question_set_id: questionSetData.id,
+          question_set_name: questionSetData.name,
+          source: 'native',
+          schema_version: 'question_set_run_v1',
+          idempotency_key_hash: idempotencyKeyHash,
+          request_fingerprint: requestFingerprint,
+          planned_platforms: plan.plannedPlatforms,
+          skipped_platforms: plan.skippedPlatforms,
+          competitor_snapshot: competitorSnapshot,
+          analysis_contract_version: AIResponseAnalysisService.ANALYSIS_METHOD || 'ai_structured_v2',
+          planned_record_count: plan.targets.length,
+          integrity_status: 'complete',
+          integrity_missing_record_count: 0,
+          integrity_error_code: null,
+          started_at: new Date()
+        }, { transaction });
+
+        const quota = await this.consumeRunQuota(
+          runUser.id,
+          plan.targets.length,
+          { transaction }
+        );
+        if (!quota.ok) {
+          const failure = this.quotaFailureResult(quota);
+          throw runError(failure.message, failure.status, failure.data);
+        }
+        if (typeof options.faultInjector === 'function') {
+          await options.faultInjector('after_quota', { run, quota, transaction });
+        }
+        const entries = await this.createRunEntries({
+          targets: plan.targets,
+          runUser,
+          projectData,
+          keywords: plan.keywords,
+          questionSetRunId: run.id,
+          transaction,
+          afterRecordCreated: async (context) => {
+            if (typeof options.faultInjector === 'function') {
+              await options.faultInjector('after_record', {
+                ...context,
+                run,
+                transaction
+              });
+            }
+          }
+        });
+        if (typeof options.faultInjector === 'function') {
+          await options.faultInjector('before_commit', { run, entries, transaction });
+        }
+        return { run, entries };
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        const replay = await QuestionSetRun.findOne({ where: idempotencyWhere });
+        if (replay) {
+          if (replay.request_fingerprint !== requestFingerprint) {
+            throw runError('幂等键已用于不同的运行请求', 409, {
+              error_code: 'IDEMPOTENCY_KEY_REUSED'
+            });
+          }
+          return this.buildQuestionSetRunStartResult(replay, { replay: true });
+        }
+      }
+      throw error;
+    }
+
+    if (committed.replay) {
+      return this.buildQuestionSetRunStartResult(committed.replay, { replay: true });
+    }
+    const context = {
+      ...plan,
+      entries: committed.entries,
+      competitors: competitorSnapshot,
+      questionSetRunId: committed.run.id
+    };
+    let dispatchDeferred = false;
+    try {
+      this.schedulePreparedRun(context);
+    } catch (error) {
+      dispatchDeferred = true;
+      console.warn('问题集运行提交后调度失败，等待补发:', {
+        question_set_run_id: committed.run.id,
+        error_code: 'question_set_run_dispatch_deferred'
+      });
+    }
+    return this.buildQuestionSetRunStartResult(committed.run, { dispatchDeferred });
+  }
+
+  async buildPersistedQuestionSetRunContext(run, records) {
+    const project = await BrandProject.findByPk(run.project_id);
+    const projectData = project?.toJSON ? project.toJSON() : project;
+    if (!this.isRunnableProject(projectData)) return null;
+    const platformCodes = normalizePlatformCodes(records.map((record) => record.platform));
+    const [availability, runtimeSettings] = await Promise.all([
+      AIPlatformService.getPlatformAvailability(platformCodes),
+      this.getRuntimeSettings()
+    ]);
+    const availabilityByCode = new Map(availability.map((item) => [item.code, item]));
+    const entries = records.map((record) => {
+      const platform = String(record.platform || '').trim().toLowerCase();
+      const platformStatus = availabilityByCode.get(platform);
+      return {
+        record,
+        target: {
+          prompt: {
+            id: record.tracked_prompt_id,
+            question: record.question,
+            enabled: true
+          },
+          platform,
+          platform_name: record.platform_name || platformStatus?.platform_name || platform,
+          model_name: record.model_name || platformStatus?.model_name || '',
+          platformConfig: platformStatus?.config || {}
+        }
+      };
+    });
+    const firstRecord = records[0];
+    const keywords = String(firstRecord?.brand_keywords || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const competitorSnapshot = Array.isArray(run.competitor_snapshot)
+      ? run.competitor_snapshot
+      : [];
+    return {
+      ok: true,
+      projectData,
+      runUser: { id: run.user_id },
+      targets: entries.map((entry) => entry.target),
+      skippedPlatforms: Array.isArray(run.skipped_platforms) ? run.skipped_platforms : [],
+      runtimeSettings,
+      competitors: competitorSnapshot,
+      keywords,
+      entries,
+      concurrency: this.getProjectRunConcurrency(runtimeSettings),
+      questionSetRunId: run.id
+    };
+  }
+
+  async dispatchPendingQuestionSetRuns(options = {}) {
+    const RunRepository = options.QuestionSetRun || QuestionSetRun;
+    const RecordRepository = options.QuestionRecord || QuestionRecord;
+    const limit = Number.isInteger(options.limit) && options.limit > 0
+      ? Math.min(options.limit, 500)
+      : 100;
+    const runs = await RunRepository.findAll({
+      where: {
+        source: 'native',
+        completed_at: null,
+        paused_at: null
+      },
+      order: [['id', 'ASC']],
+      limit
+    });
+    let dispatched = 0;
+    for (const run of runs) {
+      const records = await RecordRepository.findAll({
+        where: {
+          question_set_run_id: run.id,
+          run_slot_index: { [Op.not]: null },
+          retry_batch_id: null,
+          status: 'pending',
+          execution_token: null
+        },
+        order: [['run_slot_index', 'ASC'], ['id', 'ASC']]
+      });
+      if (!records.length) continue;
+      const context = await this.buildPersistedQuestionSetRunContext(run, records);
+      if (!context) continue;
+      try {
+        this.schedulePreparedRun(context);
+        dispatched += 1;
+      } catch (error) {
+        console.warn('补发问题集运行失败:', {
+          question_set_run_id: run.id,
+          error_code: 'question_set_run_redispatch_failed'
+        });
+      }
+    }
+    return dispatched;
   }
 
   schedulePreparedRun(context) {

@@ -149,6 +149,7 @@ test('two scheduler processes execute the same long-running slot side effects on
     return { ok: true, attempted: 1, completed: 1, failed: 0 };
   };
   for (const service of [firstService, secondService]) {
+    service.dispatchPendingQuestionSetRuns = async () => 0;
     service.recoverStalePendingRecords = async () => 0;
     service.recoverStaleScheduledExecutions = async () => 0;
     service.submitDetectionForSchedule = submit;

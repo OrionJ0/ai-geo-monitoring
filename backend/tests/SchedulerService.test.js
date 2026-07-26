@@ -214,6 +214,7 @@ test('recovers stale pending project records as failed', async () => {
       findAll: async (options) => {
         assert.equal(options.where.status, 'pending');
         assert.ok(options.where.created_at);
+        assert.equal(options.where.question_set_run_id, null);
         return [
           {
             result_summary: retryMetadata,
@@ -292,16 +293,22 @@ test('periodic recovery only expires claimed executions, not old records still w
 });
 
 test('scheduler tick is single-flight within one process', async () => {
+  const originalDispatchPendingRuns = SchedulerService.dispatchPendingQuestionSetRuns;
   const originalRecover = SchedulerService.recoverStalePendingRecords;
   const originalRecoverScheduled = SchedulerService.recoverStaleScheduledExecutions;
   const originalFindSchedules = DetectionSchedule.findAll;
   const originalFindProjects = BrandProject.findAll;
   let releaseRecovery;
   let recoveryCalls = 0;
+  let dispatchCalls = 0;
   const recoveryGate = new Promise((resolve) => {
     releaseRecovery = resolve;
   });
 
+  SchedulerService.dispatchPendingQuestionSetRuns = async () => {
+    dispatchCalls += 1;
+    return 0;
+  };
   SchedulerService.recoverStalePendingRecords = async () => {
     recoveryCalls += 1;
     await recoveryGate;
@@ -317,12 +324,14 @@ test('scheduler tick is single-flight within one process', async () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(recoveryCalls, 1);
+    assert.equal(dispatchCalls, 1);
     releaseRecovery();
     await Promise.all([firstTick, overlappingTick]);
     assert.equal(recoveryCalls, 1);
   } finally {
     releaseRecovery();
     await SchedulerService._tickPromise?.catch(() => {});
+    SchedulerService.dispatchPendingQuestionSetRuns = originalDispatchPendingRuns;
     SchedulerService.recoverStalePendingRecords = originalRecover;
     SchedulerService.recoverStaleScheduledExecutions = originalRecoverScheduled;
     DetectionSchedule.findAll = originalFindSchedules;
@@ -396,15 +405,21 @@ test('scheduler startup can be retried after initialization fails', async () => 
   await SchedulerService.stop();
   const previousRecoveryAt = SchedulerService.getReadiness().last_recovery_at;
   const originalRefresh = SchedulerService.refresh;
+  const originalDispatchPendingRuns = SchedulerService.dispatchPendingQuestionSetRuns;
   const originalRecovery = SchedulerService.recoverStalePendingRecords;
   const originalScheduledRecovery = SchedulerService.recoverStaleScheduledExecutions;
   let refreshCalls = 0;
+  let dispatchCalls = 0;
   let recoveryCalls = 0;
   let scheduledRecoveryCalls = 0;
 
   SchedulerService.refresh = async () => {
     refreshCalls += 1;
     if (refreshCalls === 1) throw new Error('refresh failed');
+  };
+  SchedulerService.dispatchPendingQuestionSetRuns = async () => {
+    dispatchCalls += 1;
+    return 0;
   };
   SchedulerService.recoverStalePendingRecords = async () => {
     recoveryCalls += 1;
@@ -424,6 +439,7 @@ test('scheduler startup can be retried after initialization fails', async () => 
     });
     await SchedulerService.start();
     assert.equal(refreshCalls, 2);
+    assert.equal(dispatchCalls, 1);
     assert.equal(recoveryCalls, 1);
     assert.equal(scheduledRecoveryCalls, 1);
     const readiness = SchedulerService.getReadiness();
@@ -433,6 +449,7 @@ test('scheduler startup can be retried after initialization fails', async () => 
   } finally {
     await SchedulerService.stop();
     SchedulerService.refresh = originalRefresh;
+    SchedulerService.dispatchPendingQuestionSetRuns = originalDispatchPendingRuns;
     SchedulerService.recoverStalePendingRecords = originalRecovery;
     SchedulerService.recoverStaleScheduledExecutions = originalScheduledRecovery;
   }
@@ -515,6 +532,7 @@ test('disables an archived project schedule after claiming its durable slot', as
   const originalFindProjects = BrandProject.findAll;
   const originalFindProject = BrandProject.findByPk;
   const originalRecover = SchedulerService.recoverStalePendingRecords;
+  const originalDispatchPendingRuns = SchedulerService.dispatchPendingQuestionSetRuns;
   const originalRecoverScheduled = SchedulerService.recoverStaleScheduledExecutions;
   const originalClaim = SchedulerService.claimScheduledOccurrence;
   const originalStartExecution = SchedulerService.startScheduledExecution;
@@ -531,6 +549,7 @@ test('disables an archived project schedule after claiming its durable slot', as
   BrandProject.findAll = async () => [];
   BrandProject.findByPk = async () => ({ id: 2, status: 'archived' });
   SchedulerService.recoverStalePendingRecords = async () => 0;
+  SchedulerService.dispatchPendingQuestionSetRuns = async () => 0;
   SchedulerService.recoverStaleScheduledExecutions = async () => 0;
   SchedulerService.claimScheduledOccurrence = async () => ({
     claimed: true,
@@ -548,6 +567,7 @@ test('disables an archived project schedule after claiming its durable slot', as
     BrandProject.findAll = originalFindProjects;
     BrandProject.findByPk = originalFindProject;
     SchedulerService.recoverStalePendingRecords = originalRecover;
+    SchedulerService.dispatchPendingQuestionSetRuns = originalDispatchPendingRuns;
     SchedulerService.recoverStaleScheduledExecutions = originalRecoverScheduled;
     SchedulerService.claimScheduledOccurrence = originalClaim;
     SchedulerService.startScheduledExecution = originalStartExecution;
