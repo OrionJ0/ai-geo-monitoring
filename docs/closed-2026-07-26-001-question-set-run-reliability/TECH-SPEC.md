@@ -1,8 +1,8 @@
 ---
 title: 问题集运行与调度可靠性加固技术方案
 date: 2026-07-26
-status: active
-source: docs/active-2026-07-26-001-question-set-run-reliability/prd.md
+status: closed
+source: docs/closed-2026-07-26-001-question-set-run-reliability/prd.md
 scope: deep
 ---
 

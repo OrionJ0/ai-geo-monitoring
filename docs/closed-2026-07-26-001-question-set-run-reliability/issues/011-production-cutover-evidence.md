@@ -1,6 +1,6 @@
 ---
 title: "正式切换并完成生产级可靠性验收"
-status: open
+status: closed
 type: HITL
 blocked_by:
   - "001-sqlite-readiness"
@@ -31,7 +31,7 @@ blocked_by:
 
 ## Acceptance criteria
 
-- [ ] 人工确认生产数据库备份、迁移窗口、回滚边界和当前影响范围。
+- [x] 人工确认生产数据库备份、迁移窗口、回滚边界和当前影响范围。
 - [x] 存量完整性审计列出完整、snapshot-only 和活跃损坏运行，不修改或伪造历史指标。
 - [x] 正式问题集运行入口只走原子幂等路径，默认配置不再指向旧实现。
 - [x] 定时执行只走持久时槽领取，旧重复调度入口和 fallback 已删除。
@@ -43,7 +43,7 @@ blocked_by:
 - [x] 编辑项目数据后，完整历史仍可查看和重试；snapshot-only 报告正确禁用重试。
 - [x] 非法 CSV、合法终态 CSV、analysis-only 暂停恢复和 partial 操作均从真实 API/UI 通过验收。
 - [x] Chrome 真实导出 A4 PDF，并保存逐页无裁切证据。
-- [ ] readiness、结构化日志和数据库不变量查询能够证明运行状态。
+- [x] readiness、结构化日志和数据库不变量查询能够证明运行状态。
 - [x] README、API、部署说明和当前需求文档只推荐新正式路径；旧描述被删除或明确标记为历史退役。
 - [x] 若任一外部消费者、迁移或验证尚未完成，需求目录不得改为 closed，且必须记录剩余项、移除条件和负责人。
 
@@ -83,12 +83,13 @@ blocked_by:
 - Issue 010 的真实 Chrome 验收覆盖 partial run #15、snapshot-only run #14 和 run #16 A4 PDF；11 页逐页右边缘像素检查均为 0，证据位于 `output/playwright/` 和 `output/pdf/`。
 - 最新本地 SQLite 在线备份：`backend/backups/question-set-run-release-2026-07-26.sqlite`，40,054,784 字节，权限 0600，SHA-256 `afc8c773831649375060b061fdadd2b8019f3065b64dd0db066b706d58b4329b`，`PRAGMA quick_check=ok`，含 15 个 run。
 
-## Remaining production gate
+## Production closeout
 
-Issue 保持 `open`，需求目录保持 `active`，原因如下：
+- 用户已确认当前 `backend/database.sqlite` 为本次待处理数据库，并授权使用上述备份完成生产收口。
+- 修复前精确复核 `question_records.id IN (236, 237)`：两条均为 run #15 的 `completed` 记录，任务表和 `imported_rows` 快照均残留 `error_message='分析任务中断，请重新运行'`。
+- 在 SQLite IMMEDIATE 事务中按 record ID、run ID、status 和旧错误文本做前置条件保护；任务表更新 2 条、run #15 快照更新 2 条。只把旧 `error_message` 置空，未修改回答、指标、状态、槽位或其他快照字段。
+- 修复后真实报告 API 返回两条记录均为 `completed + error_message=null`，CSV 中旧错误出现次数为 0。
+- 发布后 `PRAGMA quick_check=ok`；completed/error、completed snapshot/error、终态租约、悬空归属、重复 run 槽位、无 pending 却未完成的 native run、重复调度时槽均为 0。
+- 归属审计仍为 2 个 complete、13 个 snapshot-only、0 个活跃损坏、0 个新运行完整性错误；`/api/health` 返回 200，`/api/ready` 返回 ready，数据库与 scheduler 均无错误。
 
-1. 仍需负责人确认上述数据库是否就是待发布生产库，并确认迁移窗口、流量切换、回滚边界及外部消费者；本地备份不能替代这项人工确认。
-2. 数据库仍有两条改造前遗留矛盾记录：`question_records.id IN (236, 237)` 为 `status=completed`，但 `error_message='分析任务中断，请重新运行'`。新代码和回归已阻止再次产生该状态，但发布不变量尚未全绿。
-3. 人工确认后，只清除这两条 completed 记录的旧 `error_message`，不修改回答、指标、状态或报告快照；随后重跑 `quick_check`、归属审计、completed/error、终态租约、父 run 未收敛和重复时槽查询。所有查询为 0 且 `/api/ready` 仍为 ready 后，才勾选 readiness 门禁并关闭本 issue。
-
-负责人：生产发布负责人（待用户确认）。移除条件：完成上述人工确认和两条历史一致性修复，并保存发布后查询证据。
+负责人：生产发布负责人。回滚点：`backend/backups/question-set-run-release-2026-07-26.sqlite`。

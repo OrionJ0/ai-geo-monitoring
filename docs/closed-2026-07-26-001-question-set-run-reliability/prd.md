@@ -1,7 +1,7 @@
 ---
 title: 问题集运行与调度可靠性加固 PRD
 date: 2026-07-26
-status: active
+status: closed
 source: 问题集“添加 → 运行 → 报告”全链路对抗审查与真实代码、数据库核验
 ---
 
@@ -235,5 +235,5 @@ SQLite 配置失效本身没有已证实的数据损坏事故，不单独定义�
 
 ## Handoff
 
-- PRD path: `docs/active-2026-07-26-001-question-set-run-reliability/prd.md`
-- Recommended next step: 评审同目录 `TECH-SPEC.md`，确认后使用 `$to-issues` 拆成按发布门禁排序的实现切片。
+- PRD path: `docs/closed-2026-07-26-001-question-set-run-reliability/prd.md`
+- Delivery status: 已按同目录 `TECH-SPEC.md` 和 11 个 issues 完成实现、正式入口切换、数据迁移及生产级验收；后续变更应以当前正式路径为基线，不得恢复旧 fallback。
