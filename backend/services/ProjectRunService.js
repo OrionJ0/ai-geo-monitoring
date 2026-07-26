@@ -473,12 +473,13 @@ class ProjectRunService {
     }
   }
 
-  async createTargetRecord({ target, runUser, projectData, keywords }) {
+  async createTargetRecord({ target, runUser, projectData, keywords, scheduledExecutionId = null }) {
     const prompt = target.prompt;
     return QuestionRecord.create({
       user_id: runUser.id,
       project_id: projectData.id,
       tracked_prompt_id: prompt.id,
+      scheduled_execution_id: Number(scheduledExecutionId) > 0 ? Number(scheduledExecutionId) : null,
       platform: target.platform,
       platform_name: target.platform_name || target.platform,
       model_name: target.model_name || null,
@@ -489,10 +490,16 @@ class ProjectRunService {
     });
   }
 
-  async createRunEntries({ targets, runUser, projectData, keywords }) {
+  async createRunEntries({ targets, runUser, projectData, keywords, scheduledExecutionId = null }) {
     const rows = [];
     for (const target of targets) {
-      const record = await this.createTargetRecord({ target, runUser, projectData, keywords });
+      const record = await this.createTargetRecord({
+        target,
+        runUser,
+        projectData,
+        keywords,
+        scheduledExecutionId
+      });
       rows.push({ target, record });
     }
     return rows;
@@ -651,7 +658,14 @@ class ProjectRunService {
     return consumeQuotaDirect(userId, 'detection', amount, options);
   }
 
-  async prepareProjectRun({ project, prompts, platforms, user, promptSelectionExplicit = false }) {
+  async prepareProjectRun({
+    project,
+    prompts,
+    platforms,
+    user,
+    promptSelectionExplicit = false,
+    scheduledExecutionId = null
+  }) {
     const projectData = project.toJSON ? project.toJSON() : project;
     const runUser = this.resolveRunUser(projectData, user);
     if (!this.isRunnableProject(projectData)) {
@@ -733,7 +747,13 @@ class ProjectRunService {
       order: [['id', 'ASC']]
     });
     const keywords = this.buildBrandKeywordList(projectData);
-    const entries = await this.createRunEntries({ targets, runUser, projectData, keywords });
+    const entries = await this.createRunEntries({
+      targets,
+      runUser,
+      projectData,
+      keywords,
+      scheduledExecutionId
+    });
 
     return {
       ok: true,
@@ -1455,8 +1475,22 @@ class ProjectRunService {
     return { ok: true, runId, resumed: true, remainingCount: validEntries.length };
   }
 
-  async runProject({ project, prompts, platforms, user, promptSelectionExplicit = false }) {
-    const prepared = await this.prepareProjectRun({ project, prompts, platforms, user, promptSelectionExplicit });
+  async runProject({
+    project,
+    prompts,
+    platforms,
+    user,
+    promptSelectionExplicit = false,
+    scheduledExecutionId = null
+  }) {
+    const prepared = await this.prepareProjectRun({
+      project,
+      prompts,
+      platforms,
+      user,
+      promptSelectionExplicit,
+      scheduledExecutionId
+    });
     if (!prepared.ok) return prepared;
 
     const results = await this.runPreparedTargets(prepared);

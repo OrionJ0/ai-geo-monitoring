@@ -23,6 +23,10 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
     type: DataTypes.INTEGER,
     allowNull: true
   },
+  scheduled_execution_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   platform: {
     type: DataTypes.STRING(50),
     allowNull: false
@@ -84,6 +88,9 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
     },
     {
       fields: ['tracked_prompt_id']
+    },
+    {
+      fields: ['scheduled_execution_id']
     },
     {
       fields: ['platform']

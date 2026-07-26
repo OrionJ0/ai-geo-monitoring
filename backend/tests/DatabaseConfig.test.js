@@ -268,6 +268,15 @@ test('ready endpoint reports verified database and scheduler startup state', asy
     assert.ok(body.checks.database.busy_timeout_ms >= 5000);
     assert.equal(body.checks.scheduler.started, true);
     assert.ok(body.checks.scheduler.last_recovery_at);
+    assert.deepEqual(body.checks.scheduler.scheduled_executions, {
+      claimed: 0,
+      duplicate_claims: 0,
+      stale_claims: 0,
+      completed: 0,
+      failed: 0,
+      last_claimed_at: null,
+      last_error_code: null
+    });
     assert.equal(body.checks.last_error, null);
   } finally {
     child.kill('SIGTERM');

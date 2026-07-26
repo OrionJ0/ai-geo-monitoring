@@ -4,10 +4,14 @@ const {
   QuestionRecord,
   QuestionSetRetryBatch,
   ResultDetail,
+  ScheduledExecution,
   TrackedPrompt,
-  User
+  User,
+  sequelize
 } = require('../models');
-const { Op } = require('sequelize');
+const { randomUUID } = require('node:crypto');
+const os = require('node:os');
+const { Op, Transaction } = require('sequelize');
 const AIPlatformService = require('./AIPlatformService');
 const ResultParserService = require('./ResultParserService');
 const ProjectRunService = require('./ProjectRunService');
@@ -86,6 +90,9 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   const platformService = options.aiPlatformService || AIPlatformService;
   const settingsService = options.settingsService || AIRuntimeSettingsService;
   const quotaConsumer = options.consumeQuota || consumeQuotaDirect;
+  const scheduledExecutionId = Number(options.scheduledExecutionId) > 0
+    ? Number(options.scheduledExecutionId)
+    : null;
   let projectData = options.project || null;
   if (!options.projectValidated) {
     const projectGuard = await validateScheduleProject(schedule);
@@ -155,6 +162,7 @@ async function submitDetectionForSchedule(schedule, options = {}) {
             user_id,
             project_id: schedule.project_id || null,
             tracked_prompt_id: schedule.tracked_prompt_id || null,
+            scheduled_execution_id: scheduledExecutionId,
             platform: platformStatus.code,
             platform_name: platformStatus.platform_name,
             model_name: platformStatus.model_name,
@@ -191,6 +199,7 @@ async function submitDetectionForSchedule(schedule, options = {}) {
         user_id,
         project_id: schedule.project_id || null,
         tracked_prompt_id: schedule.tracked_prompt_id || null,
+        scheduled_execution_id: scheduledExecutionId,
         platform,
         platform_name: platformStatus.platform_name,
         model_name: platformStatus.model_name,
@@ -295,11 +304,22 @@ function normalizeSchedulePlatforms(platforms, project = null) {
 }
 
 class SchedulerService {
-  constructor() {
+  constructor(options = {}) {
     this._timer = null;
+    this._tickPromise = null;
     this._started = false;
     this._lastRecoveryAt = null;
     this._lastErrorCode = null;
+    this._ownerId = options.ownerId || `${os.hostname()}:${process.pid}`;
+    this._scheduledExecutionStats = {
+      claimed: 0,
+      duplicate_claims: 0,
+      stale_claims: 0,
+      completed: 0,
+      failed: 0,
+      last_claimed_at: null,
+      last_error_code: null
+    };
   }
 
   async start() {
@@ -310,6 +330,7 @@ class SchedulerService {
         includeUnclaimed: true,
         maxAgeMs: 1
       });
+      await this.recoverStaleScheduledExecutions();
       this._lastRecoveryAt = new Date().toISOString();
       this._timer = setInterval(() => this.tick().catch(() => { }), 30 * 1000);
       this._started = true;
@@ -329,6 +350,10 @@ class SchedulerService {
       last_recovery_at: this._lastRecoveryAt,
       last_error_code: this._lastErrorCode
     };
+  }
+
+  getScheduledExecutionStats() {
+    return { ...this._scheduledExecutionStats };
   }
 
   normalizeProjectMonitoring(project) {
@@ -377,24 +402,202 @@ class SchedulerService {
     const where = scheduleId ? { id: scheduleId } : {};
     const rows = await DetectionSchedule.findAll({ where });
     for (const row of rows) {
-      const next = computeNextRun(row.daily_time, row.timezone);
-      await row.update({ next_run_at: next });
+      if (scheduleId || !row.next_run_at) {
+        const next = computeNextRun(row.daily_time, row.timezone);
+        await row.update({ next_run_at: next });
+      }
     }
     if (!scheduleId) {
       const projects = await BrandProject.findAll({ where: { monitoring_enabled: true, status: 'active' } });
       for (const project of projects) {
-        const normalized = this.normalizeProjectMonitoring(project.toJSON());
-        await project.update({
-          monitoring_time: normalized.monitoring_time,
-          monitoring_next_run_at: computeNextRun(normalized.monitoring_time)
-        });
+        const projectData = project.toJSON();
+        const normalized = this.normalizeProjectMonitoring(projectData);
+        const updatePayload = {};
+        if (projectData.monitoring_time !== normalized.monitoring_time) {
+          updatePayload.monitoring_time = normalized.monitoring_time;
+        }
+        if (!projectData.monitoring_next_run_at) {
+          updatePayload.monitoring_next_run_at = computeNextRun(normalized.monitoring_time);
+        }
+        if (Object.keys(updatePayload).length > 0) {
+          await project.update(updatePayload);
+        }
       }
     }
   }
 
-  async tick() {
+  async claimScheduledOccurrence(input, options = {}) {
+    const scheduleKind = String(input?.scheduleKind || '');
+    const scheduleConfig = {
+      detection_schedule: {
+        repository: options.DetectionSchedule || DetectionSchedule,
+        nextRunField: 'next_run_at'
+      },
+      project_monitoring: {
+        repository: options.BrandProject || BrandProject,
+        nextRunField: 'monitoring_next_run_at'
+      }
+    }[scheduleKind];
+    if (!scheduleConfig) throw new Error(`不支持的调度类型: ${scheduleKind}`);
+
+    const dueAt = new Date(input.dueAt);
+    const nextRunAt = new Date(input.nextRunAt);
+    if (Number.isNaN(dueAt.getTime()) || Number.isNaN(nextRunAt.getTime())) {
+      throw new Error('调度时槽时间无效');
+    }
+
+    const Database = options.sequelize || sequelize;
+    const ExecutionRepository = options.ScheduledExecution || ScheduledExecution;
+    const now = options.now ? new Date(options.now) : new Date();
+    const leaseMs = Number(options.leaseMs) > 0 ? Number(options.leaseMs) : 20 * 60 * 1000;
+    const executionToken = options.executionToken || randomUUID();
+    const leaseOwner = options.ownerId || this._ownerId;
+    const transactionOptions = Database.getDialect() === 'sqlite'
+      ? { type: Transaction.TYPES.IMMEDIATE }
+      : {};
+
+    try {
+      const execution = await Database.transaction(transactionOptions, async (transaction) => {
+        const row = await ExecutionRepository.create({
+          schedule_kind: scheduleKind,
+          schedule_id: input.scheduleId,
+          project_id: input.projectId || null,
+          due_at: dueAt,
+          status: 'claimed',
+          execution_token: executionToken,
+          lease_owner: leaseOwner,
+          lease_expires_at: new Date(now.getTime() + leaseMs),
+          attempt: 1
+        }, { transaction });
+        const [advanced] = await scheduleConfig.repository.update(
+          { [scheduleConfig.nextRunField]: nextRunAt },
+          {
+            where: {
+              id: input.scheduleId,
+              [scheduleConfig.nextRunField]: dueAt
+            },
+            transaction
+          }
+        );
+        if (advanced !== 1) {
+          const error = new Error('调度时槽已不再到期');
+          error.code = 'SCHEDULE_SLOT_NOT_DUE';
+          throw error;
+        }
+        return row;
+      });
+      this._scheduledExecutionStats.claimed += 1;
+      this._scheduledExecutionStats.last_claimed_at = now.toISOString();
+      return { claimed: true, execution };
+    } catch (error) {
+      const uniqueConflict = error?.name === 'SequelizeUniqueConstraintError'
+        || error?.original?.code === '23505'
+        || (
+          error?.original?.code === 'SQLITE_CONSTRAINT'
+          && /unique/i.test(String(error?.original?.message || error?.message || ''))
+        );
+      if (uniqueConflict || error?.code === 'SCHEDULE_SLOT_NOT_DUE') {
+        if (uniqueConflict) this._scheduledExecutionStats.duplicate_claims += 1;
+        else this._scheduledExecutionStats.stale_claims += 1;
+        return {
+          claimed: false,
+          reason: uniqueConflict ? 'already_claimed' : 'slot_not_due'
+        };
+      }
+      this._scheduledExecutionStats.last_error_code = 'scheduled_execution_claim_failed';
+      throw error;
+    }
+  }
+
+  async startScheduledExecution(execution, options = {}) {
+    const ExecutionRepository = options.ScheduledExecution || ScheduledExecution;
+    const now = options.now ? new Date(options.now) : new Date();
+    const [updated] = await ExecutionRepository.update(
+      {
+        status: 'running',
+        started_at: now
+      },
+      {
+        where: {
+          id: execution.id,
+          execution_token: execution.execution_token,
+          status: 'claimed'
+        }
+      }
+    );
+    return updated === 1;
+  }
+
+  async finalizeScheduledExecution(execution, outcome, options = {}) {
+    const ExecutionRepository = options.ScheduledExecution || ScheduledExecution;
+    const now = options.now ? new Date(options.now) : new Date();
+    const status = outcome?.status === 'completed' ? 'completed' : 'failed';
+    const [updated] = await ExecutionRepository.update(
+      {
+        status,
+        error_code: status === 'failed'
+          ? String(outcome?.errorCode || 'scheduled_execution_failed').slice(0, 80)
+          : null,
+        error_message: status === 'failed'
+          ? String(outcome?.errorMessage || '调度执行失败').slice(0, 500)
+          : null,
+        completed_at: now
+      },
+      {
+        where: {
+          id: execution.id,
+          execution_token: execution.execution_token,
+          status: 'running'
+        }
+      }
+    );
+    if (updated === 1) {
+      this._scheduledExecutionStats[status] += 1;
+      this._scheduledExecutionStats.last_error_code = status === 'failed'
+        ? String(outcome?.errorCode || 'scheduled_execution_failed').slice(0, 80)
+        : null;
+    }
+    return updated === 1;
+  }
+
+  async recoverStaleScheduledExecutions(options = {}) {
+    const ExecutionRepository = options.ScheduledExecution || ScheduledExecution;
+    const now = options.now ? new Date(options.now) : new Date();
+    const [recovered] = await ExecutionRepository.update(
+      {
+        status: 'failed',
+        error_code: 'scheduled_execution_interrupted',
+        error_message: '调度执行中断，未自动重复外部调用',
+        completed_at: now
+      },
+      {
+        where: {
+          status: { [Op.in]: ['claimed', 'running'] },
+          lease_expires_at: { [Op.lt]: now }
+        }
+      }
+    );
+    if (recovered > 0) {
+      this._scheduledExecutionStats.failed += recovered;
+      this._scheduledExecutionStats.last_error_code = 'scheduled_execution_interrupted';
+      console.warn(`已收敛 ${recovered} 个过期调度执行时槽`);
+    }
+    return recovered;
+  }
+
+  tick() {
+    if (this._tickPromise) return this._tickPromise;
+    const tickPromise = this._runTick().finally(() => {
+      if (this._tickPromise === tickPromise) this._tickPromise = null;
+    });
+    this._tickPromise = tickPromise;
+    return tickPromise;
+  }
+
+  async _runTick() {
     const now = new Date();
     await this.recoverStalePendingRecords({ now });
+    await this.recoverStaleScheduledExecutions({ now });
     const due = await DetectionSchedule.findAll({
       where: {
         enabled: true,
@@ -402,13 +605,42 @@ class SchedulerService {
       }
     });
     for (const s of due) {
+      let execution = null;
       try {
-        const result = await submitDetectionForSchedule(s);
-        if (result?.skipped) continue;
-        if (!result?.ok && !result?.attempted && !result?.advance_schedule) continue;
+        const dueAt = new Date(s.next_run_at);
         const next = computeNextRun(s.daily_time, s.timezone);
-        await s.update({ last_run_at: now, next_run_at: next });
+        const claim = await this.claimScheduledOccurrence({
+          scheduleKind: 'detection_schedule',
+          scheduleId: s.id,
+          projectId: s.project_id,
+          dueAt,
+          nextRunAt: next
+        });
+        if (!claim.claimed) continue;
+        execution = claim.execution;
+        if (!await this.startScheduledExecution(execution)) continue;
+
+        const result = await this.submitDetectionForSchedule(s, {
+          scheduledExecutionId: execution.id
+        });
+        if (!result?.skipped) {
+          await s.update({ last_run_at: now });
+        }
+        await this.finalizeScheduledExecution(execution, result?.ok
+          ? { status: 'completed' }
+          : {
+              status: 'failed',
+              errorCode: result?.reason || 'scheduled_execution_failed',
+              errorMessage: '定时监测执行失败'
+            });
       } catch (e) {
+        if (execution) {
+          await this.finalizeScheduledExecution(execution, {
+            status: 'failed',
+            errorCode: 'scheduled_execution_exception',
+            errorMessage: '定时监测执行异常'
+          }).catch(() => {});
+        }
         console.warn('执行定时任务失败:', e?.message || e);
       }
     }
@@ -420,15 +652,46 @@ class SchedulerService {
       }
     });
     for (const project of dueProjects) {
+      let execution = null;
       try {
-        await this.runProjectNow(project.id);
+        const dueAt = new Date(project.monitoring_next_run_at);
+        const nextRunAt = computeNextRun(project.monitoring_time);
+        const claim = await this.claimScheduledOccurrence({
+          scheduleKind: 'project_monitoring',
+          scheduleId: project.id,
+          projectId: project.id,
+          dueAt,
+          nextRunAt
+        });
+        if (!claim.claimed) continue;
+        execution = claim.execution;
+        if (!await this.startScheduledExecution(execution)) continue;
+
+        const ok = await this.runProjectNow(project.id, {
+          advanceSchedule: false,
+          scheduledExecutionId: execution.id
+        });
+        await this.finalizeScheduledExecution(execution, ok
+          ? { status: 'completed' }
+          : {
+              status: 'failed',
+              errorCode: 'project_monitoring_failed',
+              errorMessage: '项目自动监测执行失败'
+            });
       } catch (e) {
+        if (execution) {
+          await this.finalizeScheduledExecution(execution, {
+            status: 'failed',
+            errorCode: 'project_monitoring_exception',
+            errorMessage: '项目自动监测执行异常'
+          }).catch(() => {});
+        }
         console.warn('执行项目自动监测失败:', e?.message || e);
       }
     }
   }
 
-  async runProjectNow(projectId) {
+  async runProjectNow(projectId, options = {}) {
     const project = await BrandProject.findByPk(projectId);
     if (!project || !project.monitoring_enabled) return false;
     const normalized = this.normalizeProjectMonitoring(project.toJSON());
@@ -441,20 +704,26 @@ class SchedulerService {
       project,
       prompts: prompts.map((item) => item.toJSON()),
       platforms: normalized.platforms,
-      user
+      user,
+      scheduledExecutionId: options.scheduledExecutionId || null
     });
     if (!result?.ok) {
-      await project.update({
-        monitoring_time: normalized.monitoring_time,
-        monitoring_next_run_at: computeNextRun(normalized.monitoring_time)
-      });
+      if (options.advanceSchedule !== false) {
+        await project.update({
+          monitoring_time: normalized.monitoring_time,
+          monitoring_next_run_at: computeNextRun(normalized.monitoring_time)
+        });
+      }
       return false;
     }
-    await project.update({
+    const updatePayload = {
       monitoring_time: normalized.monitoring_time,
-      monitoring_last_run_at: new Date(),
-      monitoring_next_run_at: computeNextRun(normalized.monitoring_time)
-    });
+      monitoring_last_run_at: new Date()
+    };
+    if (options.advanceSchedule !== false) {
+      updatePayload.monitoring_next_run_at = computeNextRun(normalized.monitoring_time);
+    }
+    await project.update(updatePayload);
     return true;
   }
 
@@ -552,4 +821,7 @@ class SchedulerService {
   }
 }
 
-module.exports = new SchedulerService();
+const schedulerService = new SchedulerService();
+schedulerService.SchedulerService = SchedulerService;
+
+module.exports = schedulerService;

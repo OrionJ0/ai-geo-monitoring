@@ -18,6 +18,7 @@ const SeoAuditJob = require('./SeoAuditJob');
 const AIPlatformConfig = require('./AIPlatformConfig');
 const QuestionSetRun = require('./QuestionSetRun');
 const QuestionSetRetryBatch = require('./QuestionSetRetryBatch');
+const ScheduledExecution = require('./ScheduledExecution');
 
 // 定义关联关系
 User.hasMany(QuestionRecord, {
@@ -92,6 +93,15 @@ QuestionSetRetryBatch.belongsTo(QuestionSetRun, {
   as: 'questionSetRun'
 });
 
+ScheduledExecution.hasMany(QuestionRecord, {
+  foreignKey: 'scheduled_execution_id',
+  as: 'questionRecords'
+});
+QuestionRecord.belongsTo(ScheduledExecution, {
+  foreignKey: 'scheduled_execution_id',
+  as: 'scheduledExecution'
+});
+
 const models = {
   sequelize,
   User,
@@ -112,7 +122,8 @@ const models = {
   SeoAuditJob,
   AIPlatformConfig,
   QuestionSetRun,
-  QuestionSetRetryBatch
+  QuestionSetRetryBatch,
+  ScheduledExecution
 };
 
 module.exports = models;

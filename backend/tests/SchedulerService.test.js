@@ -141,6 +141,54 @@ test('scheduled runs do not consume quota or create records when all platforms a
   }]);
 });
 
+test('scheduled detection records retain their execution ledger id', async () => {
+  const originalCreateRecord = QuestionRecord.create;
+  const originalUpdateRecord = QuestionRecord.update;
+  const createdPayloads = [];
+  QuestionRecord.create = async (payload) => {
+    createdPayloads.push(payload);
+    return { id: 91 };
+  };
+  QuestionRecord.update = async () => [1];
+
+  try {
+    await SchedulerService.submitDetectionForSchedule({
+      user_id: 9,
+      project_id: 2,
+      question: '调度记录属于哪个执行时槽？',
+      brand: 'Goodie AI',
+      platforms: ['deepseek'],
+      highlight_keywords: []
+    }, {
+      projectValidated: true,
+      scheduledExecutionId: 77,
+      aiPlatformService: {
+        getPlatformAvailability: async () => [{
+          code: 'deepseek',
+          platform_name: 'DeepSeek',
+          model_name: 'deepseek-v4',
+          available: true,
+          config: {}
+        }],
+        queryPlatform: async () => ({
+          success: false,
+          error_code: 'upstream_unavailable'
+        })
+      },
+      settingsService: {
+        getSettings: async () => ({})
+      },
+      consumeQuota: async () => ({ ok: true })
+    });
+
+    assert.equal(createdPayloads.length, 1);
+    assert.equal(createdPayloads[0].scheduled_execution_id, 77);
+  } finally {
+    QuestionRecord.create = originalCreateRecord;
+    QuestionRecord.update = originalUpdateRecord;
+  }
+});
+
 test('scheduled query exceptions mark created records as failed', () => {
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
 
@@ -243,13 +291,116 @@ test('periodic recovery only expires claimed executions, not old records still w
   );
 });
 
+test('scheduler tick is single-flight within one process', async () => {
+  const originalRecover = SchedulerService.recoverStalePendingRecords;
+  const originalRecoverScheduled = SchedulerService.recoverStaleScheduledExecutions;
+  const originalFindSchedules = DetectionSchedule.findAll;
+  const originalFindProjects = BrandProject.findAll;
+  let releaseRecovery;
+  let recoveryCalls = 0;
+  const recoveryGate = new Promise((resolve) => {
+    releaseRecovery = resolve;
+  });
+
+  SchedulerService.recoverStalePendingRecords = async () => {
+    recoveryCalls += 1;
+    await recoveryGate;
+    return 0;
+  };
+  SchedulerService.recoverStaleScheduledExecutions = async () => 0;
+  DetectionSchedule.findAll = async () => [];
+  BrandProject.findAll = async () => [];
+
+  try {
+    const firstTick = SchedulerService.tick();
+    const overlappingTick = SchedulerService.tick();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(recoveryCalls, 1);
+    releaseRecovery();
+    await Promise.all([firstTick, overlappingTick]);
+    assert.equal(recoveryCalls, 1);
+  } finally {
+    releaseRecovery();
+    await SchedulerService._tickPromise?.catch(() => {});
+    SchedulerService.recoverStalePendingRecords = originalRecover;
+    SchedulerService.recoverStaleScheduledExecutions = originalRecoverScheduled;
+    DetectionSchedule.findAll = originalFindSchedules;
+    BrandProject.findAll = originalFindProjects;
+  }
+});
+
+test('scheduler startup refresh preserves persisted due slots and only initializes missing ones', async () => {
+  const originalFindSchedules = DetectionSchedule.findAll;
+  const originalFindProjects = BrandProject.findAll;
+  const persistedDueAt = new Date('2026-07-25T01:00:00.000Z');
+  const persistedProjectDueAt = new Date('2026-07-25T02:00:00.000Z');
+  const scheduleUpdates = [];
+  const projectUpdates = [];
+
+  DetectionSchedule.findAll = async ({ where }) => {
+    assert.deepEqual(where, {});
+    return [
+      {
+        daily_time: '09:00',
+        timezone: 'Asia/Shanghai',
+        next_run_at: persistedDueAt,
+        update: async (payload) => scheduleUpdates.push({ id: 1, payload })
+      },
+      {
+        daily_time: '10:00',
+        timezone: 'Asia/Shanghai',
+        next_run_at: null,
+        update: async (payload) => scheduleUpdates.push({ id: 2, payload })
+      }
+    ];
+  };
+  BrandProject.findAll = async () => [
+    {
+      monitoring_next_run_at: persistedProjectDueAt,
+      toJSON: () => ({
+        monitoring_enabled: true,
+        monitoring_time: '9:0',
+        monitoring_next_run_at: persistedProjectDueAt,
+        platforms: ['deepseek']
+      }),
+      update: async (payload) => projectUpdates.push({ id: 3, payload })
+    },
+    {
+      monitoring_next_run_at: null,
+      toJSON: () => ({
+        monitoring_enabled: true,
+        monitoring_time: '10:00',
+        monitoring_next_run_at: null,
+        platforms: ['deepseek']
+      }),
+      update: async (payload) => projectUpdates.push({ id: 4, payload })
+    }
+  ];
+
+  try {
+    await SchedulerService.refresh();
+
+    assert.deepEqual(scheduleUpdates.map((entry) => entry.id), [2]);
+    assert.ok(scheduleUpdates[0].payload.next_run_at instanceof Date);
+    assert.equal(Object.hasOwn(projectUpdates[0].payload, 'monitoring_next_run_at'), false);
+    assert.equal(projectUpdates[0].payload.monitoring_time, '09:00');
+    assert.ok(projectUpdates[1].payload.monitoring_next_run_at instanceof Date);
+  } finally {
+    DetectionSchedule.findAll = originalFindSchedules;
+    BrandProject.findAll = originalFindProjects;
+  }
+});
+
 test('scheduler startup can be retried after initialization fails', async () => {
   await SchedulerService.stop();
   const previousRecoveryAt = SchedulerService.getReadiness().last_recovery_at;
   const originalRefresh = SchedulerService.refresh;
   const originalRecovery = SchedulerService.recoverStalePendingRecords;
+  const originalScheduledRecovery = SchedulerService.recoverStaleScheduledExecutions;
   let refreshCalls = 0;
   let recoveryCalls = 0;
+  let scheduledRecoveryCalls = 0;
 
   SchedulerService.refresh = async () => {
     refreshCalls += 1;
@@ -257,6 +408,10 @@ test('scheduler startup can be retried after initialization fails', async () => 
   };
   SchedulerService.recoverStalePendingRecords = async () => {
     recoveryCalls += 1;
+    return 0;
+  };
+  SchedulerService.recoverStaleScheduledExecutions = async () => {
+    scheduledRecoveryCalls += 1;
     return 0;
   };
 
@@ -270,6 +425,7 @@ test('scheduler startup can be retried after initialization fails', async () => 
     await SchedulerService.start();
     assert.equal(refreshCalls, 2);
     assert.equal(recoveryCalls, 1);
+    assert.equal(scheduledRecoveryCalls, 1);
     const readiness = SchedulerService.getReadiness();
     assert.equal(readiness.started, true);
     assert.ok(readiness.last_recovery_at);
@@ -278,6 +434,7 @@ test('scheduler startup can be retried after initialization fails', async () => 
     await SchedulerService.stop();
     SchedulerService.refresh = originalRefresh;
     SchedulerService.recoverStalePendingRecords = originalRecovery;
+    SchedulerService.recoverStaleScheduledExecutions = originalScheduledRecovery;
   }
 });
 
@@ -291,12 +448,17 @@ test('manual scheduled runs only succeed when at least one platform completes', 
   assert.match(source, /if \(!result\?\.ok\) \{/);
 });
 
-test('automatic scheduled runs advance after attempted platform failures', () => {
+test('automatic scheduled runs claim a durable slot before attempted platform failures', () => {
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
 
-  assert.match(source, /const result = await submitDetectionForSchedule\(s\)/);
-  assert.match(source, /if \(!result\?\.ok && !result\?\.attempted && !result\?\.advance_schedule\) continue/);
-  assert.match(source, /await s\.update\(\{ last_run_at: now, next_run_at: next \}\)/);
+  const claimIndex = source.indexOf("scheduleKind: 'detection_schedule'");
+  const submitIndex = source.indexOf('await this.submitDetectionForSchedule(s', claimIndex);
+  const finalizeIndex = source.indexOf('await this.finalizeScheduledExecution(execution', submitIndex);
+
+  assert.ok(claimIndex > 0);
+  assert.ok(submitIndex > claimIndex);
+  assert.ok(finalizeIndex > submitIndex);
+  assert.match(source, /await s\.update\(\{ last_run_at: now \}\)/);
 });
 
 test('scheduled runs only count finalized records as completed', () => {
@@ -348,11 +510,15 @@ test('does not manually advance an archived project schedule', async () => {
   }
 });
 
-test('does not auto advance an archived project schedule during tick', async () => {
+test('disables an archived project schedule after claiming its durable slot', async () => {
   const originalFindSchedules = DetectionSchedule.findAll;
   const originalFindProjects = BrandProject.findAll;
   const originalFindProject = BrandProject.findByPk;
   const originalRecover = SchedulerService.recoverStalePendingRecords;
+  const originalRecoverScheduled = SchedulerService.recoverStaleScheduledExecutions;
+  const originalClaim = SchedulerService.claimScheduledOccurrence;
+  const originalStartExecution = SchedulerService.startScheduledExecution;
+  const originalFinalizeExecution = SchedulerService.finalizeScheduledExecution;
   const updates = [];
 
   DetectionSchedule.findAll = async () => [{
@@ -365,6 +531,13 @@ test('does not auto advance an archived project schedule during tick', async () 
   BrandProject.findAll = async () => [];
   BrandProject.findByPk = async () => ({ id: 2, status: 'archived' });
   SchedulerService.recoverStalePendingRecords = async () => 0;
+  SchedulerService.recoverStaleScheduledExecutions = async () => 0;
+  SchedulerService.claimScheduledOccurrence = async () => ({
+    claimed: true,
+    execution: { id: 11, execution_token: 'archived-test-token' }
+  });
+  SchedulerService.startScheduledExecution = async () => true;
+  SchedulerService.finalizeScheduledExecution = async () => true;
 
   try {
     await SchedulerService.tick();
@@ -375,6 +548,10 @@ test('does not auto advance an archived project schedule during tick', async () 
     BrandProject.findAll = originalFindProjects;
     BrandProject.findByPk = originalFindProject;
     SchedulerService.recoverStalePendingRecords = originalRecover;
+    SchedulerService.recoverStaleScheduledExecutions = originalRecoverScheduled;
+    SchedulerService.claimScheduledOccurrence = originalClaim;
+    SchedulerService.startScheduledExecution = originalStartExecution;
+    SchedulerService.finalizeScheduledExecution = originalFinalizeExecution;
   }
 });
 

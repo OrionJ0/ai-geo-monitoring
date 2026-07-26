@@ -653,13 +653,15 @@ test('creates run records for every project run target before execution', async 
       ],
       runUser: { id: 9 },
       projectData: { id: 2, name: 'Goodie AI' },
-      keywords: ['Goodie AI']
+      keywords: ['Goodie AI'],
+      scheduledExecutionId: 77
     });
 
     assert.equal(entries.length, 3);
     assert.deepEqual(entries.map((entry) => entry.record.id), [1, 2, 3]);
     assert.deepEqual(createdPayloads.map((payload) => payload.tracked_prompt_id), [1, 2, 3]);
     assert.deepEqual(createdPayloads.map((payload) => payload.status), ['pending', 'pending', 'pending']);
+    assert.deepEqual(createdPayloads.map((payload) => payload.scheduled_execution_id), [77, 77, 77]);
   } finally {
     QuestionRecord.create = originalCreateRecord;
   }

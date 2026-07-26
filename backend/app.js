@@ -104,7 +104,10 @@ app.get('/api/ready', (req, res) => {
   const database = typeof sequelize.getReadiness === 'function'
     ? sequelize.getReadiness()
     : { status: 'error', dialect: sequelize.getDialect(), last_error_code: 'database_readiness_unavailable' };
-  const scheduler = SchedulerService.getReadiness();
+  const scheduler = {
+    ...SchedulerService.getReadiness(),
+    scheduled_executions: SchedulerService.getScheduledExecutionStats()
+  };
   const ready = database.status === 'ready' && scheduler.started === true;
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'not_ready',
@@ -192,6 +195,28 @@ async function ensureColumn(tableName, columnName, definition) {
   }
 }
 
+async function ensureIndex(tableName, indexName, fields) {
+  const qi = sequelize.getQueryInterface();
+  try {
+    const indexes = await qi.showIndex(tableName);
+    const expectedFields = fields.join(',');
+    const exists = indexes.some((index) => (
+      index.name === indexName
+      || index.fields
+        .map((field) => field.attribute || field.name)
+        .join(',') === expectedFields
+    ));
+    if (!exists) {
+      await qi.addIndex(tableName, fields, { name: indexName });
+      console.log(`已添加 ${tableName}.${indexName} 索引`);
+    }
+  } catch (e) {
+    if (!/no such table|does not exist/i.test(String(e?.message || e))) {
+      console.warn(`检查/添加 ${tableName}.${indexName} 索引失败:`, e.message);
+    }
+  }
+}
+
 async function ensureGeoMonitoringColumns() {
   await ensureColumn('brand_projects', 'monitoring_enabled', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false });
   await ensureColumn('brand_projects', 'monitoring_time', { type: DataTypes.STRING(5), allowNull: false, defaultValue: '09:00' });
@@ -239,6 +264,15 @@ async function ensureGeoMonitoringColumns() {
     type: DataTypes.DATE,
     allowNull: true
   });
+  await ensureColumn('question_records', 'scheduled_execution_id', {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  });
+  await ensureIndex(
+    'question_records',
+    'question_records_scheduled_execution_id',
+    ['scheduled_execution_id']
+  );
 }
 
 async function ensureDynamicPlatformColumns() {

@@ -53,6 +53,33 @@ test('question-set retry records persist execution leases, citation snapshots an
   assert.ok(retryBatch.status);
 });
 
+test('scheduled executions persist one unique ledger row per schedule slot', async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const scheduledExecution = await queryInterface.describeTable('scheduled_executions');
+  const questionRecord = await queryInterface.describeTable('question_records');
+  const indexes = await queryInterface.showIndex('scheduled_executions');
+
+  assert.ok(scheduledExecution.schedule_kind);
+  assert.ok(scheduledExecution.schedule_id);
+  assert.ok(scheduledExecution.project_id);
+  assert.ok(scheduledExecution.due_at);
+  assert.ok(scheduledExecution.status);
+  assert.ok(scheduledExecution.execution_token);
+  assert.ok(scheduledExecution.lease_owner);
+  assert.ok(scheduledExecution.lease_expires_at);
+  assert.ok(scheduledExecution.attempt);
+  assert.ok(scheduledExecution.error_code);
+  assert.ok(scheduledExecution.error_message);
+  assert.ok(scheduledExecution.started_at);
+  assert.ok(scheduledExecution.completed_at);
+  assert.ok(questionRecord.scheduled_execution_id);
+  assert.ok(indexes.some((index) => (
+    index.unique
+    && index.fields.map((field) => field.attribute).join(',')
+      === 'schedule_kind,schedule_id,due_at'
+  )));
+});
+
 test('postgres startup migration detects Sequelize user-defined enum descriptions', () => {
   const appSource = fs.readFileSync(path.resolve(__dirname, '../app.js'), 'utf8');
 
