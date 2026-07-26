@@ -1380,19 +1380,69 @@ class ProjectRunService {
     const project = await BrandProject.findByPk(run.project_id);
     const projectData = project?.toJSON ? project.toJSON() : project;
     if (!this.isRunnableProject(projectData)) return null;
-    const platformCodes = normalizePlatformCodes(records.map((record) => record.platform));
-    const [availability, runtimeSettings] = await Promise.all([
+    const analysisOnlyRecordIds = records
+      .filter((record) => record.execution_mode === 'analysis_only')
+      .map((record) => Number(record.id))
+      .filter((recordId) => Number.isInteger(recordId) && recordId > 0);
+    const platformCodes = normalizePlatformCodes(
+      records
+        .filter((record) => record.execution_mode !== 'analysis_only')
+        .map((record) => record.platform)
+    );
+    const promptIds = Array.from(new Set(
+      records
+        .map((record) => Number(record.tracked_prompt_id))
+        .filter((promptId) => Number.isInteger(promptId) && promptId > 0)
+    ));
+    const [availability, runtimeSettings, responseDetails, storedPrompts] = await Promise.all([
       AIPlatformService.getPlatformAvailability(platformCodes),
-      this.getRuntimeSettings()
+      this.getRuntimeSettings(),
+      analysisOnlyRecordIds.length
+        ? ResultDetail.findAll({
+            where: {
+              question_record_id: { [Op.in]: analysisOnlyRecordIds }
+            }
+          })
+        : [],
+      promptIds.length
+        ? TrackedPrompt.findAll({
+            where: {
+              id: { [Op.in]: promptIds },
+              project_id: run.project_id
+            }
+          })
+        : []
     ]);
     const availabilityByCode = new Map(availability.map((item) => [item.code, item]));
+    const detailByRecordId = new Map(
+      responseDetails.map((detail) => [Number(detail.question_record_id), detail])
+    );
+    const promptById = new Map(
+      storedPrompts.map((prompt) => [Number(prompt.id), prompt])
+    );
     const entries = records.map((record) => {
       const platform = String(record.platform || '').trim().toLowerCase();
       const platformStatus = availabilityByCode.get(platform);
+      const retryMode = record.execution_mode === 'analysis_only'
+        ? 'analysis_only'
+        : 'full_monitoring';
+      const responseDetail = retryMode === 'analysis_only'
+        ? detailByRecordId.get(Number(record.id))
+        : null;
+      const storedPrompt = promptById.get(Number(record.tracked_prompt_id));
+      const prompt = storedPrompt?.toJSON ? storedPrompt.toJSON() : (storedPrompt || {});
       return {
         record,
+        retryMode,
+        responseText: retryMode === 'analysis_only'
+          ? String(responseDetail?.ai_response_original || '')
+          : '',
+        providerCitations: retryMode === 'analysis_only'
+          ? normalizeProviderCitations(responseDetail?.provider_citations)
+          : [],
         target: {
           prompt: {
+            ...prompt,
             id: record.tracked_prompt_id,
             question: record.question,
             enabled: true
@@ -1400,7 +1450,9 @@ class ProjectRunService {
           platform,
           platform_name: record.platform_name || platformStatus?.platform_name || platform,
           model_name: record.model_name || platformStatus?.model_name || '',
-          platformConfig: platformStatus?.config || {}
+          platformConfig: retryMode === 'full_monitoring'
+            ? (platformStatus?.config || {})
+            : {}
         }
       };
     });
@@ -1412,6 +1464,16 @@ class ProjectRunService {
     const competitorSnapshot = Array.isArray(run.competitor_snapshot)
       ? run.competitor_snapshot
       : [];
+    const retryBatchIds = Array.from(new Set(
+      records
+        .map((record) => Number(record.retry_batch_id))
+        .filter((batchId) => Number.isInteger(batchId) && batchId > 0)
+    ));
+    if (retryBatchIds.length > 1) {
+      const error = new Error('同一运行存在多个待处理重试批次');
+      error.code = 'question_set_retry_batch_context_conflict';
+      throw error;
+    }
     return {
       ok: true,
       projectData,
@@ -1424,7 +1486,8 @@ class ProjectRunService {
       entries,
       concurrency: this.getProjectRunConcurrency(runtimeSettings),
       questionSetRunId: run.id,
-      runRevision: Number(run.revision) || 0
+      runRevision: Number(run.revision) || 0,
+      retryBatchId: retryBatchIds[0] || null
     };
   }
 
@@ -1449,7 +1512,6 @@ class ProjectRunService {
         where: {
           question_set_run_id: run.id,
           run_slot_index: { [Op.not]: null },
-          retry_batch_id: null,
           status: 'pending',
           execution_token: null
         },
@@ -1910,10 +1972,6 @@ class ProjectRunService {
     }
     if (prepared.replay) return prepared.replay;
 
-    const retryRecordIds = prepared.entries.map((entry) => Number(entry.record.id));
-    const fullMonitoringCount = prepared.entries.filter(
-      (entry) => entry.retryMode === 'full_monitoring'
-    ).length;
     const context = {
       entries: prepared.entries,
       runUser,
@@ -1930,16 +1988,53 @@ class ProjectRunService {
     try {
       this.schedulePreparedRun(context);
     } catch (error) {
-      await QuestionRecord.update(
-        { status: 'failed', error_message: RETRY_SCHEDULE_FAILURE_MESSAGE },
-        {
-          where: {
-            id: { [require('sequelize').Op.in]: retryRecordIds },
-            project_id: projectData.id,
-            status: 'pending'
-          }
+      await sequelize.transaction(async (transaction) => {
+        for (const entry of prepared.entries) {
+          await QuestionRecord.update(
+            {
+              status: 'failed',
+              error_message: RETRY_SCHEDULE_FAILURE_MESSAGE,
+              execution_token: null,
+              execution_started_at: null,
+              lease_owner: null,
+              lease_expires_at: null,
+              result_summary: {
+                ...(entry.record.result_summary && typeof entry.record.result_summary === 'object'
+                  ? entry.record.result_summary
+                  : {}),
+                failure: {
+                  stage: 'retry_dispatch',
+                  error_code: 'retry_dispatch_failed'
+                }
+              }
+            },
+            {
+              where: {
+                id: entry.record.id,
+                project_id: projectData.id,
+                status: 'pending'
+              },
+              transaction
+            }
+          );
         }
-      );
+        await QuestionSetRetryBatch.update(
+          { status: 'failed' },
+          {
+            where: {
+              id: prepared.retryBatchId,
+              question_set_run_id: runId
+            },
+            transaction
+          }
+        );
+      });
+      const QuestionSetRunService = require('./QuestionSetRunService');
+      await QuestionSetRunService.reconcileNativeRun({
+        projectId: projectData.id,
+        runId,
+        expectedRevision: context.runRevision
+      });
       throw runError(RETRY_SCHEDULE_FAILURE_MESSAGE, 500);
     }
 
@@ -1969,6 +2064,25 @@ class ProjectRunService {
       let aiResult = { data: {} };
       let originalText = String(reusedResponseText || '');
       let providerCitations = normalizeProviderCitations(reusedProviderCitations);
+      if (retryMode === 'analysis_only' && !originalText.trim()) {
+        const message = '结构化分析重试所需原回答缺失';
+        await this.failRecord(
+          record,
+          message,
+          {
+            stage: 'analysis_retry_context',
+            error_code: 'analysis_retry_context_missing'
+          },
+          { executionToken }
+        );
+        return {
+          record_id: record.id,
+          prompt_id: prompt.id,
+          platform: target.platform,
+          status: 'failed',
+          error: message
+        };
+      }
       if (retryMode !== 'analysis_only') {
         aiResult = await AIPlatformService.queryPlatform(target.platform, prompt.question, {
           config: target.platformConfig,
@@ -2138,73 +2252,16 @@ class ProjectRunService {
       return { ok: true, runId, resumed: true, remainingCount: 0 };
     }
 
-    // 重建执行上下文
-    const project = await BrandProject.findByPk(run.project_id);
-    if (!project) throw Object.assign(new Error('项目不存在'), { status: 404 });
-    const projectData = project.toJSON ? project.toJSON() : project;
-
-    const competitors = await BrandCompetitor.findAll({
-      where: { project_id: run.project_id },
-      order: [['id', 'ASC']]
-    });
-
-    const keywords = this.buildBrandKeywordList(projectData);
-    const runtimeSettings = await this.getRuntimeSettings();
-
-    // 获取关联的 prompts
-    const promptIds = [...new Set(records.map((r) => r.tracked_prompt_id).filter(Boolean))];
-    const prompts = await TrackedPrompt.findAll({
-      where: {
-        id: { [require('sequelize').Op.in]: promptIds },
-        project_id: run.project_id
-      }
-    });
-    const promptsById = new Map(prompts.map((p) => [p.id, p]));
-
-    // 获取平台配置
-    const platformCodes = [...new Set(records.map((r) => r.platform).filter(Boolean))];
-    const availability = await AIPlatformService.getPlatformAvailability(platformCodes);
-    const configByCode = new Map(availability.map((a) => [a.code, a.config]));
-
-    // 构建 entries
-    const entries = records.map((record) => {
-      const prompt = promptsById.get(record.tracked_prompt_id);
-      const platformConfig = configByCode.get(record.platform);
-      return {
-        target: {
-          prompt: prompt || { id: record.tracked_prompt_id, question: record.question },
-          platform: record.platform,
-          platform_name: record.platform_name || record.platform,
-          model_name: record.model_name || '',
-          platformConfig: platformConfig || {}
-        },
-        record
-      };
-    });
-
-    const validEntries = entries.filter((e) => e.target.prompt);
-    if (!validEntries.length) {
-      await run.update({ paused_at: null });
-      return { ok: true, runId, resumed: true, remainingCount: 0 };
+    const context = await this.buildPersistedQuestionSetRunContext(run, records);
+    if (!context) {
+      throw Object.assign(new Error('项目不存在或已归档'), { status: 409 });
     }
 
     // 清除暂停状态并恢复执行
     await run.update({ paused_at: null });
-    const concurrency = this.getProjectRunConcurrency(runtimeSettings);
-    this.schedulePreparedRun({
-      entries: validEntries,
-      runUser: { id: run.user_id },
-      projectData,
-      competitors,
-      keywords,
-      runtimeSettings,
-      concurrency,
-      questionSetRunId: runId,
-      runRevision: Number(run.revision) || 0,
-      targets: validEntries.map((e) => e.target)
-    });
+    this.schedulePreparedRun(context);
 
-    return { ok: true, runId, resumed: true, remainingCount: validEntries.length };
+    return { ok: true, runId, resumed: true, remainingCount: context.entries.length };
   }
 
   async runProject({
