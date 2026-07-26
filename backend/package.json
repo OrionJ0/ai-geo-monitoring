@@ -7,6 +7,8 @@
     "dev": "nodemon app.js",
     "test": "node --test tests/*.test.js",
     "test:postgres:scheduler": "node --test tests/integration/ScheduledExecutionPostgres.test.js",
+    "audit:run-ownership": "node scripts/migrateQuestionSetRunOwnership.js",
+    "migrate:run-ownership": "node scripts/migrateQuestionSetRunOwnership.js --apply",
     "setup:local-key": "node scripts/setupLocalEncryptionKey.js"
   },
   "keywords": [],

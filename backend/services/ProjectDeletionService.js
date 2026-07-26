@@ -10,7 +10,9 @@ const {
   VisibilityMetric,
   AlertRule,
   ReportSnapshot,
-  QuestionSetRun
+  QuestionSetRun,
+  QuestionSetRetryBatch,
+  ScheduledExecution
 } = require('../models');
 
 class ProjectDeletionService {
@@ -44,6 +46,8 @@ class ProjectDeletionService {
     const AlertRepository = repositories.AlertRule || AlertRule;
     const ReportRepository = repositories.ReportSnapshot || ReportSnapshot;
     const QuestionSetRunRepository = repositories.QuestionSetRun || QuestionSetRun;
+    const RetryBatchRepository = repositories.QuestionSetRetryBatch || QuestionSetRetryBatch;
+    const ScheduledExecutionRepository = repositories.ScheduledExecution || ScheduledExecution;
 
     const records = await RecordRepository.findAll({
       where: { project_id: projectId },
@@ -69,7 +73,9 @@ class ProjectDeletionService {
 
     const schedules = await ScheduleRepository.destroy({ where: { project_id: projectId } });
     const reports = await ReportRepository.destroy({ where: { project_id: projectId } });
+    const questionSetRetryBatches = await RetryBatchRepository.destroy({ where: { project_id: projectId } });
     const questionSetRuns = await QuestionSetRunRepository.destroy({ where: { project_id: projectId } });
+    const scheduledExecutions = await ScheduledExecutionRepository.destroy({ where: { project_id: projectId } });
     const alerts = await AlertRepository.destroy({ where: { project_id: projectId } });
     const prompts = await PromptRepository.destroy({ where: { project_id: projectId } });
     const groups = await PromptGroupRepository.destroy({ where: { project_id: projectId } });
@@ -85,7 +91,9 @@ class ProjectDeletionService {
         prompts,
         alerts,
         reports,
+        questionSetRetryBatches,
         questionSetRuns,
+        scheduledExecutions,
         schedules,
         records: deletedRecords,
         details,

@@ -473,13 +473,28 @@ class ProjectRunService {
     }
   }
 
-  async createTargetRecord({ target, runUser, projectData, keywords, scheduledExecutionId = null }) {
+  async createTargetRecord({
+    target,
+    runUser,
+    projectData,
+    keywords,
+    scheduledExecutionId = null,
+    questionSetRunId = null,
+    runSlotIndex = null,
+    executionMode = 'full_monitoring',
+    retryBatchId = null,
+    transaction = null
+  }) {
     const prompt = target.prompt;
     return QuestionRecord.create({
       user_id: runUser.id,
       project_id: projectData.id,
       tracked_prompt_id: prompt.id,
       scheduled_execution_id: Number(scheduledExecutionId) > 0 ? Number(scheduledExecutionId) : null,
+      question_set_run_id: Number(questionSetRunId) > 0 ? Number(questionSetRunId) : null,
+      run_slot_index: Number.isInteger(runSlotIndex) && runSlotIndex >= 0 ? runSlotIndex : null,
+      execution_mode: executionMode === 'analysis_only' ? 'analysis_only' : 'full_monitoring',
+      retry_batch_id: Number(retryBatchId) > 0 ? Number(retryBatchId) : null,
       platform: target.platform,
       platform_name: target.platform_name || target.platform,
       model_name: target.model_name || null,
@@ -487,18 +502,29 @@ class ProjectRunService {
       brand: projectData.name,
       brand_keywords: keywords.join(','),
       status: 'pending'
-    });
+    }, transaction ? { transaction } : undefined);
   }
 
-  async createRunEntries({ targets, runUser, projectData, keywords, scheduledExecutionId = null }) {
+  async createRunEntries({
+    targets,
+    runUser,
+    projectData,
+    keywords,
+    scheduledExecutionId = null,
+    questionSetRunId = null,
+    transaction = null
+  }) {
     const rows = [];
-    for (const target of targets) {
+    for (const [runSlotIndex, target] of targets.entries()) {
       const record = await this.createTargetRecord({
         target,
         runUser,
         projectData,
         keywords,
-        scheduledExecutionId
+        scheduledExecutionId,
+        questionSetRunId,
+        runSlotIndex: questionSetRunId ? runSlotIndex : null,
+        transaction
       });
       rows.push({ target, record });
     }
@@ -664,7 +690,8 @@ class ProjectRunService {
     platforms,
     user,
     promptSelectionExplicit = false,
-    scheduledExecutionId = null
+    scheduledExecutionId = null,
+    questionSetRunId = null
   }) {
     const projectData = project.toJSON ? project.toJSON() : project;
     const runUser = this.resolveRunUser(projectData, user);
@@ -752,7 +779,8 @@ class ProjectRunService {
       runUser,
       projectData,
       keywords,
-      scheduledExecutionId
+      scheduledExecutionId,
+      questionSetRunId
     });
 
     return {
@@ -824,9 +852,12 @@ class ProjectRunService {
     if (options.questionSetRunId) {
       await QuestionSetRun.update(
         {
-          record_ids: recordIds,
+          planned_record_count: prepared.entries.length,
           imported_rows: [],
-          completed_at: null
+          completed_at: null,
+          integrity_status: 'complete',
+          integrity_missing_record_count: 0,
+          integrity_error_code: null
         },
         {
           where: {
@@ -885,20 +916,15 @@ class ProjectRunService {
     });
     if (existingBatch) return retryReplayResult(existingBatch);
 
-    const storedIds = Array.isArray(storedRun.record_ids)
-      ? storedRun.record_ids.map(Number).filter(Number.isInteger)
-      : [];
-    const storedRecords = storedIds.length
-      ? await QuestionRecord.findAll({
-        where: {
-          id: { [require('sequelize').Op.in]: storedIds },
-          project_id: projectData.id
-        }
-      })
-      : [];
-    const storedById = new Map(storedRecords.map((record) => [Number(record.id), record]));
-    const orderedRecords = storedIds.map((id) => storedById.get(id)).filter(Boolean);
-    if (orderedRecords.length !== storedIds.length) {
+    const orderedRecords = await QuestionRecord.findAll({
+      where: {
+        question_set_run_id: runId,
+        project_id: projectData.id,
+        run_slot_index: { [require('sequelize').Op.not]: null }
+      },
+      order: [['run_slot_index', 'ASC'], ['id', 'ASC']]
+    });
+    if (orderedRecords.length !== Number(storedRun.planned_record_count || 0)) {
       throw runError('运行记录不完整，无法重试', 409);
     }
     if (orderedRecords.some((record) => record.status === 'pending')) {
@@ -1018,22 +1044,17 @@ class ProjectRunService {
         record_ids: []
       }, { transaction });
 
-      const currentIds = Array.isArray(run.record_ids)
-        ? run.record_ids.map(Number).filter(Number.isInteger)
-        : [];
-      const currentRecords = currentIds.length
-        ? await QuestionRecord.findAll({
-          where: {
-            id: { [require('sequelize').Op.in]: currentIds },
-            project_id: projectData.id
-          },
-          transaction,
-          lock: transaction.LOCK.UPDATE
-        })
-        : [];
-      const currentById = new Map(currentRecords.map((record) => [Number(record.id), record]));
-      const currentOrderedRecords = currentIds.map((id) => currentById.get(id)).filter(Boolean);
-      if (currentOrderedRecords.length !== currentIds.length) {
+      const currentOrderedRecords = await QuestionRecord.findAll({
+        where: {
+          question_set_run_id: runId,
+          project_id: projectData.id,
+          run_slot_index: { [require('sequelize').Op.not]: null }
+        },
+        order: [['run_slot_index', 'ASC'], ['id', 'ASC']],
+        transaction,
+        lock: transaction.LOCK.UPDATE
+      });
+      if (currentOrderedRecords.length !== Number(run.planned_record_count || 0)) {
         throw runError('运行记录不完整，无法重试', 409);
       }
       if (currentOrderedRecords.some((record) => record.status === 'pending')) {
@@ -1062,15 +1083,21 @@ class ProjectRunService {
 
       const entries = [];
       for (const previousRecord of claimedRecords) {
+        const runSlotIndex = Number(previousRecord.run_slot_index);
         const retryMode = analysisOnlyIds.has(Number(previousRecord.id))
           ? 'analysis_only'
           : 'full_monitoring';
         const platformStatus = availabilityByCode.get(String(previousRecord.platform || '').toLowerCase());
         const previousAttempt = Number(previousRecord.result_summary?.retry?.attempt) || 0;
+        await previousRecord.update({ run_slot_index: null }, { transaction });
         const retryRecord = await QuestionRecord.create({
           user_id: previousRecord.user_id,
           project_id: projectData.id,
           tracked_prompt_id: previousRecord.tracked_prompt_id,
+          question_set_run_id: runId,
+          run_slot_index: runSlotIndex,
+          execution_mode: retryMode,
+          retry_batch_id: retryBatch.id,
           platform: previousRecord.platform,
           platform_name: retryMode === 'full_monitoring'
             ? (platformStatus?.platform_name || previousRecord.platform_name || previousRecord.platform)
@@ -1129,12 +1156,7 @@ class ProjectRunService {
         });
       }
 
-      const replacementById = new Map(entries.map((entry) => [
-        Number(entry.previousRecordId),
-        Number(entry.record.id)
-      ]));
       await run.update({
-        record_ids: currentIds.map((id) => replacementById.get(id) || id),
         imported_rows: [],
         completed_at: null,
         paused_at: null,
@@ -1372,8 +1394,9 @@ class ProjectRunService {
     const pendingCount = rows.filter((row) => row.status === 'pending').length;
     const records = await QuestionRecord.findAll({
       where: {
-        id: { [require('sequelize').Op.in]: run.record_ids },
-        project_id: run.project_id
+        question_set_run_id: run.id,
+        project_id: run.project_id,
+        run_slot_index: { [require('sequelize').Op.not]: null }
       },
       attributes: ['id', 'status']
     });
@@ -1396,8 +1419,9 @@ class ProjectRunService {
     // 找到所有 pending 状态的记录
     const records = await QuestionRecord.findAll({
       where: {
-        id: { [require('sequelize').Op.in]: run.record_ids },
+        question_set_run_id: run.id,
         project_id: run.project_id,
+        run_slot_index: { [require('sequelize').Op.not]: null },
         status: 'pending'
       }
     });

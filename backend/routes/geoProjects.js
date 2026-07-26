@@ -757,12 +757,11 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
     }
     const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
 
-    // 先创建 QuestionSetRun 记录（record_ids 后续更新），以便 worker 暂停检查
+    // 先创建 QuestionSetRun 聚合，以便任务直接写入关系归属和稳定槽位。
     const questionSetRun = await QuestionSetRunService.createNativeRun({
       project: req.brandProject,
       questionSet: group,
-      user: req.user,
-      runData: { record_ids: [] }
+      user: req.user
     });
 
     const result = await ProjectRunService.enqueueProjectRun({
@@ -781,8 +780,6 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
       await questionSetRun.destroy().catch(() => {});
       return res.status(result.status || 400).json({ success: false, message: result.message, data: result.data });
     }
-    // 更新 record_ids
-    await questionSetRun.update({ record_ids: result.data.record_ids });
     return res.status(result.status || 202).json({
       success: true,
       message: result.message,

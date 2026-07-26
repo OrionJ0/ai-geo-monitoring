@@ -233,6 +233,69 @@ test('keeps SQLite for local development when DATABASE_URL is not configured', a
   }
 });
 
+test('existing SQLite schemas add indexed execution columns before model index sync', async () => {
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'geo-legacy-startup-'));
+  const databasePath = path.join(tempDirectory, 'legacy.sqlite');
+  const port = await reservePort();
+  const prepareScript = `
+    const { sequelize } = require('./models');
+    (async () => {
+      await sequelize.sync({ force: true });
+      await sequelize.query('DROP INDEX IF EXISTS question_records_scheduled_execution_id');
+      await sequelize.query('ALTER TABLE question_records DROP COLUMN scheduled_execution_id');
+      await sequelize.close();
+    })().catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+  `;
+  const prepared = spawnSync(process.execPath, ['-e', prepareScript], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      DB_LOGGING: 'false',
+      DB_STORAGE: databasePath,
+      DATABASE_URL: ''
+    },
+    encoding: 'utf8'
+  });
+  assert.equal(prepared.status, 0, prepared.stderr);
+
+  const child = spawn(process.execPath, ['app.js'], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      DB_LOGGING: 'false',
+      DB_STORAGE: databasePath,
+      DATABASE_URL: '',
+      HOST: '127.0.0.1',
+      PORT: String(port),
+      JWT_SECRET: 'test-legacy-startup-jwt-secret',
+      CONFIG_ENCRYPTION_KEY: '0'.repeat(64),
+      DEFAULT_ADMIN_PASSWORD: 'test-legacy-startup-admin-password'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  try {
+    const response = await waitForResponse(`http://127.0.0.1:${port}/api/ready`, 3000);
+    assert.equal(response.status, 200, stderr);
+  } finally {
+    child.kill('SIGTERM');
+    await new Promise((resolve) => {
+      if (child.exitCode !== null) resolve();
+      else child.once('exit', resolve);
+    });
+    fs.rmSync(tempDirectory, { recursive: true, force: true });
+  }
+});
+
 test('ready endpoint reports verified database and scheduler startup state', async () => {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'geo-ready-endpoint-'));
   const databasePath = path.join(tempDirectory, 'ready.sqlite');

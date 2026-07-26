@@ -100,6 +100,50 @@ test('deletes prompt metrics by prompt id and record id before removing records'
   assert.deepEqual(recordWhere.id[Op.in], [11, 12]);
 });
 
+test('preserves run-owned records and their evidence when prompt analysis is cleared', async () => {
+  let metricWhere = null;
+  let detailWhere = null;
+  let recordWhere = null;
+  const models = {
+    DetectionSchedule: { destroy: async () => 0 },
+    QuestionRecord: {
+      findAll: async ({ attributes }) => {
+        assert.deepEqual(attributes, ['id', 'question_set_run_id']);
+        return [
+          { id: 11, question_set_run_id: 90 },
+          { id: 12, question_set_run_id: null }
+        ];
+      },
+      destroy: async ({ where }) => {
+        recordWhere = where;
+        return 1;
+      }
+    },
+    VisibilityMetric: {
+      destroy: async ({ where }) => {
+        metricWhere = where;
+        return 1;
+      }
+    },
+    ResultDetail: {
+      destroy: async ({ where }) => {
+        detailWhere = where;
+        return 1;
+      }
+    }
+  };
+
+  const result = await PromptAnalysisCleanupService.deleteForPrompts(7, [3], models);
+
+  assert.equal(result.records, 1);
+  assert.deepEqual(detailWhere.question_record_id[Op.in], [12]);
+  assert.deepEqual(recordWhere.id[Op.in], [12]);
+  assert.deepEqual(
+    metricWhere[Op.and][0][Op.or][1].question_record_id[Op.notIn],
+    [11]
+  );
+});
+
 test('removes generated report snapshots after prompt analysis data changes', async () => {
   let reportWhere = null;
   const models = {
@@ -173,4 +217,44 @@ test('deletes project analysis records, metrics, details and generated reports w
   assert.equal(recordWhere.project_id, 7);
   assert.deepEqual(recordWhere.id[Op.in], [21, 22]);
   assert.deepEqual(reportWhere, { project_id: 7, status: 'generated' });
+});
+
+test('project analysis cleanup also preserves run-owned historical evidence', async () => {
+  let metricWhere = null;
+  let detailWhere = null;
+  let recordWhere = null;
+  const models = {
+    QuestionRecord: {
+      findAll: async () => [
+        { id: 21, question_set_run_id: 90 },
+        { id: 22, question_set_run_id: null }
+      ],
+      destroy: async ({ where }) => {
+        recordWhere = where;
+        return 1;
+      }
+    },
+    VisibilityMetric: {
+      destroy: async ({ where }) => {
+        metricWhere = where;
+        return 1;
+      }
+    },
+    ResultDetail: {
+      destroy: async ({ where }) => {
+        detailWhere = where;
+        return 1;
+      }
+    }
+  };
+
+  const result = await PromptAnalysisCleanupService.deleteForProject(7, models);
+
+  assert.equal(result.records, 1);
+  assert.deepEqual(detailWhere.question_record_id[Op.in], [22]);
+  assert.deepEqual(recordWhere.id[Op.in], [22]);
+  assert.deepEqual(
+    metricWhere[Op.and][0][Op.or][1].question_record_id[Op.notIn],
+    [21]
+  );
 });

@@ -195,19 +195,21 @@ async function ensureColumn(tableName, columnName, definition) {
   }
 }
 
-async function ensureIndex(tableName, indexName, fields) {
+async function ensureIndex(tableName, indexName, fields, options = {}) {
   const qi = sequelize.getQueryInterface();
   try {
     const indexes = await qi.showIndex(tableName);
     const expectedFields = fields.join(',');
-    const exists = indexes.some((index) => (
-      index.name === indexName
-      || index.fields
-        .map((field) => field.attribute || field.name)
-        .join(',') === expectedFields
-    ));
+    const exists = indexes.some((index) => {
+      const sameIndex = index.name === indexName
+        || index.fields
+          .map((field) => field.attribute || field.name)
+          .join(',') === expectedFields;
+      const matchingUniqueness = options.unique !== true || index.unique === true;
+      return sameIndex && matchingUniqueness;
+    });
     if (!exists) {
-      await qi.addIndex(tableName, fields, { name: indexName });
+      await qi.addIndex(tableName, fields, { name: indexName, ...options });
       console.log(`已添加 ${tableName}.${indexName} 索引`);
     }
   } catch (e) {
@@ -272,6 +274,71 @@ async function ensureGeoMonitoringColumns() {
     'question_records',
     'question_records_scheduled_execution_id',
     ['scheduled_execution_id']
+  );
+  await ensureColumn('question_records', 'question_set_run_id', {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  });
+  await ensureColumn('question_records', 'run_slot_index', {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  });
+  await ensureColumn('question_records', 'execution_mode', {
+    type: DataTypes.STRING(24),
+    allowNull: false,
+    defaultValue: 'full_monitoring'
+  });
+  await ensureColumn('question_records', 'retry_batch_id', {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  });
+  await ensureColumn('question_records', 'lease_owner', {
+    type: DataTypes.STRING(120),
+    allowNull: true
+  });
+  await ensureColumn('question_records', 'lease_expires_at', {
+    type: DataTypes.DATE,
+    allowNull: true
+  });
+  await ensureColumn('question_set_runs', 'planned_record_count', {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0
+  });
+  await ensureColumn('question_set_runs', 'integrity_status', {
+    type: DataTypes.STRING(32),
+    allowNull: false,
+    defaultValue: 'complete'
+  });
+  await ensureColumn('question_set_runs', 'integrity_missing_record_count', {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0
+  });
+  await ensureColumn('question_set_runs', 'integrity_error_code', {
+    type: DataTypes.STRING(80),
+    allowNull: true
+  });
+  await ensureIndex(
+    'question_records',
+    'question_records_run_slot_unique',
+    ['question_set_run_id', 'run_slot_index'],
+    { unique: true }
+  );
+  await ensureIndex(
+    'question_records',
+    'question_records_run_status',
+    ['question_set_run_id', 'status']
+  );
+  await ensureIndex(
+    'question_records',
+    'question_records_lease_status',
+    ['lease_expires_at', 'status']
+  );
+  await ensureIndex(
+    'question_records',
+    'question_records_retry_batch_id',
+    ['retry_batch_id']
   );
 }
 
@@ -453,7 +520,10 @@ async function ensureDefaultSettings() {
 (async () => {
   try {
     await ensureExistingTableProjectColumns();
+    // 旧库上的模型索引可能引用本版本新增列；必须先补列，再让 Sequelize 同步索引。
+    await ensureGeoMonitoringColumns();
     await sequelize.sync();
+    // 新库在 sync 前还没有表；再次校验可同时覆盖全新安装与旧库升级。
     await ensureGeoMonitoringColumns();
     await ensureDynamicPlatformColumns();
     // 确保 users 表存在会员到期列

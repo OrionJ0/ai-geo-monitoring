@@ -93,6 +93,23 @@ QuestionSetRetryBatch.belongsTo(QuestionSetRun, {
   as: 'questionSetRun'
 });
 
+QuestionSetRun.hasMany(QuestionRecord, {
+  foreignKey: 'question_set_run_id',
+  as: 'questionRecords'
+});
+QuestionRecord.belongsTo(QuestionSetRun, {
+  foreignKey: 'question_set_run_id',
+  as: 'questionSetRun'
+});
+QuestionSetRetryBatch.hasMany(QuestionRecord, {
+  foreignKey: 'retry_batch_id',
+  as: 'questionRecords'
+});
+QuestionRecord.belongsTo(QuestionSetRetryBatch, {
+  foreignKey: 'retry_batch_id',
+  as: 'retryBatch'
+});
+
 ScheduledExecution.hasMany(QuestionRecord, {
   foreignKey: 'scheduled_execution_id',
   as: 'questionRecords'

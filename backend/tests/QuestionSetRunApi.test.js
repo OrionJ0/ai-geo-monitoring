@@ -145,16 +145,14 @@ test('用户可以按问题集筛选运行历史', async () => {
     user_id: user.id,
     question_set_id: 101,
     question_set_name: '采购决策问题集',
-    source: 'native',
-    record_ids: []
+    source: 'native'
   });
   await QuestionSetRun.create({
     project_id: project.id,
     user_id: user.id,
     question_set_id: 202,
     question_set_name: '品牌认知问题集',
-    source: 'native',
-    record_ids: []
+    source: 'native'
   });
 
   const filteredResponse = await requestRoute('get', '/:projectId/question-set-runs', {
@@ -222,7 +220,7 @@ test('用户可以在原报告中重试失败项且重复提交不会创建第�
     question_set_id: 88,
     question_set_name: '失败项重试测试',
     source: 'native',
-    record_ids: [failedRecord.id],
+    planned_record_count: 1,
     imported_rows: [{
       record_id: failedRecord.id,
       question: failedRecord.question,
@@ -230,6 +228,10 @@ test('用户可以在原报告中重试失败项且重复提交不会创建第�
       status: 'failed'
     }],
     completed_at: new Date()
+  });
+  await failedRecord.update({
+    question_set_run_id: nativeRun.id,
+    run_slot_index: 0
   });
 
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
@@ -272,17 +274,23 @@ test('用户可以在原报告中重试失败项且重复提交不会创建第�
     assert.equal(scheduledContext.entries[0].target.platformConfig.temperature, 0.3);
 
     await nativeRun.reload();
-    assert.equal(nativeRun.record_ids.length, 1);
-    assert.notEqual(nativeRun.record_ids[0], failedRecord.id);
     assert.deepEqual(nativeRun.imported_rows, []);
     assert.equal(nativeRun.completed_at, null);
 
-    const retryRecord = await QuestionRecord.findByPk(nativeRun.record_ids[0]);
+    const retryRecord = await QuestionRecord.findOne({
+      where: {
+        question_set_run_id: nativeRun.id,
+        run_slot_index: 0
+      }
+    });
+    assert.notEqual(retryRecord.id, failedRecord.id);
     assert.equal(retryRecord.status, 'pending');
     assert.equal(retryRecord.model_name, 'qwen-current-model');
     assert.equal(retryRecord.result_summary.retry.previous_record_id, failedRecord.id);
     await failedRecord.reload();
     assert.equal(failedRecord.status, 'failed');
+    assert.equal(failedRecord.question_set_run_id, nativeRun.id);
+    assert.equal(failedRecord.run_slot_index, null);
     await retryRecord.update({ status: 'failed', error_message: '再次失败' });
 
     const duplicate = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
@@ -343,8 +351,12 @@ test('结构化分析失败时复用原回答且不重新消耗监测配额', as
     question_set_id: 89,
     question_set_name: '仅重试结构化分析',
     source: 'native',
-    record_ids: [failedRecord.id],
+    planned_record_count: 1,
     completed_at: new Date()
+  });
+  await failedRecord.update({
+    question_set_run_id: nativeRun.id,
+    run_slot_index: 0
   });
 
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
@@ -380,9 +392,14 @@ test('结构化分析失败时复用原回答且不重新消耗监测配额', as
       source_origin: 'web_search'
     }]);
 
-    await nativeRun.reload();
-    const retryRecord = await QuestionRecord.findByPk(nativeRun.record_ids[0]);
+    const retryRecord = await QuestionRecord.findOne({
+      where: {
+        question_set_run_id: nativeRun.id,
+        run_slot_index: 0
+      }
+    });
     assert.equal(retryRecord.result_summary.retry.kind, 'analysis_only');
+    assert.equal(retryRecord.execution_mode, 'analysis_only');
     const copiedDetail = await ResultDetail.findOne({
       where: { question_record_id: retryRecord.id }
     });
@@ -438,9 +455,13 @@ test('重试配额不足时恢复原报告且不留下待处理记录', async ()
     question_set_id: 92,
     question_set_name: '配额回滚测试',
     source: 'native',
-    record_ids: [failedRecord.id],
+    planned_record_count: 1,
     imported_rows: cachedRows,
     completed_at: completedAt
+  });
+  await failedRecord.update({
+    question_set_run_id: nativeRun.id,
+    run_slot_index: 0
   });
 
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
@@ -475,9 +496,10 @@ test('重试配额不足时恢复原报告且不留下待处理记录', async ()
     assert.equal(await QuestionRecord.count({ where: { project_id: project.id } }), beforeCount);
 
     await nativeRun.reload();
-    assert.deepEqual(nativeRun.record_ids, [failedRecord.id]);
     assert.deepEqual(nativeRun.imported_rows, cachedRows);
     assert.equal(nativeRun.completed_at.toISOString(), completedAt.toISOString());
+    await failedRecord.reload();
+    assert.equal(failedRecord.run_slot_index, 0);
   } finally {
     AIPlatformService.getPlatformAvailability = originalGetAvailability;
     ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
@@ -520,8 +542,12 @@ test('完整监测重试不会调用已移出当前项目范围的平台', async
     question_set_id: 93,
     question_set_name: '平台范围测试',
     source: 'native',
-    record_ids: [failedRecord.id],
+    planned_record_count: 1,
     completed_at: new Date()
+  });
+  await failedRecord.update({
+    question_set_run_id: nativeRun.id,
+    run_slot_index: 0
   });
 
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
@@ -586,7 +612,11 @@ test('暂停和恢复接口不能操作另一个项目的问题集运行', async
     user_id: user.id,
     question_set_name: '隔离测试',
     source: 'native',
-    record_ids: [pending.id]
+    planned_record_count: 1
+  });
+  await pending.update({
+    question_set_run_id: otherRun.id,
+    run_slot_index: 0
   });
 
   const pauseResponse = await requestRoute('post', '/:projectId/question-set-runs/:runId/pause', {

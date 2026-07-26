@@ -153,12 +153,19 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     project,
     questionSet,
     user,
-    runData: { record_ids: [completed.id, failed.id] }
+    runData: { plannedRecordCount: 2 }
   });
+  await completed.update({ question_set_run_id: run.id, run_slot_index: 0 });
+  await failed.update({ question_set_run_id: run.id, run_slot_index: 1 });
   const report = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
 
   assert.ok(await QuestionSetRun.findByPk(run.id));
   assert.equal(report.status, 'partial');
+  assert.deepEqual(report.integrity, {
+    status: 'complete',
+    missing_record_count: 0,
+    error_code: null
+  });
   assert.equal(report.summary.total, 2);
   assert.equal(report.summary.completed, 1);
   assert.equal(report.summary.failed, 1);
@@ -237,8 +244,9 @@ test('历史混合引用不进入问题集核心 KPI，但保留可解释的旧�
     project,
     questionSet,
     user,
-    runData: { record_ids: [record.id] }
+    runData: { plannedRecordCount: 1 }
   });
+  await record.update({ question_set_run_id: run.id, run_slot_index: 0 });
 
   const report = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
 
@@ -271,8 +279,9 @@ test('旧执行器生成的终态快照不能覆盖已进入新一轮重试的�
     project,
     questionSet,
     user,
-    runData: { record_ids: [record.id] }
+    runData: { plannedRecordCount: 1 }
   });
+  await record.update({ question_set_run_id: run.id, run_slot_index: 0 });
   const originalGetNativeRows = QuestionSetRunService.getNativeRows;
   QuestionSetRunService.getNativeRows = async (...args) => {
     const rows = await originalGetNativeRows.apply(QuestionSetRunService, args);
@@ -336,7 +345,6 @@ test('报告不再用文本规则猜测无竞品项目的历史排名', async ()
     question_set_name: '校园周界厂家',
     source: 'imported',
     schema_version: 'question_set_run_v1',
-    record_ids: [],
     imported_rows: [{
       record_id: null,
       question_id: null,
@@ -390,7 +398,6 @@ test('v2 结构化候选顺序可在无竞品项目中产生品牌排名并随 C
     question_set_name: '结构化候选顺序',
     source: 'imported',
     schema_version: 'question_set_run_v1',
-    record_ids: [],
     imported_rows: [{
       record_id: null,
       question_id: null,

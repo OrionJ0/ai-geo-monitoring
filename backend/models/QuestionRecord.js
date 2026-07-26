@@ -27,6 +27,35 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
     type: DataTypes.INTEGER,
     allowNull: true
   },
+  question_set_run_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  run_slot_index: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    validate: { min: 0 }
+  },
+  execution_mode: {
+    type: DataTypes.STRING(24),
+    allowNull: false,
+    defaultValue: 'full_monitoring',
+    validate: {
+      isIn: [['full_monitoring', 'analysis_only']]
+    }
+  },
+  retry_batch_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  lease_owner: {
+    type: DataTypes.STRING(120),
+    allowNull: true
+  },
+  lease_expires_at: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
   platform: {
     type: DataTypes.STRING(50),
     allowNull: false
@@ -91,6 +120,23 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
     },
     {
       fields: ['scheduled_execution_id']
+    },
+    {
+      fields: ['question_set_run_id']
+    },
+    {
+      fields: ['question_set_run_id', 'status']
+    },
+    {
+      name: 'question_records_run_slot_unique',
+      unique: true,
+      fields: ['question_set_run_id', 'run_slot_index']
+    },
+    {
+      fields: ['lease_expires_at', 'status']
+    },
+    {
+      fields: ['retry_batch_id']
     },
     {
       fields: ['platform']

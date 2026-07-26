@@ -226,7 +226,12 @@ class QuestionSetRunService {
       question_set_name: questionSetRow.name,
       source: 'native',
       schema_version: SCHEMA_VERSION,
-      record_ids: Array.isArray(runData?.record_ids) ? runData.record_ids : [],
+      planned_record_count: Number.isInteger(runData?.plannedRecordCount)
+        ? Math.max(0, runData.plannedRecordCount)
+        : 0,
+      integrity_status: 'complete',
+      integrity_missing_record_count: 0,
+      integrity_error_code: null,
       started_at: new Date()
     });
   }
@@ -243,17 +248,19 @@ class QuestionSetRunService {
 
   async getNativeRows(run, repositories = {}) {
     const Record = repositories.QuestionRecord || QuestionRecord;
-    const ids = Array.isArray(run.record_ids) ? run.record_ids.map(Number).filter(Number.isInteger) : [];
-    if (!ids.length) return [];
     const records = await Record.findAll({
-      where: { id: { [Op.in]: ids }, project_id: run.project_id },
+      where: {
+        question_set_run_id: run.id,
+        project_id: run.project_id,
+        run_slot_index: { [Op.not]: null }
+      },
       include: [
         { model: repositories.ResultDetail || ResultDetail, as: 'resultDetail', required: false },
         { model: repositories.VisibilityMetric || VisibilityMetric, as: 'visibilityMetric', required: false }
-      ]
+      ],
+      order: [['run_slot_index', 'ASC'], ['id', 'ASC']]
     });
-    const byId = new Map(records.map((record) => [Number(record.id), record]));
-    return ids.map((id) => byId.get(id)).filter(Boolean).map(normalizeNativeRow);
+    return records.map(normalizeNativeRow);
   }
 
   async getReport({ projectId, runId, repositories = {} }) {
@@ -270,7 +277,10 @@ class QuestionSetRunService {
       return hasCompetitorBaseline ? row : { ...row, brand_rank: null };
     });
     const pausedAt = run.paused_at || null;
-    const status = deriveStatus(rows, pausedAt);
+    const integrityStatus = run.integrity_status || 'complete';
+    const status = integrityStatus === 'missing_records'
+      ? 'failed'
+      : deriveStatus(rows, pausedAt);
     return {
       id: run.id,
       project_id: run.project_id,
@@ -284,6 +294,11 @@ class QuestionSetRunService {
       paused_at: pausedAt,
       created_at: run.created_at,
       updated_at: run.updated_at,
+      integrity: {
+        status: integrityStatus,
+        missing_record_count: Number(run.integrity_missing_record_count) || 0,
+        error_code: run.integrity_error_code || null
+      },
       summary: summarize(rows),
       rows
     };
@@ -297,7 +312,7 @@ class QuestionSetRunService {
     if (run.source !== 'native') return false;
     const revision = Number(run.revision) || 0;
     const rows = await this.getNativeRows(run, repositories);
-    const expectedRows = Array.isArray(run.record_ids) ? run.record_ids.length : 0;
+    const expectedRows = Number(run.planned_record_count) || 0;
     const status = deriveStatus(rows, run.paused_at || null);
     if (
       status === 'running'
@@ -309,7 +324,10 @@ class QuestionSetRunService {
       {
         imported_rows: rows,
         completed_at: new Date(),
-        paused_at: null
+        paused_at: null,
+        integrity_status: 'complete',
+        integrity_missing_record_count: 0,
+        integrity_error_code: null
       },
       {
         where: {
@@ -372,7 +390,10 @@ class QuestionSetRunService {
       question_set_name: parsed.questionSetName,
       source: 'imported',
       schema_version: parsed.schemaVersion,
-      record_ids: [],
+      planned_record_count: 0,
+      integrity_status: 'complete',
+      integrity_missing_record_count: 0,
+      integrity_error_code: null,
       imported_rows: parsed.rows,
       started_at: parsed.startedAt,
       completed_at: parsed.completedAt

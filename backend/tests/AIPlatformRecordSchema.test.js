@@ -80,6 +80,30 @@ test('scheduled executions persist one unique ledger row per schedule slot', asy
   )));
 });
 
+test('question-set records persist explicit run ownership and one current row per slot', async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const questionRecord = await queryInterface.describeTable('question_records');
+  const questionSetRun = await queryInterface.describeTable('question_set_runs');
+  const indexes = await queryInterface.showIndex('question_records');
+
+  assert.ok(questionRecord.question_set_run_id);
+  assert.ok(questionRecord.run_slot_index);
+  assert.ok(questionRecord.execution_mode);
+  assert.ok(questionRecord.retry_batch_id);
+  assert.equal(questionSetRun.record_ids, undefined);
+  assert.ok(questionRecord.lease_owner);
+  assert.ok(questionRecord.lease_expires_at);
+  assert.ok(questionSetRun.planned_record_count);
+  assert.ok(questionSetRun.integrity_status);
+  assert.ok(questionSetRun.integrity_missing_record_count);
+  assert.ok(questionSetRun.integrity_error_code);
+  assert.ok(indexes.some((index) => (
+    index.unique
+    && index.fields.map((field) => field.attribute).join(',')
+      === 'question_set_run_id,run_slot_index'
+  )));
+});
+
 test('postgres startup migration detects Sequelize user-defined enum descriptions', () => {
   const appSource = fs.readFileSync(path.resolve(__dirname, '../app.js'), 'utf8');
 

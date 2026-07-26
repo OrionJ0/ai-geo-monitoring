@@ -49,10 +49,24 @@ test('permanently deletes archived project data before deleting the project row'
         return 4;
       }
     },
+    QuestionSetRetryBatch: {
+      destroy: async ({ where }) => {
+        calls.push('question-set-retry-batches:destroy');
+        whereByModel.questionSetRetryBatchDestroy = where;
+        return 1;
+      }
+    },
     QuestionSetRun: {
       destroy: async ({ where }) => {
         calls.push('question-set-runs:destroy');
         whereByModel.questionSetRunDestroy = where;
+        return 2;
+      }
+    },
+    ScheduledExecution: {
+      destroy: async ({ where }) => {
+        calls.push('scheduled-executions:destroy');
+        whereByModel.scheduledExecutionDestroy = where;
         return 2;
       }
     },
@@ -103,7 +117,9 @@ test('permanently deletes archived project data before deleting the project row'
     'records:destroy',
     'schedules:destroy',
     'reports:destroy',
+    'question-set-retry-batches:destroy',
     'question-set-runs:destroy',
+    'scheduled-executions:destroy',
     'alerts:destroy',
     'prompts:destroy',
     'groups:destroy',
@@ -116,7 +132,9 @@ test('permanently deletes archived project data before deleting the project row'
   assert.deepEqual(whereByModel.recordDestroy.id[Op.in], [21, 22]);
   assert.deepEqual(whereByModel.scheduleDestroy, { project_id: 7 });
   assert.deepEqual(whereByModel.reportDestroy, { project_id: 7 });
+  assert.deepEqual(whereByModel.questionSetRetryBatchDestroy, { project_id: 7 });
   assert.deepEqual(whereByModel.questionSetRunDestroy, { project_id: 7 });
+  assert.deepEqual(whereByModel.scheduledExecutionDestroy, { project_id: 7 });
   assert.deepEqual(whereByModel.alertDestroy, { project_id: 7 });
   assert.deepEqual(whereByModel.promptDestroy, { project_id: 7 });
   assert.deepEqual(whereByModel.groupDestroy, { project_id: 7 });

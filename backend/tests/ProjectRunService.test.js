@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { QuestionRecord, ResultDetail, BrandCompetitor } = require('../models');
+const {
+  QuestionRecord,
+  QuestionSetRun,
+  ResultDetail,
+  BrandCompetitor
+} = require('../models');
 const AIPlatformService = require('../services/AIPlatformService');
 const ProjectRunService = require('../services/ProjectRunService');
 const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
@@ -654,7 +659,8 @@ test('creates run records for every project run target before execution', async 
       runUser: { id: 9 },
       projectData: { id: 2, name: 'Goodie AI' },
       keywords: ['Goodie AI'],
-      scheduledExecutionId: 77
+      scheduledExecutionId: 77,
+      questionSetRunId: 41
     });
 
     assert.equal(entries.length, 3);
@@ -662,6 +668,13 @@ test('creates run records for every project run target before execution', async 
     assert.deepEqual(createdPayloads.map((payload) => payload.tracked_prompt_id), [1, 2, 3]);
     assert.deepEqual(createdPayloads.map((payload) => payload.status), ['pending', 'pending', 'pending']);
     assert.deepEqual(createdPayloads.map((payload) => payload.scheduled_execution_id), [77, 77, 77]);
+    assert.deepEqual(createdPayloads.map((payload) => payload.question_set_run_id), [41, 41, 41]);
+    assert.deepEqual(createdPayloads.map((payload) => payload.run_slot_index), [0, 1, 2]);
+    assert.deepEqual(createdPayloads.map((payload) => payload.execution_mode), [
+      'full_monitoring',
+      'full_monitoring',
+      'full_monitoring'
+    ]);
   } finally {
     QuestionRecord.create = originalCreateRecord;
   }
@@ -805,7 +818,10 @@ test('queues a project run without waiting for prepared targets to finish', asyn
   const originalFindCompetitors = BrandCompetitor.findAll;
   const originalCreateEntries = ProjectRunService.createRunEntries;
   const originalSchedule = ProjectRunService.schedulePreparedRun;
+  const originalUpdateRun = QuestionSetRun.update;
   let scheduledContext = null;
+  let createEntriesOptions = null;
+  let runUpdate = null;
 
   AIPlatformService.getPlatformAvailability = async () => [{
     code: 'doubao',
@@ -818,10 +834,17 @@ test('queues a project run without waiting for prepared targets to finish', asyn
   ProjectRunService.getRuntimeSettings = async () => ({ ai_run_concurrency: 2, ai_retry_count: 3, ai_default_timeout_seconds: 90, ai_default_max_tokens: 4096 });
   ProjectRunService.consumeRunQuota = async () => ({ ok: true, used: 2, limit: 100 });
   BrandCompetitor.findAll = async () => [];
-  ProjectRunService.createRunEntries = async ({ targets }) => targets.map((target, index) => ({
-    target,
-    record: { id: index + 10 }
-  }));
+  ProjectRunService.createRunEntries = async (options) => {
+    createEntriesOptions = options;
+    return options.targets.map((target, index) => ({
+      target,
+      record: { id: index + 10 }
+    }));
+  };
+  QuestionSetRun.update = async (payload, options) => {
+    runUpdate = { payload, options };
+    return [1];
+  };
   ProjectRunService.schedulePreparedRun = (context) => {
     scheduledContext = context;
   };
@@ -834,7 +857,8 @@ test('queues a project run without waiting for prepared targets to finish', asyn
         { id: 4, question: 'GEO 监测怎么做', enabled: true, platforms: ['doubao'] }
       ],
       platforms: ['doubao'],
-      user: { id: 9, role: 'user' }
+      user: { id: 9, role: 'user' },
+      questionSetRunId: 41
     });
 
     assert.equal(result.ok, true);
@@ -844,6 +868,24 @@ test('queues a project run without waiting for prepared targets to finish', asyn
     assert.equal(result.data.pending, 2);
     assert.deepEqual(result.data.record_ids, [10, 11]);
     assert.equal(scheduledContext.entries.length, 2);
+    assert.equal(createEntriesOptions.questionSetRunId, 41);
+    assert.equal(scheduledContext.questionSetRunId, 41);
+    assert.deepEqual(runUpdate, {
+      payload: {
+        planned_record_count: 2,
+        imported_rows: [],
+        completed_at: null,
+        integrity_status: 'complete',
+        integrity_missing_record_count: 0,
+        integrity_error_code: null
+      },
+      options: {
+        where: {
+          id: 41,
+          project_id: 2
+        }
+      }
+    });
   } finally {
     AIPlatformService.getPlatformAvailability = originalGetAvailability;
     ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
@@ -851,6 +893,7 @@ test('queues a project run without waiting for prepared targets to finish', asyn
     BrandCompetitor.findAll = originalFindCompetitors;
     ProjectRunService.createRunEntries = originalCreateEntries;
     ProjectRunService.schedulePreparedRun = originalSchedule;
+    QuestionSetRun.update = originalUpdateRun;
   }
 });
 
