@@ -12,6 +12,7 @@ const { authRequired, adminRequired } = require('../middleware/auth');
 const { Op } = require('sequelize');
 const AIPlatformService = require('../services/AIPlatformService');
 const ResultParserService = require('../services/ResultParserService');
+const ProjectRunService = require('../services/ProjectRunService');
 const ProjectRecordFinalizationService = require('../services/ProjectRecordFinalizationService');
 const ScheduleProjectContextService = require('../services/ScheduleProjectContextService');
 const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
@@ -97,22 +98,33 @@ async function saveCompletedDetectionResult({
     brand: brand ? String(brand).trim() : null,
     brand_keywords: brandKeywordsStr || ''
   });
-
-  await ResultDetail.create({
-    question_record_id: record.id,
-    ai_response_original: responseText,
-    parsing_status: 'completed'
+  const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
+    retryMode: 'analysis_only'
   });
-
-  const keywordsArr = typeof brandKeywordsStr === 'string'
-    ? brandKeywordsStr.split(/[,，]/).map(s => s.trim()).filter(Boolean)
-    : [];
-  await ProjectRecordFinalizationService.finalize({
-    record,
-    responseText,
-    aiResponse,
-    keywords: keywordsArr
+  const lease = await ProjectRunService.claimRecordExecution(record.id, { leaseMs });
+  if (!lease.claimed) throw new Error('record_lease_claim_rejected');
+  const heartbeat = ProjectRunService.startRecordLeaseHeartbeat({
+    recordId: record.id,
+    executionToken: lease.executionToken,
+    leaseMs: lease.leaseMs
   });
+  try {
+    const keywordsArr = typeof brandKeywordsStr === 'string'
+      ? brandKeywordsStr.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+      : [];
+    await ProjectRecordFinalizationService.finalize({
+      record,
+      executionToken: lease.executionToken,
+      persistResponseDetail: true,
+      responseText,
+      aiResponse,
+      providerCitations: ProjectRunService.snapshotProviderCitations(aiResponse),
+      keywords: keywordsArr
+    });
+  } finally {
+    await heartbeat.stop();
+    await ProjectRunService.releaseRecordExecution(record.id, lease.executionToken);
+  }
   return record;
 }
 
@@ -271,7 +283,31 @@ router.post('/create', authRequired, async (req, res) => {
 
 // 异步处理AI查询
 async function processAIQuery(recordId, platform, question, platformConfig, runtimeSettings) {
+  let rec = null;
+  let executionToken = null;
+  let leaseHeartbeat = null;
   try {
+    rec = await QuestionRecord.findByPk(recordId);
+    if (!rec) return;
+    const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
+      target: { platformConfig },
+      runtimeSettings
+    });
+    const lease = await ProjectRunService.claimRecordExecution(recordId, { leaseMs });
+    if (!lease.claimed) {
+      console.warn('检测任务领取执行租约失败:', {
+        record_id: recordId,
+        error_code: 'record_lease_claim_rejected'
+      });
+      return;
+    }
+    executionToken = lease.executionToken;
+    leaseHeartbeat = ProjectRunService.startRecordLeaseHeartbeat({
+      recordId,
+      executionToken,
+      leaseMs: lease.leaseMs
+    });
+
     // 调用AI平台API
     const aiResult = await AIPlatformService.queryPlatform(platform, question, {
       config: platformConfig,
@@ -280,12 +316,14 @@ async function processAIQuery(recordId, platform, question, platformConfig, runt
 
     if (!aiResult.success) {
       const failureMessage = runtimePlatformFailureMessage(aiResult);
-      await QuestionRecord.update(
+      await ProjectRunService.failRecord(
+        rec,
+        failureMessage,
         {
-          status: 'failed',
-          error_message: failureMessage
+          stage: 'monitoring_request',
+          error_code: aiResult.error_code || 'provider_error'
         },
-        { where: { id: recordId } }
+        { executionToken }
       );
       return;
     }
@@ -293,42 +331,47 @@ async function processAIQuery(recordId, platform, question, platformConfig, runt
     // 仅保存原始回答文本
     const originalText = ResultParserService.extractResponseText(aiResult.data);
     if (!String(originalText || '').trim()) {
-      await QuestionRecord.update(
+      await ProjectRunService.failRecord(
+        rec,
+        '监测平台返回内容为空',
         {
-          status: 'failed',
-          error_message: '监测平台返回内容为空'
+          stage: 'monitoring_response',
+          error_code: 'empty_provider_response'
         },
-        { where: { id: recordId } }
+        { executionToken }
       );
       return;
     }
-    await ResultDetail.create({
-      question_record_id: recordId,
-      ai_response_original: originalText,
-      parsing_status: 'completed'
-    });
 
-    // 读取记录以获取关键词，并计算统计
-    const rec = await QuestionRecord.findByPk(recordId);
+    // 读取记录中的关键词，并在一个事务中提交回答、指标和终态
     const brandKeywordsArr = typeof rec?.brand_keywords === 'string'
       ? rec.brand_keywords.split(/[,，]/).map(s => s.trim()).filter(Boolean)
       : Array.isArray(rec?.brand_keywords) ? rec.brand_keywords : [];
     await ProjectRecordFinalizationService.finalize({
       record: rec,
+      executionToken,
+      persistResponseDetail: true,
       responseText: originalText,
       aiResponse: aiResult.data,
+      providerCitations: ProjectRunService.snapshotProviderCitations(aiResult.data),
       keywords: brandKeywordsArr
     });
 
   } catch (error) {
     console.error(`处理AI查询失败 (recordId: ${recordId}):`, error);
-    await QuestionRecord.update(
-      {
-        status: 'failed',
-        error_message: SAFE_PLATFORM_FAILURE_MESSAGE
-      },
-      { where: { id: recordId } }
-    );
+    if (rec) {
+      await ProjectRunService.failRecord(
+        rec,
+        SAFE_PLATFORM_FAILURE_MESSAGE,
+        { stage: 'worker_exception', error_code: 'detection_worker_failed' },
+        { executionToken }
+      );
+    }
+  } finally {
+    if (leaseHeartbeat) await leaseHeartbeat.stop();
+    if (executionToken) {
+      await ProjectRunService.releaseRecordExecution(recordId, executionToken);
+    }
   }
 }
 

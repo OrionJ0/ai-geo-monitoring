@@ -753,6 +753,9 @@ test('数据库执行租约只抢占仍为 pending 且尚未被其他进程领�
     assert.equal(calls[0][1].where.status, 'pending');
     assert.equal(calls[0][1].where.execution_token, null);
     assert.match(calls[0][0].execution_token, /^[0-9a-f-]{36}$/);
+    assert.equal(typeof calls[0][0].lease_owner, 'string');
+    assert.ok(calls[0][0].lease_owner.length > 0);
+    assert.ok(calls[0][0].lease_expires_at instanceof Date);
     assert.ok(calls[0][0].execution_started_at instanceof Date);
   } finally {
     QuestionRecord.update = originalUpdate;

@@ -25,13 +25,24 @@ test('detection responses avoid raw internal provider failures', () => {
   assert.doesNotMatch(routeSource, /message:\s*aiResult\.error/);
 });
 
-test('async detection guards empty AI responses before creating result details', () => {
+test('async detection guards empty AI responses before atomically finalizing result details', () => {
   const extractIndex = routeSource.indexOf('const originalText = ResultParserService.extractResponseText(aiResult.data)');
-  const detailIndex = routeSource.indexOf('await ResultDetail.create', extractIndex);
+  const detailIndex = routeSource.indexOf('persistResponseDetail: true', extractIndex);
   const guardIndex = routeSource.indexOf('监测平台返回内容为空', extractIndex);
 
   assert.ok(extractIndex > 0);
   assert.ok(detailIndex > extractIndex);
   assert.ok(guardIndex > extractIndex);
   assert.ok(guardIndex < detailIndex);
+});
+
+test('async detection claims and renews a lease and fences every terminal write', () => {
+  assert.match(routeSource, /ProjectRunService\.claimRecordExecution\(/);
+  assert.match(routeSource, /ProjectRunService\.startRecordLeaseHeartbeat\(/);
+  assert.match(routeSource, /ProjectRunService\.failRecord\([\s\S]*\{ executionToken \}/);
+  assert.match(routeSource, /ProjectRecordFinalizationService\.finalize\([\s\S]*executionToken/);
+  assert.doesNotMatch(
+    routeSource,
+    /async function processAIQuery[\s\S]*QuestionRecord\.update\([\s\S]*status:\s*'failed'/
+  );
 });

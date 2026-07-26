@@ -157,14 +157,22 @@ test('two scheduler processes execute the same long-running slot side effects on
 
   const firstTick = firstService.tick();
   const competingTick = secondService.tick();
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  let overlapTick = null;
+  try {
+    const deadline = Date.now() + 2000;
+    while (platformCalls === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 
-  assert.equal(platformCalls, 1);
-  await competingTick;
+    assert.equal(platformCalls, 1);
+    overlapTick = secondService.tick();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(platformCalls, 1);
+  } finally {
+    releasePlatformCall();
+  }
+  await Promise.all([firstTick, competingTick, overlapTick].filter(Boolean));
   await secondService.tick();
-  assert.equal(platformCalls, 1);
-  releasePlatformCall();
-  await firstTick;
 
   assert.equal(platformCalls, 1);
   assert.equal(await ScheduledExecution.count({

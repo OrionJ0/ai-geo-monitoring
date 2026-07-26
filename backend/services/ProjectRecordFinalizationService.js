@@ -4,6 +4,18 @@ const VisibilityAnalysisService = require('./VisibilityAnalysisService');
 
 const SAFE_METRIC_FAILURE_MESSAGE = '指标生成失败，请稍后重试';
 
+async function failRecordSafely(projectRunService, record, message, failure, executionToken) {
+  if (typeof projectRunService?.failRecord !== 'function') {
+    throw new TypeError('projectRunService.failRecord is required');
+  }
+  return projectRunService.failRecord(
+    record,
+    message,
+    failure,
+    { executionToken }
+  );
+}
+
 function countKeywordOccurrences(text, keywords) {
   const list = Array.isArray(keywords) ? keywords.filter(Boolean) : [];
   const ranges = list.flatMap((kw) => {
@@ -28,25 +40,44 @@ function countKeywordOccurrences(text, keywords) {
 
 async function finalize({
   record,
+  executionToken = null,
+  persistResponseDetail = false,
   responseText,
   aiResponse = null,
+  providerCitations = [],
   keywords = [],
   repositories = {},
   projectRunService = ProjectRunService
 }) {
   if (!String(responseText || '').trim()) {
     const message = '监测平台返回内容为空';
-    await record.update({ status: 'failed', error_message: message });
-    return { ok: false, status: 'failed', error: new Error(message) };
+    const failed = await failRecordSafely(
+      projectRunService,
+      record,
+      message,
+      {
+        stage: 'monitoring_response',
+        error_code: 'empty_provider_response'
+      },
+      executionToken
+    );
+    return {
+      ok: false,
+      status: failed ? 'failed' : 'stale',
+      error: new Error(failed ? message : '执行租约已失效')
+    };
   }
 
   const keywordCounts = countKeywordOccurrences(responseText, keywords);
   if (!record?.project_id) {
-    await record.update({
-      status: 'completed',
-      result_summary: { keyword_counts: keywordCounts }
+    return projectRunService.finalizeRecordWithoutMetric({
+      record,
+      executionToken,
+      persistResponseDetail,
+      responseText,
+      providerCitations,
+      resultSummary: { keyword_counts: keywordCounts }
     });
-    return { ok: true, status: 'completed' };
   }
 
   const ProjectRepository = repositories.BrandProject || BrandProject;
@@ -57,8 +88,18 @@ async function finalize({
     const project = await ProjectRepository.findByPk(record.project_id);
     if (!project) {
       const message = SAFE_METRIC_FAILURE_MESSAGE;
-      await record.update({ status: 'failed', error_message: message });
-      return { ok: false, status: 'failed', error: new Error(message) };
+      const failed = await failRecordSafely(
+        projectRunService,
+        record,
+        message,
+        { stage: 'metric_persist', error_code: 'project_not_found' },
+        executionToken
+      );
+      return {
+        ok: false,
+        status: failed ? 'failed' : 'stale',
+        error: new Error(failed ? message : '执行租约已失效')
+      };
     }
     const competitors = await CompetitorRepository.findAll({ where: { project_id: project.id }, order: [['id', 'ASC']] });
     const prompt = record.tracked_prompt_id
@@ -66,8 +107,11 @@ async function finalize({
       : null;
     return await projectRunService.finalizeSuccessfulRecord({
       record,
+      executionToken,
+      persistResponseDetail,
       responseText,
       aiResponse,
+      providerCitations,
       project,
       competitors,
       prompt,
@@ -75,12 +119,18 @@ async function finalize({
     });
   } catch (error) {
     const message = SAFE_METRIC_FAILURE_MESSAGE;
-    try {
-      await record.update({ status: 'failed', error_message: message });
-    } catch (updateError) {
-      console.warn('标记项目检测指标失败记录异常:', updateError?.message || updateError);
-    }
-    return { ok: false, status: 'failed', error: new Error(message) };
+    const failed = await failRecordSafely(
+      projectRunService,
+      record,
+      message,
+      { stage: 'metric_persist', error_code: 'metric_persist_failed' },
+      executionToken
+    );
+    return {
+      ok: false,
+      status: failed ? 'failed' : 'stale',
+      error: new Error(failed ? message : '执行租约已失效')
+    };
   }
 }
 

@@ -3,7 +3,6 @@ const {
   DetectionSchedule,
   QuestionRecord,
   QuestionSetRetryBatch,
-  ResultDetail,
   ScheduledExecution,
   TrackedPrompt,
   User,
@@ -193,6 +192,8 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   for (const platformStatus of runnablePlatforms) {
     const platform = platformStatus.code;
     let rec = null;
+    let executionToken = null;
+    let leaseHeartbeat = null;
     attempted += 1;
     try {
       rec = await QuestionRecord.create({
@@ -208,15 +209,43 @@ async function submitDetectionForSchedule(schedule, options = {}) {
         brand_keywords: keywordsArr.join(',')
       });
 
+      const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
+        target: { platformConfig: platformStatus.config },
+        runtimeSettings
+      });
+      const lease = await ProjectRunService.claimRecordExecution(rec.id, {
+        leaseMs,
+        leaseOwner: options.leaseOwner
+      });
+      if (!lease.claimed) {
+        console.warn('定时任务领取执行租约失败:', {
+          record_id: rec.id,
+          error_code: 'record_lease_claim_rejected'
+        });
+        failed += 1;
+        continue;
+      }
+      executionToken = lease.executionToken;
+      leaseHeartbeat = ProjectRunService.startRecordLeaseHeartbeat({
+        recordId: rec.id,
+        executionToken,
+        leaseMs: lease.leaseMs
+      });
+
       const result = await platformService.queryPlatform(platform, question, {
         config: platformStatus.config,
         runtimeSettings
       });
       if (!result.success) {
         console.warn('定时任务平台调用失败:', result.error || result.message || platform);
-        await QuestionRecord.update(
-          { status: 'failed', error_message: safePlatformFailureMessage(result) },
-          { where: { id: rec.id } }
+        await ProjectRunService.failRecord(
+          rec,
+          safePlatformFailureMessage(result),
+          {
+            stage: 'monitoring_request',
+            error_code: result.error_code || 'provider_error'
+          },
+          { executionToken }
         );
         failed += 1;
         continue;
@@ -224,24 +253,26 @@ async function submitDetectionForSchedule(schedule, options = {}) {
 
       const originalText = ResultParserService.extractResponseText(result.data);
       if (!String(originalText || '').trim()) {
-        await QuestionRecord.update(
-          { status: 'failed', error_message: '监测平台返回内容为空' },
-          { where: { id: rec.id } }
+        await ProjectRunService.failRecord(
+          rec,
+          '监测平台返回内容为空',
+          {
+            stage: 'monitoring_response',
+            error_code: 'empty_provider_response'
+          },
+          { executionToken }
         );
         failed += 1;
         continue;
       }
-      await ResultDetail.create({
-        question_record_id: rec.id,
-        ai_response_original: originalText,
-        provider_citations: ProjectRunService.snapshotProviderCitations(result.data),
-        parsing_status: 'completed'
-      });
 
       const finalization = await finalizeScheduledProjectRecord({
         record: rec,
+        executionToken,
+        persistResponseDetail: true,
         responseText: originalText,
         aiResponse: result.data,
+        providerCitations: ProjectRunService.snapshotProviderCitations(result.data),
         keywords: keywordsArr
       });
       if (finalization?.ok) {
@@ -254,13 +285,23 @@ async function submitDetectionForSchedule(schedule, options = {}) {
       failed += 1;
       if (rec?.id) {
         try {
-          await QuestionRecord.update(
-            { status: 'failed', error_message: SAFE_PLATFORM_FAILURE_MESSAGE },
-            { where: { id: rec.id } }
+          await ProjectRunService.failRecord(
+            rec,
+            SAFE_PLATFORM_FAILURE_MESSAGE,
+            {
+              stage: 'worker_exception',
+              error_code: 'scheduled_worker_failed'
+            },
+            { executionToken }
           );
         } catch (updateError) {
           console.warn('标记定时任务失败记录异常:', updateError?.message || updateError);
         }
+      }
+    } finally {
+      if (leaseHeartbeat) await leaseHeartbeat.stop();
+      if (executionToken && rec?.id) {
+        await ProjectRunService.releaseRecordExecution(rec.id, executionToken);
       }
     }
   }
@@ -627,7 +668,8 @@ class SchedulerService {
         if (!await this.startScheduledExecution(execution)) continue;
 
         const result = await this.submitDetectionForSchedule(s, {
-          scheduledExecutionId: execution.id
+          scheduledExecutionId: execution.id,
+          leaseOwner: this._ownerId
         });
         if (!result?.skipped) {
           await s.update({ last_run_at: now });
@@ -740,33 +782,71 @@ class SchedulerService {
     const now = options.now ? new Date(options.now) : new Date();
     const cutoff = new Date(now.getTime() - maxAgeMs);
     const RecordRepository = options.QuestionRecord || QuestionRecord;
-    const staleTimeField = options.includeUnclaimed === true
-      ? 'created_at'
-      : 'execution_started_at';
-    const where = {
-      status: 'pending',
-      [staleTimeField]: { [Op.lt]: cutoff }
+    const expiredLeaseWhere = {
+      execution_token: { [Op.not]: null },
+      lease_expires_at: { [Op.lt]: now }
     };
+    const legacyClaimWhere = {
+      execution_token: { [Op.not]: null },
+      lease_expires_at: null,
+      execution_started_at: { [Op.lt]: cutoff }
+    };
+    const staleCandidates = [expiredLeaseWhere, legacyClaimWhere];
     if (options.includeUnclaimed === true) {
-      where.question_set_run_id = null;
+      staleCandidates.push({
+        execution_token: null,
+        question_set_run_id: null,
+        created_at: { [Op.lt]: cutoff }
+      });
     }
+    const where = { status: 'pending', [Op.or]: staleCandidates };
     const staleRecords = await RecordRepository.findAll({ where });
-    await Promise.all(staleRecords.map((record) => record.update({
-      status: 'failed',
-      error_message: '分析任务中断，请重新运行',
-      execution_token: null,
-      execution_started_at: null,
-      result_summary: {
-        ...(record.result_summary && typeof record.result_summary === 'object'
-          ? record.result_summary
-          : {}),
-        failure: {
-          stage: 'execution_interrupted',
-          error_code: 'stale_pending_recovered'
+    const recoveredRecords = [];
+    for (const record of staleRecords) {
+      const payload = {
+        status: 'failed',
+        error_message: '分析任务中断，请重新运行',
+        execution_token: null,
+        execution_started_at: null,
+        lease_owner: null,
+        lease_expires_at: null,
+        result_summary: {
+          ...(record.result_summary && typeof record.result_summary === 'object'
+            ? record.result_summary
+            : {}),
+          failure: {
+            stage: 'execution_interrupted',
+            error_code: 'stale_pending_recovered'
+          }
         }
+      };
+      let recovered = true;
+      if (typeof RecordRepository.update === 'function' && record.id) {
+        const recordWhere = {
+          id: record.id,
+          status: 'pending'
+        };
+        if (record.execution_token) {
+          recordWhere.execution_token = record.execution_token;
+          if (record.lease_expires_at) {
+            recordWhere.lease_expires_at = { [Op.lt]: now };
+          } else {
+            recordWhere.lease_expires_at = null;
+            recordWhere.execution_started_at = { [Op.lt]: cutoff };
+          }
+        } else {
+          recordWhere.execution_token = null;
+          recordWhere.question_set_run_id = null;
+          recordWhere.created_at = { [Op.lt]: cutoff };
+        }
+        const [updated] = await RecordRepository.update(payload, { where: recordWhere });
+        recovered = updated === 1;
+      } else {
+        await record.update(payload);
       }
-    })));
-    const count = staleRecords.length;
+      if (recovered) recoveredRecords.push(record);
+    }
+    const count = recoveredRecords.length;
     const BatchRepository = options.QuestionSetRetryBatch || QuestionSetRetryBatch;
     await BatchRepository.update(
       { status: 'failed' },
@@ -781,7 +861,12 @@ class SchedulerService {
         }
       }
     );
-    if (count > 0) console.warn(`已恢复 ${count} 条超时未完成分析记录`);
+    if (count > 0) {
+      console.warn('已恢复过期分析执行租约:', {
+        count,
+        error_code: 'stale_pending_recovered'
+      });
+    }
     this._lastRecoveryAt = now.toISOString();
     return count;
   }

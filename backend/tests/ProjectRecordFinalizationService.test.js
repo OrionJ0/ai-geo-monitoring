@@ -78,6 +78,10 @@ test('marks empty AI responses as failed before finalizing detection records', a
       }
     },
     projectRunService: {
+      failRecord: async (record, message) => {
+        await record.update({ status: 'failed', error_message: message });
+        return true;
+      },
       finalizeSuccessfulRecord: async () => {
         metricFinalized = true;
       }
@@ -116,6 +120,10 @@ test('marks project detection records as failed when visibility metric generatio
       }
     },
     projectRunService: {
+      failRecord: async (record, message) => {
+        await record.update({ status: 'failed', error_message: message });
+        return true;
+      },
       finalizeSuccessfulRecord: async () => {
         throw new Error('metric write failed');
       }

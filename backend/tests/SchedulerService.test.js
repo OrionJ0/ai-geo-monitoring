@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { Op } = require('sequelize');
 
 const { BrandProject, DetectionSchedule, QuestionRecord, TrackedPrompt, User } = require('../models');
 const ProjectRunService = require('../services/ProjectRunService');
@@ -64,6 +65,10 @@ test('marks scheduled project records as failed when metric generation fails', a
       }
     },
     projectRunService: {
+      failRecord: async (record, message) => {
+        await record.update({ status: 'failed', error_message: message });
+        return true;
+      },
       finalizeSuccessfulRecord: async () => {
         throw new Error('metric write failed');
       }
@@ -78,10 +83,10 @@ test('marks scheduled project records as failed when metric generation fails', a
   assert.equal(result.error.message, '指标生成失败，请稍后重试');
 });
 
-test('scheduled detections guard empty AI responses before creating result details', () => {
+test('scheduled detections guard empty AI responses before atomically finalizing result details', () => {
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
   const extractIndex = source.indexOf('const originalText = ResultParserService.extractResponseText');
-  const detailIndex = source.indexOf('await ResultDetail.create', extractIndex);
+  const detailIndex = source.indexOf('persistResponseDetail: true', extractIndex);
   const guardIndex = source.indexOf('监测平台返回内容为空', extractIndex);
 
   assert.ok(extractIndex > 0);
@@ -193,7 +198,8 @@ test('scheduled query exceptions mark created records as failed', () => {
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
 
   assert.match(source, /let rec = null/);
-  assert.match(source, /catch \(e\)[\s\S]*QuestionRecord\.update\([\s\S]*SAFE_PLATFORM_FAILURE_MESSAGE/);
+  assert.match(source, /catch \(e\)[\s\S]*ProjectRunService\.failRecord\([\s\S]*SAFE_PLATFORM_FAILURE_MESSAGE/);
+  assert.match(source, /ProjectRunService\.failRecord\([\s\S]*\{ executionToken \}/);
 });
 
 test('recovers stale pending project records as failed', async () => {
@@ -213,8 +219,14 @@ test('recovers stale pending project records as failed', async () => {
     QuestionRecord: {
       findAll: async (options) => {
         assert.equal(options.where.status, 'pending');
-        assert.ok(options.where.created_at);
-        assert.equal(options.where.question_set_run_id, null);
+        assert.equal(options.where[Op.or].length, 3);
+        assert.equal(options.where[Op.or][0].execution_token[Op.not], null);
+        assert.ok(options.where[Op.or][0].lease_expires_at[Op.lt]);
+        assert.equal(options.where[Op.or][1].lease_expires_at, null);
+        assert.ok(options.where[Op.or][1].execution_started_at[Op.lt]);
+        assert.equal(options.where[Op.or][2].execution_token, null);
+        assert.equal(options.where[Op.or][2].question_set_run_id, null);
+        assert.ok(options.where[Op.or][2].created_at[Op.lt]);
         return [
           {
             result_summary: retryMetadata,
@@ -242,6 +254,8 @@ test('recovers stale pending project records as failed', async () => {
     error_message: '分析任务中断，请重新运行',
     execution_token: null,
     execution_started_at: null,
+    lease_owner: null,
+    lease_expires_at: null,
     result_summary: {
       ...retryMetadata,
       failure: {
@@ -255,6 +269,8 @@ test('recovers stale pending project records as failed', async () => {
     error_message: '分析任务中断，请重新运行',
     execution_token: null,
     execution_started_at: null,
+    lease_owner: null,
+    lease_expires_at: null,
     result_summary: {
       failure: {
         stage: 'execution_interrupted',
@@ -284,7 +300,11 @@ test('periodic recovery only expires claimed executions, not old records still w
   });
 
   assert.equal(recovered, 0);
-  assert.ok(observedWhere.execution_started_at);
+  assert.equal(observedWhere[Op.or].length, 2);
+  assert.equal(observedWhere[Op.or][0].execution_token[Op.not], null);
+  assert.ok(observedWhere[Op.or][0].lease_expires_at[Op.lt]);
+  assert.equal(observedWhere[Op.or][1].lease_expires_at, null);
+  assert.ok(observedWhere[Op.or][1].execution_started_at[Op.lt]);
   assert.equal(observedWhere.created_at, undefined);
   assert.equal(
     SchedulerService.getReadiness().last_recovery_at,

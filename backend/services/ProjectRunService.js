@@ -10,6 +10,7 @@ const {
   QuestionSetRetryBatch
 } = require('../models');
 const { createHash, randomUUID } = require('node:crypto');
+const os = require('node:os');
 const { Op, Transaction } = require('sequelize');
 const AIPlatformService = require('./AIPlatformService');
 const ResultParserService = require('./ResultParserService');
@@ -28,6 +29,17 @@ const { consumeQuotaDirect } = require('../middleware/quota');
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
 const RETRY_SCHEDULE_FAILURE_MESSAGE = '失败项重试调度失败，请重新提交';
 const PLATFORM_MISMATCH_MESSAGE = '问题选择的平台不在当前项目的监测范围内。';
+const MIN_RECORD_LEASE_MS = 60 * 1000;
+const RECORD_LEASE_BUFFER_SECONDS = 60;
+
+class StaleWorkerWriteError extends Error {
+  constructor(recordId) {
+    super('执行租约已失效，拒绝迟到 worker 写入');
+    this.name = 'StaleWorkerWriteError';
+    this.code = 'stale_worker_write_rejected';
+    this.recordId = recordId;
+  }
+}
 
 function runtimePlatformFailureMessage(result) {
   return AI_PLATFORM_ERROR_MESSAGES[result?.error_code] || SAFE_PLATFORM_FAILURE_MESSAGE;
@@ -241,6 +253,7 @@ function normalizeProviderCitations(value) {
 class ProjectRunService {
   constructor() {
     this.activeRecordIds = new Set();
+    this.recordLeaseOwner = `${os.hostname()}:${process.pid}:project-run`;
   }
 
   isRunnableProject(project) {
@@ -407,8 +420,114 @@ class ProjectRunService {
     );
   }
 
+  async persistResultDetail({
+    record,
+    responseText,
+    providerCitations,
+    transaction
+  }) {
+    const payload = {
+      ai_response_original: responseText,
+      provider_citations: normalizeProviderCitations(providerCitations),
+      parsing_status: 'completed',
+      parsing_error: null
+    };
+    const existing = await ResultDetail.findOne({
+      where: { question_record_id: record.id },
+      transaction
+    });
+    if (existing) return existing.update(payload, { transaction });
+    return ResultDetail.create(
+      { ...payload, question_record_id: record.id },
+      { transaction }
+    );
+  }
+
+  async updateRecordTerminalState({
+    record,
+    payload,
+    executionToken = null,
+    transaction = null
+  }) {
+    if (!executionToken) {
+      if (record instanceof QuestionRecord) {
+        throw new StaleWorkerWriteError(record.id);
+      }
+      await record.update(payload, transaction ? { transaction } : undefined);
+      return true;
+    }
+    const [updated] = await QuestionRecord.update(
+      {
+        ...payload,
+        execution_token: null,
+        execution_started_at: null,
+        lease_owner: null,
+        lease_expires_at: null
+      },
+      {
+        where: {
+          id: record.id,
+          status: 'pending',
+          execution_token: executionToken
+        },
+        ...(transaction ? { transaction } : {})
+      }
+    );
+    if (updated !== 1) throw new StaleWorkerWriteError(record.id);
+    return true;
+  }
+
+  async finalizeRecordWithoutMetric({
+    record,
+    executionToken = null,
+    persistResponseDetail = false,
+    responseText,
+    providerCitations = [],
+    resultSummary = {}
+  }) {
+    try {
+      await this.runInTransaction(async (transaction) => {
+        if (persistResponseDetail) {
+          await this.persistResultDetail({
+            record,
+            responseText,
+            providerCitations,
+            transaction
+          });
+        }
+        await this.updateRecordTerminalState({
+          record,
+          executionToken,
+          transaction,
+          payload: {
+            status: 'completed',
+            error_message: null,
+            result_summary: resultSummary
+          }
+        });
+      });
+      return { ok: true, status: 'completed' };
+    } catch (error) {
+      if (error instanceof StaleWorkerWriteError) {
+        console.warn('拒绝迟到 worker 写入:', {
+          record_id: record.id,
+          error_code: error.code
+        });
+        return {
+          ok: false,
+          status: 'stale',
+          error: new Error('执行租约已失效'),
+          error_code: error.code
+        };
+      }
+      throw error;
+    }
+  }
+
   async finalizeSuccessfulRecord({
     record,
+    executionToken = null,
+    persistResponseDetail = false,
     responseText,
     aiResponse,
     providerCitations,
@@ -429,17 +548,28 @@ class ProjectRunService {
         prompt
       });
       const metric = await this.runInTransaction(async (transaction) => {
+        if (persistResponseDetail) {
+          await this.persistResultDetail({
+            record,
+            responseText,
+            providerCitations,
+            transaction
+          });
+        }
         const savedMetric = await this.persistVisibilityMetric({ record, payload, transaction });
-        await record.update(
-          {
+        await this.updateRecordTerminalState({
+          record,
+          executionToken,
+          transaction,
+          payload: {
             status: 'completed',
+            error_message: null,
             result_summary: {
               ...retrySummaryMetadata(record),
               keyword_counts: keywordCounts
             }
-          },
-          { transaction }
-        );
+          }
+        });
         return savedMetric;
       });
       return {
@@ -449,6 +579,18 @@ class ProjectRunService {
         keyword_counts: keywordCounts
       };
     } catch (error) {
+      if (error instanceof StaleWorkerWriteError) {
+        console.warn('拒绝迟到 worker 写入:', {
+          record_id: record.id,
+          error_code: error.code
+        });
+        return {
+          ok: false,
+          status: 'stale',
+          error: '执行租约已失效',
+          error_code: error.code
+        };
+      }
       const message = metricFailureMessage(error);
       const diagnostics = metricFailureDiagnostics(error);
       const failure = {
@@ -473,7 +615,26 @@ class ProjectRunService {
           ...diagnostics
         });
       }
-      await record.update(updatePayload);
+      const failed = await this.failRecord(
+        record,
+        message,
+        failure,
+        {
+          executionToken,
+          resultSummary: updatePayload.result_summary,
+          persistResponseDetail,
+          responseText,
+          providerCitations
+        }
+      );
+      if (executionToken && !failed) {
+        return {
+          ok: false,
+          status: 'stale',
+          error: '执行租约已失效',
+          error_code: 'stale_worker_write_rejected'
+        };
+      }
       return {
         ok: false,
         status: 'failed',
@@ -486,11 +647,13 @@ class ProjectRunService {
     return error?.message || String(error || '未知错误');
   }
 
-  async failRecord(record, message, failure = null) {
-    if (!record?.update) return;
+  async failRecord(record, message, failure = null, options = {}) {
+    if (!record?.id) return false;
     try {
       const payload = { status: 'failed', error_message: message };
-      if (failure?.stage && failure?.error_code) {
+      if (options.resultSummary && typeof options.resultSummary === 'object') {
+        payload.result_summary = options.resultSummary;
+      } else if (failure?.stage && failure?.error_code) {
         payload.result_summary = {
           ...(record.result_summary && typeof record.result_summary === 'object' ? record.result_summary : {}),
           failure: {
@@ -499,9 +662,38 @@ class ProjectRunService {
           }
         };
       }
-      await record.update(payload);
-    } catch (updateError) {
-      console.warn('标记项目运行记录失败异常:', updateError?.message || updateError);
+      const persistFailure = async (transaction = null) => {
+        if (options.persistResponseDetail) {
+          await this.persistResultDetail({
+            record,
+            responseText: options.responseText,
+            providerCitations: options.providerCitations,
+            transaction
+          });
+        }
+        await this.updateRecordTerminalState({
+          record,
+          payload,
+          executionToken: options.executionToken || null,
+          transaction
+        });
+      };
+      if (options.persistResponseDetail) {
+        await this.runInTransaction(persistFailure);
+      } else {
+        await persistFailure();
+      }
+      return true;
+    } catch (error) {
+      if (error instanceof StaleWorkerWriteError) {
+        console.warn('拒绝迟到 worker 写入:', {
+          record_id: record.id,
+          error_code: error.code
+        });
+        return false;
+      }
+      console.warn('标记项目运行记录失败异常:', error?.message || error);
+      return false;
     }
   }
 
@@ -577,12 +769,54 @@ class ProjectRunService {
     return 2;
   }
 
-  async claimRecordExecution(recordId) {
+  getRecordExecutionLeaseMs({ target = {}, runtimeSettings = {}, retryMode } = {}) {
+    const rawMonitoringTimeoutSeconds = Number(
+      target?.platformConfig?.request_timeout_seconds
+      || runtimeSettings.ai_default_timeout_seconds
+      || 90
+    );
+    const monitoringTimeoutSeconds = Number.isFinite(rawMonitoringTimeoutSeconds)
+      && rawMonitoringTimeoutSeconds > 0
+      ? rawMonitoringTimeoutSeconds
+      : 90;
+    const rawMonitoringRetryCount = Number(runtimeSettings.ai_retry_count ?? 3);
+    const monitoringRetryCount = Number.isInteger(rawMonitoringRetryCount)
+      ? Math.max(0, Math.min(3, rawMonitoringRetryCount))
+      : 3;
+    const monitoringAttempts = retryMode === 'analysis_only'
+      ? 0
+      : Math.max(1, Math.min(4, monitoringRetryCount + 1));
+    const monitoringSeconds = Math.max(10, monitoringTimeoutSeconds) * monitoringAttempts;
+    const retryDelaySeconds = monitoringAttempts > 1
+      ? Array.from(
+        { length: monitoringAttempts - 1 },
+        (_, index) => Math.min(5, 2 ** index)
+      ).reduce((sum, seconds) => sum + seconds, 0)
+      : 0;
+    const analysisProfile = AIResponseAnalysisService.ANALYSIS_REQUEST_PROFILE || {};
+    const analysisSeconds = Math.max(10, Number(analysisProfile.timeout_seconds) || 120)
+      * Math.max(1, Number(analysisProfile.max_attempts) || 2);
+    return Math.max(
+      MIN_RECORD_LEASE_MS,
+      (monitoringSeconds + retryDelaySeconds + analysisSeconds + RECORD_LEASE_BUFFER_SECONDS) * 1000
+    );
+  }
+
+  async claimRecordExecution(recordId, options = {}) {
     const executionToken = randomUUID();
+    const now = options.now ? new Date(options.now) : new Date();
+    const leaseMs = Math.max(
+      MIN_RECORD_LEASE_MS,
+      Number(options.leaseMs) || MIN_RECORD_LEASE_MS
+    );
+    const leaseOwner = String(options.leaseOwner || this.recordLeaseOwner).slice(0, 120);
+    const leaseExpiresAt = new Date(now.getTime() + leaseMs);
     const [updated] = await QuestionRecord.update(
       {
         execution_token: executionToken,
-        execution_started_at: new Date()
+        execution_started_at: now,
+        lease_owner: leaseOwner,
+        lease_expires_at: leaseExpiresAt
       },
       {
         where: {
@@ -594,17 +828,98 @@ class ProjectRunService {
     );
     return {
       claimed: updated === 1,
-      executionToken: updated === 1 ? executionToken : null
+      executionToken: updated === 1 ? executionToken : null,
+      leaseOwner: updated === 1 ? leaseOwner : null,
+      leaseExpiresAt: updated === 1 ? leaseExpiresAt : null,
+      leaseMs
+    };
+  }
+
+  async renewRecordExecutionLease(recordId, executionToken, options = {}) {
+    if (!executionToken) return false;
+    const now = options.now ? new Date(options.now) : new Date();
+    const leaseMs = Math.max(
+      MIN_RECORD_LEASE_MS,
+      Number(options.leaseMs) || MIN_RECORD_LEASE_MS
+    );
+    const [updated] = await QuestionRecord.update(
+      { lease_expires_at: new Date(now.getTime() + leaseMs) },
+      {
+        where: {
+          id: recordId,
+          status: 'pending',
+          execution_token: executionToken
+        }
+      }
+    );
+    if (updated !== 1) {
+      console.warn('执行租约续期失败:', {
+        record_id: recordId,
+        error_code: 'record_lease_renewal_rejected'
+      });
+    }
+    return updated === 1;
+  }
+
+  startRecordLeaseHeartbeat({
+    recordId,
+    executionToken,
+    leaseMs,
+    heartbeatMs
+  }) {
+    let stopped = false;
+    let renewalInFlight = false;
+    let pendingRenewal = Promise.resolve();
+    const normalizedLeaseMs = Math.max(
+      MIN_RECORD_LEASE_MS,
+      Number(leaseMs) || MIN_RECORD_LEASE_MS
+    );
+    const intervalMs = Math.max(
+      5,
+      Number(heartbeatMs) || Math.max(1000, Math.floor(normalizedLeaseMs / 3))
+    );
+    const timer = setInterval(() => {
+      if (stopped || renewalInFlight) return;
+      renewalInFlight = true;
+      pendingRenewal = this.renewRecordExecutionLease(
+        recordId,
+        executionToken,
+        { leaseMs: normalizedLeaseMs }
+      ).then((renewed) => {
+        if (!renewed) {
+          stopped = true;
+          clearInterval(timer);
+        }
+      }).catch(() => {
+        stopped = true;
+        clearInterval(timer);
+        console.warn('执行租约续期异常:', {
+          record_id: recordId,
+          error_code: 'record_lease_renewal_failed'
+        });
+      }).finally(() => {
+        renewalInFlight = false;
+      });
+    }, intervalMs);
+    timer.unref?.();
+    return {
+      stop: async () => {
+        stopped = true;
+        clearInterval(timer);
+        await pendingRenewal;
+      }
     };
   }
 
   async releaseRecordExecution(recordId, executionToken) {
-    if (!executionToken) return;
+    if (!executionToken) return false;
     try {
-      await QuestionRecord.update(
+      const [updated] = await QuestionRecord.update(
         {
           execution_token: null,
-          execution_started_at: null
+          execution_started_at: null,
+          lease_owner: null,
+          lease_expires_at: null
         },
         {
           where: {
@@ -613,11 +928,13 @@ class ProjectRunService {
           }
         }
       );
+      return updated === 1;
     } catch (error) {
       console.warn('释放分析任务执行租约失败:', {
         record_id: recordId,
-        error: this.formatError(error)
+        error_code: 'record_lease_release_failed'
       });
+      return false;
     }
   }
 
@@ -677,10 +994,20 @@ class ProjectRunService {
         }
         if (claimable) this.activeRecordIds.add(recordId);
         let executionToken = null;
+        let leaseHeartbeat = null;
         try {
           if (claimable && entry.record instanceof QuestionRecord) {
-            const lease = await this.claimRecordExecution(recordId);
+            const leaseMs = this.getRecordExecutionLeaseMs({
+              target: entry.target,
+              runtimeSettings,
+              retryMode: entry.retryMode
+            });
+            const lease = await this.claimRecordExecution(recordId, { leaseMs });
             if (!lease.claimed) {
+              console.warn('领取执行租约失败:', {
+                record_id: recordId,
+                error_code: 'record_lease_claim_rejected'
+              });
               results[currentIndex] = {
                 record_id: recordId,
                 prompt_id: entry.target?.prompt?.id || null,
@@ -691,6 +1018,11 @@ class ProjectRunService {
               continue;
             }
             executionToken = lease.executionToken;
+            leaseHeartbeat = this.startRecordLeaseHeartbeat({
+              recordId,
+              executionToken,
+              leaseMs: lease.leaseMs
+            });
           }
           results[currentIndex] = await this.runTarget({
             target: entry.target,
@@ -702,9 +1034,11 @@ class ProjectRunService {
             projectData,
             competitors,
             keywords,
-            runtimeSettings
+            runtimeSettings,
+            executionToken
           });
         } finally {
+          if (leaseHeartbeat) await leaseHeartbeat.stop();
           if (executionToken) await this.releaseRecordExecution(recordId, executionToken);
           if (retryBatchId) await this.updateRetryBatchStatus(retryBatchId, 'running');
           if (claimable) this.activeRecordIds.delete(recordId);
@@ -1599,7 +1933,8 @@ class ProjectRunService {
     projectData,
     competitors,
     keywords,
-    runtimeSettings
+    runtimeSettings,
+    executionToken = null
   }) {
     const prompt = target.prompt;
     let record = preparedRecord;
@@ -1621,7 +1956,7 @@ class ProjectRunService {
           await this.failRecord(record, message, {
             stage: 'monitoring_request',
             error_code: aiResult.error_code || 'provider_error'
-          });
+          }, { executionToken });
           return {
             record_id: record.id,
             prompt_id: prompt.id,
@@ -1635,7 +1970,15 @@ class ProjectRunService {
       }
       if (!String(originalText || '').trim()) {
         const message = '监测平台返回内容为空';
-        await this.failRecord(record, message);
+        await this.failRecord(
+          record,
+          message,
+          {
+            stage: 'monitoring_response',
+            error_code: 'empty_provider_response'
+          },
+          { executionToken }
+        );
         return {
           record_id: record.id,
           prompt_id: prompt.id,
@@ -1644,17 +1987,10 @@ class ProjectRunService {
           error: message
         };
       }
-      if (retryMode !== 'analysis_only') {
-        await ResultDetail.create({
-          question_record_id: record.id,
-          ai_response_original: originalText,
-          provider_citations: providerCitations,
-          parsing_status: 'completed'
-        });
-      }
-
       const finalization = await this.finalizeSuccessfulRecord({
         record,
+        executionToken,
+        persistResponseDetail: retryMode !== 'analysis_only',
         responseText: originalText,
         aiResponse: aiResult.data,
         providerCitations,
@@ -1688,7 +2024,12 @@ class ProjectRunService {
       };
     } catch (error) {
       const message = SAFE_PLATFORM_FAILURE_MESSAGE;
-      await this.failRecord(record, message);
+      await this.failRecord(
+        record,
+        message,
+        { stage: 'worker_exception', error_code: 'worker_execution_failed' },
+        { executionToken }
+      );
       return {
         record_id: record?.id || null,
         prompt_id: prompt?.id || null,
