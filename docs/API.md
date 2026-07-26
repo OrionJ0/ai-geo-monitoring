@@ -22,8 +22,9 @@ Authorization: Bearer <token>
 - **定时任务 API**：1000 次/15 分钟
 - **登录接口**：5 次/15 分钟
 
-## 健康检查
-- `GET /api/health`
+## 健康与就绪检查
+- `GET /api/health`：进程存活检查，不表示数据库、调度器或恢复流程已就绪。
+- `GET /api/ready`：数据库、调度器和首次恢复的就绪检查；任一必需检查失败返回 `503`。SQLite 响应同时返回实际 `journal_mode`、`busy_timeout_ms` 和 `synchronous`。
 
 ## 验证码（公开接口，无需认证）
 - `GET /api/captcha/new` 获取文本验证码（题目与有效期）
@@ -83,14 +84,17 @@ Authorization: Bearer <token>
 - `PATCH /api/geo-projects/:projectId/question-sets/:questionSetId` 编辑问题集名称、说明或成员
 - `DELETE /api/geo-projects/:projectId/question-sets/:questionSetId` 删除问题集；成员问题仅解除归属，不会被删除
 - `POST /api/geo-projects/:projectId/question-sets/:questionSetId/run` 将问题集内所有启用问题按可用监测平台加入并发队列
+  - 必须通过 `Idempotency-Key` 请求头或请求体 `idempotency_key` 提交 8–128 位幂等键；两处同时存在时必须相同
+  - 同一用户、项目和幂等键的相同请求返回原 `question_set_run_id`，不会再次预留配额或创建任务；同键不同请求返回 `409 IDEMPOTENCY_KEY_REUSED`
   - 每个启用问题都使用当前项目配置的全部可用模型；单问题自身保存的平台范围不会限制问题集运行
-  - 返回 `202 Accepted`、队列记录、`question_set_run_id` 和 `report_url`；每个成员问题仍可通过单问题接口独立运行
+  - run、配额预留和全部任务在一个事务内创建；返回 `202 Accepted`、`question_set_run_id`、`accepted_count`、计划/跳过平台、`idempotent_replay` 和 `report_url`
 - `GET /api/geo-projects/:projectId/question-set-runs` 分页查询当前项目的问题集运行历史
   - Query 参数：`page` 默认 1；`pageSize` 默认 20，最大 100；`questionSetId` 可选，仅返回指定问题集的历史
   - `questionSetId` 必须是正整数；非法值返回 `400 Bad Request`
   - 返回运行来源、当前状态、本次汇总和分页信息，不在列表中返回逐条回答
 - `GET /api/geo-projects/:projectId/question-set-runs/:runId` 获取一次问题集运行的独立报告
-  - 报告只聚合该运行关联的任务，包含本次汇总与逐问题逐平台结果
+  - 报告只聚合关系字段归属的本次任务，包含 `execution_summary`、失败阶段、完整性摘要、逐问题逐平台结果和服务端计算的 pause/resume/retry capabilities
+  - snapshot-only 与 imported 报告保持可读、可导出，但执行型 capability 为 false 并返回稳定禁用原因
 - `POST /api/geo-projects/:projectId/question-set-runs/:runId/retry-failed` 重新提交原生运行中的失败项
   - 请求体可传 `idempotency_key`（8–128 位字母、数字、点、下划线、冒号或连字符），也可使用 `Idempotency-Key` 请求头；同一运行和同一键只创建一批重试记录
   - 返回 `202 Accepted`；结构化分析失败且已保存完整原回答时，只调用独立分析 API，不再调用监测平台且不消耗检测配额
@@ -104,7 +108,8 @@ Authorization: Bearer <token>
   - 固定单表结构，一行对应一个问题与一个平台结果；数组字段、失败阶段、分析诊断和重试链路使用 JSON 单元格保存以支持无损回导
 - `POST /api/geo-projects/:projectId/question-set-runs/import` 导入标准问题集报告 CSV
   - 请求：原始 CSV 文本，`Content-Type: text/csv`，最大 5MB、5000 条数据行
-  - 校验：schema 版本、必要列、字段类型、JSON 数组和引用链接协议；仅允许 HTTP/HTTPS 引用链接
+  - 校验：schema 版本、必要列、终态 `status`、正整数 ID、非负计数、0–100 百分比、正数排名、时间顺序、JSON 结构和引用链接协议；仅允许 HTTP/HTTPS 引用链接
+  - 校验失败返回 `422`，并给出稳定 `code`、`row` 和 `column`；整份文件原子拒绝，不写入部分报告
   - 返回：`201 Created` 和只读导入报告；不会创建或覆盖问题、问题集，也不会计入项目汇总指标
 
 ## SEO 检测（需认证）

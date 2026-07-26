@@ -12,8 +12,10 @@ const {
   sequelize,
   BrandProject,
   DetectionSchedule,
+  QuestionRecord,
   QuestionSetRun,
   ScheduledExecution,
+  UsageCounter,
   User
 } = require('../models');
 const schedulerModule = require('../services/SchedulerService');
@@ -47,6 +49,8 @@ test.after(async () => {
 });
 
 test.beforeEach(async () => {
+  await QuestionRecord.destroy({ where: {} });
+  await UsageCounter.destroy({ where: {} });
   await ScheduledExecution.destroy({ where: {} });
   await DetectionSchedule.destroy({ where: {} });
 });
@@ -143,8 +147,27 @@ test('two scheduler processes execute the same long-running slot side effects on
   const platformCallGate = new Promise((resolve) => {
     releasePlatformCall = resolve;
   });
-  const submit = async () => {
+  const submit = async (claimedSchedule, { scheduledExecutionId }) => {
     platformCalls += 1;
+    await UsageCounter.create({
+      user_id: user.id,
+      feature: 'detection',
+      period: 'daily',
+      used_count: 1,
+      period_start: dueAt
+    });
+    await QuestionRecord.create({
+      user_id: user.id,
+      project_id: project.id,
+      scheduled_execution_id: scheduledExecutionId,
+      platform: 'deepseek',
+      platform_name: 'DeepSeek',
+      model_name: 'deepseek-chat',
+      brand: project.name,
+      question: claimedSchedule.question,
+      brand_keywords: project.name,
+      status: 'completed'
+    });
     await platformCallGate;
     return { ok: true, attempted: 1, completed: 1, failed: 0 };
   };
@@ -175,6 +198,8 @@ test('two scheduler processes execute the same long-running slot side effects on
   await secondService.tick();
 
   assert.equal(platformCalls, 1);
+  assert.equal(await UsageCounter.sum('used_count'), 1);
+  assert.equal(await QuestionRecord.count(), 1);
   assert.equal(await ScheduledExecution.count({
     where: {
       schedule_kind: 'detection_schedule',

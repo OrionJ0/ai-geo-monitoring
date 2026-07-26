@@ -114,7 +114,9 @@ server {
 ```
 
 ## 验证与健康检查
-- 健康检查：`GET https://<你的域名>/api/health`
+- 存活检查：`GET https://<你的域名>/api/health`，只表示 HTTP 进程存活。
+- 就绪检查：`GET https://<你的域名>/api/ready`。只有返回 `200` 且 `status=ready` 才能接入流量；SQLite 部署还必须显示 `journal_mode=wal`、`busy_timeout_ms>=5000`、`synchronous=normal`，并确认 scheduler 已启动且首次 recovery 无错误。
+- 问题集可靠性迁移前先生成可恢复的数据库备份并执行 `PRAGMA quick_check`；迁移后运行 `cd backend && npm run audit:run-ownership`，确认新运行无悬空归属、重复槽位或完整性错误。未完成生产迁移和回滚确认时不得把需求标记为已关闭。
 - AI 平台配置：管理员登录 `/admin/settings`，人工填写 API Key 和供应商明确支持的模型请求参数，再分别执行“测试连接”和“检测联网能力”
 - 登录验证：使用默认管理员登录并立即修改密码（见下方安全建议）
 

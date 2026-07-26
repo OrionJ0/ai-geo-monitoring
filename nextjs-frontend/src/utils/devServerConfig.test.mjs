@@ -11,7 +11,7 @@ function readPackageJson(directory) {
   return JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8'));
 }
 
-test('development entry points use Turbopack on port 3001', () => {
+test('development entry points use Turbopack on the public port 3001 listener', () => {
   const rootPackage = readPackageJson(projectRoot);
   const frontendPackage = readPackageJson(frontendRoot);
   const developmentCommands = [
@@ -20,7 +20,7 @@ test('development entry points use Turbopack on port 3001', () => {
     frontendPackage.scripts.dev,
   ];
 
-  assert.equal(frontendPackage.scripts.dev, 'next dev -p 3001');
+  assert.equal(frontendPackage.scripts.dev, 'next dev -H 0.0.0.0 -p 3001');
   assert.equal(
     rootPackage.scripts['dev:frontend'],
     'npm --prefix nextjs-frontend run dev',

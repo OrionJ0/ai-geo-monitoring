@@ -1,7 +1,7 @@
 ---
 title: 问题集运行与调度可靠性加固技术方案
 date: 2026-07-26
-status: draft
+status: active
 source: docs/active-2026-07-26-001-question-set-run-reliability/prd.md
 scope: deep
 ---
@@ -45,9 +45,9 @@ scope: deep
   - 历史报告自动对比。
   - `question_set_runs.record_ids` 物理列的最终清理可随本需求迁移完成；若生产数据库无法在当前发布窗口安全删列，则必须登记为迁移未完成，代码不得继续读取或写入该列。
 
-## 3. 当前系统认知
+## 3. 改造前系统认知（历史）
 
-### 3.1 正式入口
+### 3.1 改造前正式入口（历史）
 
 - 手动问题集运行：`backend/routes/geoProjects.js`
   - 当前先创建空 `QuestionSetRun`，再调用 `ProjectRunService.enqueueProjectRun()`。
@@ -69,7 +69,7 @@ scope: deep
   - 当前根据 source/status 自行决定暂停、继续和重试。
   - PDF 模式使用固定像素列宽。
 
-### 3.2 当前数据模型
+### 3.2 改造前数据模型（历史）
 
 - `QuestionSetRun`
   - `record_ids`：当前任务指针的 JSON 数组。
@@ -83,7 +83,7 @@ scope: deep
 - `DetectionSchedule` / `BrandProject.monitoring_next_run_at`
   - 没有单次到期时槽的持久执行账本。
 
-### 3.3 现有测试
+### 3.3 改造前测试基线（历史）
 
 - `backend/tests/SchedulerService.test.js`
 - `backend/tests/ProjectRunService.test.js`
@@ -95,6 +95,14 @@ scope: deep
 - `nextjs-frontend/src/utils/projectSelection.test.cjs`
 
 现有测试覆盖正常运行和部分恢复，但未证明调度重入、迟到 worker fencing、初始运行事务回滚、父运行恢复收敛、清理保护、analysis-only 暂停恢复和真实 PDF 右边界。
+
+### 3.4 已接入的正式路径
+
+- 手动问题集运行只由 `geoProjects.js` 调用 `ProjectRunService.startQuestionSetRun()`，要求幂等键并在一个事务内创建 run、预留配额和任务；旧空 run 创建链已删除。
+- 定时执行先由 `SchedulerService.claimScheduledOccurrence()` 领取唯一持久时槽，再执行配额、任务和平台副作用；进程内 tick 同时保持 single-flight。
+- native run 只通过 `question_records.question_set_run_id + run_slot_index` 读取任务事实；`question_set_runs.record_ids` 已从模型和数据库删除，仅一次性迁移代码保留对旧 schema 的读取能力。
+- worker 通过带到期时间的执行租约领取任务，终态写入使用 token fencing；正常执行、暂停、恢复和 recovery 均调用统一 reconcile 收敛父 run。
+- `/api/ready` 是正式接流门禁；`/api/health` 仅表示进程存活。
 
 ## 4. 需求、约束与规则
 

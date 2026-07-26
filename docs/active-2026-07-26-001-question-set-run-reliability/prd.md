@@ -1,7 +1,7 @@
 ---
 title: 问题集运行与调度可靠性加固 PRD
 date: 2026-07-26
-status: draft
+status: active
 source: 问题集“添加 → 运行 → 报告”全链路对抗审查与真实代码、数据库核验
 ---
 
