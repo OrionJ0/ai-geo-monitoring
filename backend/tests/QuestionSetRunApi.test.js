@@ -270,6 +270,7 @@ test('用户可以在原报告中重试失败项且重复提交不会创建第�
     assert.equal(response.payload.success, true);
     assert.equal(response.payload.data.retried_count, 1);
     assert.equal(scheduledContext.entries.length, 1);
+    assert.equal(scheduledContext.runRevision, 1);
     assert.equal(scheduledContext.entries[0].target.model_name, 'qwen-current-model');
     assert.equal(scheduledContext.entries[0].target.platformConfig.temperature, 0.3);
 

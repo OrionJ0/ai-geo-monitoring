@@ -1360,7 +1360,8 @@ class ProjectRunService {
       ...plan,
       entries: committed.entries,
       competitors: competitorSnapshot,
-      questionSetRunId: committed.run.id
+      questionSetRunId: committed.run.id,
+      runRevision: Number(committed.run.revision) || 0
     };
     let dispatchDeferred = false;
     try {
@@ -1422,7 +1423,8 @@ class ProjectRunService {
       keywords,
       entries,
       concurrency: this.getProjectRunConcurrency(runtimeSettings),
-      questionSetRunId: run.id
+      questionSetRunId: run.id,
+      runRevision: Number(run.revision) || 0
     };
   }
 
@@ -1469,44 +1471,64 @@ class ProjectRunService {
     return dispatched;
   }
 
-  schedulePreparedRun(context) {
-    const task = async () => {
-      await this.updateRetryBatchStatus(context.retryBatchId, 'running');
-      try {
-        const results = await this.runPreparedTargets(context);
-        // 检查是否是暂停结束而非自然完成
-        if (context.questionSetRunId) {
-          const run = await QuestionSetRun.findByPk(context.questionSetRunId, { attributes: ['paused_at'] });
-          if (run?.paused_at) {
-            await this.updateRetryBatchStatus(context.retryBatchId, 'queued');
-            console.log('问题集运行已暂停:', { question_set_run_id: context.questionSetRunId });
-            return; // 暂停状态，跳过完成后的处理
-          }
-        }
-        await this.evaluateAlertsAfterRun(context.projectData, context.runUser);
-        if (context.questionSetRunId) {
-          const QuestionSetRunService = require('./QuestionSetRunService');
-          await QuestionSetRunService.finalizeNativeRun({
-            projectId: context.projectData.id,
-            runId: context.questionSetRunId
-          });
-        }
-        await this.updateRetryBatchStatus(context.retryBatchId, 'completed');
-        const summary = this.summarizeRunResults(results, context.targets.length);
-        console.log('项目队列分析完成:', {
-          project_id: context.projectData.id,
-          total: summary.total,
-          completed: summary.completed,
-          failed: summary.failed
+  async executePreparedRun(context) {
+    await this.updateRetryBatchStatus(context.retryBatchId, 'running');
+    try {
+      const results = await this.runPreparedTargets(context);
+      const summary = this.summarizeRunResults(results.filter(Boolean), context.targets.length);
+      let reconciliation = null;
+      if (context.questionSetRunId) {
+        const QuestionSetRunService = require('./QuestionSetRunService');
+        reconciliation = await QuestionSetRunService.reconcileNativeRun({
+          projectId: context.projectData.id,
+          runId: context.questionSetRunId,
+          expectedRevision: context.runRevision
         });
-      } catch (error) {
-        await this.updateRetryBatchStatus(context.retryBatchId, 'failed');
-        throw error;
+        if (!reconciliation.ok && reconciliation.reason !== 'stale_revision') {
+          const error = new Error('问题集父运行收敛失败');
+          error.code = `question_set_run_reconcile_${reconciliation.reason || 'failed'}`;
+          throw error;
+        }
       }
-    };
 
+      const terminal = !context.questionSetRunId
+        || reconciliation?.reconciled
+        || reconciliation?.reason === 'already_terminal';
+      if (terminal) {
+        await this.evaluateAlertsAfterRun(context.projectData, context.runUser);
+        await this.updateRetryBatchStatus(
+          context.retryBatchId,
+          reconciliation?.status === 'failed' ? 'failed' : 'completed'
+        );
+      } else if (reconciliation?.reason === 'stale_revision') {
+        await this.updateRetryBatchStatus(
+          context.retryBatchId,
+          summary.completed === 0 && summary.failed > 0 ? 'failed' : 'completed'
+        );
+      } else if (reconciliation?.status === 'paused') {
+        await this.updateRetryBatchStatus(context.retryBatchId, 'queued');
+        console.log('问题集运行已暂停:', {
+          question_set_run_id: context.questionSetRunId,
+          revision: reconciliation.revision
+        });
+      }
+
+      console.log('项目队列分析完成:', {
+        project_id: context.projectData.id,
+        total: summary.total,
+        completed: summary.completed,
+        failed: summary.failed
+      });
+      return { results, summary, reconciliation };
+    } catch (error) {
+      await this.updateRetryBatchStatus(context.retryBatchId, 'failed');
+      throw error;
+    }
+  }
+
+  schedulePreparedRun(context) {
     setImmediate(() => {
-      task().catch((error) => {
+      this.executePreparedRun(context).catch((error) => {
         console.error('项目队列分析异常:', this.formatError(error));
       });
     });
@@ -1901,6 +1923,7 @@ class ProjectRunService {
       runtimeSettings,
       concurrency: this.getProjectRunConcurrency(runtimeSettings),
       questionSetRunId: runId,
+      runRevision: Number(prepared.run.revision) || 0,
       retryBatchId: prepared.retryBatchId,
       targets: prepared.entries.map((entry) => entry.target)
     };
@@ -2106,8 +2129,12 @@ class ProjectRunService {
       }
     });
     if (!records.length) {
-      // 所有记录已完成，直接清除暂停状态
-      await run.update({ paused_at: null });
+      const QuestionSetRunService = require('./QuestionSetRunService');
+      await QuestionSetRunService.reconcileNativeRun({
+        projectId: run.project_id,
+        runId: run.id,
+        expectedRevision: Number(run.revision) || 0
+      });
       return { ok: true, runId, resumed: true, remainingCount: 0 };
     }
 
@@ -2173,6 +2200,7 @@ class ProjectRunService {
       runtimeSettings,
       concurrency,
       questionSetRunId: runId,
+      runRevision: Number(run.revision) || 0,
       targets: validEntries.map((e) => e.target)
     });
 

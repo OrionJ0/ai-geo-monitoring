@@ -285,40 +285,214 @@ class QuestionSetRunService {
     };
   }
 
-  async finalizeNativeRun({ projectId, runId, repositories = {} }) {
+  async reconcileNativeRun({
+    projectId,
+    runId,
+    expectedRevision = null,
+    now = new Date(),
+    repositories = {}
+  }) {
     const Run = repositories.QuestionSetRun || QuestionSetRun;
     const stored = await this.findRun({ projectId, runId, repositories });
-    if (!stored) return false;
+    if (!stored) {
+      return {
+        ok: false,
+        reconciled: false,
+        reason: 'run_not_found'
+      };
+    }
     const run = plain(stored);
-    if (run.source !== 'native') return false;
+    if (run.source !== 'native') {
+      return {
+        ok: false,
+        reconciled: false,
+        reason: 'not_native'
+      };
+    }
     const revision = Number(run.revision) || 0;
+    const requestedRevision = expectedRevision === null || expectedRevision === undefined
+      ? revision
+      : Number(expectedRevision);
+    if (!Number.isInteger(requestedRevision) || requestedRevision !== revision) {
+      console.warn('拒绝旧 revision 收敛父运行:', {
+        question_set_run_id: run.id,
+        expected_revision: requestedRevision,
+        actual_revision: revision,
+        error_code: 'question_set_run_reconcile_stale_revision'
+      });
+      return {
+        ok: false,
+        reconciled: false,
+        reason: 'stale_revision',
+        revision
+      };
+    }
+
+    const cachedRows = Array.isArray(run.imported_rows) ? run.imported_rows : [];
+    const integrityStatus = run.integrity_status || 'complete';
+    if (
+      run.completed_at
+      && !run.paused_at
+      && (cachedRows.length > 0 || integrityStatus !== 'complete')
+    ) {
+      return {
+        ok: true,
+        reconciled: false,
+        reason: 'already_terminal',
+        status: integrityStatus === 'missing_records'
+          ? 'failed'
+          : deriveStatus(cachedRows),
+        revision
+      };
+    }
+
     const rows = await this.getNativeRows(run, repositories);
     const expectedRows = Number(run.planned_record_count) || 0;
     const status = deriveStatus(rows, run.paused_at || null);
-    if (
-      status === 'running'
-      || status === 'paused'
-      || !rows.length
-      || rows.length !== expectedRows
-    ) return false;
+    const pending = rows.filter((row) => row.status === 'pending').length;
+    if (pending > 0) {
+      return {
+        ok: true,
+        reconciled: false,
+        reason: 'pending_records',
+        status,
+        pending,
+        revision
+      };
+    }
+
+    const recordCountMatches = rows.length > 0 && rows.length === expectedRows;
+    const terminalStatus = recordCountMatches ? deriveStatus(rows) : 'failed';
+    const missingRecordCount = recordCountMatches
+      ? 0
+      : Math.max(1, Math.abs(expectedRows - rows.length));
+    const integrityErrorCode = recordCountMatches
+      ? null
+      : (rows.length === 0
+          ? 'empty_native_run'
+          : 'question_set_run_record_count_mismatch');
     const [updatedRows] = await Run.update(
       {
         imported_rows: rows,
-        completed_at: new Date(),
+        completed_at: new Date(now),
         paused_at: null,
-        integrity_status: 'complete',
-        integrity_missing_record_count: 0,
-        integrity_error_code: null
+        integrity_status: recordCountMatches ? 'complete' : 'missing_records',
+        integrity_missing_record_count: missingRecordCount,
+        integrity_error_code: integrityErrorCode
       },
       {
         where: {
           id: run.id,
           project_id: run.project_id,
-          revision
+          revision,
+          completed_at: run.completed_at || null
         }
       }
     );
-    return updatedRows === 1;
+    if (updatedRows !== 1) {
+      const latestStored = await this.findRun({ projectId, runId, repositories });
+      const latest = plain(latestStored);
+      const latestRevision = Number(latest?.revision) || 0;
+      if (latestRevision !== revision) {
+        console.warn('拒绝旧 revision 收敛父运行:', {
+          question_set_run_id: run.id,
+          expected_revision: revision,
+          actual_revision: latestRevision,
+          error_code: 'question_set_run_reconcile_stale_revision'
+        });
+        return {
+          ok: false,
+          reconciled: false,
+          reason: 'stale_revision',
+          revision: latestRevision
+        };
+      }
+      if (latest?.completed_at) {
+        return {
+          ok: true,
+          reconciled: false,
+          reason: 'already_terminal',
+          status: latest.integrity_status === 'missing_records'
+            ? 'failed'
+            : deriveStatus(Array.isArray(latest.imported_rows) ? latest.imported_rows : []),
+          revision: latestRevision
+        };
+      }
+      const error = new Error('问题集父运行收敛写入未生效');
+      error.code = 'question_set_run_reconcile_write_rejected';
+      throw error;
+    }
+    console.log('问题集父运行已收敛:', {
+      question_set_run_id: run.id,
+      revision,
+      status: terminalStatus,
+      error_code: recordCountMatches ? null : integrityErrorCode
+    });
+    return {
+      ok: true,
+      reconciled: true,
+      status: terminalStatus,
+      revision,
+      integrity_status: recordCountMatches ? 'complete' : 'missing_records'
+    };
+  }
+
+  async reconcileIncompleteNativeRuns({
+    limit = 100,
+    now = new Date(),
+    repositories = {}
+  } = {}) {
+    const Run = repositories.QuestionSetRun || QuestionSetRun;
+    const Record = repositories.QuestionRecord || QuestionRecord;
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 500) : 100;
+    const runs = await Run.findAll({
+      where: {
+        source: 'native',
+        completed_at: null,
+        '$questionRecords.id$': null
+      },
+      include: [{
+        model: Record,
+        as: 'questionRecords',
+        attributes: [],
+        required: false,
+        where: {
+          status: 'pending',
+          run_slot_index: { [Op.not]: null }
+        }
+      }],
+      order: [['id', 'ASC']],
+      limit: safeLimit,
+      subQuery: false
+    });
+    const results = [];
+    let firstError = null;
+    for (const stored of runs) {
+      const run = plain(stored);
+      try {
+        results.push(await this.reconcileNativeRun({
+          projectId: run.project_id,
+          runId: run.id,
+          expectedRevision: Number(run.revision) || 0,
+          now,
+          repositories
+        }));
+      } catch (error) {
+        firstError ||= error;
+        console.error('问题集父运行收敛失败:', {
+          question_set_run_id: run.id,
+          revision: Number(run.revision) || 0,
+          error_code: error.code || 'question_set_run_reconcile_failed'
+        });
+      }
+    }
+    if (firstError) {
+      const error = new Error('存在未能收敛的问题集父运行');
+      error.code = 'question_set_run_reconcile_failed';
+      error.cause = firstError;
+      throw error;
+    }
+    return results;
   }
 
   async listReports({ projectId, questionSetId, page = 1, pageSize = 20, repositories = {} }) {

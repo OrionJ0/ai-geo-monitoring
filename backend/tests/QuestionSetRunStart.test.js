@@ -157,6 +157,7 @@ test('atomically persists one launch plan and replays the same idempotency key',
   assert.equal(await QuestionSetRun.count(), 1);
   assert.equal(await QuestionRecord.count(), 2);
   assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].runRevision, 0);
 
   const run = await QuestionSetRun.findByPk(first.data.question_set_run_id);
   assert.equal(run.planned_record_count, 2);
@@ -294,4 +295,5 @@ test('keeps committed pending records when immediate dispatch fails and later re
     dispatched[0].questionSetRunId,
     result.data.question_set_run_id
   );
+  assert.equal(dispatched[0].runRevision, 0);
 });

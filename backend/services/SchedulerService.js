@@ -15,6 +15,7 @@ const AIPlatformService = require('./AIPlatformService');
 const ResultParserService = require('./ResultParserService');
 const ProjectRunService = require('./ProjectRunService');
 const ProjectRecordFinalizationService = require('./ProjectRecordFinalizationService');
+const QuestionSetRunService = require('./QuestionSetRunService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
@@ -861,6 +862,37 @@ class SchedulerService {
         }
       }
     );
+    const reconciliationService = options.questionSetRunService || QuestionSetRunService;
+    try {
+      const affectedRuns = new Map();
+      for (const record of recoveredRecords) {
+        const runId = Number(record.question_set_run_id);
+        const projectId = Number(record.project_id);
+        if (Number.isInteger(runId) && runId > 0 && Number.isInteger(projectId) && projectId > 0) {
+          affectedRuns.set(`${projectId}:${runId}`, { projectId, runId });
+        }
+      }
+      for (const affected of affectedRuns.values()) {
+        const reconciliation = await reconciliationService.reconcileNativeRun(affected);
+        if (!reconciliation?.ok && reconciliation?.reason !== 'stale_revision') {
+          const error = new Error('问题集父运行收敛失败');
+          error.code = `question_set_run_reconcile_${reconciliation?.reason || 'rejected'}`;
+          throw error;
+        }
+      }
+      if (RecordRepository === QuestionRecord) {
+        await reconciliationService.reconcileIncompleteNativeRuns({ now });
+      }
+      if (this._lastErrorCode === 'question_set_run_reconcile_failed') {
+        this._lastErrorCode = null;
+      }
+    } catch (error) {
+      this._lastErrorCode = 'question_set_run_reconcile_failed';
+      console.error('恢复后收敛问题集父运行失败:', {
+        error_code: 'question_set_run_reconcile_failed'
+      });
+      throw error;
+    }
     if (count > 0) {
       console.warn('已恢复过期分析执行租约:', {
         count,

@@ -209,11 +209,14 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   await run.reload();
   assert.deepEqual(run.imported_rows, []);
   assert.equal(run.completed_at, null);
-  const finalized = await QuestionSetRunService.finalizeNativeRun({
+  const finalized = await QuestionSetRunService.reconcileNativeRun({
     projectId: project.id,
-    runId: run.id
+    runId: run.id,
+    expectedRevision: 0
   });
-  assert.equal(finalized, true);
+  assert.equal(finalized.ok, true);
+  assert.equal(finalized.reconciled, true);
+  assert.equal(finalized.status, 'partial');
   await run.reload();
   assert.equal(run.imported_rows.length, 2);
   assert.ok(run.completed_at);
@@ -288,11 +291,13 @@ test('旧执行器生成的终态快照不能覆盖已进入新一轮重试的�
   };
 
   try {
-    const finalized = await QuestionSetRunService.finalizeNativeRun({
+    const finalized = await QuestionSetRunService.reconcileNativeRun({
       projectId: project.id,
-      runId: run.id
+      runId: run.id,
+      expectedRevision: 0
     });
-    assert.equal(finalized, false);
+    assert.equal(finalized.ok, false);
+    assert.equal(finalized.reason, 'stale_revision');
     await run.reload();
     assert.deepEqual(run.imported_rows, []);
     assert.equal(run.completed_at, null);
