@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-  getWebPlatformRuntimePresentation
+  getWebPlatformRuntimePresentation,
+  selectManagedWebPlatformCodes
 } = require('./webPlatformRuntimeStatus.cjs');
 
 function present(status, options = {}) {
@@ -74,6 +75,22 @@ test('hides disabled status and keeps read failures non-blocking', () => {
   });
 });
 
+test('shows runtime status only for managed Web platforms used by the current project or run', () => {
+  assert.deepEqual(
+    selectManagedWebPlatformCodes([
+      'doubao',
+      'deepseek-web',
+      'DOUBAO-WEB',
+      'deepseek-web',
+      '',
+      null
+    ]),
+    ['deepseek-web', 'doubao-web']
+  );
+  assert.deepEqual(selectManagedWebPlatformCodes(['doubao', 'qwen']), []);
+  assert.deepEqual(selectManagedWebPlatformCodes(undefined), []);
+});
+
 test('maps login, verification, unavailable and shutdown to operator-safe guidance', () => {
   assert.deepEqual(present({
     enabled: true,
@@ -132,9 +149,8 @@ test('shared component polls only on visible pages and is mounted at both decisi
   assert.match(hook, /document\.visibilityState\s*!==\s*'visible'/);
   assert.match(hook, /requestVersion/);
   assert.match(component, /getWebPlatformRuntimePresentation/);
-  assert.match(component, /deepseek-web/);
-  assert.match(component, /doubao-web/);
+  assert.match(component, /selectManagedWebPlatformCodes\(platformCodes\)/);
   assert.match(component, /aria-live="polite"/);
-  assert.match(prompts, /<WebPlatformRuntimeStatus\s*\/>/);
-  assert.match(reports, /<WebPlatformRuntimeStatus\s*\/>/);
+  assert.match(prompts, /<WebPlatformRuntimeStatus\s+platformCodes=\{projectPlatforms\}\s*\/>/);
+  assert.match(reports, /<WebPlatformRuntimeStatus\s+platformCodes=\{relevantWebPlatformCodes\}\s*\/>/);
 });

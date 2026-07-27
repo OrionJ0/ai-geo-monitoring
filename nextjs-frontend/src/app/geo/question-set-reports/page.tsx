@@ -47,7 +47,13 @@ import styles from './question-set-reports.module.css';
 
 const { Paragraph, Text, Title } = Typography;
 
-type Project = { id: number; name: string; status?: string; website?: string };
+type Project = {
+  id: number;
+  name: string;
+  status?: string;
+  website?: string;
+  platforms?: string[];
+};
 type CitationSource = {
   url?: string;
   domain?: string;
@@ -546,6 +552,14 @@ export default function QuestionSetReportsPage() {
     () => projects.find((item) => item.id === projectId),
     [projects, projectId],
   );
+  const relevantWebPlatformCodes = useMemo(() => {
+    const reportPlatforms = (report?.rows || [])
+      .map((row) => row.platform)
+      .filter((code): code is string => Boolean(code));
+    return reportPlatforms.length
+      ? reportPlatforms
+      : selectedProject?.platforms || [];
+  }, [report, selectedProject]);
   const summary = report?.summary || {};
   const hasCompetitorBaseline = Number(summary.competitor_baseline_count || 0) > 0;
   const hasLegacyAnalysis = Boolean(report?.rows?.some(
@@ -808,7 +822,7 @@ export default function QuestionSetReportsPage() {
         </Space>
       </div>
 
-      <WebPlatformRuntimeStatus />
+      <WebPlatformRuntimeStatus platformCodes={relevantWebPlatformCodes} />
 
       <QuestionSetRunHistoryDrawer
         open={historyOpen}

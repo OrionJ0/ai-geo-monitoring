@@ -1,6 +1,9 @@
 'use client';
 
-import { getWebPlatformRuntimePresentation } from '@/utils/webPlatformRuntimeStatus.cjs';
+import {
+  getWebPlatformRuntimePresentation,
+  selectManagedWebPlatformCodes
+} from '@/utils/webPlatformRuntimeStatus.cjs';
 import { useWebPlatformRuntimeStatus } from '@/lib/useWebPlatformRuntimeStatus';
 import styles from './WebPlatformRuntimeStatus.module.css';
 
@@ -39,8 +42,15 @@ function RuntimeStrip({ platform }: { platform: typeof PLATFORMS[number] }) {
   );
 }
 
-export default function WebPlatformRuntimeStatus() {
-  return PLATFORMS.map((platform) => (
-    <RuntimeStrip key={platform.code} platform={platform} />
-  ));
+export default function WebPlatformRuntimeStatus({
+  platformCodes
+}: {
+  platformCodes: readonly string[];
+}) {
+  return selectManagedWebPlatformCodes(platformCodes).map((code) => {
+    const platform = PLATFORMS.find((item) => item.code === code);
+    return platform
+      ? <RuntimeStrip key={platform.code} platform={platform} />
+      : null;
+  });
 }

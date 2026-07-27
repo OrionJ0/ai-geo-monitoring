@@ -3,6 +3,17 @@ function nonNegativeInteger(value) {
   return Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : 0;
 }
 
+const MANAGED_WEB_PLATFORM_CODES = ['deepseek-web', 'doubao-web'];
+
+function selectManagedWebPlatformCodes(platformCodes) {
+  const selected = new Set(
+    (Array.isArray(platformCodes) ? platformCodes : [])
+      .map((code) => String(code || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  return MANAGED_WEB_PLATFORM_CODES.filter((code) => selected.has(code));
+}
+
 function getWebPlatformRuntimePresentation(status, options = {}) {
   const platformName = options.platformName || 'Web 平台';
   if (options.unavailable || !status) {
@@ -85,5 +96,6 @@ function getWebPlatformRuntimePresentation(status, options = {}) {
 }
 
 module.exports = {
-  getWebPlatformRuntimePresentation
+  getWebPlatformRuntimePresentation,
+  selectManagedWebPlatformCodes
 };

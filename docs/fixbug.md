@@ -58,6 +58,20 @@
 
 ### P2
 
+- [ ] 2026-07-27：只显示当前项目或运行实际使用的 Web 通道状态
+  - 状态：待修
+  - 记录时间：2026-07-27 23:06
+  - 现象：目标 VM 的“广拓”项目只配置豆包 API，问题库仍固定显示“DeepSeek Web 登录已失效”，让用户误以为当前项目被无关平台阻塞。
+  - 影响：全局启用但未被当前项目使用的 Web 平台会在问题库和运行报告制造错误告警，用户无法判断哪个登录状态真正影响当前任务。
+  - 来源：
+    - `nextjs-frontend/src/components/WebPlatformRuntimeStatus.tsx`
+    - `nextjs-frontend/src/app/geo/prompts/page.tsx`
+    - `nextjs-frontend/src/app/geo/question-set-reports/page.tsx`
+    - 目标 VM `http://192.168.9.224:3001/geo/prompts`
+  - 复现：启用 `deepseek-web`，令当前项目只选择 `doubao`，打开问题库。
+  - 修复进展：组件已改为接收当前项目或当前运行的平台代码，只轮询和展示其中的受管 Web 平台；定向 5 项回归测试通过。
+  - 下一步：完成前端全量测试和生产构建，推送后由目标 VM 拉取部署，再确认豆包 API 项目不显示 DeepSeek Web 告警。
+
 - [ ] 2026-07-27：修复未运行问题显示 1970 年时间
   - 状态：待修
   - 记录时间：2026-07-27 22:06

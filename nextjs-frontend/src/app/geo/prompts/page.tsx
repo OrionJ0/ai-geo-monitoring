@@ -988,7 +988,7 @@ export default function GeoPromptsPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       {platformCatalogError ? <Alert type="error" showIcon title={platformCatalogError} /> : null}
-      <WebPlatformRuntimeStatus />
+      <WebPlatformRuntimeStatus platformCodes={projectPlatforms} />
       <Card title="问题库">
         <Row gutter={[12, 12]} align="middle">
           <Col flex="360px">
