@@ -4,7 +4,8 @@ const { encryptSecret, decryptSecret } = require('./SecretEncryptionService');
 const { validatePlatformUrl } = require('./PlatformUrlPolicyService');
 
 const ADAPTER_TYPES = new Set(['openai_responses', 'openai_chat_completions']);
-const RESERVED_PLATFORM_CODES = new Set(['deepseek-web']);
+const RESERVED_PLATFORM_CODES = new Set(['deepseek-web', 'doubao-web']);
+const MANAGED_WEB_ADAPTER_TYPES = new Set(['deepseek_web', 'doubao_web']);
 const TEST_STATUSES = new Set(['untested', 'success', 'failed']);
 const WEB_SEARCH_TEST_STATUSES = new Set(['untested', 'success', 'failed', 'inconclusive']);
 const REQUEST_OPTIONS_MAX_BYTES = 16 * 1024;
@@ -29,7 +30,7 @@ const API_CAPABILITIES = Object.freeze({
   legacy_schedule: true,
   interactive_login: false
 });
-const DEEPSEEK_WEB_CAPABILITIES = Object.freeze({
+const MANAGED_WEB_CAPABILITIES = Object.freeze({
   monitoring: true,
   analysis: false,
   prompt_generation: false,
@@ -58,7 +59,7 @@ const PRESET_PLATFORMS = Object.freeze([
     adapter_type: 'openai_chat_completions',
     base_url: 'https://api.deepseek.com/v1/chat/completions',
     default_model: 'deepseek-v4-flash',
-    enabled: true,
+    enabled: false,
     builtin: true
   }),
   Object.freeze({
@@ -71,11 +72,23 @@ const PRESET_PLATFORMS = Object.freeze([
     builtin: true
   }),
   Object.freeze({
+    code: 'doubao-web',
+    name: '豆包网页版',
+    adapter_type: 'doubao_web',
+    base_url: 'https://www.doubao.com',
+    default_model: 'doubao-web-ui',
+    enabled: false,
+    builtin: true
+  }),
+  Object.freeze({
     code: 'qwen',
     name: '千问',
     adapter_type: 'openai_responses',
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     default_model: 'qwen3.7-plus',
+    request_options: Object.freeze({
+      search_options: Object.freeze({ forced_search: true })
+    }),
     enabled: true,
     builtin: true
   }),
@@ -89,6 +102,12 @@ const PRESET_PLATFORMS = Object.freeze([
     builtin: true
   })
 ]);
+
+const MANAGED_WEB_PRESETS = new Map(
+  PRESET_PLATFORMS
+    .filter((preset) => MANAGED_WEB_ADAPTER_TYPES.has(preset.adapter_type))
+    .map((preset) => [preset.code, preset])
+);
 
 class PlatformConfigError extends Error {
   constructor(message, code = 'invalid_platform_config', status = 400) {
@@ -159,8 +178,8 @@ function rowValue(row, key) {
 }
 
 function getPlatformCapabilities(row) {
-  return rowValue(row, 'adapter_type') === 'deepseek_web'
-    ? { ...DEEPSEEK_WEB_CAPABILITIES }
+  return MANAGED_WEB_ADAPTER_TYPES.has(rowValue(row, 'adapter_type'))
+    ? { ...MANAGED_WEB_CAPABILITIES }
     : { ...API_CAPABILITIES };
 }
 
@@ -170,14 +189,18 @@ function hasPlatformCapability(row, capability) {
 }
 
 function isManagedPlatform(row) {
-  return rowValue(row, 'adapter_type') === 'deepseek_web'
+  return MANAGED_WEB_ADAPTER_TYPES.has(rowValue(row, 'adapter_type'))
     || RESERVED_PLATFORM_CODES.has(String(rowValue(row, 'code') || '').toLowerCase());
 }
 
 function isConfigured(row) {
-  if (rowValue(row, 'adapter_type') === 'deepseek_web') {
-    return String(rowValue(row, 'base_url') || '').trim() === 'https://chat.deepseek.com'
-      && String(rowValue(row, 'default_model') || '').trim() === 'deepseek-web-ui';
+  const managedPreset = MANAGED_WEB_PRESETS.get(
+    String(rowValue(row, 'code') || '').toLowerCase()
+  );
+  if (managedPreset) {
+    return rowValue(row, 'adapter_type') === managedPreset.adapter_type
+      && String(rowValue(row, 'base_url') || '').trim() === managedPreset.base_url
+      && String(rowValue(row, 'default_model') || '').trim() === managedPreset.default_model;
   }
   return Boolean(
     rowValue(row, 'encrypted_api_key')
@@ -189,10 +212,12 @@ function isConfigured(row) {
 function getUnavailableReason(row) {
   if (!row || row.archived_at) return 'archived';
   if (!row.enabled) return 'disabled';
-  if (rowValue(row, 'adapter_type') !== 'deepseek_web' && !row.encrypted_api_key) return 'missing_api_key';
+  if (!MANAGED_WEB_ADAPTER_TYPES.has(rowValue(row, 'adapter_type')) && !row.encrypted_api_key) {
+    return 'missing_api_key';
+  }
   if (!String(row.base_url || '').trim()) return 'missing_base_url';
   if (!String(row.default_model || '').trim()) return 'missing_model';
-  if (rowValue(row, 'adapter_type') === 'deepseek_web' && !isConfigured(row)) return 'managed_config_invalid';
+  if (isManagedPlatform(row) && !isConfigured(row)) return 'managed_config_invalid';
   return null;
 }
 
@@ -243,13 +268,14 @@ class AIPlatformConfigService {
 
     for (const preset of PRESET_PLATFORMS) {
       const existing = await this.model.findOne({ where: { code: preset.code } });
+      const managedPreset = MANAGED_WEB_PRESETS.get(preset.code);
       if (
-        preset.code === 'deepseek-web'
+        managedPreset
         && existing
-        && (!existing.builtin || existing.adapter_type !== 'deepseek_web')
+        && (!existing.builtin || existing.adapter_type !== managedPreset.adapter_type)
       ) {
         throw new PlatformConfigError(
-          '保留平台标识 deepseek-web 已被其他配置占用',
+          `保留平台标识 ${preset.code} 已被其他配置占用`,
           'reserved_platform_code_conflict',
           409
         );
@@ -258,7 +284,7 @@ class AIPlatformConfigService {
         where: { code: preset.code },
         defaults: preset
       });
-      if (preset.code === 'deepseek-web') {
+      if (managedPreset) {
         await row.update({
           name: preset.name,
           adapter_type: preset.adapter_type,
@@ -275,6 +301,26 @@ class AIPlatformConfigService {
         await row.update({ builtin: true });
       }
       const requestOptions = row.request_options || {};
+      const matchesPresetIdentity = row.name === preset.name
+        && row.adapter_type === preset.adapter_type
+        && row.base_url === preset.base_url
+        && row.default_model === preset.default_model;
+      const isLegacyQwenDefault = preset.code === 'qwen'
+        && matchesPresetIdentity
+        && Object.keys(requestOptions).length === 0;
+      if (isLegacyQwenDefault) {
+        await row.update({
+          request_options: JSON.parse(JSON.stringify(preset.request_options)),
+          ...this.untestedState()
+        });
+      }
+      const isLegacyUnconfiguredDeepSeekDefault = preset.code === 'deepseek'
+        && matchesPresetIdentity
+        && row.enabled
+        && !row.encrypted_api_key;
+      if (isLegacyUnconfiguredDeepSeekDefault) {
+        await row.update({ enabled: false });
+      }
       const isObsoleteDoubaoPreset = preset.code === 'doubao'
         && JSON.stringify(requestOptions) === JSON.stringify({
           tools: [{ type: 'web_search', max_keyword: 2 }]

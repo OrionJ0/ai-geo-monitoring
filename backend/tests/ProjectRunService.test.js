@@ -8,7 +8,7 @@ const {
   BrandCompetitor
 } = require('../models');
 const AIPlatformService = require('../services/AIPlatformService');
-const WebPlatformService = require('../services/WebPlatformService');
+const WebPlatformRegistry = require('../services/WebPlatformRegistry');
 const ProjectRunService = require('../services/ProjectRunService');
 const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
 const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
@@ -823,13 +823,13 @@ test('runs a prepared project run target without creating a duplicate question r
   }
 });
 
-test('project executor passes bounded owner context and persists Web text, citations and capture metadata', async () => {
+test('project executor passes bounded owner context and persists Doubao Web text, citations and capture metadata', async () => {
   const originalQueryPlatform = AIPlatformService.queryPlatform;
   const originalFinalize = ProjectRunService.finalizeSuccessfulRecord;
   let queryOptions = null;
   let finalizationInput = null;
   const webCapture = {
-    schema_version: 'deepseek-web-capture-v1',
+    schema_version: 'doubao-web-capture-v1',
     status: 'completed',
     artifact_owner_record_id: 88
   };
@@ -838,13 +838,13 @@ test('project executor passes bounded owner context and persists Web text, citat
     queryOptions = options;
     return {
       success: true,
-      platform: 'deepseek-web',
-      text: 'DeepSeek 网页最终回答',
+      platform: 'doubao-web',
+      text: '豆包网页最终回答',
       data: {},
       provider_citations: [{
         url: 'https://example.com/source',
         domain: 'example.com',
-        source_origin: 'deepseek_web_dom',
+        source_origin: 'doubao_web_dom',
         source_role: 'explicit_citation'
       }],
       web_capture: webCapture
@@ -869,10 +869,10 @@ test('project executor passes bounded owner context and persists Web text, citat
     const result = await ProjectRunService.runTarget({
       target: {
         prompt: { id: 8, question: '开源 GEO 工具有哪些' },
-        platform: 'deepseek-web',
+        platform: 'doubao-web',
         platformConfig: {
-          adapter_type: 'deepseek_web',
-          default_model: 'deepseek-web-ui'
+          adapter_type: 'doubao_web',
+          default_model: 'doubao-web-ui'
         }
       },
       record: { id: 88, update: async () => {} },
@@ -891,7 +891,7 @@ test('project executor passes bounded owner context and persists Web text, citat
       project_id: 2,
       execution_token: 'lease-token'
     });
-    assert.equal(finalizationInput.responseText, 'DeepSeek 网页最终回答');
+    assert.equal(finalizationInput.responseText, '豆包网页最终回答');
     assert.equal(finalizationInput.providerCitations.length, 1);
     assert.deepEqual(finalizationInput.resultSummaryPatch, { web_capture: webCapture });
   } finally {
@@ -903,7 +903,7 @@ test('project executor passes bounded owner context and persists Web text, citat
 test('a stale Web worker discards newly promoted evidence after terminal fencing rejects it', async () => {
   const originalQueryPlatform = AIPlatformService.queryPlatform;
   const originalFinalize = ProjectRunService.finalizeSuccessfulRecord;
-  const originalDiscard = WebPlatformService.discardRecordCapture;
+  const originalGetService = WebPlatformRegistry.getService;
   const discarded = [];
   const webCapture = {
     status: 'completed',
@@ -927,7 +927,9 @@ test('a stale Web worker discards newly promoted evidence after terminal fencing
     error: '执行租约已失效',
     error_code: 'stale_worker_write_rejected'
   });
-  WebPlatformService.discardRecordCapture = async (...args) => discarded.push(args);
+  WebPlatformRegistry.getService = () => ({
+    discardRecordCapture: async (...args) => discarded.push(args)
+  });
 
   try {
     const result = await ProjectRunService.runTarget({
@@ -949,14 +951,14 @@ test('a stale Web worker discards newly promoted evidence after terminal fencing
   } finally {
     AIPlatformService.queryPlatform = originalQueryPlatform;
     ProjectRunService.finalizeSuccessfulRecord = originalFinalize;
-    WebPlatformService.discardRecordCapture = originalDiscard;
+    WebPlatformRegistry.getService = originalGetService;
   }
 });
 
 test('an unexpected finalization failure discards newly promoted Web evidence', async () => {
   const originalQueryPlatform = AIPlatformService.queryPlatform;
   const originalFinalize = ProjectRunService.finalizeSuccessfulRecord;
-  const originalDiscard = WebPlatformService.discardRecordCapture;
+  const originalGetService = WebPlatformRegistry.getService;
   const discarded = [];
   const updates = [];
   const webCapture = {
@@ -978,7 +980,9 @@ test('an unexpected finalization failure discards newly promoted Web evidence', 
   ProjectRunService.finalizeSuccessfulRecord = async () => {
     throw new Error('database connection lost');
   };
-  WebPlatformService.discardRecordCapture = async (...args) => discarded.push(args);
+  WebPlatformRegistry.getService = () => ({
+    discardRecordCapture: async (...args) => discarded.push(args)
+  });
 
   try {
     const result = await ProjectRunService.runTarget({
@@ -1000,7 +1004,7 @@ test('an unexpected finalization failure discards newly promoted Web evidence', 
   } finally {
     AIPlatformService.queryPlatform = originalQueryPlatform;
     ProjectRunService.finalizeSuccessfulRecord = originalFinalize;
-    WebPlatformService.discardRecordCapture = originalDiscard;
+    WebPlatformRegistry.getService = originalGetService;
   }
 });
 

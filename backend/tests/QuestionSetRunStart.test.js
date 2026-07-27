@@ -415,6 +415,57 @@ test('question-set entry persists DeepSeek Web records with run ownership and ad
   }
 });
 
+test('question-set entry persists Doubao Web records through the same prepared-run path', async () => {
+  const previousPlatforms = project.platforms;
+  await project.update({ platforms: ['doubao-web'] });
+  AIPlatformService.getPlatformAvailability = async () => [{
+    code: 'doubao-web',
+    platform_name: '豆包网页版',
+    model_name: 'doubao-web-ui',
+    available: true,
+    reason: null,
+    config: {
+      code: 'doubao-web',
+      adapter_type: 'doubao_web',
+      default_model: 'doubao-web-ui'
+    }
+  }];
+  let scheduledContext = null;
+  ProjectRunService.schedulePreparedRun = (context) => {
+    scheduledContext = context;
+  };
+
+  try {
+    const result = await ProjectRunService.startQuestionSetRun(startOptions({
+      project,
+      prompts: prompts.map((prompt) => ({
+        ...prompt.toJSON(),
+        platforms: ['doubao-web']
+      })),
+      platforms: ['doubao-web'],
+      idempotencyKey: 'doubao-web-question-set-entry'
+    }));
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data.planned_platforms, ['doubao-web']);
+    const records = await QuestionRecord.findAll({
+      where: { question_set_run_id: result.data.question_set_run_id },
+      order: [['run_slot_index', 'ASC']]
+    });
+    assert.deepEqual(records.map((record) => record.platform), [
+      'doubao-web',
+      'doubao-web'
+    ]);
+    assert.ok(records.every((record) => record.model_name === 'doubao-web-ui'));
+    assert.equal(
+      scheduledContext.entries[0].target.platformConfig.adapter_type,
+      'doubao_web'
+    );
+  } finally {
+    await project.update({ platforms: previousPlatforms });
+  }
+});
+
 test('mixed question-set run skips unavailable Web before quota and keeps API records runnable', async () => {
   const previousPlatforms = project.platforms;
   await project.update({ platforms: ['doubao', 'deepseek-web'] });

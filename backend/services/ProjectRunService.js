@@ -13,7 +13,7 @@ const { createHash, randomUUID } = require('node:crypto');
 const os = require('node:os');
 const { Op, Transaction } = require('sequelize');
 const AIPlatformService = require('./AIPlatformService');
-const WebPlatformService = require('./WebPlatformService');
+const WebPlatformRegistry = require('./WebPlatformRegistry');
 const ResultParserService = require('./ResultParserService');
 const VisibilityAnalysisService = require('./VisibilityAnalysisService');
 const AIResponseAnalysisService = require('./AIResponseAnalysisService');
@@ -33,27 +33,33 @@ const PLATFORM_MISMATCH_MESSAGE = '问题选择的平台不在当前项目的监
 const MIN_RECORD_LEASE_MS = 60 * 1000;
 const RECORD_LEASE_BUFFER_SECONDS = 60;
 
-const WEB_PLATFORM_ERROR_MESSAGES = {
-  web_browser_not_configured: '未配置可用的本机 Chrome',
-  web_browser_launch_failed: 'DeepSeek 网页版浏览器启动失败',
-  web_browser_closed: 'DeepSeek 网页版浏览器已关闭',
-  web_browser_unresponsive: 'DeepSeek 网页版浏览器响应超时',
-  web_browser_command_failed: 'DeepSeek 网页版浏览器命令执行失败',
-  web_browser_connection_failed: '无法连接 DeepSeek 网页版浏览器',
-  web_capture_failed: 'DeepSeek 网页版采集失败',
-  web_profile_in_use: 'DeepSeek 网页版专用浏览器会话正在使用中',
-  web_login_required: 'DeepSeek 网页版需要重新人工登录',
-  web_verification_required: 'DeepSeek 网页版需要人工完成验证',
-  web_selector_mismatch: 'DeepSeek 网页版页面结构暂不受支持',
-  web_search_state_unverified: '无法确认 DeepSeek 网页版联网搜索已开启',
-  web_generation_timeout: '等待 DeepSeek 网页版最终回答超时',
-  web_response_too_large: 'DeepSeek 网页版回答超过保存上限',
-  web_screenshot_failed: 'DeepSeek 网页版截图保存失败',
-  web_artifact_write_failed: 'DeepSeek 网页版证据保存失败',
-  web_artifact_promote_failed: 'DeepSeek 网页版证据提交失败',
-  web_capture_metadata_too_large: 'DeepSeek 网页版采集元数据超过保存上限',
-  web_shutdown: 'DeepSeek 网页版服务正在关闭'
-};
+function webPlatformErrorMessage(result) {
+  const name = result?.platform === 'doubao-web'
+    ? '豆包网页版'
+    : 'DeepSeek 网页版';
+  const messages = {
+    web_browser_not_configured: '未配置可用的本机 Chrome',
+    web_browser_launch_failed: `${name}浏览器启动失败`,
+    web_browser_closed: `${name}浏览器已关闭`,
+    web_browser_unresponsive: `${name}浏览器响应超时`,
+    web_browser_command_failed: `${name}浏览器命令执行失败`,
+    web_browser_connection_failed: `无法连接 ${name}浏览器`,
+    web_capture_failed: `${name}采集失败`,
+    web_profile_in_use: `${name}专用浏览器会话正在使用中`,
+    web_login_required: `${name}需要重新人工登录`,
+    web_verification_required: `${name}需要人工完成验证`,
+    web_selector_mismatch: `${name}页面结构暂不受支持`,
+    web_search_state_unverified: `无法确认 ${name}联网搜索已开启`,
+    web_generation_timeout: `等待 ${name}最终回答超时`,
+    web_response_too_large: `${name}回答超过保存上限`,
+    web_screenshot_failed: `${name}截图保存失败`,
+    web_artifact_write_failed: `${name}证据保存失败`,
+    web_artifact_promote_failed: `${name}证据提交失败`,
+    web_capture_metadata_too_large: `${name}采集元数据超过保存上限`,
+    web_shutdown: `${name}服务正在关闭`
+  };
+  return messages[result?.error_code];
+}
 
 class StaleWorkerWriteError extends Error {
   constructor(recordId) {
@@ -65,7 +71,7 @@ class StaleWorkerWriteError extends Error {
 }
 
 function runtimePlatformFailureMessage(result) {
-  return WEB_PLATFORM_ERROR_MESSAGES[result?.error_code]
+  return webPlatformErrorMessage(result)
     || AI_PLATFORM_ERROR_MESSAGES[result?.error_code]
     || SAFE_PLATFORM_FAILURE_MESSAGE;
 }
@@ -2168,7 +2174,7 @@ class ProjectRunService {
           config: target.platformConfig,
           runtimeSettings
         };
-        if (target.platformConfig?.adapter_type === 'deepseek_web') {
+        if (WebPlatformRegistry.hasDefinition(target.platform)) {
           queryOptions.purpose = 'project_monitoring';
           queryOptions.capture_owner = {
             record_id: record.id,
@@ -2256,7 +2262,7 @@ class ProjectRunService {
           finalization.error_code === 'stale_worker_write_rejected'
           && generatedWebCapture
         ) {
-          await WebPlatformService.discardRecordCapture(
+          await WebPlatformRegistry.getService(target.platform).discardRecordCapture(
             record.id,
             generatedWebCapture
           );
@@ -2286,7 +2292,9 @@ class ProjectRunService {
     } catch (error) {
       if (generatedWebCapture && record?.id) {
         try {
-          await WebPlatformService.discardRecordCapture(record.id, generatedWebCapture);
+          await WebPlatformRegistry
+            .getService(target.platform)
+            .discardRecordCapture(record.id, generatedWebCapture);
         } catch {
           // Evidence cleanup is best-effort here; the record must still reach a failed terminal state.
         }

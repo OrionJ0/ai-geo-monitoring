@@ -1,6 +1,7 @@
 const express = require('express');
 const AIPlatformConfigService = require('../services/AIPlatformConfigService');
 const AIPlatformRequestService = require('../services/AIPlatformRequestService');
+const WebPlatformRegistry = require('../services/WebPlatformRegistry');
 const { PlatformConfigError } = require('../services/AIPlatformConfigService');
 const { adminRequired } = require('../middleware/auth');
 
@@ -18,6 +19,24 @@ function handleError(res, error, operation) {
   }
   console.error(`AI 平台${operation}失败:`, error?.name || 'Error');
   return res.status(500).json({ success: false, message: `${operation}失败` });
+}
+
+async function getManagedWebService(id) {
+  const row = await AIPlatformConfigService.requireCapability(
+    id,
+    'interactive_login'
+  );
+  let definition;
+  try {
+    definition = WebPlatformRegistry.validateManagedConfig(row);
+  } catch (error) {
+    throw new PlatformConfigError(
+      '受管 Web 平台配置无效',
+      error?.code || 'managed_config_invalid',
+      409
+    );
+  }
+  return WebPlatformRegistry.getService(definition.code);
 }
 
 router.get('/', async (_req, res) => {
@@ -56,6 +75,49 @@ router.patch('/:id/enabled', async (req, res) => {
     return res.json({ success: true, message: platform.enabled ? 'AI 平台已启用' : 'AI 平台已停用', data: platform });
   } catch (error) {
     return handleError(res, error, '启停');
+  }
+});
+
+router.get('/:id/web-session', async (req, res) => {
+  try {
+    const service = await getManagedWebService(req.params.id);
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      data: service.getAdminSessionSnapshot()
+    });
+  } catch (error) {
+    return handleError(res, error, '网页登录状态读取');
+  }
+});
+
+router.post('/:id/web-session/open', async (req, res) => {
+  try {
+    const service = await getManagedWebService(req.params.id);
+    const status = await service.beginInteractiveLogin();
+    return res.json({
+      success: true,
+      message: '专用 Chrome 已打开，请完成人工登录或账号切换',
+      data: status
+    });
+  } catch (error) {
+    return handleError(res, error, '网页登录窗口打开');
+  }
+});
+
+router.post('/:id/web-session/verify', async (req, res) => {
+  try {
+    const service = await getManagedWebService(req.params.id);
+    const status = await service.verifyInteractiveLogin();
+    return res.json({
+      success: true,
+      message: status.login_state === 'ready'
+        ? '网页登录状态已验证'
+        : '网页登录状态仍需人工处理',
+      data: status
+    });
+  } catch (error) {
+    return handleError(res, error, '网页登录验证');
   }
 });
 

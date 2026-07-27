@@ -61,7 +61,7 @@ const adminAIPlatformRoutes = require('./routes/adminAIPlatforms');
 const aiPlatformRoutes = require('./routes/aiPlatforms');
 const SchedulerService = require('./services/SchedulerService');
 const ProjectRunService = require('./services/ProjectRunService');
-const WebPlatformService = require('./services/WebPlatformService');
+const WebPlatformRegistry = require('./services/WebPlatformRegistry');
 const { createApplicationShutdown } = require('./services/ApplicationShutdownService');
 const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
 const AIPlatformConfigService = require('./services/AIPlatformConfigService');
@@ -142,7 +142,7 @@ const shutdownApplication = createApplicationShutdown({
   getServer: () => server,
   schedulerService: SchedulerService,
   projectRunService: ProjectRunService,
-  webPlatformService: WebPlatformService,
+  webPlatformRegistry: WebPlatformRegistry,
   sequelize
 });
 
@@ -633,16 +633,15 @@ async function ensureDefaultSettings() {
     await AIRuntimeSettingsService.ensureDefaults();
     await AIPlatformConfigService.ensurePresets();
     try {
-      const reconciledWebCaptures = await WebPlatformService
-        .getCaptureStore()
-        .reconcileTrash({
+      const reconciledWebCaptures = await WebPlatformRegistry
+        .reconcileCaptureStores({
           recordExists: async (recordId) => Boolean(await QuestionRecord.findByPk(
             recordId,
             { attributes: ['id'], raw: true }
           ))
         });
-      if (reconciledWebCaptures > 0) {
-        console.log(`已恢复或清理 ${reconciledWebCaptures} 个隔离 Web 证据目录`);
+      if (reconciledWebCaptures.total > 0) {
+        console.log(`已恢复或清理 ${reconciledWebCaptures.total} 个隔离 Web 证据目录`);
       }
     } catch (e) {
       console.warn('恢复或清理隔离 Web 证据失败:', e.message);

@@ -5,9 +5,9 @@ import axios from '@/lib/axiosConfig';
 
 export const POLL_INTERVAL_MS = 30_000;
 
-export type DeepSeekWebRuntimeStatus = {
-  schema_version: 'deepseek-web-runtime-v1';
-  platform: 'deepseek-web';
+export type WebPlatformRuntimeStatus = {
+  schema_version: `${string}-web-runtime-v1`;
+  platform: `${string}-web`;
   enabled: boolean;
   state: 'idle' | 'busy' | 'login_required' | 'verification_required' | 'unavailable' | 'shutting_down';
   running_count: number;
@@ -19,8 +19,8 @@ export type DeepSeekWebRuntimeStatus = {
   observed_at: string;
 };
 
-export function useDeepSeekWebRuntimeStatus() {
-  const [status, setStatus] = useState<DeepSeekWebRuntimeStatus | null>(null);
+export function useWebPlatformRuntimeStatus(platformCode: 'deepseek-web' | 'doubao-web') {
+  const [status, setStatus] = useState<WebPlatformRuntimeStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const requestVersion = useRef(0);
@@ -29,11 +29,15 @@ export function useDeepSeekWebRuntimeStatus() {
     const version = requestVersion.current + 1;
     requestVersion.current = version;
     try {
-      const response = await axios.get('/api/ai-platforms/deepseek-web/runtime-status');
+      const response = await axios.get(`/api/ai-platforms/${platformCode}/runtime-status`);
       if (requestVersion.current !== version) return;
       const nextStatus = response?.data?.data;
-      if (!nextStatus || nextStatus.schema_version !== 'deepseek-web-runtime-v1') {
-        throw new Error('invalid DeepSeek Web runtime status');
+      if (
+        !nextStatus
+        || nextStatus.platform !== platformCode
+        || nextStatus.schema_version !== `${platformCode}-runtime-v1`
+      ) {
+        throw new Error('invalid Web platform runtime status');
       }
       setStatus(nextStatus);
       setUnavailable(false);
@@ -43,7 +47,7 @@ export function useDeepSeekWebRuntimeStatus() {
     } finally {
       if (requestVersion.current === version) setLoading(false);
     }
-  }, []);
+  }, [platformCode]);
 
   useEffect(() => {
     let timer: number | undefined;

@@ -125,3 +125,30 @@ test('复用历史证据时读取原始归属记录，且不猜测模型版本',
   assert.equal(evidence.modelName, '');
   assert.match(evidence.artifacts[0].url, /^\/api\/detection\/record\/37\/web-captures\//);
 });
+
+test('豆包 Web 使用与 DeepSeek 隔离但一致的证据展示契约', () => {
+  const evidence = buildWebCaptureEvidence({
+    id: 51,
+    platform: 'doubao-web',
+    model_name: 'doubao-web-ui',
+    provider_citations: [],
+    result_summary: {
+      web_capture: {
+        status: 'completed',
+        selector_version: 'doubao-web-v1',
+        artifact_owner_record_id: 51,
+        search: { requested: true, observed: true },
+        artifacts: {
+          search_state: { id: SEARCH_ARTIFACT_ID },
+          final_answer: { id: FINAL_ARTIFACT_ID }
+        }
+      }
+    }
+  });
+
+  assert.equal(evidence.modelName, 'doubao-web-ui');
+  assert.equal(evidence.selectorVersion, 'doubao-web-v1');
+  assert.equal(evidence.searchObserved, true);
+  assert.deepEqual(evidence.explicitCitations, []);
+  assert.equal(evidence.artifacts.length, 2);
+});

@@ -25,7 +25,7 @@ function createApplicationShutdown({
   getServer,
   schedulerService,
   projectRunService,
-  webPlatformService,
+  webPlatformRegistry,
   sequelize
 }) {
   let shutdownPromise = null;
@@ -36,7 +36,7 @@ function createApplicationShutdown({
       projectRunService.beginShutdown();
       await Promise.all([
         schedulerService.stop(),
-        webPlatformService.shutdown(),
+        webPlatformRegistry.shutdown(),
         projectRunService.drain()
       ]);
       await sequelize.close();

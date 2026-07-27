@@ -1,0 +1,46 @@
+'use client';
+
+import { getWebPlatformRuntimePresentation } from '@/utils/webPlatformRuntimeStatus.cjs';
+import { useWebPlatformRuntimeStatus } from '@/lib/useWebPlatformRuntimeStatus';
+import styles from './WebPlatformRuntimeStatus.module.css';
+
+const PLATFORMS = [
+  { code: 'deepseek-web', name: 'DeepSeek Web', kicker: 'DEEPSEEK WEB' },
+  { code: 'doubao-web', name: '豆包 Web', kicker: '豆包 WEB' }
+] as const;
+
+function RuntimeStrip({ platform }: { platform: typeof PLATFORMS[number] }) {
+  const { status, loading, unavailable } = useWebPlatformRuntimeStatus(platform.code);
+  if (loading && !status && !unavailable) return null;
+
+  const presentation = getWebPlatformRuntimePresentation(status, {
+    unavailable,
+    platformName: platform.name
+  });
+  if (!presentation) return null;
+
+  return (
+    <section
+      className={styles.runtimeStrip}
+      data-tone={presentation.type}
+      data-state={status?.state || 'unknown'}
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span className={styles.signal} aria-hidden="true">
+        <span />
+      </span>
+      <div className={styles.copy}>
+        <span className={styles.kicker}>{platform.kicker} · 单通道队列</span>
+        <strong>{presentation.title}</strong>
+        <span className={styles.description}>{presentation.description}</span>
+      </div>
+    </section>
+  );
+}
+
+export default function WebPlatformRuntimeStatus() {
+  return PLATFORMS.map((platform) => (
+    <RuntimeStrip key={platform.code} platform={platform} />
+  ));
+}

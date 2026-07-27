@@ -7,6 +7,7 @@ const path = require('node:path');
 const {
   WebPlatformService,
   resolveWebRuntimeConfig,
+  resolvePlatformWebRuntimeConfig,
   classifyProbeSnapshot,
   buildChromeArguments
 } = require('../services/WebPlatformService');
@@ -63,6 +64,27 @@ test('resolves a dedicated ignored runtime profile and validates timeout bounds'
     }),
     { code: 'web_runtime_config_invalid' }
   );
+});
+
+test('resolves a platform-specific runtime without reading another Web platform fallback', () => {
+  const cwd = path.resolve(__dirname, '..');
+  const config = resolvePlatformWebRuntimeConfig({
+    code: 'doubao-web',
+    displayName: '豆包网页版',
+    envPrefix: 'DOUBAO_WEB'
+  }, {
+    cwd,
+    env: {
+      DOUBAO_WEB_TIMEOUT_SECONDS: '60',
+      DEEPSEEK_WEB_PROFILE_DIR: '.runtime/shared/profile',
+      DEEPSEEK_WEB_EVIDENCE_DIR: '.runtime/shared/evidence'
+    },
+    platform: 'darwin'
+  });
+
+  assert.equal(config.profileDir, path.join(cwd, '.runtime/doubao-web/profile'));
+  assert.equal(config.evidenceDir, path.join(cwd, '.runtime/doubao-web/evidence'));
+  assert.equal(config.timeoutMs, 60_000);
 });
 
 test('rejects broad or shared profile and evidence directories before touching the filesystem', () => {
@@ -134,6 +156,53 @@ test('preflight starts one headed session, caches success and preserves the prof
   assert.equal(mode, 0o700);
   await service.shutdown();
   assert.equal(await fs.promises.readFile(marker, 'utf8'), 'persisted');
+});
+
+test('a platform definition controls origin, launch target, selector identity and failure shape', async (t) => {
+  const runtimeConfig = await makeRuntimeDirectory();
+  t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+  const events = [];
+  const service = new WebPlatformService({
+    definition: {
+      code: 'doubao-web',
+      displayName: '豆包网页版',
+      officialUrl: 'https://www.doubao.com/chat/',
+      allowedOrigins: ['https://www.doubao.com'],
+      selectorVersion: 'doubao-web-v1',
+      captureSchemaVersion: 'doubao-web-capture-v1'
+    },
+    runtimeConfig,
+    launcher: fakeLauncher(
+      () => ({
+        status: 'ready',
+        origin: 'https://www.doubao.com',
+        composerCount: 1
+      }),
+      events
+    ),
+    pageFactory: () => ({}),
+    adapterFactory: () => ({
+      async capture() {
+        throw Object.assign(new Error('需要登录'), {
+          code: 'web_login_required',
+          stage: 'session_ready_checked'
+        });
+      }
+    })
+  });
+
+  assert.deepEqual(await service.preflight(), {
+    ok: true,
+    state: 'ready',
+    selector_version: 'doubao-web-v1'
+  });
+  const failed = await service.queryPlatform('测试', {
+    capture_owner: { record_id: 1, user_id: 1 }
+  });
+  assert.equal(events[0][1], 'https://www.doubao.com/chat/');
+  assert.equal(failed.platform, 'doubao-web');
+  assert.equal(failed.web_capture.schema_version, 'doubao-web-capture-v1');
+  assert.equal(failed.web_capture.failure.stage, 'session_ready_checked');
 });
 
 test('preflight tolerates the initial blank target until the official composer is ready', async (t) => {
@@ -418,6 +487,210 @@ test('interactive login keeps polling through login and verification until one c
   assert.equal(result.ok, true);
   assert.deepEqual(reported, ['login_required', 'verification_required']);
   await service.shutdown();
+});
+
+test('interactive login waits until the platform-required capability is available', async (t) => {
+  const runtimeConfig = await makeRuntimeDirectory();
+  t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+  const reported = [];
+  let capabilityChecks = 0;
+  const service = new WebPlatformService({
+    definition: {
+      verifyInteractiveSession: async () => {
+        capabilityChecks += 1;
+        if (capabilityChecks === 1) {
+          throw Object.assign(new Error('login required for deep research'), {
+            code: 'web_login_required'
+          });
+        }
+      }
+    },
+    runtimeConfig,
+    launcher: fakeLauncher(async () => ({
+      status: 'ready',
+      origin: 'https://chat.deepseek.com',
+      composerCount: 1
+    })),
+    pageFactory: () => ({})
+  });
+
+  const result = await service.waitForInteractiveLogin({
+    pollMs: 1,
+    onStatus: (status) => reported.push(status)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(capabilityChecks, 2);
+  assert.deepEqual(reported, ['login_required']);
+  await service.shutdown();
+});
+
+test('administrator session status distinguishes browser setup, profile initialization and login verification', async (t) => {
+  const runtimeConfig = await makeRuntimeDirectory();
+  t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+  const service = new WebPlatformService({
+    runtimeConfig,
+    launcher: fakeLauncher(async () => ({
+      status: 'ready',
+      origin: 'https://chat.deepseek.com',
+      composerCount: 1
+    }))
+  });
+
+  assert.deepEqual(service.getAdminSessionSnapshot(), {
+    schema_version: 'managed-web-session-v1',
+    platform: 'deepseek-web',
+    browser_configured: true,
+    profile_initialized: false,
+    login_state: 'unchecked',
+    reason_code: null,
+    last_verified_at: null
+  });
+
+  const verified = await service.verifyInteractiveLogin();
+  assert.equal(verified.login_state, 'ready');
+  assert.equal(verified.profile_initialized, true);
+  assert.match(verified.last_verified_at, /^\d{4}-\d{2}-\d{2}T/);
+  await service.shutdown();
+});
+
+test('interactive verification checks the platform-required capability before reporting login ready', async (t) => {
+  const runtimeConfig = await makeRuntimeDirectory();
+  t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+  let capabilityChecks = 0;
+  const service = new WebPlatformService({
+    definition: {
+      verifyInteractiveSession: async () => {
+        capabilityChecks += 1;
+        throw Object.assign(new Error('login required for deep research'), {
+          code: 'web_login_required'
+        });
+      }
+    },
+    runtimeConfig,
+    launcher: fakeLauncher(async () => ({
+      status: 'ready',
+      origin: 'https://chat.deepseek.com',
+      composerCount: 1
+    })),
+    pageFactory: () => ({})
+  });
+
+  const verified = await service.verifyInteractiveLogin();
+  assert.equal(capabilityChecks, 1);
+  assert.equal(verified.login_state, 'login_required');
+  assert.equal(verified.reason_code, 'web_login_required');
+  assert.equal(verified.last_verified_at, null);
+  assert.equal(service.getRuntimeSnapshot().lifecycle_state, 'login_required');
+  await service.shutdown();
+});
+
+test('opening login or account switching recycles the dedicated Chrome and blocks capture until verification', async (t) => {
+  const runtimeConfig = await makeRuntimeDirectory();
+  t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+  const events = [];
+  let probeResult = {
+    status: 'ready',
+    origin: 'https://chat.deepseek.com',
+    composerCount: 1
+  };
+  let captures = 0;
+  const service = new WebPlatformService({
+    runtimeConfig,
+    launcher: fakeLauncher(async () => probeResult, events),
+    captureStore: {},
+    pageFactory: () => ({}),
+    adapterFactory: () => ({
+      async capture() {
+        captures += 1;
+        return {
+          success: true,
+          platform: 'deepseek-web',
+          text: '完成',
+          data: {},
+          provider_citations: [],
+          web_capture: { status: 'completed' }
+        };
+      }
+    })
+  });
+
+  await service.preflight();
+  const opened = await service.beginInteractiveLogin();
+  assert.equal(opened.login_state, 'login_required');
+  assert.equal(events.filter(([event]) => event === 'launch').length, 2);
+  assert.equal(events.filter(([event]) => event === 'close').length, 1);
+
+  const blocked = await service.queryPlatform('不应发送', {
+    capture_owner: { record_id: 1, user_id: 7 }
+  });
+  assert.equal(blocked.error_code, 'web_login_required');
+  assert.equal(captures, 0);
+
+  const verified = await service.verifyInteractiveLogin();
+  assert.equal(verified.login_state, 'ready');
+  const completed = await service.queryPlatform('验证后发送', {
+    capture_owner: { record_id: 2, user_id: 7 }
+  });
+  assert.equal(completed.success, true);
+  assert.equal(captures, 1);
+  await service.shutdown();
+});
+
+test('interactive login preserves browser launch failures in the administrator status snapshot', async (t) => {
+  const runtimeConfig = await makeRuntimeDirectory();
+  t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+  const service = new WebPlatformService({
+    runtimeConfig,
+    launcher: {
+      async launch() {
+        throw Object.assign(new Error('launch failed'), {
+          code: 'web_browser_launch_failed'
+        });
+      }
+    }
+  });
+
+  await assert.rejects(service.beginInteractiveLogin(), {
+    code: 'web_browser_launch_failed'
+  });
+  assert.deepEqual(service.getAdminSessionSnapshot(), {
+    schema_version: 'managed-web-session-v1',
+    platform: 'deepseek-web',
+    browser_configured: true,
+    profile_initialized: true,
+    login_state: 'unavailable',
+    reason_code: 'web_browser_launch_failed',
+    last_verified_at: null
+  });
+  await service.shutdown();
+});
+
+test('interactive verification reports login and human-verification blockers without exposing runtime details', async (t) => {
+  for (const [status, loginState, reasonCode] of [
+    ['login_required', 'login_required', 'web_login_required'],
+    ['verification_required', 'verification_required', 'web_verification_required'],
+    ['selector_mismatch', 'selector_mismatch', 'web_selector_mismatch']
+  ]) {
+    const runtimeConfig = await makeRuntimeDirectory();
+    t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+    const service = new WebPlatformService({
+      runtimeConfig,
+      preflightStabilizationMs: 0,
+      launcher: fakeLauncher(async () => ({
+        status,
+        origin: 'https://chat.deepseek.com',
+        composerCount: 0
+      }))
+    });
+
+    const result = await service.verifyInteractiveLogin();
+    assert.equal(result.login_state, loginState);
+    assert.equal(result.reason_code, reasonCode);
+    assert.equal('profile_dir' in result, false);
+    assert.equal('chrome_executable' in result, false);
+    await service.shutdown();
+  }
 });
 
 test('login failure opens a circuit so already queued work fails without another page action', async (t) => {

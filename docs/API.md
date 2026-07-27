@@ -20,7 +20,7 @@ Authorization: Bearer <token>
 ### 速率限制
 - **通用 API**：500 次/15 分钟
 - **定时任务 API**：1000 次/15 分钟
-- **DeepSeek Web 只读运行状态**：1000 次/15 分钟；精确状态路径不消耗通用 API 预算，但仍先要求认证
+- **受管 Web 只读运行状态**：每个精确状态路径 1000 次/15 分钟；不消耗通用 API 预算，但仍先要求认证
 - **登录接口**：5 次/15 分钟
 
 ## 健康与就绪检查
@@ -55,7 +55,7 @@ Authorization: Bearer <token>
 - `POST /api/detection/create` 创建检测任务
   - 参数：`question` 必填；`platforms`、`brand`、`brand_keywords`/`highlightKeywords` 可选
 - `GET /api/detection/status/:recordId` 获取任务状态与结果摘要
-- `GET /api/detection/record/:recordId/web-captures/:artifactId` 读取 DeepSeek Web 页面证据
+- `GET /api/detection/record/:recordId/web-captures/:artifactId` 按记录平台读取受管 Web 页面证据
   - 仅接受记录 `result_summary.web_capture.artifacts` 中声明的不透明 artifact ID
   - 记录所有者和管理员可读；复用证据时同时校验原始 artifact owner
   - 成功返回 `image/png`、`Content-Disposition: inline` 和 `Cache-Control: private, no-store`
@@ -70,7 +70,7 @@ Authorization: Bearer <token>
   - **权限验证**：只能查看自己的历史，管理员可查看所有
 - `DELETE /api/detection/record/:id` 删除单条历史记录
   - **权限验证**：只能删除自己的记录，管理员可删除所有
-  - 非受保护记录删除成功后同步清理其 DeepSeek Web 页面证据
+  - 非受保护记录删除成功后按记录平台同步清理其 Web 页面证据
 - `DELETE /api/detection/history/:userId` 批量删除历史记录
   - **权限验证**：只能删除自己的记录，管理员可删除所有
 
@@ -253,10 +253,12 @@ Authorization: Bearer <token>
 
 ## AI 平台目录（需认证）
 - `GET /api/ai-platforms` 获取未归档平台目录及是否可选择，不返回 API Key。
-- `GET /api/ai-platforms/deepseek-web/runtime-status` 获取 DeepSeek Web 全局只读运行快照。
+- `GET /api/ai-platforms/:platformCode/runtime-status` 获取受管 Web 平台全局只读运行快照；当前只允许 `deepseek-web` 与 `doubao-web`，原 DeepSeek URL 保持不变，未知或 API 平台返回 404。
+  - `GET /api/ai-platforms/deepseek-web/runtime-status`
+  - `GET /api/ai-platforms/doubao-web/runtime-status`
   - 响应设置 `Cache-Control: private, no-store`，只返回 `schema_version`、`platform`、`enabled`、`state`、`running_count`、`queued_count`、`pending_count`、`needs_action`、`action_code`、`reason_code` 和 `observed_at`。
   - `state` 为 `idle`、`busy`、`login_required`、`verification_required`、`unavailable` 或 `shutting_down`；状态是无副作用快照，不启动 Chrome、不执行 preflight，也不替代真实运行前检查。
-  - `pending_count` 统计可执行或已持有效租约的 `deepseek-web` pending 记录；已暂停且没有有效租约的休眠记录不计入。`running_count` 只表示真实页面采集，只能为 0 或 1；`queued_count = max(pending_count - running_count, 0)`。
+  - `pending_count` 只统计请求平台的可执行或已持有效租约 pending 记录；已暂停且没有有效租约的休眠记录不计入。`running_count` 只表示该平台真实页面采集，只能为 0 或 1；`queued_count = max(pending_count - running_count, 0)`。
   - 响应不包含问题、回答、运行/记录 ID、PID、本机路径、浏览器凭据或内部异常。读取失败返回通用 `500`，不会禁用现有运行入口。
 
 ## AI 平台管理（需管理员权限）
@@ -264,12 +266,17 @@ Authorization: Bearer <token>
 - `POST /api/admin/ai-platforms` 新增 OpenAI Chat Completions 或 Responses 兼容平台。
 - `PUT /api/admin/ai-platforms/:id` 编辑平台、默认模型和 `request_options`；API Key 留空表示保留。
 - `PATCH /api/admin/ai-platforms/:id/enabled` 启用或停用平台。
+- `GET /api/admin/ai-platforms/:id/web-session` 读取受管 Web 平台的管理员会话状态；响应禁止缓存，只返回平台、浏览器是否可用、Profile 是否已初始化、登录验证状态、稳定原因码和最近验证时间，不返回路径或网页凭据。
+- `POST /api/admin/ai-platforms/:id/web-session/open` 关闭该平台已有受管窗口并打开同一专用 Profile 的 Chrome，供管理员人工登录或切换账号；操作期间该平台以 `web_login_required` 阻断新采集，其他 Web 平台不受影响。
+- `POST /api/admin/ai-platforms/:id/web-session/verify` 主动检查当前官方页面和唯一输入区。返回 `ready`、`login_required`、`verification_required`、`selector_mismatch` 或 `unavailable`；只有 `ready` 会清除该平台的登录熔断。
 - `GET /api/admin/ai-platforms/:id/models` 使用该平台已保存的连接配置临时读取供应商 `GET /models`；成功时合并当前默认模型、去重并完整返回，不做“常用/最新”筛选，同时返回 `persisted: false`，模型目录不落库。
 - `GET /api/admin/ai-platforms/:id/api-key` 由管理员主动读取该平台现有 API Key；响应设置 `Cache-Control: no-store`，平台列表仍不返回明文。
 - `DELETE /api/admin/ai-platforms/:id/api-key` 清除 API Key。
 - `DELETE /api/admin/ai-platforms/:id` 删除自定义平台；为保留历史记录含义，服务端采用软删除。
 - `POST /api/admin/ai-platforms/:id/test` 主动测试连接，不改变启用状态。
 - `POST /api/admin/ai-platforms/:id/test-web-search` 独立检测联网能力；可提交 `{ "input": "测试问题" }`，返回 `success`、`failed` 或 `inconclusive`，以及本次 `input`、模型文本和供应商响应体。输入输出仅随当前响应返回，数据库只保存状态、时间和简短结论，不改变平台启用状态。
+
+上述 `web-session` 接口只允许 `deepseek-web` 和 `doubao-web`，API 平台调用会返回 `unsupported_platform_capability`。打开的专用 Chrome 位于后端机器的持久桌面会话中，不会把第三方网页登录嵌入设置页。
 
 ## 会员方案（需管理员权限）
 - `GET /api/membership/plans` 获取全部会员方案

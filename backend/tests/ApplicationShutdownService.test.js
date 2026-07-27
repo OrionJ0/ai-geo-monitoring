@@ -34,7 +34,7 @@ test('application shutdown drains scheduler, project runs and Web session before
         await projectRunsDrained;
       }
     },
-    webPlatformService: {
+    webPlatformRegistry: {
       async shutdown() {
         events.push('web');
       }

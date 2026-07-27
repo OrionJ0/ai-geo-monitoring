@@ -4,11 +4,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-  getDeepSeekWebRuntimePresentation
-} = require('./deepSeekWebRuntimeStatus.cjs');
+  getWebPlatformRuntimePresentation
+} = require('./webPlatformRuntimeStatus.cjs');
+
+function present(status, options = {}) {
+  return getWebPlatformRuntimePresentation(status, {
+    platformName: 'DeepSeek Web',
+    ...options
+  });
+}
 
 test('maps idle and busy snapshots to queue-wide wording without ETA or exact position', () => {
-  assert.deepEqual(getDeepSeekWebRuntimePresentation({
+  assert.deepEqual(present({
     enabled: true,
     state: 'idle',
     running_count: 0,
@@ -20,7 +27,7 @@ test('maps idle and busy snapshots to queue-wide wording without ETA or exact po
     description: '当前没有等待中的 Web 问题。'
   });
 
-  assert.deepEqual(getDeepSeekWebRuntimePresentation({
+  assert.deepEqual(present({
     enabled: true,
     state: 'busy',
     running_count: 1,
@@ -32,7 +39,7 @@ test('maps idle and busy snapshots to queue-wide wording without ETA or exact po
     description: '正在运行 1 条，等待 4 条。其他 Web 问题将按顺序执行。'
   });
 
-  const waiting = getDeepSeekWebRuntimePresentation({
+  const waiting = present({
     enabled: true,
     state: 'busy',
     running_count: 0,
@@ -44,19 +51,19 @@ test('maps idle and busy snapshots to queue-wide wording without ETA or exact po
 });
 
 test('hides disabled status and keeps read failures non-blocking', () => {
-  assert.equal(getDeepSeekWebRuntimePresentation({
+  assert.equal(present({
     enabled: false,
     state: 'unavailable',
     reason_code: 'disabled'
   }), null);
 
-  assert.deepEqual(getDeepSeekWebRuntimePresentation(null, { unavailable: true }), {
+  assert.deepEqual(present(null, { unavailable: true }), {
     type: 'info',
     title: 'DeepSeek Web 状态暂时无法读取',
     description: '不影响现有运行入口；提交时仍会执行通道检查。'
   });
 
-  assert.deepEqual(getDeepSeekWebRuntimePresentation({
+  assert.deepEqual(present({
     enabled: false,
     state: 'unavailable',
     reason_code: 'disabled'
@@ -68,7 +75,7 @@ test('hides disabled status and keeps read failures non-blocking', () => {
 });
 
 test('maps login, verification, unavailable and shutdown to operator-safe guidance', () => {
-  assert.deepEqual(getDeepSeekWebRuntimePresentation({
+  assert.deepEqual(present({
     enabled: true,
     state: 'login_required',
     reason_code: 'web_login_required'
@@ -77,16 +84,16 @@ test('maps login, verification, unavailable and shutdown to operator-safe guidan
     title: 'DeepSeek Web 登录已失效',
     description: '请联系虚拟机运维负责人处理；恢复后可从原运行报告重试。'
   });
-  assert.deepEqual(getDeepSeekWebRuntimePresentation({
+  assert.deepEqual(present({
     enabled: true,
     state: 'verification_required',
     reason_code: 'web_verification_required'
   }), {
     type: 'warning',
     title: 'DeepSeek Web 需要人工验证',
-    description: '请联系虚拟机运维负责人处理；不要在当前页面输入 DeepSeek 凭据。'
+    description: '请联系虚拟机运维负责人处理；不要在当前页面输入 DeepSeek Web 凭据。'
   });
-  assert.deepEqual(getDeepSeekWebRuntimePresentation({
+  assert.deepEqual(present({
     enabled: true,
     state: 'unavailable',
     reason_code: 'web_profile_in_use'
@@ -95,7 +102,7 @@ test('maps login, verification, unavailable and shutdown to operator-safe guidan
     title: 'DeepSeek Web 当前不可用',
     description: '专用浏览器会话正在被占用，请联系虚拟机运维负责人处理。'
   });
-  assert.deepEqual(getDeepSeekWebRuntimePresentation({
+  assert.deepEqual(present({
     enabled: true,
     state: 'shutting_down'
   }), {
@@ -106,8 +113,8 @@ test('maps login, verification, unavailable and shutdown to operator-safe guidan
 });
 
 test('shared component polls only on visible pages and is mounted at both decision points', () => {
-  const hookPath = path.resolve(__dirname, '../lib/useDeepSeekWebRuntimeStatus.ts');
-  const componentPath = path.resolve(__dirname, '../components/DeepSeekWebRuntimeStatus.tsx');
+  const hookPath = path.resolve(__dirname, '../lib/useWebPlatformRuntimeStatus.ts');
+  const componentPath = path.resolve(__dirname, '../components/WebPlatformRuntimeStatus.tsx');
   const promptsPath = path.resolve(__dirname, '../app/geo/prompts/page.tsx');
   const reportsPath = path.resolve(__dirname, '../app/geo/question-set-reports/page.tsx');
 
@@ -119,13 +126,15 @@ test('shared component polls only on visible pages and is mounted at both decisi
   const prompts = fs.readFileSync(promptsPath, 'utf8');
   const reports = fs.readFileSync(reportsPath, 'utf8');
 
-  assert.match(hook, /\/api\/ai-platforms\/deepseek-web\/runtime-status/);
+  assert.match(hook, /`\/api\/ai-platforms\/\$\{platformCode\}\/runtime-status`/);
   assert.match(hook, /POLL_INTERVAL_MS\s*=\s*30_000/);
   assert.match(hook, /visibilitychange/);
   assert.match(hook, /document\.visibilityState\s*!==\s*'visible'/);
   assert.match(hook, /requestVersion/);
-  assert.match(component, /getDeepSeekWebRuntimePresentation/);
+  assert.match(component, /getWebPlatformRuntimePresentation/);
+  assert.match(component, /deepseek-web/);
+  assert.match(component, /doubao-web/);
   assert.match(component, /aria-live="polite"/);
-  assert.match(prompts, /<DeepSeekWebRuntimeStatus\s*\/>/);
-  assert.match(reports, /<DeepSeekWebRuntimeStatus\s*\/>/);
+  assert.match(prompts, /<WebPlatformRuntimeStatus\s*\/>/);
+  assert.match(reports, /<WebPlatformRuntimeStatus\s*\/>/);
 });

@@ -4,13 +4,108 @@
 
 ### P1
 
-目前没有事项。
+- [ ] 2026-07-27：完成目标 VM 的豆包 Web 正式切换
+  - 状态：待修
+  - 记录时间：2026-07-27 22:06
+  - 现象：访问 `http://192.168.9.224:3001/admin/settings` 时，设置页只有 DeepSeek Web，没有豆包 Web，也没有登录、切换账号、验证登录和重新加载等管理入口。
+  - 影响：用户无法在实际使用入口配置或确认豆包 Web；当前目标 VM 仍在运行旧前端/旧后端，源码中的新实现没有在正式流程生效。
+  - 来源：
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/01-settings-platform-list.png`
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/audit-report.md`
+    - `nextjs-frontend/src/app/admin/settings/page.tsx`
+  - 复现：打开目标 VM 设置页，检查 Web 平台列表和账号操作区。
+  - 修复进展：当前源码、完整测试和生产构建均已包含豆包 Web 与账号管理入口；目标 VM 前端仍是旧版本，且当前开发账号没有目标 VM 的 SSH 权限。
+  - 下一步：核实目标 VM 的部署入口，部署当前前后端，确认正式配置包含 `doubao-web`，再从目标 VM 完成登录、验证登录、运行问题和历史回查。
+
+- [ ] 2026-07-27：修复局域网 HTTP 页面点击运行无响应
+  - 状态：待修
+  - 记录时间：2026-07-27 22:06
+  - 现象：在 `http://192.168.9.224:3001/geo/prompts` 点击单题“运行”后，页面没有加载态、成功或失败提示，也没有发出运行请求；浏览器报错 `TypeError: window.crypto.randomUUID is not a function`。
+  - 影响：通过局域网 HTTP 访问的用户无法执行单题监测，且界面把客户端崩溃表现成“按钮没反应”。
+  - 来源：
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/04-run-click-no-visible-feedback.png`
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/audit-report.md`
+    - `nextjs-frontend/src/utils/idempotencyKey.cjs`
+  - 复现：通过非安全上下文的局域网 HTTP 地址打开问题库，点击任一问题的“运行”，观察控制台和网络请求。
+  - 修复进展：当前源码已改用兼容安全上下文和局域网 HTTP 的幂等键生成器，前端定向测试和完整 230 项测试通过；目标 VM 仍未部署该构建。
+  - 下一步：将已使用兼容降级算法的当前前端部署到目标 VM，并在局域网 HTTP 真实入口证明请求已发出、页面有运行反馈、历史记录已生成。
 
 ### P2
 
-目前没有事项。
+- [ ] 2026-07-27：修复未运行问题显示 1970 年时间
+  - 状态：待修
+  - 记录时间：2026-07-27 22:06
+  - 现象：新建且从未运行的问题在“最近运行”列显示 `1970-01-01 08:00`，而不是未运行状态。
+  - 影响：用户会误以为问题曾在异常时间运行，无法准确判断是否完成过采集。
+  - 来源：
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/04-run-click-no-visible-feedback.png`
+    - `nextjs-frontend/src/app/geo/prompts/page.tsx`
+  - 复现：创建一个未运行的问题，查看问题库的“最近运行”列。
+  - 修复进展：已增加空值、空白字符串、无效时间和有效时间测试，页面已统一使用可选时间格式化器；完整前端测试与生产构建通过。
+  - 下一步：部署到目标 VM 后，从问题库确认未运行问题显示 `-`。
+
+- [ ] 2026-07-27：补全失败历史的错误原因和失败阶段
+  - 状态：待修
+  - 记录时间：2026-07-27 22:06
+  - 现象：管理端历史记录标记为“失败”，展开后却只显示完整的 AI 原始回答，没有显示 `error_message`、失败阶段或错误码。
+  - 影响：用户无法区分“回答采集失败”和“回答已采集但后续分析/指标保存失败”，也无法据此排障。
+  - 来源：
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/06-admin-history-failed-with-answer.png`
+    - `nextjs-frontend/src/app/admin/history/page.tsx`
+    - `backend/services/ProjectRunService.js`
+  - 复现：打开管理端运行历史，展开一条状态为“失败”但包含回答内容的记录。
+  - 修复进展：已区分“回答采集失败”和“回答已采集，后续处理失败”，并展示安全化原因、中文阶段、阶段代码和错误码；行为与页面接入测试通过。
+  - 下一步：部署到目标 VM 后，展开原失败记录核对真实数据展示。
+
+- [ ] 2026-07-27：迁移目标 VM 的内置平台默认配置
+  - 状态：待修
+  - 记录时间：2026-07-27 22:06
+  - 现象：目标 VM 的千问请求参数仍为空对象，DeepSeek API 仍默认启用且未配置，与当前产品要求的“千问默认强制联网、DeepSeek API 默认不启用”不一致。
+  - 影响：旧环境升级后不会获得新的安全默认值，可能发出未启用联网搜索的千问请求，或把未配置的 DeepSeek API 暴露为可选平台。
+  - 来源：
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/01-settings-platform-list.png`
+    - `backend/services/AIPlatformConfigService.js`
+  - 复现：在目标 VM 设置页查看千问请求参数和 DeepSeek API 启用状态。
+  - 修复进展：已增加幂等迁移：只升级完整匹配旧预置身份的 Qwen 空参数，只关闭完整匹配旧预置且没有密钥的 DeepSeek API；管理员自定义连接和已配置启用状态保持不变。本机生产后端重启后已验证迁移生效。
+  - 下一步：部署到目标 VM 并重启后端后，在设置页验证 Qwen 为 `{"search_options":{"forced_search":true}}`、未配置的 DeepSeek API 为停用。
 
 ### P3
+
+- [ ] 2026-07-27：修复问题库首屏短暂显示空数据
+  - 状态：待修
+  - 记录时间：2026-07-27 22:06
+  - 现象：进入问题库时先短暂显示 `0` 条和空状态，约 800ms 后才出现真实数据。
+  - 影响：用户会误以为问题被清空，弱网环境下更明显。
+  - 来源：
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/audit-report.md`
+    - `nextjs-frontend/src/app/geo/prompts/page.tsx`
+  - 复现：冷启动后首次进入问题库，观察统计卡片和表格的数据加载过程。
+  - 修复进展：问题请求期间的数量区域已显示“正在加载问题…”，表格继续使用加载态；相关页面测试和生产构建通过。
+  - 下一步：部署到目标 VM 后节流网络复查首屏。
+
+- [ ] 2026-07-27：改善管理历史的回答排版
+  - 状态：待修
+  - 记录时间：2026-07-27 22:06
+  - 现象：管理端历史展开区把 Markdown 标记 `###`、`**` 等作为普通文本直接显示。
+  - 影响：长回答难以阅读，标题、列表和强调信息的层次丢失。
+  - 来源：
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/06-admin-history-failed-with-answer.png`
+    - `nextjs-frontend/src/app/admin/history/page.tsx`
+  - 复现：展开一条包含 Markdown 的 AI 回答历史。
+  - 修复进展：已复用项目现有 React Markdown 与 GFM 展示能力，未启用原始 HTML 或 `dangerouslySetInnerHTML`；安全约束测试和生产构建通过。
+  - 下一步：部署到目标 VM 后展开包含标题、强调和列表的回答做视觉复查。
+
+- [ ] 2026-07-27：补全管理历史筛选控件的可访问名称
+  - 状态：待修
+  - 记录时间：2026-07-27 22:06
+  - 现象：平台和状态筛选下拉框缺少可访问名称，部分中文按钮的可访问名称被拆成带空格的字符。
+  - 影响：屏幕阅读器用户难以理解筛选控件用途，自动化与语音控制也不稳定。
+  - 来源：
+    - `output/playwright/doubao-deepseek-e2e-2026-07-27/audit-report.md`
+    - `nextjs-frontend/src/app/admin/history/page.tsx`
+  - 复现：查看管理历史页面的 accessibility tree，检查两个筛选下拉框和操作按钮名称。
+  - 修复进展：已为平台筛选、状态筛选、搜索和重置补充稳定 `aria-label`，页面测试和生产构建通过。
+  - 下一步：部署到目标 VM 后复查 accessibility tree。
 
 - [ ] 2026-07-27：跟进前端 ESLint 工具链的间接依赖漏洞
   - 状态：待修

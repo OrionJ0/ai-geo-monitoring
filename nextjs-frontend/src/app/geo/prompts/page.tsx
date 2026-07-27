@@ -16,6 +16,8 @@ import { formatHistoryErrorMessage, formatHistoryParsingErrorMessage } from '@/u
 import { getRunResultNotice } from '@/utils/runResultMessage.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { getApiRunResultData } from '@/utils/apiRunResult.cjs';
+import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
+import { formatOptionalDateTimeShort } from '@/utils/dateTimeDisplay.cjs';
 import {
   getSelectablePromptProjects,
   resolveSelectedPromptProjectId,
@@ -28,7 +30,7 @@ import { filterPromptRows } from '@/utils/promptListFilters.cjs';
 import { parseBatchQuestions } from '@/utils/questionBatchParser.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import WebCaptureEvidence from '@/components/WebCaptureEvidence';
-import DeepSeekWebRuntimeStatus from '@/components/DeepSeekWebRuntimeStatus';
+import WebPlatformRuntimeStatus from '@/components/WebPlatformRuntimeStatus';
 
 const { Text } = Typography;
 
@@ -53,21 +55,6 @@ const periodOptions = [
 const promptRunBlockMessages = {
   no_enabled_prompt: '问题已停用，启用后才能运行',
   platform_mismatch: '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置'
-};
-
-const formatDateTimeShort = (value) => {
-  try {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return '-';
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    return `${y}-${m}-${dd} ${hh}:${mm}`;
-  } catch {
-    return '-';
-  }
 };
 
 const percent = (value) => {
@@ -228,7 +215,7 @@ export default function GeoPromptsPage() {
     return (
       <div style={{ background: '#fff', padding: 8 }}>
         <Descriptions bordered column={2} size="small" styles={{ label: { whiteSpace: 'nowrap', width: 90 } }}>
-          <Descriptions.Item label="检测时间">{formatDateTimeShort(row.created_at)}</Descriptions.Item>
+          <Descriptions.Item label="检测时间">{formatOptionalDateTimeShort(row.created_at)}</Descriptions.Item>
           <Descriptions.Item label="状态">
             <Tag color={statusColor}>{statusLabels[row.status] || row.status || '-'}</Tag>
           </Descriptions.Item>
@@ -662,12 +649,12 @@ export default function GeoPromptsPage() {
     questionSetRunRequestRef.current = requestId;
     const idempotencyScope = `${runProjectId}:${questionSet.id}`;
     let idempotencyKey = questionSetRunIdempotencyRef.current.get(idempotencyScope);
-    if (!idempotencyKey) {
-      idempotencyKey = window.crypto.randomUUID();
-      questionSetRunIdempotencyRef.current.set(idempotencyScope, idempotencyKey);
-    }
     try {
       setRunningQuestionSetId(questionSet.id);
+      if (!idempotencyKey) {
+        idempotencyKey = createIdempotencyKey();
+        questionSetRunIdempotencyRef.current.set(idempotencyScope, idempotencyKey);
+      }
       const res = await axios.post(
         `/api/geo-projects/${runProjectId}/question-sets/${questionSet.id}/run`,
         { idempotency_key: idempotencyKey },
@@ -703,7 +690,10 @@ export default function GeoPromptsPage() {
         message[notice.type](notice.text);
         if (data.report_url) router.push(data.report_url);
       } else if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
-        message.error(getApiErrorMessage(error, '运行问题集失败'));
+        message.error(getApiErrorMessage(
+          error,
+          error instanceof Error ? error.message : '运行问题集失败'
+        ));
       }
     } finally {
       if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
@@ -771,12 +761,12 @@ export default function GeoPromptsPage() {
     runRequestRef.current = requestId;
     const idempotencyScope = `${runProjectId}:${record.id}`;
     let idempotencyKey = promptRunIdempotencyRef.current.get(idempotencyScope);
-    if (!idempotencyKey) {
-      idempotencyKey = window.crypto.randomUUID();
-      promptRunIdempotencyRef.current.set(idempotencyScope, idempotencyKey);
-    }
     try {
       setRunningPromptId(record.id);
+      if (!idempotencyKey) {
+        idempotencyKey = createIdempotencyKey();
+        promptRunIdempotencyRef.current.set(idempotencyScope, idempotencyKey);
+      }
       const res = await axios.post(
         `/api/geo-projects/${runProjectId}/prompts/${record.id}/run`,
         { idempotency_key: idempotencyKey },
@@ -812,7 +802,10 @@ export default function GeoPromptsPage() {
         message[notice.type](notice.text);
         if (data.report_url) router.push(data.report_url);
       } else if (runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
-        message.error(getApiErrorMessage(error, '运行问题失败'));
+        message.error(getApiErrorMessage(
+          error,
+          error instanceof Error ? error.message : '运行问题失败'
+        ));
       }
     } finally {
       if (runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) setRunningPromptId(null);
@@ -956,7 +949,7 @@ export default function GeoPromptsPage() {
       dataIndex: ['performance', 'last_run_at'],
       key: 'last_run_at',
       width: 180,
-      render: formatDateTimeShort,
+      render: formatOptionalDateTimeShort,
       sorter: (a, b) => new Date(a.performance?.last_run_at || 0) - new Date(b.performance?.last_run_at || 0),
     },
     {
@@ -995,7 +988,7 @@ export default function GeoPromptsPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       {platformCatalogError ? <Alert type="error" showIcon title={platformCatalogError} /> : null}
-      <DeepSeekWebRuntimeStatus />
+      <WebPlatformRuntimeStatus />
       <Card title="问题库">
         <Row gutter={[12, 12]} align="middle">
           <Col flex="360px">
@@ -1161,7 +1154,11 @@ export default function GeoPromptsPage() {
                     { label: '已停用', value: 'disabled' },
                   ]}
                 />
-                <Text type="secondary">{`显示 ${filteredPrompts.length} / ${prompts.length} 条`}</Text>
+                <Text type="secondary">
+                  {promptsLoading
+                    ? '正在加载问题…'
+                    : `显示 ${filteredPrompts.length} / ${prompts.length} 条`}
+                </Text>
               </Space>
               <Space wrap>
                 <Button type="primary" disabled={selectedPromptIds.length < 2} onClick={openCreateQuestionSet}>
@@ -1413,7 +1410,7 @@ export default function GeoPromptsPage() {
               title: '时间',
               dataIndex: 'created_at',
               width: 180,
-              render: formatDateTimeShort
+              render: formatOptionalDateTimeShort
             }
           ]}
         />

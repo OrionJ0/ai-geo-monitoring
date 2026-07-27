@@ -13,7 +13,7 @@
 
 真实 `.env`、`.env.local`、SQLite、日志和运行状态均被 Git 忽略。部署脚本不会输出 `JWT_SECRET`、`CONFIG_ENCRYPTION_KEY` 或其他秘密。
 
-如启用 DeepSeek Web，运行主机还必须安装受支持的 Chrome，并保持当前运行用户的持久图形桌面会话可用。虚拟机不得休眠，远程桌面断开不能退出、注销或销毁该会话。无桌面 Linux、多后端实例和自动验证码处理不在第一版支持范围内。
+如启用 DeepSeek Web 或豆包 Web，运行主机还必须安装受支持的 Chrome，并保持当前运行用户的持久图形桌面会话可用。虚拟机不得休眠，远程桌面断开不能退出、注销或销毁该会话。无桌面 Linux、多后端实例和自动验证码处理不在第一版支持范围内。
 
 ## 首次接管
 
@@ -103,23 +103,36 @@ PID 状态保存在 `.runtime/`。停止时会先发送 `SIGTERM`，等待超时
 
 以后迁移到 Linux 时，这套手动部署命令可以直接使用。如需引入 systemd，需要替换启动和停止适配层；拉取、备份、测试和构建步骤不变。
 
-## DeepSeek Web 虚拟机运行边界
+## 受管 Web 虚拟机运行边界
 
 - 后端必须从持续存在的持久图形桌面会话运行；虚拟机不得休眠，远程桌面断开不能销毁图形会话。
-- SQLite/Postgres 数据、DeepSeek 专用 profile 和 Web 证据目录必须位于持久磁盘。profile 不得与日常 Chrome、SEO 渲染浏览器或其他后端实例共用。
+- SQLite/Postgres 数据、DeepSeek 与豆包各自的专用 profile 和 Web 证据目录必须位于持久磁盘。两个 profile 彼此隔离，也不得与日常 Chrome、SEO 渲染浏览器或其他后端实例共用。
 - 所有市场部同事使用现有共享 `admin` 访问共同项目和报告。该账号保留完整管理员权限，应用无法识别真实操作人或提供人员级审计；密码分发、轮换和离职撤权由公司内部账号流程负责。
-- 系统 `admin` 与 DeepSeek 服务账号是两套独立身份。DeepSeek 账号密码只由虚拟机运维负责人维护，不得进入应用配置、数据库、日志、Issue 或示例命令。
-- `/api/ready` 只表示主应用、数据库、调度器和首次恢复就绪，不代表 DeepSeek Web 可用。登录后的使用者应读取 `/api/ai-platforms/deepseek-web/runtime-status`；真实运行仍会执行自己的 preflight。
+- 系统 `admin` 与 DeepSeek 服务账号是两套独立身份，与豆包服务账号也彼此独立。网页账号密码只由虚拟机运维负责人维护，不得进入应用配置、数据库、日志、Issue 或示例命令。
+- `/api/ready` 只表示主应用、数据库、调度器和首次恢复就绪，不代表 DeepSeek Web 或豆包 Web 可用。登录后的使用者应按平台读取 `/api/ai-platforms/:platformCode/runtime-status`；真实运行仍会执行自己的 preflight。
 
-首次登录、登录失效、人工验证、账号切换或选择器故障的正式恢复流程为：
+首次登录、登录失效、人工验证或账号切换的首选恢复流程为：
+
+1. 管理员进入 `/admin/settings` 的“AI 平台”页签。
+2. 查看目标平台的浏览器、Profile 和登录验证状态。
+3. 点击“登录 / 打开 Chrome”或“切换账号”。
+4. 在虚拟机持久桌面中新打开的专用 Chrome 中人工完成操作。
+5. 回到设置页点击“验证登录”，确认状态为“网页登录已验证”。
+
+打开登录窗口后，对应平台以 `web_login_required` 阻断新页面采集，验证成功后恢复；DeepSeek Web 与豆包 Web 的登录操作、浏览器和熔断互相隔离。设置页只显示浏览器配置、Profile 初始化和验证结果，不读取账号身份、密码、Cookie、Authorization 或绝对路径。
+
+重启后端会清除两个平台各自的进程内熔断，但不会证明网页登录仍然有效；重启后仍应在设置页验证目标平台，真实任务也会再次执行 preflight。
+
+如果后端不可用、设置页无法进入或需要离线修复 Profile，使用 CLI 兜底：
 
 ```bash
 npm run prod:stop
 npm run web:login -- deepseek-web
+# 或：npm run web:login -- doubao-web
 npm run prod:start
 ```
 
-在登录命令打开的虚拟机 Chrome 中完成操作并确认对话输入区可用后，先关闭登录浏览器，再启动生产服务。`prod:stop` 会让后端优雅关闭专用 Chrome 并释放 profile lock；重启后端会清除旧后端的登录、验证或选择器类进程内熔断。只完成网页登录但不重启后端，不视为恢复完成。
+`prod:stop` 会让后端优雅关闭全部注册 Chrome 并释放各自的 Profile lock。豆包 Web 必须在真实单问题、问题集重试、自动监测、双浏览器资源和回收验收全部通过后才由管理员启用。
 
 ## 验证与排错
 

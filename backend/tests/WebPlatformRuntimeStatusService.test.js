@@ -5,6 +5,26 @@ const {
   WebPlatformRuntimeStatusService
 } = require('../services/WebPlatformRuntimeStatusService');
 
+function registryFor(snapshot, observedCodes = []) {
+  return {
+    getDefinition(code) {
+      observedCodes.push(code);
+      return {
+        code,
+        runtimeSchemaVersion: `${code}-runtime-v1`
+      };
+    },
+    getService(code) {
+      observedCodes.push(code);
+      return {
+        getRuntimeSnapshot() {
+          return snapshot;
+        }
+      };
+    }
+  };
+}
+
 test('returns an idle public snapshot when the enabled Web channel has no work', async () => {
   const observedAt = new Date('2026-07-27T02:00:00.000Z');
   const service = new WebPlatformRuntimeStatusService({
@@ -20,11 +40,7 @@ test('returns an idle public snapshot when the enabled Web channel has no work',
         return { enabled: true };
       }
     },
-    webPlatformService: {
-      getRuntimeSnapshot() {
-        return { running_count: 0 };
-      }
-    },
+    webPlatformRegistry: registryFor({ running_count: 0 }),
     now: () => observedAt
   });
 
@@ -112,11 +128,7 @@ test('maps persistent blockers and shutdown with a fixed public priority', async
           return { enabled: true };
         }
       },
-      webPlatformService: {
-        getRuntimeSnapshot() {
-          return snapshot;
-        }
-      },
+      webPlatformRegistry: registryFor(snapshot),
       now: () => new Date('2026-07-27T02:00:00.000Z')
     });
 
@@ -147,16 +159,12 @@ test('returns a stable unavailable contract when the managed platform row is mis
         });
       }
     },
-    webPlatformService: {
-      getRuntimeSnapshot() {
-        return {
-          running_count: 0,
-          lifecycle_state: 'stopped',
-          blocking_error_code: null,
-          shutting_down: false
-        };
-      }
-    },
+    webPlatformRegistry: registryFor({
+      running_count: 0,
+      lifecycle_state: 'stopped',
+      blocking_error_code: null,
+      shutting_down: false
+    }),
     now: () => new Date('2026-07-27T02:00:00.000Z')
   });
 
@@ -169,4 +177,39 @@ test('returns a stable unavailable contract when the managed platform row is mis
   assert.equal(status.action_code, 'contact_vm_operator');
   assert.equal(countCalls, 0);
   assert.doesNotMatch(JSON.stringify(status), /row details/);
+});
+
+test('isolates pending and runtime state by requested managed Web platform', async () => {
+  const countedPlatforms = [];
+  const registryCalls = [];
+  const service = new WebPlatformRuntimeStatusService({
+    questionRecordModel: {
+      async count(options) {
+        countedPlatforms.push(options.where.platform);
+        return 3;
+      }
+    },
+    questionSetRunModel: {},
+    aiPlatformConfigService: {
+      async getPlatformByCode(code) {
+        assert.equal(code, 'doubao-web');
+        return { enabled: true };
+      }
+    },
+    webPlatformRegistry: registryFor({
+      running_count: 1,
+      lifecycle_state: 'busy'
+    }, registryCalls),
+    now: () => new Date('2026-07-27T02:00:00.000Z')
+  });
+
+  const status = await service.getStatus('doubao-web');
+
+  assert.equal(status.schema_version, 'doubao-web-runtime-v1');
+  assert.equal(status.platform, 'doubao-web');
+  assert.equal(status.running_count, 1);
+  assert.equal(status.pending_count, 3);
+  assert.equal(status.queued_count, 2);
+  assert.deepEqual(countedPlatforms, ['doubao-web']);
+  assert.deepEqual(registryCalls, ['doubao-web', 'doubao-web']);
 });

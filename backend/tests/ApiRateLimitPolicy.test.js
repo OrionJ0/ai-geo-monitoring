@@ -12,6 +12,10 @@ test('skips the general limiter only for the exact Web runtime status path', () 
     true
   );
   assert.equal(
+    shouldSkipGeneralLimiter('/ai-platforms/doubao-web/runtime-status'),
+    true
+  );
+  assert.equal(
     shouldSkipGeneralLimiter('/ai-platforms/deepseek-web/runtime-status/extra'),
     false
   );

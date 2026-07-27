@@ -94,3 +94,8 @@ test('prompt page refreshes prompt data only for the current project after mutat
   assert.match(source, /refreshPromptDataForProject\(mutationProjectId\)/);
   assert.doesNotMatch(source, /fetchPrompts\(selectedProjectId\);\s*fetchProjects\(\);/);
 });
+
+test('问题列表加载期间不显示有业务含义的 0 / 0 假空态', () => {
+  assert.match(source, /promptsLoading\s*\?\s*'正在加载问题…'/);
+  assert.match(source, /:\s*`显示 \$\{filteredPrompts\.length\} \/ \$\{prompts\.length\} 条`/);
+});

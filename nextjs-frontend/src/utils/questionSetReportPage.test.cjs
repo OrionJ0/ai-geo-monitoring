@@ -153,7 +153,9 @@ test('原生问题集报告可以确认后重试失败项', () => {
   assert.match(source, /重试失败项/);
   assert.match(source, /Popconfirm/);
   assert.match(source, /当前设置中心的监测模型和参数/);
-  assert.match(source, /window\.crypto\.randomUUID\(\)/);
+  assert.match(source, /import \{ createIdempotencyKey \}/);
+  assert.match(source, /const idempotencyKey = createIdempotencyKey\(\)/);
+  assert.doesNotMatch(source, /window\.crypto\.randomUUID\(\)/);
   assert.match(source, /idempotency_key/);
   assert.match(source, /已有完整原回答/);
   assert.match(source, /summary\.failed/);
@@ -220,7 +222,7 @@ test('运行报告成为问题库后的主入口，旧汇总入口下沉且运�
   assert.match(questionSetRunBlock, /data\.report_url/);
   assert.match(prompts, /const questionSetRunIdempotencyRef = useRef\(new Map\(\)\)/);
   assert.match(questionSetRunBlock, /questionSetRunIdempotencyRef\.current\.get\(idempotencyScope\)/);
-  assert.match(questionSetRunBlock, /window\.crypto\.randomUUID\(\)/);
+  assert.match(questionSetRunBlock, /createIdempotencyKey\(\)/);
   assert.match(questionSetRunBlock, /idempotency_key:\s*idempotencyKey/);
   assert.match(questionSetRunBlock, /'Idempotency-Key':\s*idempotencyKey/);
   assert.match(questionSetRunBlock, /data\.idempotent_replay/);

@@ -31,6 +31,7 @@ import {
 } from '@ant-design/icons';
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
 import { downloadQuestionSetReportPdf } from '@/utils/downloadQuestionSetReportPdf';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import {
@@ -41,7 +42,7 @@ import QuestionSetRunHistoryDrawer, {
   type QuestionSetOption,
 } from './QuestionSetRunHistoryDrawer';
 import WebCaptureEvidence from '@/components/WebCaptureEvidence';
-import DeepSeekWebRuntimeStatus from '@/components/DeepSeekWebRuntimeStatus';
+import WebPlatformRuntimeStatus from '@/components/WebPlatformRuntimeStatus';
 import styles from './question-set-reports.module.css';
 
 const { Paragraph, Text, Title } = Typography;
@@ -644,7 +645,7 @@ export default function QuestionSetReportsPage() {
     if (!projectId || !report || !report.capabilities?.can_retry) return;
     setRetrying(true);
     try {
-      const idempotencyKey = window.crypto.randomUUID();
+      const idempotencyKey = createIdempotencyKey();
       const response = await axios.post(
         `/api/geo-projects/${projectId}/question-set-runs/${report.id}/retry-failed`,
         { idempotency_key: idempotencyKey },
@@ -655,7 +656,10 @@ export default function QuestionSetReportsPage() {
         loadHistory(projectId, historyPage, historyQuestionSetId),
       ]);
     } catch (error) {
-      message.error(getApiErrorMessage(error, '重试失败项失败'));
+      message.error(getApiErrorMessage(
+        error,
+        error instanceof Error ? error.message : '重试失败项失败'
+      ));
     } finally {
       setRetrying(false);
     }
@@ -804,7 +808,7 @@ export default function QuestionSetReportsPage() {
         </Space>
       </div>
 
-      <DeepSeekWebRuntimeStatus />
+      <WebPlatformRuntimeStatus />
 
       <QuestionSetRunHistoryDrawer
         open={historyOpen}

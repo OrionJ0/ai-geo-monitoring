@@ -35,6 +35,16 @@ function createService(options = {}) {
       default_model: 'deepseek-web-ui'
     },
     {
+      code: 'doubao-web',
+      name: '豆包网页版',
+      adapter_type: 'doubao_web',
+      enabled: false,
+      archived_at: null,
+      encrypted_api_key: null,
+      base_url: 'https://www.doubao.com',
+      default_model: 'doubao-web-ui'
+    },
+    {
       code: 'archived-ai',
       name: 'Archived AI',
       enabled: false,
@@ -58,20 +68,75 @@ function createService(options = {}) {
         code: row.code,
         name: row.name,
         enabled: row.enabled,
-        configured: row.adapter_type === 'deepseek_web' || Boolean(row.encrypted_api_key),
-        selectable: row.enabled && (row.adapter_type === 'deepseek_web' || Boolean(row.encrypted_api_key)),
-        unavailable_reason: row.adapter_type === 'deepseek_web' || row.encrypted_api_key ? null : 'missing_api_key',
-        capabilities: row.adapter_type === 'deepseek_web'
+        configured: ['deepseek_web', 'doubao_web'].includes(row.adapter_type)
+          || Boolean(row.encrypted_api_key),
+        selectable: row.enabled && (
+          ['deepseek_web', 'doubao_web'].includes(row.adapter_type)
+          || Boolean(row.encrypted_api_key)
+        ),
+        unavailable_reason: ['deepseek_web', 'doubao_web'].includes(row.adapter_type)
+          || row.encrypted_api_key
+          ? null
+          : 'missing_api_key',
+        capabilities: ['deepseek_web', 'doubao_web'].includes(row.adapter_type)
           ? { monitoring: true, analysis: false, direct_stream: false }
           : { monitoring: true, analysis: true, direct_stream: true }
       })),
     listPlatformRows: async () => rows
   };
+  const definitions = new Map([
+    ['deepseek-web', {
+      code: 'deepseek-web',
+      adapterType: 'deepseek_web',
+      displayName: 'DeepSeek Web',
+      captureSchemaVersion: 'deepseek-web-capture-v1'
+    }],
+    ['doubao-web', {
+      code: 'doubao-web',
+      adapterType: 'doubao_web',
+      displayName: '豆包 Web',
+      captureSchemaVersion: 'doubao-web-capture-v1'
+    }]
+  ]);
+  const defaultWebService = {
+    preflight: async () => ({ ok: true }),
+    queryPlatform: async (_question, { capture_owner: captureOwner }) => ({
+      success: true,
+      platform: 'deepseek-web',
+      text: '网页回答',
+      data: {},
+      provider_citations: [],
+      web_capture: {
+        status: 'completed',
+        record_id: captureOwner.record_id
+      }
+    })
+  };
+  const webPlatformRegistry = options.webPlatformRegistry || {
+    listDefinitions() {
+      return Array.from(definitions.values());
+    },
+    hasDefinition(code) {
+      return definitions.has(code);
+    },
+    validateManagedConfig(config) {
+      const definition = definitions.get(config.code);
+      if (!definition || definition.adapterType !== config.adapter_type) {
+        throw Object.assign(new Error('invalid'), {
+          code: 'managed_config_invalid'
+        });
+      }
+      return definition;
+    },
+    getService(code) {
+      return options.webPlatformServices?.[code] || defaultWebService;
+    }
+  };
   return {
     service: new AIPlatformService({
       requestService,
       configService,
-      webPlatformService: options.webPlatformService
+      webPlatformRegistry
     }),
     rows,
     calls
@@ -115,10 +180,12 @@ test('rejects platforms that do not provide the requested capability', async () 
 test('runs DeepSeek Web preflight only for explicit runtime availability checks', async () => {
   const probeCalls = [];
   const { service } = createService({
-    webPlatformService: {
-      preflight: async () => {
-        probeCalls.push('preflight');
-        return { ok: true };
+    webPlatformServices: {
+      'deepseek-web': {
+        preflight: async () => {
+          probeCalls.push('preflight');
+          return { ok: true };
+        }
       }
     }
   });
@@ -137,9 +204,11 @@ test('runs DeepSeek Web preflight only for explicit runtime availability checks'
 
 test('reports a stable unavailable reason when DeepSeek Web preflight fails', async () => {
   const { service } = createService({
-    webPlatformService: {
-      preflight: async () => {
-        throw Object.assign(new Error('login required'), { code: 'web_login_required' });
+    webPlatformServices: {
+      'deepseek-web': {
+        preflight: async () => {
+          throw Object.assign(new Error('login required'), { code: 'web_login_required' });
+        }
       }
     }
   });
@@ -154,17 +223,19 @@ test('reports a stable unavailable reason when DeepSeek Web preflight fails', as
 test('routes only the managed Web adapter to WebPlatformService with no API fallback', async () => {
   const webCalls = [];
   const { service, rows, calls } = createService({
-    webPlatformService: {
-      queryPlatform: async (...args) => {
-        webCalls.push(args);
-        return {
-          success: true,
-          platform: 'deepseek-web',
-          text: '网页回答',
-          data: {},
-          provider_citations: [],
-          web_capture: { status: 'completed' }
-        };
+    webPlatformServices: {
+      'deepseek-web': {
+        queryPlatform: async (...args) => {
+          webCalls.push(args);
+          return {
+            success: true,
+            platform: 'deepseek-web',
+            text: '网页回答',
+            data: {},
+            provider_citations: [],
+            web_capture: { status: 'completed' }
+          };
+        }
       }
     }
   });
@@ -180,11 +251,78 @@ test('routes only the managed Web adapter to WebPlatformService with no API fall
   assert.equal(calls.length, 0);
 });
 
+test('routes each managed Web platform through its registered isolated service with no API fallback', async () => {
+  const webCalls = [];
+  const services = new Map([
+    ['deepseek-web', {
+      async queryPlatform(...args) {
+        webCalls.push(['deepseek-web', ...args]);
+        return { success: true, platform: 'deepseek-web', text: 'DeepSeek 网页回答' };
+      }
+    }],
+    ['doubao-web', {
+      async queryPlatform(...args) {
+        webCalls.push(['doubao-web', ...args]);
+        return {
+          success: false,
+          platform: 'doubao-web',
+          error_code: 'web_selector_mismatch'
+        };
+      }
+    }]
+  ]);
+  const definitions = new Map([
+    ['deepseek-web', { code: 'deepseek-web', adapterType: 'deepseek_web' }],
+    ['doubao-web', { code: 'doubao-web', adapterType: 'doubao_web' }]
+  ]);
+  const { service, rows, calls } = createService({
+    webPlatformRegistry: {
+      listDefinitions() {
+        return Array.from(definitions.values());
+      },
+      hasDefinition(code) {
+        return definitions.has(code);
+      },
+      getDefinition(code) {
+        return definitions.get(code) || null;
+      },
+      validateManagedConfig(config) {
+        const definition = definitions.get(config.code);
+        if (!definition || definition.adapterType !== config.adapter_type) {
+          throw Object.assign(new Error('invalid'), {
+            code: 'managed_config_invalid'
+          });
+        }
+        return definition;
+      },
+      getService(code) {
+        return services.get(code);
+      }
+    }
+  });
+  rows.find((row) => row.code === 'doubao-web').enabled = true;
+
+  const result = await service.queryPlatform('doubao-web', '测试问题', {
+    config: rows.find((row) => row.code === 'doubao-web'),
+    purpose: 'project_monitoring',
+    capture_owner: { record_id: 13, user_id: 7, project_id: 3 }
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.platform, 'doubao-web');
+  assert.equal(result.error_code, 'web_selector_mismatch');
+  assert.equal(webCalls.length, 1);
+  assert.equal(webCalls[0][0], 'doubao-web');
+  assert.equal(calls.length, 0);
+});
+
 test('rejects Web queries without project purpose and bounded record ownership', async () => {
   const { service, rows, calls } = createService({
-    webPlatformService: {
-      queryPlatform: async () => {
-        throw new Error('must not execute');
+    webPlatformServices: {
+      'deepseek-web': {
+        queryPlatform: async () => {
+          throw new Error('must not execute');
+        }
       }
     }
   });
@@ -209,8 +347,10 @@ test('an active Web query does not serialize an API platform query', async () =>
   let releaseWeb;
   const webPending = new Promise((resolve) => { releaseWeb = resolve; });
   const { service, rows, calls } = createService({
-    webPlatformService: {
-      queryPlatform: async () => webPending
+    webPlatformServices: {
+      'deepseek-web': {
+        queryPlatform: async () => webPending
+      }
     }
   });
 
@@ -247,4 +387,5 @@ test('AI platform service contains no provider credential environment fallback',
 
   assert.doesNotMatch(source, /DOUBAO_|DEEPSEEK_|KIMI_|QIANWEN_|AI_MAX_TOKENS/);
   assert.doesNotMatch(source, /process\.env/);
+  assert.doesNotMatch(source, /options\.webPlatformService/);
 });

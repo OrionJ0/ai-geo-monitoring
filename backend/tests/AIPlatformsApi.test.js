@@ -10,6 +10,7 @@ const { sequelize, AIPlatformConfig } = require('../models');
 const AIPlatformConfigService = require('../services/AIPlatformConfigService');
 const AIPlatformRequestService = require('../services/AIPlatformRequestService');
 const WebPlatformRuntimeStatusService = require('../services/WebPlatformRuntimeStatusService');
+const WebPlatformRegistry = require('../services/WebPlatformRegistry');
 const adminRouter = require('../routes/adminAIPlatforms');
 const catalogRouter = require('../routes/aiPlatforms');
 
@@ -159,12 +160,12 @@ test('returns a non-sensitive platform catalog to authenticated users', async ()
 
 test('returns the no-store Web runtime status only to authenticated users', async () => {
   const original = WebPlatformRuntimeStatusService.getStatus;
-  let reads = 0;
-  WebPlatformRuntimeStatusService.getStatus = async () => {
-    reads += 1;
+  const reads = [];
+  WebPlatformRuntimeStatusService.getStatus = async (platformCode) => {
+    reads.push(platformCode);
     return {
-      schema_version: 'deepseek-web-runtime-v1',
-      platform: 'deepseek-web',
+      schema_version: `${platformCode}-runtime-v1`,
+      platform: platformCode,
       enabled: true,
       state: 'idle',
       running_count: 0,
@@ -179,14 +180,16 @@ test('returns the no-store Web runtime status only to authenticated users', asyn
 
   try {
     assert.equal(
-      (await api(catalogRouter, 'GET', '/deepseek-web/runtime-status')).status,
+      (await api(catalogRouter, 'GET', '/:platformCode/runtime-status', {
+        params: { platformCode: 'deepseek-web' }
+      })).status,
       401
     );
     const response = await api(
       catalogRouter,
       'GET',
-      '/deepseek-web/runtime-status',
-      { role: 'user' }
+      '/:platformCode/runtime-status',
+      { role: 'user', params: { platformCode: 'deepseek-web' } }
     );
 
     assert.equal(response.status, 200);
@@ -204,7 +207,24 @@ test('returns the no-store Web runtime status only to authenticated users', asyn
       'schema_version',
       'state'
     ]);
-    assert.equal(reads, 1);
+    const doubao = await api(
+      catalogRouter,
+      'GET',
+      '/:platformCode/runtime-status',
+      { role: 'user', params: { platformCode: 'doubao-web' } }
+    );
+    assert.equal(doubao.status, 200);
+    assert.equal(doubao.json.data.platform, 'doubao-web');
+    assert.deepEqual(reads, ['deepseek-web', 'doubao-web']);
+
+    const unknown = await api(
+      catalogRouter,
+      'GET',
+      '/:platformCode/runtime-status',
+      { role: 'user', params: { platformCode: 'doubao' } }
+    );
+    assert.equal(unknown.status, 404);
+    assert.deepEqual(reads, ['deepseek-web', 'doubao-web']);
   } finally {
     WebPlatformRuntimeStatusService.getStatus = original;
   }
@@ -220,8 +240,8 @@ test('keeps Web runtime status read failures generic and non-cacheable', async (
     const response = await api(
       catalogRouter,
       'GET',
-      '/deepseek-web/runtime-status',
-      { role: 'user' }
+      '/:platformCode/runtime-status',
+      { role: 'user', params: { platformCode: 'deepseek-web' } }
     );
     assert.equal(response.status, 500);
     assert.equal(response.headers['Cache-Control'], 'private, no-store');
@@ -264,6 +284,125 @@ test('rejects API-only administrator operations for the managed Web platform', a
     AIPlatformRequestService.listModels = originals.models;
     AIPlatformRequestService.testConnection = originals.connection;
     AIPlatformRequestService.testWebSearch = originals.search;
+  }
+});
+
+test('lets only administrators inspect, open and verify a managed Web login session', async () => {
+  const web = await AIPlatformConfig.findOne({ where: { code: 'doubao-web' } });
+  const originalGetService = WebPlatformRegistry.getService;
+  const calls = [];
+  const snapshots = {
+    initial: {
+      schema_version: 'managed-web-session-v1',
+      platform: 'doubao-web',
+      browser_configured: true,
+      profile_initialized: false,
+      login_state: 'unchecked',
+      reason_code: null,
+      last_verified_at: null
+    },
+    opened: {
+      schema_version: 'managed-web-session-v1',
+      platform: 'doubao-web',
+      browser_configured: true,
+      profile_initialized: true,
+      login_state: 'login_required',
+      reason_code: 'web_login_required',
+      last_verified_at: null
+    },
+    verified: {
+      schema_version: 'managed-web-session-v1',
+      platform: 'doubao-web',
+      browser_configured: true,
+      profile_initialized: true,
+      login_state: 'ready',
+      reason_code: null,
+      last_verified_at: '2026-07-27T08:00:00.000Z'
+    }
+  };
+  WebPlatformRegistry.getService = (platformCode) => {
+    assert.equal(platformCode, 'doubao-web');
+    return {
+      getAdminSessionSnapshot() {
+        calls.push('status');
+        return snapshots.initial;
+      },
+      async beginInteractiveLogin() {
+        calls.push('open');
+        return snapshots.opened;
+      },
+      async verifyInteractiveLogin() {
+        calls.push('verify');
+        return snapshots.verified;
+      }
+    };
+  };
+
+  try {
+    assert.equal((await api(adminRouter, 'GET', '/:id/web-session', {
+      role: 'user',
+      params: { id: web.id }
+    })).status, 403);
+
+    const status = await api(adminRouter, 'GET', '/:id/web-session', {
+      role: 'admin',
+      params: { id: web.id }
+    });
+    assert.equal(status.status, 200);
+    assert.equal(status.headers['Cache-Control'], 'no-store');
+    assert.deepEqual(status.json.data, snapshots.initial);
+
+    const opened = await api(adminRouter, 'POST', '/:id/web-session/open', {
+      role: 'admin',
+      params: { id: web.id }
+    });
+    assert.equal(opened.status, 200);
+    assert.deepEqual(opened.json.data, snapshots.opened);
+
+    const verified = await api(adminRouter, 'POST', '/:id/web-session/verify', {
+      role: 'admin',
+      params: { id: web.id }
+    });
+    assert.equal(verified.status, 200);
+    assert.deepEqual(verified.json.data, snapshots.verified);
+    assert.deepEqual(calls, ['status', 'open', 'verify']);
+    assert.doesNotMatch(
+      JSON.stringify([status.json, opened.json, verified.json]),
+      /profile_dir|chrome_executable|cookie|authorization/i
+    );
+  } finally {
+    WebPlatformRegistry.getService = originalGetService;
+  }
+});
+
+test('rejects Web session operations for API platforms before touching a Web runtime', async () => {
+  const apiPlatform = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+  const originalGetService = WebPlatformRegistry.getService;
+  let runtimeReads = 0;
+  WebPlatformRegistry.getService = () => {
+    runtimeReads += 1;
+    return {};
+  };
+
+  try {
+    for (const [method, routePath] of [
+      ['GET', '/:id/web-session'],
+      ['POST', '/:id/web-session/open'],
+      ['POST', '/:id/web-session/verify']
+    ]) {
+      const response = await api(adminRouter, method, routePath, {
+        role: 'admin',
+        params: { id: apiPlatform.id }
+      });
+      assert.equal(response.status, 400);
+      assert.equal(
+        response.json.data.error_code,
+        'unsupported_platform_capability'
+      );
+    }
+    assert.equal(runtimeReads, 0);
+  } finally {
+    WebPlatformRegistry.getService = originalGetService;
   }
 });
 

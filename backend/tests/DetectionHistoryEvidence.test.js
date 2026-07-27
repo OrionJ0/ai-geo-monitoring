@@ -253,7 +253,10 @@ test('单条检测历史删除拒绝破坏问题集运行证据', async () => {
 });
 
 test('单条检测历史删除会在数据库提交后清理对应 Web 证据', async () => {
-  const record = await createRecord({ question: '带网页证据的普通记录' });
+  const record = await createRecord({
+    question: '带网页证据的普通记录',
+    platform: 'deepseek-web'
+  });
   const evidenceDir = await createEvidence(record.id);
 
   const response = await requestRoute('delete', '/record/:id', {
@@ -279,7 +282,8 @@ test('批量检测历史删除只删除当前缓存并报告受保护数量', as
     question: '保留的运行证据'
   });
   const mutableRecord = await createRecord({
-    question: '可删除的当前缓存'
+    question: '可删除的当前缓存',
+    platform: 'deepseek-web'
   });
   const protectedEvidenceDir = await createEvidence(protectedRecord.id);
   const mutableEvidenceDir = await createEvidence(mutableRecord.id);
@@ -301,7 +305,10 @@ test('批量检测历史删除只删除当前缓存并报告受保护数量', as
 });
 
 test('数据库事务回滚时恢复已隔离的 Web 证据', async () => {
-  const record = await createRecord({ question: '事务回滚记录' });
+  const record = await createRecord({
+    question: '事务回滚记录',
+    platform: 'deepseek-web'
+  });
   const evidenceDir = await createEvidence(record.id);
   const originalDestroy = ResultDetail.destroy;
   ResultDetail.destroy = async () => {
@@ -321,7 +328,10 @@ test('数据库事务回滚时恢复已隔离的 Web 证据', async () => {
 });
 
 test('数据库提交后清理失败返回稳定错误且隔离证据不再可读', async () => {
-  const record = await createRecord({ question: '提交后清理失败记录' });
+  const record = await createRecord({
+    question: '提交后清理失败记录',
+    platform: 'deepseek-web'
+  });
   const evidenceDir = await createEvidence(record.id);
   const originalCommit = WebCaptureDeletionService.captureStore.commitQuarantine;
   WebCaptureDeletionService.captureStore.commitQuarantine = async () => {

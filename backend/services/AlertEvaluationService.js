@@ -6,7 +6,9 @@ const PlatformSelectionService = require('./PlatformSelectionService');
 
 const PLATFORM_LABELS = {
   doubao: '豆包',
-  deepseek: 'DeepSeek'
+  'doubao-web': '豆包网页版',
+  deepseek: 'DeepSeek',
+  'deepseek-web': 'DeepSeek 网页版'
 };
 
 const ALERT_RULE_TYPES = [

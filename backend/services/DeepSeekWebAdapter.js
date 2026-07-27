@@ -6,6 +6,17 @@ const MAX_CAPTURE_METADATA_BYTES = 32 * 1024;
 const MAX_NETWORK_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_NETWORK_RESPONSES = 50;
 const MAX_PROVIDER_CITATIONS = 200;
+const DEEPSEEK_WEB_IDENTITY = Object.freeze({
+  platformCode: 'deepseek-web',
+  modelName: 'deepseek-web-ui',
+  displayName: 'DeepSeek Web',
+  captureSchemaVersion: 'deepseek-web-capture-v1',
+  selectorVersion: selectors.selectorVersion,
+  pageOrigin: 'https://chat.deepseek.com',
+  allowedOrigins: selectors.allowedOrigins,
+  domCitationOrigin: 'deepseek_web_dom',
+  networkCitationOrigin: 'deepseek_web_network'
+});
 
 function adapterError(code, message, stage = null) {
   const error = new Error(message);
@@ -22,7 +33,7 @@ function safeIso(value) {
   return new Date(value).toISOString();
 }
 
-function safeUrl(value) {
+function safeUrl(value, identity = DEEPSEEK_WEB_IDENTITY) {
   const text = String(value || '');
   if (text.length > 2048) throw adapterError('web_selector_mismatch', 'DeepSeek 页面地址无效');
   let url;
@@ -31,7 +42,7 @@ function safeUrl(value) {
   } catch {
     throw adapterError('web_selector_mismatch', 'DeepSeek 页面地址无效');
   }
-  if (!selectors.allowedOrigins.includes(url.origin)) {
+  if (!identity.allowedOrigins.includes(url.origin)) {
     throw adapterError('web_selector_mismatch', 'DeepSeek 页面来源不匹配');
   }
   return url.toString();
@@ -56,7 +67,11 @@ function normalizeExternalUrl(value) {
   return normalized.length <= 2048 ? normalized : null;
 }
 
-function normalizeProviderCitations(explicitCitations, retrievalCandidates) {
+function normalizeProviderCitations(
+  explicitCitations,
+  retrievalCandidates,
+  identity = DEEPSEEK_WEB_IDENTITY
+) {
   const rows = [];
   const seen = new Set();
   const append = (item, sourceRole) => {
@@ -72,8 +87,8 @@ function normalizeProviderCitations(explicitCitations, retrievalCandidates) {
         ? { title: bounded(String(item.title).replace(/\s+/g, ' ').trim(), 500) }
         : {}),
       source_origin: sourceRole === 'explicit_citation'
-        ? 'deepseek_web_dom'
-        : 'deepseek_web_network',
+        ? identity.domCitationOrigin
+        : identity.networkCitationOrigin,
       source_role: sourceRole
     });
   };
@@ -93,6 +108,7 @@ class DeepSeekWebAdapter {
     this.pollMs = options.pollMs ?? 500;
     this.stableMs = options.stableMs ?? 3000;
     this.timeoutMs = options.timeoutMs ?? 180_000;
+    this.identity = options.identity || DEEPSEEK_WEB_IDENTITY;
   }
 
   validateOwner(owner) {
@@ -123,7 +139,7 @@ class DeepSeekWebAdapter {
       if (newTurns.length > 1) {
         throw adapterError(
           'web_selector_mismatch',
-          '无法唯一识别当前 DeepSeek 回答',
+          `无法唯一识别当前${this.identity.displayName}回答`,
           'new_assistant_turn_seen'
         );
       }
@@ -148,7 +164,7 @@ class DeepSeekWebAdapter {
     }
     throw adapterError(
       'web_generation_timeout',
-      '等待 DeepSeek Web 最终回答超时',
+      `等待${this.identity.displayName}最终回答超时`,
       'generation_finished'
     );
   }
@@ -179,7 +195,7 @@ class DeepSeekWebAdapter {
       if (search?.observed !== true) {
         throw adapterError(
           'web_search_state_unverified',
-          '无法确认 DeepSeek 智能搜索已开启',
+          `无法确认${this.identity.displayName}联网搜索已开启`,
           'search_enabled_verified'
         );
       }
@@ -205,7 +221,7 @@ class DeepSeekWebAdapter {
       if (Buffer.byteLength(finalTurn.text, 'utf8') > MAX_RESPONSE_BYTES) {
         throw adapterError(
           'web_response_too_large',
-          'DeepSeek Web 回答超过保存上限',
+          `${this.identity.displayName}回答超过保存上限`,
           'content_extracted'
         );
       }
@@ -214,7 +230,8 @@ class DeepSeekWebAdapter {
       const retrievalCandidates = await this.page.collectRetrievalCandidates?.() || [];
       const providerCitations = normalizeProviderCitations(
         explicitCitations,
-        retrievalCandidates
+        retrievalCandidates,
+        this.identity
       );
       currentStage = 'final_evidence_saved';
       const finalScreenshot = await this.page.captureScreenshot('final_answer');
@@ -228,12 +245,12 @@ class DeepSeekWebAdapter {
       const metadata = await this.page.getMetadata();
       const completedAt = this.now();
       const webCapture = {
-        schema_version: 'deepseek-web-capture-v1',
-        selector_version: selectors.selectorVersion,
+        schema_version: this.identity.captureSchemaVersion,
+        selector_version: this.identity.selectorVersion,
         status: 'completed',
         artifact_owner_record_id: captureOwner.record_id,
-        page_origin: 'https://chat.deepseek.com',
-        page_url: safeUrl(metadata.pageUrl),
+        page_origin: this.identity.pageOrigin,
+        page_url: safeUrl(metadata.pageUrl, this.identity),
         started_at: safeIso(startedAt),
         completed_at: safeIso(completedAt),
         captured_at: safeIso(completedAt),
@@ -267,14 +284,14 @@ class DeepSeekWebAdapter {
       if (Buffer.byteLength(JSON.stringify(webCapture), 'utf8') > MAX_CAPTURE_METADATA_BYTES) {
         throw adapterError(
           'web_capture_metadata_too_large',
-          'DeepSeek Web 采集元数据超过保存上限',
+          `${this.identity.displayName}采集元数据超过保存上限`,
           'final_evidence_saved'
         );
       }
       return {
         success: true,
-        platform: 'deepseek-web',
-        model_name: 'deepseek-web-ui',
+        platform: this.identity.platformCode,
+        model_name: this.identity.modelName,
         text: finalTurn.text,
         data: {},
         provider_citations: providerCitations,
@@ -295,6 +312,7 @@ class DeepSeekWebPage {
     this.connection = session.connection;
     this.sleep = options.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.networkObservation = null;
+    this.identity = options.identity || DEEPSEEK_WEB_IDENTITY;
   }
 
   async evaluate(expression) {
@@ -340,7 +358,7 @@ class DeepSeekWebPage {
       } catch {
         return;
       }
-      if (responseUrl.origin !== 'https://chat.deepseek.com') return;
+      if (responseUrl.origin !== this.identity.pageOrigin) return;
       const mimeType = String(response.mimeType || '').toLowerCase();
       if (
         mimeType !== 'application/json'

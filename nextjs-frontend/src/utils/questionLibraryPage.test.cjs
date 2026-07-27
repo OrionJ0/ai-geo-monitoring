@@ -34,6 +34,24 @@ test('问题可以选择所属问题集并继续单独运行', () => {
   assert.match(pageSource, /编辑问题/);
 });
 
+test('局域网 HTTP 环境使用兼容密钥运行问题集和单个问题', () => {
+  const questionSetStart = pageSource.indexOf('const runQuestionSet');
+  const questionSetEnd = pageSource.indexOf('const deletePrompt', questionSetStart);
+  const questionSetRun = pageSource.slice(questionSetStart, questionSetEnd);
+  const promptStart = pageSource.indexOf('const runPrompt');
+  const promptEnd = pageSource.indexOf('const openPromptHistory', promptStart);
+  const promptRun = pageSource.slice(promptStart, promptEnd);
+
+  assert.match(pageSource, /import \{ createIdempotencyKey \}/);
+  assert.doesNotMatch(pageSource, /window\.crypto\.randomUUID\(\)/);
+  assert.ok(questionSetRun.indexOf('try {') < questionSetRun.indexOf('createIdempotencyKey()'));
+  assert.match(questionSetRun, /createIdempotencyKey\(\)/);
+  assert.match(questionSetRun, /axios\.post/);
+  assert.ok(promptRun.indexOf('try {') < promptRun.indexOf('createIdempotencyKey()'));
+  assert.match(promptRun, /createIdempotencyKey\(\)/);
+  assert.match(promptRun, /axios\.post/);
+});
+
 test('问题库隐藏生成建议并提供单条和批量新增入口', () => {
   assert.doesNotMatch(pageSource, /title="生成问题建议"/);
   assert.doesNotMatch(pageSource, />生成建议<\/Button>/);

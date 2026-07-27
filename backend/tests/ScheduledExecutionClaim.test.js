@@ -323,6 +323,47 @@ test('project automatic monitoring forwards DeepSeek Web through the existing pr
   }
 });
 
+test('project automatic monitoring forwards Doubao Web through the existing project runner', async () => {
+  const previousPlatforms = project.platforms;
+  await project.update({
+    platforms: ['doubao-web'],
+    monitoring_enabled: true
+  });
+  const prompt = await TrackedPrompt.create({
+    project_id: project.id,
+    user_id: user.id,
+    question: '豆包网页监测问题',
+    platforms: ['doubao-web'],
+    enabled: true
+  });
+  const service = new schedulerModule.SchedulerService({
+    ownerId: 'project-doubao-web-monitoring-process'
+  });
+  const ProjectRunService = require('../services/ProjectRunService');
+  const originalRunProject = ProjectRunService.runProject;
+  let runOptions = null;
+  ProjectRunService.runProject = async (options) => {
+    runOptions = options;
+    return { ok: true, data: { completed: 1, failed: 0 } };
+  };
+
+  try {
+    const ok = await service.runProjectNow(project.id, {
+      advanceSchedule: false,
+      scheduledExecutionId: 713
+    });
+
+    assert.equal(ok, true);
+    assert.deepEqual(runOptions.platforms, ['doubao-web']);
+    assert.equal(runOptions.scheduledExecutionId, 713);
+    assert.deepEqual(runOptions.prompts.map((item) => item.id), [prompt.id]);
+  } finally {
+    ProjectRunService.runProject = originalRunProject;
+    await prompt.destroy();
+    await project.update({ platforms: previousPlatforms });
+  }
+});
+
 for (const dialect of ['sqlite', 'postgres']) {
   test(`${dialect} claim contract treats a unique slot conflict as an owned duplicate`, async () => {
     const dueAt = new Date('2026-07-26T01:00:00.000Z');

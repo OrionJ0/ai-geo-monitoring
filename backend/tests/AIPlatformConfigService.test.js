@@ -34,16 +34,26 @@ test.after(async () => {
   await sequelize.close();
 });
 
-test('seeds API presets plus a disabled non-sensitive DeepSeek Web managed preset', async () => {
+test('seeds API presets plus disabled non-sensitive managed Web presets', async () => {
   const service = createService();
   await service.ensurePresets();
 
   const rows = await AIPlatformConfig.findAll({ order: [['code', 'ASC']] });
-  assert.deepEqual(rows.map((row) => row.code), ['deepseek', 'deepseek-web', 'doubao', 'hunyuan', 'qwen']);
+  assert.deepEqual(rows.map((row) => row.code), [
+    'deepseek',
+    'deepseek-web',
+    'doubao',
+    'doubao-web',
+    'hunyuan',
+    'qwen'
+  ]);
   assert.equal(rows.every((row) => row.builtin), true);
   assert.equal(rows.every((row) => row.encrypted_api_key === null), true);
   assert.equal(rows.every((row) => row.api_key_last4 === null), true);
-  assert.equal(rows.filter((row) => row.code !== 'deepseek-web').every((row) => row.enabled), true);
+  assert.equal(rows.find((row) => row.code === 'doubao').enabled, true);
+  assert.equal(rows.find((row) => row.code === 'qwen').enabled, true);
+  assert.equal(rows.find((row) => row.code === 'hunyuan').enabled, true);
+  assert.equal(rows.find((row) => row.code === 'deepseek').enabled, false);
   assert.equal(rows.find((row) => row.code === 'deepseek').default_model, 'deepseek-v4-flash');
   const deepseekWeb = rows.find((row) => row.code === 'deepseek-web');
   assert.equal(deepseekWeb.name, 'DeepSeek 网页版');
@@ -51,6 +61,12 @@ test('seeds API presets plus a disabled non-sensitive DeepSeek Web managed prese
   assert.equal(deepseekWeb.base_url, 'https://chat.deepseek.com');
   assert.equal(deepseekWeb.default_model, 'deepseek-web-ui');
   assert.equal(deepseekWeb.enabled, false);
+  const doubaoWeb = rows.find((row) => row.code === 'doubao-web');
+  assert.equal(doubaoWeb.name, '豆包网页版');
+  assert.equal(doubaoWeb.adapter_type, 'doubao_web');
+  assert.equal(doubaoWeb.base_url, 'https://www.doubao.com');
+  assert.equal(doubaoWeb.default_model, 'doubao-web-ui');
+  assert.equal(doubaoWeb.enabled, false);
   const doubao = rows.find((row) => row.code === 'doubao');
   assert.equal(doubao.adapter_type, 'openai_responses');
   assert.equal(doubao.base_url, 'https://ark.cn-beijing.volces.com/api/v3');
@@ -60,39 +76,48 @@ test('seeds API presets plus a disabled non-sensitive DeepSeek Web managed prese
   assert.equal(qwen.adapter_type, 'openai_responses');
   assert.equal(qwen.default_model, 'qwen3.7-plus');
   assert.equal(qwen.base_url, 'https://dashscope.aliyuncs.com/compatible-mode/v1');
+  assert.deepEqual(qwen.request_options, {
+    search_options: { forced_search: true }
+  });
   const hunyuan = rows.find((row) => row.code === 'hunyuan');
   assert.equal(hunyuan.name, '腾讯混元');
   assert.equal(hunyuan.adapter_type, 'openai_chat_completions');
   assert.equal(hunyuan.default_model, 'hy3');
   assert.equal(hunyuan.base_url, 'https://tokenhub.tencentmaas.com/v1');
-  assert.equal(PRESET_PLATFORMS.length, 5);
+  assert.equal(PRESET_PLATFORMS.length, 6);
 });
 
-test('treats the managed Web preset as configured without an API key and derives capabilities', async () => {
+test('treats both managed Web presets as configured without API keys and derives capabilities', async () => {
   const service = createService();
   await service.ensurePresets();
   const deepseekWeb = await AIPlatformConfig.findOne({ where: { code: 'deepseek-web' } });
+  const doubaoWeb = await AIPlatformConfig.findOne({ where: { code: 'doubao-web' } });
   await service.setEnabled(deepseekWeb.id, true);
+  await service.setEnabled(doubaoWeb.id, true);
 
   const catalog = await service.listCatalog();
-  const web = catalog.find((item) => item.code === 'deepseek-web');
+  const webPlatforms = catalog.filter((item) => (
+    ['deepseek-web', 'doubao-web'].includes(item.code)
+  ));
   const api = catalog.find((item) => item.code === 'deepseek');
 
-  assert.equal(web.configured, true);
-  assert.equal(web.selectable, true);
-  assert.equal(web.unavailable_reason, null);
-  assert.deepEqual(web.capabilities, {
-    monitoring: true,
-    analysis: false,
-    prompt_generation: false,
-    model_listing: false,
-    api_key_management: false,
-    connection_test: false,
-    api_web_search_test: false,
-    direct_stream: false,
-    legacy_schedule: false,
-    interactive_login: true
-  });
+  for (const web of webPlatforms) {
+    assert.equal(web.configured, true);
+    assert.equal(web.selectable, true);
+    assert.equal(web.unavailable_reason, null);
+    assert.deepEqual(web.capabilities, {
+      monitoring: true,
+      analysis: false,
+      prompt_generation: false,
+      model_listing: false,
+      api_key_management: false,
+      connection_test: false,
+      api_web_search_test: false,
+      direct_stream: false,
+      legacy_schedule: false,
+      interactive_login: true
+    });
+  }
   assert.equal(api.capabilities.analysis, true);
   assert.equal(api.capabilities.api_key_management, true);
   assert.equal(api.capabilities.interactive_login, false);
@@ -121,6 +146,7 @@ test('promotes an existing Qwen row to builtin without overwriting its connectio
   assert.equal(qwen.default_model, 'qwen3.7-plus');
   assert.equal(qwen.encrypted_api_key, 'already-encrypted');
   assert.equal(qwen.enabled, false);
+  assert.deepEqual(qwen.request_options, {});
 });
 
 test('migrates the retired provider-specific Responses type and obsolete max_keyword preset', async () => {
@@ -145,6 +171,62 @@ test('migrates the retired provider-specific Responses type and obsolete max_key
   await service.ensurePresets();
   await migrated.reload();
   assert.deepEqual(migrated.request_options, { temperature: 0.2 });
+});
+
+test('upgrades an existing Qwen empty request configuration to the forced-search preset', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'qwen',
+    name: '千问',
+    adapter_type: 'openai_responses',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    default_model: 'qwen3.7-plus',
+    request_options: {},
+    enabled: true,
+    builtin: true,
+    test_status: 'success',
+    web_search_test_status: 'success'
+  });
+
+  await service.ensurePresets();
+  const qwen = await AIPlatformConfig.findOne({ where: { code: 'qwen' } });
+
+  assert.deepEqual(qwen.request_options, {
+    search_options: { forced_search: true }
+  });
+  assert.equal(qwen.test_status, 'untested');
+  assert.equal(qwen.web_search_test_status, 'untested');
+
+  await qwen.update({ request_options: { temperature: 0.2 } });
+  await service.ensurePresets();
+  await qwen.reload();
+  assert.deepEqual(qwen.request_options, { temperature: 0.2 });
+});
+
+test('disables an existing unconfigured DeepSeek API default without overriding an explicitly configured account', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'deepseek',
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.deepseek.com/v1/chat/completions',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    builtin: true
+  });
+
+  await service.ensurePresets();
+  const deepseek = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+  assert.equal(deepseek.enabled, false);
+
+  await deepseek.update({
+    encrypted_api_key: 'already-encrypted',
+    api_key_last4: '1234',
+    enabled: true
+  });
+  await service.ensurePresets();
+  await deepseek.reload();
+  assert.equal(deepseek.enabled, true);
 });
 
 test('stores an encrypted API key and never exposes stored secret fields', async () => {

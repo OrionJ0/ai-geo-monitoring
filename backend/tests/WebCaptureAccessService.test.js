@@ -132,3 +132,58 @@ test('reused evidence must also be declared by the original artifact owner recor
   );
   assert.equal(opened, false);
 });
+
+test('routes evidence to its platform Store and rejects cross-platform owner reuse first', async () => {
+  const artifactId = '00000000-0000-4000-8000-000000000011';
+  const records = new Map([
+    [21, {
+      id: 21,
+      user_id: 7,
+      platform: 'doubao-web',
+      result_summary: captureSummary(20, artifactId)
+    }],
+    [20, {
+      id: 20,
+      user_id: 7,
+      platform: 'deepseek-web',
+      result_summary: captureSummary(20, artifactId)
+    }]
+  ]);
+  const opens = [];
+  const service = new WebCaptureAccessService({
+    questionRecordModel: { findByPk: async (id) => records.get(Number(id)) || null },
+    webPlatformRegistry: {
+      hasDefinition: (code) => ['doubao-web', 'deepseek-web'].includes(code),
+      getService(code) {
+        return {
+          getCaptureStore() {
+            return {
+              async openArtifact() {
+                opens.push(code);
+                return { bytes: 1 };
+              }
+            };
+          }
+        };
+      }
+    }
+  });
+
+  await assert.rejects(
+    service.openForUser({
+      recordId: 21,
+      artifactId,
+      user: { id: 7, role: 'user' }
+    }),
+    { code: 'web_capture_platform_mismatch', status: 400 }
+  );
+  assert.deepEqual(opens, []);
+
+  records.set(20, { ...records.get(20), platform: 'doubao-web' });
+  assert.equal((await service.openForUser({
+    recordId: 21,
+    artifactId,
+    user: { id: 7, role: 'user' }
+  })).bytes, 1);
+  assert.deepEqual(opens, ['doubao-web']);
+});

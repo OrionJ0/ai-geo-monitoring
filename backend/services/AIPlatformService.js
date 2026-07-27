@@ -1,6 +1,6 @@
 const AIPlatformConfigService = require('./AIPlatformConfigService');
 const AIPlatformRequestService = require('./AIPlatformRequestService');
-const WebPlatformService = require('./WebPlatformService');
+const WebPlatformRegistry = require('./WebPlatformRegistry');
 const {
   getUnavailableReason,
   hasPlatformCapability
@@ -14,14 +14,14 @@ function normalizeCodes(codes) {
   ));
 }
 
-function webFailure(code, message) {
+function webFailure(definition, code, message) {
   return {
     success: false,
-    platform: 'deepseek-web',
+    platform: definition.code,
     error_code: code,
     error: message,
     web_capture: {
-      schema_version: 'deepseek-web-capture-v1',
+      schema_version: definition.captureSchemaVersion,
       status: 'failed',
       failure: {
         stage: 'preflight',
@@ -35,19 +35,36 @@ class AIPlatformService {
   constructor(options = {}) {
     this.requestService = options.requestService || AIPlatformRequestService;
     this.configService = options.configService || AIPlatformConfigService;
-    this.webPlatformService = options.webPlatformService || WebPlatformService;
+    this.webPlatformRegistry = options.webPlatformRegistry || WebPlatformRegistry;
   }
 
   async queryPlatform(platform, question, options = {}) {
-    const adapterType = options.config?.adapter_type;
-    if (platform === 'deepseek-web' || adapterType === 'deepseek_web') {
-      if (platform !== 'deepseek-web' || adapterType !== 'deepseek_web') {
-        return webFailure('managed_config_invalid', 'DeepSeek Web 受管平台配置无效');
+    const code = String(platform || '').trim().toLowerCase();
+    const adapterType = String(options.config?.adapter_type || '');
+    const definitions = this.webPlatformRegistry.listDefinitions();
+    const definitionByCode = definitions.find((item) => item.code === code);
+    const definitionByAdapter = definitions.find(
+      (item) => item.adapterType === adapterType
+    );
+    if (definitionByCode || definitionByAdapter) {
+      const definition = definitionByCode || definitionByAdapter;
+      try {
+        this.webPlatformRegistry.validateManagedConfig({
+          ...options.config,
+          code
+        });
+      } catch {
+        return webFailure(
+          definition,
+          'managed_config_invalid',
+          `${definition.displayName} 受管平台配置无效`
+        );
       }
       if (options.purpose !== 'project_monitoring') {
         return webFailure(
+          definition,
           'unsupported_platform_capability',
-          'DeepSeek Web 仅支持项目监测入口'
+          `${definition.displayName} 仅支持项目监测入口`
         );
       }
       const recordId = Number(options.capture_owner?.record_id);
@@ -58,9 +75,13 @@ class AIPlatformService {
         || !Number.isSafeInteger(userId)
         || userId <= 0
       ) {
-        return webFailure('web_capture_owner_missing', 'DeepSeek Web 查询缺少记录归属');
+        return webFailure(
+          definition,
+          'web_capture_owner_missing',
+          `${definition.displayName} 查询缺少记录归属`
+        );
       }
-      return this.webPlatformService.queryPlatform(question, {
+      return this.webPlatformRegistry.getService(definition.code).queryPlatform(question, {
         capture_owner: {
           record_id: recordId,
           user_id: userId,
@@ -110,12 +131,16 @@ class AIPlatformService {
       if (
         reason === null
         && runtimeProbe
-        && row.adapter_type === 'deepseek_web'
+        && this.webPlatformRegistry.hasDefinition(row.code)
       ) {
         try {
-          await this.webPlatformService.preflight();
+          this.webPlatformRegistry.validateManagedConfig(row);
+          await this.webPlatformRegistry.getService(row.code).preflight();
         } catch (error) {
-          reason = String(error?.code || '').startsWith('web_')
+          reason = (
+            String(error?.code || '').startsWith('web_')
+            || error?.code === 'managed_config_invalid'
+          )
             ? error.code
             : 'web_browser_launch_failed';
         }

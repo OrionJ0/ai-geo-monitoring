@@ -1,5 +1,5 @@
 const { QuestionRecord } = require('../models');
-const WebPlatformService = require('./WebPlatformService');
+const WebPlatformRegistry = require('./WebPlatformRegistry');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -31,7 +31,22 @@ function referencesArtifact(record, artifactId) {
 class WebCaptureAccessService {
   constructor(options = {}) {
     this.questionRecordModel = options.questionRecordModel || QuestionRecord;
-    this.captureStore = options.captureStore || WebPlatformService.getCaptureStore();
+    this.captureStore = options.captureStore || null;
+    this.webPlatformRegistry = options.webPlatformRegistry || WebPlatformRegistry;
+  }
+
+  resolveCaptureStore(platformCode) {
+    if (this.captureStore) return this.captureStore;
+    if (!this.webPlatformRegistry.hasDefinition(platformCode)) {
+      throw new WebCaptureAccessError(
+        'invalid_web_capture_reference',
+        'Web 证据平台无效',
+        400
+      );
+    }
+    return this.webPlatformRegistry
+      .getService(platformCode)
+      .getCaptureStore();
   }
 
   async openForUser({ recordId, artifactId, user }) {
@@ -59,6 +74,7 @@ class WebCaptureAccessService {
     const ownerRecordId = positiveInteger(
       record?.result_summary?.web_capture?.artifact_owner_record_id
     );
+    let ownerRecord = record;
     if (!ownerRecordId) {
       throw new WebCaptureAccessError(
         'invalid_web_capture_reference',
@@ -67,7 +83,7 @@ class WebCaptureAccessService {
       );
     }
     if (ownerRecordId !== normalizedRecordId) {
-      const ownerRecord = await this.questionRecordModel.findByPk(ownerRecordId);
+      ownerRecord = await this.questionRecordModel.findByPk(ownerRecordId);
       if (!ownerRecord) {
         throw new WebCaptureAccessError('web_capture_not_found', 'Web 证据不存在', 404);
       }
@@ -78,8 +94,21 @@ class WebCaptureAccessService {
         throw new WebCaptureAccessError('web_capture_not_found', 'Web 证据不存在', 404);
       }
     }
+    const platformCode = String(record?.platform || '').trim().toLowerCase();
+    const ownerPlatformCode = String(ownerRecord?.platform || '').trim().toLowerCase();
+    if (
+      !this.captureStore
+      && (!platformCode || platformCode !== ownerPlatformCode)
+    ) {
+      throw new WebCaptureAccessError(
+        'web_capture_platform_mismatch',
+        'Web 证据平台归属不一致',
+        400
+      );
+    }
+    const captureStore = this.resolveCaptureStore(platformCode);
     try {
-      return await this.captureStore.openArtifact(ownerRecordId, normalizedArtifactId);
+      return await captureStore.openArtifact(ownerRecordId, normalizedArtifactId);
     } catch (error) {
       if (error.code === 'web_capture_missing') {
         throw new WebCaptureAccessError('web_capture_missing', 'Web 证据文件已丢失', 410);

@@ -66,7 +66,7 @@ function normalizeArtifact(capture, kind, label, recordId) {
 }
 
 function buildWebCaptureEvidence(row) {
-  if (!row || row.platform !== 'deepseek-web') return null;
+  if (!row || !['deepseek-web', 'doubao-web'].includes(row.platform)) return null;
   const capture = row.web_capture || row.result_summary?.web_capture;
   if (
     !capture

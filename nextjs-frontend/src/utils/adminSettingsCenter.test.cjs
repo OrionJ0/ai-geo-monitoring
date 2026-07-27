@@ -89,6 +89,27 @@ test('platform settings use the management API for every explicit operation', ()
   assert.match(platformSource, /Popconfirm/);
 });
 
+test('platform settings treat both managed Web adapters as browser sessions instead of APIs', () => {
+  assert.match(platformSource, /webPlatformAdminSession\.cjs/);
+  assert.match(platformSource, /isManagedWebAdapter/);
+  assert.match(platformSource, /doubao_web/);
+  assert.doesNotMatch(platformSource, /adapter_type === 'deepseek_web'/);
+  assert.doesNotMatch(platformSource, /adapter_type !== 'deepseek_web'/);
+  assert.match(platformSource, /真实网页 · 专用 Chrome/);
+  assert.match(platformSource, /\/web-session/);
+  assert.match(platformSource, /\/web-session\/open/);
+  assert.match(platformSource, /\/web-session\/verify/);
+  assert.match(platformSource, /browser_configured/);
+  assert.match(platformSource, /profile_initialized/);
+  assert.match(platformSource, /登录 \/ 打开 Chrome/);
+  assert.match(platformSource, /切换账号/);
+  assert.match(platformSource, /验证登录/);
+  assert.match(platformSource, /重新加载/);
+  assert.match(platformSource, /重新加载.*只更新页面信息/);
+  assert.match(platformSource, /页面信息已更新/);
+  assert.doesNotMatch(platformSource, /刷新状态/);
+});
+
 test('the retired standalone platform page is removed', () => {
   assert.equal(fs.existsSync(path.resolve(__dirname, '../app/admin/platforms/page.tsx')), false);
 });

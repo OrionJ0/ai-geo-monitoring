@@ -22,6 +22,10 @@ import {
 } from 'antd';
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import {
+  getWebPlatformAdminSessionPresentation,
+  isManagedWebAdapter,
+} from '@/utils/webPlatformAdminSession.cjs';
 import type { AIPlatformCapabilities } from '@/lib/useAIPlatformCatalog';
 
 const { Text } = Typography;
@@ -34,7 +38,7 @@ type PlatformRecord = {
   id: number;
   code: string;
   name: string;
-  adapter_type: 'openai_responses' | 'openai_chat_completions' | 'deepseek_web';
+  adapter_type: 'openai_responses' | 'openai_chat_completions' | 'deepseek_web' | 'doubao_web';
   base_url: string;
   default_model: string;
   request_timeout_seconds: number | null;
@@ -80,13 +84,29 @@ type WebSearchTestResult = {
   } | null;
 };
 
+type WebPlatformAdminSessionStatus = {
+  schema_version: 'managed-web-session-v1';
+  platform: 'deepseek-web' | 'doubao-web';
+  browser_configured: boolean;
+  profile_initialized: boolean;
+  login_state:
+    | 'unchecked'
+    | 'ready'
+    | 'login_required'
+    | 'verification_required'
+    | 'selector_mismatch'
+    | 'unavailable';
+  reason_code: string | null;
+  last_verified_at: string | null;
+};
+
 const adapterOptions = [
   { label: 'OpenAI 兼容 · Chat Completions', value: 'openai_chat_completions' },
   { label: 'OpenAI 兼容 · Responses（可返回搜索来源）', value: 'openai_responses' },
 ];
 
 function adapterLabel(adapterType: PlatformRecord['adapter_type']) {
-  if (adapterType === 'deepseek_web') return '真实网页 · 本机 Chrome';
+  if (isManagedWebAdapter(adapterType)) return '真实网页 · 专用 Chrome';
   return adapterOptions.find((item) => item.value === adapterType)?.label || adapterType;
 }
 
@@ -119,6 +139,10 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [modelLoading, setModelLoading] = useState(false);
+  const [webSessionStatuses, setWebSessionStatuses] = useState<
+    Record<string, WebPlatformAdminSessionStatus | null>
+  >({});
+  const [webSessionAction, setWebSessionAction] = useState<string | null>(null);
   const [form] = Form.useForm<PlatformFormValues>();
   const apiKeyRevealRequest = useRef(0);
   const apiKeyRevealPending = useRef(false);
@@ -130,17 +154,34 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
     setPreserveExistingApiKey(preserveExisting);
   };
 
+  const fetchWebSessionStatuses = useCallback(async (rows: PlatformRecord[]) => {
+    const managedRows = rows.filter((row) => isManagedWebAdapter(row.adapter_type));
+    const entries = await Promise.all(managedRows.map(async (platform) => {
+      try {
+        const response = await axios.get(
+          `/api/admin/ai-platforms/${platform.id}/web-session`,
+        );
+        return [platform.code, response?.data?.data || null] as const;
+      } catch {
+        return [platform.code, null] as const;
+      }
+    }));
+    setWebSessionStatuses(Object.fromEntries(entries));
+  }, []);
+
   const fetchPlatforms = useCallback(async () => {
     setLoading(true);
     try {
       const response = await axios.get('/api/admin/ai-platforms');
-      setPlatforms(Array.isArray(response?.data?.data) ? response.data.data : []);
+      const rows = Array.isArray(response?.data?.data) ? response.data.data : [];
+      setPlatforms(rows);
+      await fetchWebSessionStatuses(rows);
     } catch (error) {
       message.error(getApiErrorMessage(error, '获取 AI 平台失败'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchWebSessionStatuses]);
 
   useEffect(() => {
     fetchPlatforms();
@@ -367,6 +408,81 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
     }
   };
 
+  const refreshWebSession = async (
+    platform: PlatformRecord,
+    notifyResult = false,
+  ) => {
+    const actionKey = `${platform.code}:refresh`;
+    setWebSessionAction(actionKey);
+    try {
+      const response = await axios.get(
+        `/api/admin/ai-platforms/${platform.id}/web-session`,
+      );
+      setWebSessionStatuses((current) => ({
+        ...current,
+        [platform.code]: response?.data?.data || null,
+      }));
+      if (notifyResult) message.success('页面信息已更新');
+    } catch (error) {
+      setWebSessionStatuses((current) => ({
+        ...current,
+        [platform.code]: null,
+      }));
+      message.error(getApiErrorMessage(error, '读取网页登录状态失败'));
+    } finally {
+      setWebSessionAction(null);
+    }
+  };
+
+  const openWebSession = async (platform: PlatformRecord) => {
+    const actionKey = `${platform.code}:open`;
+    setWebSessionAction(actionKey);
+    try {
+      const response = await axios.post(
+        `/api/admin/ai-platforms/${platform.id}/web-session/open`,
+      );
+      setWebSessionStatuses((current) => ({
+        ...current,
+        [platform.code]: response?.data?.data || null,
+      }));
+      message.info(
+        `${platform.name}专用 Chrome 已打开；请在后端所在机器完成人工登录或账号切换，再点击“验证登录”。`,
+        8,
+      );
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '打开专用 Chrome 失败'));
+      await refreshWebSession(platform);
+    } finally {
+      setWebSessionAction(null);
+    }
+  };
+
+  const verifyWebSession = async (platform: PlatformRecord) => {
+    const actionKey = `${platform.code}:verify`;
+    setWebSessionAction(actionKey);
+    try {
+      const response = await axios.post(
+        `/api/admin/ai-platforms/${platform.id}/web-session/verify`,
+      );
+      const status = response?.data?.data as WebPlatformAdminSessionStatus;
+      setWebSessionStatuses((current) => ({
+        ...current,
+        [platform.code]: status || null,
+      }));
+      if (status?.login_state === 'ready') {
+        message.success(`${platform.name}网页登录状态已验证`);
+      } else {
+        const presentation = getWebPlatformAdminSessionPresentation(status);
+        message.warning(`${platform.name}：${presentation.label}`);
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '验证网页登录状态失败'));
+      await refreshWebSession(platform);
+    } finally {
+      setWebSessionAction(null);
+    }
+  };
+
   const columns: TableProps<PlatformRecord>['columns'] = [
     {
       title: '平台',
@@ -389,7 +505,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
         <Space orientation="vertical" size={2} style={{ maxWidth: 440 }}>
           <Text type="secondary">{adapterLabel(platform.adapter_type)}</Text>
           <Text type="secondary" ellipsis={{ tooltip: platform.base_url }}>{platform.base_url}</Text>
-          {platform.adapter_type === 'deepseek_web' ? (
+          {isManagedWebAdapter(platform.adapter_type) ? (
             <Text type="secondary">登录方式：本机人工登录并复用专用会话</Text>
           ) : (
             <Text
@@ -412,12 +528,30 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       render: (value: string) => <Text>{value || '-'}</Text>,
     },
     {
-      title: '配置状态',
+      title: '配置 / 登录状态',
       key: 'configured',
-      width: 130,
+      width: 220,
       render: (_, platform) => {
         if (platform.capabilities.interactive_login) {
-          return <Tag color={platform.configured ? 'processing' : 'warning'}>需本机人工登录</Tag>;
+          const hasStatus = Object.prototype.hasOwnProperty.call(
+            webSessionStatuses,
+            platform.code,
+          );
+          const status = webSessionStatuses[platform.code];
+          if (!hasStatus) return <Tag>正在读取</Tag>;
+          if (!status) return <Tag color="error">状态读取失败</Tag>;
+          const presentation = getWebPlatformAdminSessionPresentation(status);
+          return (
+            <Space orientation="vertical" size={2}>
+              <Tag color={presentation.color}>{presentation.label}</Tag>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {presentation.detail}
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                专用 Profile：{status.profile_initialized ? '已初始化' : '未初始化'}
+              </Text>
+            </Space>
+          );
         }
         return platform.configured
           ? <Tag color="success">已配置 · {platform.api_key_last4}</Tag>
@@ -473,12 +607,41 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
     {
       title: '操作',
       key: 'actions',
-      width: 330,
+      width: 430,
       fixed: 'right',
       render: (_, platform) => (
         <Space wrap>
-          {platform.adapter_type !== 'deepseek_web' ? (
+          {!isManagedWebAdapter(platform.adapter_type) ? (
             <Button size="small" onClick={() => openEdit(platform)}>编辑</Button>
+          ) : null}
+          {platform.capabilities.interactive_login ? (
+            <>
+              <Button
+                size="small"
+                loading={webSessionAction === `${platform.code}:open`}
+                disabled={webSessionStatuses[platform.code]?.browser_configured === false}
+                onClick={() => openWebSession(platform)}
+              >
+                {webSessionStatuses[platform.code]?.login_state === 'ready'
+                  ? '切换账号'
+                  : '登录 / 打开 Chrome'}
+              </Button>
+              <Button
+                size="small"
+                loading={webSessionAction === `${platform.code}:verify`}
+                disabled={webSessionStatuses[platform.code]?.browser_configured === false}
+                onClick={() => verifyWebSession(platform)}
+              >
+                验证登录
+              </Button>
+              <Button
+                size="small"
+                loading={webSessionAction === `${platform.code}:refresh`}
+                onClick={() => refreshWebSession(platform, true)}
+              >
+                重新加载
+              </Button>
+            </>
           ) : null}
           {platform.capabilities.connection_test ? (
             <Button size="small" loading={testingId === platform.id} onClick={() => testConnection(platform)}>测试连接</Button>
@@ -521,7 +684,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
         type="info"
         showIcon
         title="API 平台与真实网页监测使用独立能力"
-        description="自定义平台继续使用 OpenAI 兼容协议；DeepSeek 网页版是受管监测平台，只允许启停，并通过本机专用 Chrome 人工登录，不配置 API Key 或模型目录。"
+        description="DeepSeek 网页版和豆包网页版始终走各自的真实页面采集，不配置 API Key 或请求参数。管理员可以在此打开后端机器上的专用 Chrome，人工登录或切换账号，再验证会话状态；系统不会读取账号密码或会话凭据。“重新加载”只更新页面信息，“验证登录”才会实际检查当前登录是否有效。"
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Space>
@@ -535,7 +698,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
         dataSource={platforms}
         columns={columns}
         pagination={false}
-        scroll={{ x: 1560 }}
+        scroll={{ x: 1760 }}
       />
 
       <Modal

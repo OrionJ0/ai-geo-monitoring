@@ -24,8 +24,9 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 - 品牌项目创建、归档、恢复与删除
 - GEO 检测任务创建、调度与执行记录
 - 多平台 AI 回答结果监测，预置豆包、DeepSeek、千问和腾讯混元，并支持管理员新增 OpenAI Chat Completions 或 Responses 兼容平台
-- DeepSeek 真实网页监测：`deepseek-web` 使用后端所在机器的专用 headed Chrome、人工登录和持久会话，从问题库的单问题、问题集及项目自动监测入口串行采集页面最终回答、引用和截图；它与 `deepseek` API 样本完全独立，失败时不会回退 API
-- 平台级模型请求参数配置、连接测试与联网能力检测
+- 受管真实网页监测：`deepseek-web` 与 `doubao-web` 分别使用后端所在机器上的专用 headed Chrome、人工登录、持久会话、FIFO 和证据目录，从问题库的单问题、问题集及项目自动监测入口采集页面最终回答、引用和截图；两者可跨平台并行，各自失败时都不会回退同品牌 API。`doubao-web` 已接入代码但默认关闭，必须完成目标虚拟机验收后才可启用
+- 平台级模型请求参数配置、连接测试与联网能力检测；千问 Responses 新预置默认强制搜索，DeepSeek API 新预置默认关闭
+- 管理员可在设置中心查看两个网页版平台的浏览器、Profile 和登录验证状态，打开各自专用 Chrome 人工登录或切换账号
 - 由独立 AI 分析 API 抽取全部品牌/公司、目标实体映射、提及、候选顺序与推荐关系，程序据此计算品牌提及、推荐和排名；分析调用使用独立的结构化参数并在设置中心展示，不会改写监测平台参数；来源证据区分平台引用、回答正文链接、平台检索候选和分析补充来源，只有平台引用进入引用率与引用次数 KPI
 - AI 回答情绪判断，支持正向、中性、负向标签与风险项沉淀
 - 问题库支持单条与文本批量新增、分类、平台选择与历史结果追踪
@@ -91,19 +92,18 @@ cp nextjs-frontend/.env.example nextjs-frontend/.env.local
 
 JavaScript SEO 渲染抽样会启动真实浏览器访问目标站点。只有部署环境已通过容器、网络命名空间或等价出口策略隔离浏览器网络时，才应设置 `SEO_RENDER_NETWORK_ISOLATED=true`；否则该检查返回“证据不足”。可用 `SEO_RENDER_BROWSER_EXECUTABLE` 指定 Chrome/Chromium 路径。
 
-首次使用 DeepSeek Web，或登录、人工验证、账号切换和页面选择器故障恢复后，正式环境必须在虚拟机持久桌面中执行完整流程：
+首次使用受管 Web 平台，或登录、人工验证、账号切换和页面选择器故障恢复时，管理员优先打开 `/admin/settings` 的“AI 平台”页签：
 
-```bash
-npm run prod:stop
-npm run web:login -- deepseek-web
-npm run prod:start
-```
+1. 查看“配置 / 登录状态”，确认专用 Chrome 与 Profile 是否就绪。
+2. 点击对应平台的“登录 / 打开 Chrome”或“切换账号”。
+3. 在后端所在虚拟机新打开的专用 Chrome 中人工完成登录、账号切换或验证。
+4. 回到设置页点击“验证登录”；只有显示“网页登录已验证”才视为可用。
 
-在登录命令打开的 Chrome 中人工完成登录或验证，确认对话输入区可用后关闭登录浏览器，再启动新的受管后端。新后端进程会清除旧进程中的登录、验证或选择器熔断；只完成网页登录但不重启后端，不视为恢复完成。随后在管理设置中启用“DeepSeek 网页版”，并从问题库运行单个问题或问题集；项目自动监测仍可按计划触发，但品牌项目页不再提供项目级手动运行入口。
+打开登录窗口后，该平台会拒绝新的页面采集，直到管理员验证登录成功；另一个 Web 平台不受影响。页面不会接收账号密码，也不会读取或展示 Cookie、Authorization、Profile 路径和账号身份。后端不可用或设置页无法进入时，仍可在停止生产服务后使用 `npm run web:login -- <deepseek-web|doubao-web>` 作为运维恢复入口。豆包 Web 在完成有引用/无引用单问题、问题集重试、自动监测、双浏览器资源基线与回收验收前必须保持关闭。
 
-第一版仅支持单后端进程、单账号、单页面串行采集和后端所在机器上可用的桌面会话。成功任务结束后浏览器会话继续复用，避免重复登录；浏览器连接、命令或生成超时等异常会关闭并回收当前会话，下一条任务重新启动；后端关闭时也会关闭浏览器。系统不接收账号密码、Cookie 或 Authorization 配置，不自动处理验证码，不调用网页私有接口，也不把 Web 失败转换为 DeepSeek API 结果。详细环境项见 [环境变量](docs/ENVIRONMENT.md)。
+第一版仅支持单后端进程、每个 Web 平台单账号和单页面串行采集，并要求后端所在机器存在可用的持久桌面会话。成功任务结束后各平台浏览器会话独立复用；浏览器连接、命令或生成超时等异常只回收对应平台会话；后端关闭时回收全部注册浏览器。系统不接收账号密码、Cookie 或 Authorization 配置，不自动处理验证码，不调用网页私有接口，也不把 Web 失败转换为 API 结果。详细环境项见 [环境变量](docs/ENVIRONMENT.md)。
 
-市场部内部部署采用共享 `admin`：所有同事访问共同项目和报告，同时也继承现有完整管理员权限，系统无法提供人员级操作审计。共享账号的发放、轮换和离职撤权由公司内部账号流程负责。系统 `admin` 与 DeepSeek 服务账号是两套身份；DeepSeek 凭据只由虚拟机运维负责人在专用 Chrome 中维护。虚拟机不得休眠，远程桌面断开不能销毁图形会话；数据库、专用 profile 和证据目录都必须位于持久磁盘。`/api/ready` 只表示主应用、数据库和调度器就绪，DeepSeek Web 的当前状态以认证接口 `/api/ai-platforms/deepseek-web/runtime-status` 为准。
+市场部内部部署采用共享 `admin`：所有同事访问共同项目和报告，同时也继承现有完整管理员权限，系统无法提供人员级操作审计。共享账号的发放、轮换和离职撤权由公司内部账号流程负责。系统 `admin` 与各网页平台服务账号是独立身份；网页账号凭据只由虚拟机运维负责人在各自专用 Chrome 中维护。虚拟机不得休眠，远程桌面断开不能销毁图形会话；数据库、各平台 profile 和证据目录都必须位于持久磁盘。`/api/ready` 只表示主应用、数据库和调度器就绪；平台状态分别读取认证接口 `/api/ai-platforms/deepseek-web/runtime-status` 与 `/api/ai-platforms/doubao-web/runtime-status`。
 
 统一启动前后端：
 
@@ -128,6 +128,7 @@ npm run dev          # 同时启动后端和 Next.js 前端
 npm run dev:backend  # 只启动后端
 npm run dev:frontend # 只启动前端
 npm run web:login -- deepseek-web # 人工登录或恢复 DeepSeek Web 会话
+npm run web:login -- doubao-web   # 人工登录或恢复豆包 Web 会话
 npm run build        # 构建 Next.js 前端
 npm run lint         # 检查 Next.js 前端
 ```

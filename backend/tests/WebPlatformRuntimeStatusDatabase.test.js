@@ -88,9 +88,19 @@ test('counts only actionable pending Web records across active, paused and orpha
         return { enabled: true };
       }
     },
-    webPlatformService: {
-      getRuntimeSnapshot() {
-        return { running_count: 0 };
+    webPlatformRegistry: {
+      getDefinition(code) {
+        return {
+          code,
+          runtimeSchemaVersion: 'deepseek-web-runtime-v1'
+        };
+      },
+      getService() {
+        return {
+          getRuntimeSnapshot() {
+            return { running_count: 0 };
+          }
+        };
       }
     },
     now: () => observedAt

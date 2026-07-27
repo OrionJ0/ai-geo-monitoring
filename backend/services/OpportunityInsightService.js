@@ -2,7 +2,9 @@ const PRIORITY_WEIGHT = { high: 3, medium: 2, low: 1 };
 const SIGNIFICANT_PLATFORM_GAP_RATE = 50;
 const PLATFORM_LABELS = {
   doubao: '豆包',
-  deepseek: 'DeepSeek'
+  'doubao-web': '豆包网页版',
+  deepseek: 'DeepSeek',
+  'deepseek-web': 'DeepSeek 网页版'
 };
 const PromptCategoryService = require('./PromptCategoryService');
 const PlatformSelectionService = require('./PlatformSelectionService');

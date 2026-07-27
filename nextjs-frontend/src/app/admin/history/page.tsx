@@ -1,13 +1,16 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, Table, Space, Button, Input, Select, Tag, Typography, message } from 'antd';
+import { Alert, Card, Table, Space, Button, Input, Select, Tag, Typography, message } from 'antd';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import axios from '@/lib/axiosConfig';
 import { resolveKeywordStats } from '@/utils/keywordStats.cjs';
+import { getHistoryFailurePresentation } from '@/utils/historyErrorDisplay.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import WebCaptureEvidence from '@/components/WebCaptureEvidence';
 
-const { Paragraph, Text } = Typography;
+const { Text } = Typography;
 
 type HistoryFilters = {
   userId?: string;
@@ -116,6 +119,48 @@ export default function AdminHistoryPage() {
     } },
   ], [platformLabels]);
 
+  const renderExpandedHistory = (record: any) => {
+    const failurePresentation = getHistoryFailurePresentation(record);
+
+    return (
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+        {failurePresentation ? (
+          <Alert
+            type="error"
+            showIcon
+            title={failurePresentation.title}
+            description={(
+              <Space orientation="vertical" size={4}>
+                <Text>{failurePresentation.message}</Text>
+                <Text type="secondary">
+                  失败阶段：{failurePresentation.stage}（{failurePresentation.stageCode}）
+                </Text>
+                <Text type="secondary">
+                  错误码：<Text code>{failurePresentation.errorCode}</Text>
+                </Text>
+              </Space>
+            )}
+          />
+        ) : null}
+        <div>
+          <Text strong>
+            {failurePresentation?.hasCollectedAnswer ? '采集到的原始回答' : 'AI 原始回答'}
+          </Text>
+          <div style={{ marginTop: 8, lineHeight: 1.7 }}>
+            {record?.resultDetail?.ai_response_original ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {String(record.resultDetail.ai_response_original)}
+              </ReactMarkdown>
+            ) : (
+              <Text type="secondary">暂无回答内容</Text>
+            )}
+          </div>
+        </div>
+        <WebCaptureEvidence record={record} />
+      </Space>
+    );
+  };
+
   return (
     <Card
       title={(
@@ -131,6 +176,7 @@ export default function AdminHistoryPage() {
           />
           <Select
             size="small"
+            aria-label="平台筛选"
             placeholder="平台筛选"
             allowClear
             value={platform}
@@ -140,6 +186,7 @@ export default function AdminHistoryPage() {
           />
           <Select
             size="small"
+            aria-label="状态筛选"
             placeholder="状态筛选"
             allowClear
             value={status}
@@ -156,8 +203,8 @@ export default function AdminHistoryPage() {
             onPressEnter={() => { setPage(1); fetchHistory(1, limit, { userId, platform, status, q }); }}
             style={{ width: 140, maxWidth: '100%' }}
           />
-          <Button size="small" type="primary" onClick={() => { setPage(1); fetchHistory(1, limit, { userId, platform, status, q }); }}>搜索</Button>
-          <Button size="small" onClick={() => { setUserId(''); setPlatform(''); setStatus(''); setQ(''); setPage(1); fetchHistory(1, limit, {}); }}>重置</Button>
+          <Button aria-label="搜索历史" size="small" type="primary" onClick={() => { setPage(1); fetchHistory(1, limit, { userId, platform, status, q }); }}>搜索</Button>
+          <Button aria-label="重置筛选" size="small" onClick={() => { setUserId(''); setPlatform(''); setStatus(''); setQ(''); setPage(1); fetchHistory(1, limit, {}); }}>重置</Button>
         </Space>
       )}
     >
@@ -173,17 +220,7 @@ export default function AdminHistoryPage() {
           onChange: (p, l) => { setPage(p); setLimit(l); fetchHistory(p, l, { userId, platform, status, q }); },
         }}
         expandable={{
-          expandedRowRender: (record: any) => (
-            <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-              <div>
-                <Text strong>AI 原始回答</Text>
-                <Paragraph style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
-                  {record?.resultDetail?.ai_response_original || '暂无回答内容'}
-                </Paragraph>
-              </div>
-              <WebCaptureEvidence record={record} />
-            </Space>
-          )
+          expandedRowRender: renderExpandedHistory
         }}
       />
     </Card>

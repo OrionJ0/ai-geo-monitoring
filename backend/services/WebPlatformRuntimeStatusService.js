@@ -4,10 +4,7 @@ const {
   QuestionSetRun
 } = require('../models');
 const AIPlatformConfigService = require('./AIPlatformConfigService');
-const WebPlatformService = require('./WebPlatformService');
-
-const PLATFORM_CODE = 'deepseek-web';
-const SCHEMA_VERSION = 'deepseek-web-runtime-v1';
+const WebPlatformRegistry = require('./WebPlatformRegistry');
 const PUBLIC_UNAVAILABLE_CODES = new Set([
   'web_browser_not_configured',
   'web_browser_launch_failed',
@@ -70,20 +67,20 @@ class WebPlatformRuntimeStatusService {
     questionRecordModel = QuestionRecord,
     questionSetRunModel = QuestionSetRun,
     aiPlatformConfigService = AIPlatformConfigService,
-    webPlatformService = WebPlatformService,
+    webPlatformRegistry = WebPlatformRegistry,
     now = () => new Date()
   } = {}) {
     this.questionRecordModel = questionRecordModel;
     this.questionSetRunModel = questionSetRunModel;
     this.aiPlatformConfigService = aiPlatformConfigService;
-    this.webPlatformService = webPlatformService;
+    this.webPlatformRegistry = webPlatformRegistry;
     this.now = now;
   }
 
-  async countActionablePending(observedAt) {
+  async countActionablePending(platformCode, observedAt) {
     return this.questionRecordModel.count({
       where: {
-        platform: PLATFORM_CODE,
+        platform: platformCode,
         status: 'pending',
         [Op.or]: [
           { question_set_run_id: null },
@@ -106,24 +103,27 @@ class WebPlatformRuntimeStatusService {
     });
   }
 
-  async getStatus() {
+  async getStatus(platformCode = 'deepseek-web') {
+    const definition = this.webPlatformRegistry.getDefinition(platformCode);
     const observedAt = new Date(this.now());
     let platform;
     let configUnavailable = false;
     try {
-      platform = await this.aiPlatformConfigService.getPlatformByCode(PLATFORM_CODE);
+      platform = await this.aiPlatformConfigService.getPlatformByCode(definition.code);
     } catch (error) {
       if (error?.code !== 'platform_not_found') throw error;
       configUnavailable = true;
     }
     const enabled = !configUnavailable && booleanValue(platform, 'enabled');
-    const runtimeSnapshot = this.webPlatformService.getRuntimeSnapshot();
+    const runtimeSnapshot = this.webPlatformRegistry
+      .getService(definition.code)
+      .getRuntimeSnapshot();
     const runningCount = Math.min(
       nonNegativeInteger(runtimeSnapshot?.running_count),
       1
     );
     const actionablePendingCount = enabled
-      ? nonNegativeInteger(await this.countActionablePending(observedAt))
+      ? nonNegativeInteger(await this.countActionablePending(definition.code, observedAt))
       : 0;
     const pendingCount = Math.max(actionablePendingCount, runningCount);
     const queuedCount = Math.max(pendingCount - runningCount, 0);
@@ -162,8 +162,8 @@ class WebPlatformRuntimeStatusService {
     }
 
     return {
-      schema_version: SCHEMA_VERSION,
-      platform: PLATFORM_CODE,
+      schema_version: definition.runtimeSchemaVersion,
+      platform: definition.code,
       enabled,
       state: publicState.state,
       running_count: runningCount,
