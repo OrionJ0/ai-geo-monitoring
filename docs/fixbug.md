@@ -4,6 +4,19 @@
 
 ### P1
 
+- [ ] 2026-07-27：修复 Node.js 20 无法连接 Chrome 调试协议
+  - 状态：待修
+  - 记录时间：2026-07-27 23:18
+  - 现象：目标 VM 使用 Node.js 20.20.2，运行 SEO Chrome 实机测试时返回 `unavailable`；直接诊断显示 `WebSocket is not defined`，发布流程因此停止并保持网站下线。
+  - 影响：代码虽然满足文档声明的 Node.js 20.9 以上部署要求，但依赖较新 Node.js 才提供的全局 `WebSocket`，导致目标环境不能通过发布验收。
+  - 来源：
+    - `backend/services/CdpConnection.js`
+    - `backend/tests/CdpConnection.test.js`
+    - 目标 VM `npm run deploy` 输出
+  - 复现：在没有全局 `WebSocket` 的 Node.js 20 环境执行 `node --test tests/SeoRenderService.test.js`。
+  - 修复进展：已改为使用后端显式生产依赖 `ws`，并增加禁止读取 Node.js 全局 `WebSocket` 的回归测试；本机后端 786 项、部署 10 项测试及生产依赖审计均通过。
+  - 下一步：推送修复并在目标 VM 重新执行完整发布，确认 Node.js 20 下 Chrome 实机测试和真实服务入口均通过后移入“已修”。
+
 - [ ] 2026-07-27：完成目标 VM 的豆包 Web 正式切换
   - 状态：待修
   - 记录时间：2026-07-27 22:06
@@ -14,8 +27,8 @@
     - `output/playwright/doubao-deepseek-e2e-2026-07-27/audit-report.md`
     - `nextjs-frontend/src/app/admin/settings/page.tsx`
   - 复现：打开目标 VM 设置页，检查 Web 平台列表和账号操作区。
-  - 修复进展：当前源码、完整测试和生产构建均已包含豆包 Web 与账号管理入口；目标 VM 前端仍是旧版本，且当前开发账号没有目标 VM 的 SSH 权限。
-  - 下一步：核实目标 VM 的部署入口，部署当前前后端，确认正式配置包含 `doubao-web`，再从目标 VM 完成登录、验证登录、运行问题和历史回查。
+  - 修复进展：当前源码、完整测试和生产构建均已包含豆包 Web 与账号管理入口；目标 VM 已拉取新提交，但首次发布被 Node.js 20 的 Chrome 调试连接兼容问题安全拦截。
+  - 下一步：先发布 Node.js 20 兼容修复，再确认正式配置包含 `doubao-web`，并从目标 VM 完成登录、验证登录、运行问题和历史回查。
 
 - [ ] 2026-07-27：修复局域网 HTTP 页面点击运行无响应
   - 状态：待修

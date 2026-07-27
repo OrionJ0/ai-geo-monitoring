@@ -1,3 +1,5 @@
+const { WebSocket } = require('ws');
+
 function timeoutError(code, message) {
   const error = new Error(message);
   error.code = code;
