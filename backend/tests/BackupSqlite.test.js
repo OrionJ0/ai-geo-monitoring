@@ -60,6 +60,8 @@ test('creates one verified latest snapshot while the WAL source remains open', a
   assert.equal(result.backupPath, backupPath);
   assert.equal(result.integrity, 'ok');
   assert.equal(fs.existsSync(`${backupPath}.tmp`), false);
+  assert.equal(fs.existsSync(`${backupPath}.tmp-shm`), false);
+  assert.equal(fs.existsSync(`${backupPath}.tmp-wal`), false);
 
   const backup = openDatabase(backupPath);
   t.after(() => close(backup));

@@ -65,6 +65,14 @@ async function quickCheck(filename) {
   }
 }
 
+async function removeTemporaryArtifacts(temporaryPath) {
+  await Promise.all([
+    temporaryPath,
+    `${temporaryPath}-shm`,
+    `${temporaryPath}-wal`,
+  ].map((filename) => fs.promises.rm(filename, { force: true })));
+}
+
 async function backupDatabase({ sourcePath, backupPath }) {
   const resolvedSource = path.resolve(sourcePath);
   const resolvedBackup = path.resolve(backupPath);
@@ -78,7 +86,7 @@ async function backupDatabase({ sourcePath, backupPath }) {
   }
 
   await fs.promises.mkdir(path.dirname(resolvedBackup), { recursive: true });
-  await fs.promises.rm(temporaryPath, { force: true });
+  await removeTemporaryArtifacts(temporaryPath);
 
   try {
     await copySnapshot(resolvedSource, temporaryPath);
@@ -88,9 +96,10 @@ async function backupDatabase({ sourcePath, backupPath }) {
     }
     await fs.promises.chmod(temporaryPath, 0o600);
     await fs.promises.rename(temporaryPath, resolvedBackup);
+    await removeTemporaryArtifacts(temporaryPath);
     return { backupPath: resolvedBackup, integrity };
   } catch (error) {
-    await fs.promises.rm(temporaryPath, { force: true });
+    await removeTemporaryArtifacts(temporaryPath);
     throw error;
   }
 }
