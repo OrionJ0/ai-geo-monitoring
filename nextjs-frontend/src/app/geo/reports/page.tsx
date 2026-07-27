@@ -207,7 +207,7 @@ export default function GeoReportsPage() {
     { title: '检查数', dataIndex: 'checks', width: 100, render: (value) => Number(value || 0) },
     { title: '品牌提及率', dataIndex: 'brand_mention_rate', width: 120, render: (value) => `${percent(value)}%` },
     { title: '平均声量占比（SOV）', dataIndex: 'avg_share_of_voice', width: 160, render: (value) => `${percent(value)}%` },
-    { title: '明确引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
+    { title: '引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
     { title: '推荐率', dataIndex: 'recommendation_rate', width: 100, render: (value) => `${percent(value)}%` },
     { title: '平均排名', dataIndex: 'avg_brand_rank', width: 100, render: formatRank },
   ];
@@ -224,7 +224,7 @@ export default function GeoReportsPage() {
     { title: '检查数', dataIndex: 'checks', width: 100, render: (value) => Number(value || 0) },
     { title: '品牌提及率', dataIndex: 'brand_mention_rate', width: 120, render: (value) => `${percent(value)}%` },
     { title: '平均声量占比（SOV）', dataIndex: 'avg_share_of_voice', width: 160, render: (value) => `${percent(value)}%` },
-    { title: '明确引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
+    { title: '引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
     { title: '推荐率', dataIndex: 'recommendation_rate', width: 100, render: (value) => `${percent(value)}%` },
   ];
 
@@ -238,7 +238,7 @@ export default function GeoReportsPage() {
     { title: '有效分析', dataIndex: 'checks', width: 100, render: (value) => Number(value || 0) },
     { title: '品牌提及率', dataIndex: 'brand_mention_rate', width: 120, render: (value) => `${percent(value)}%` },
     { title: '平均声量占比（SOV）', dataIndex: 'avg_share_of_voice', width: 160, render: (value) => `${percent(value)}%` },
-    { title: '明确引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
+    { title: '引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
     { title: '推荐率', dataIndex: 'recommendation_rate', width: 100, render: (value) => `${percent(value)}%` },
   ];
 
@@ -248,7 +248,7 @@ export default function GeoReportsPage() {
       dataIndex: 'type',
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>,
     },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
     { title: '覆盖回答', dataIndex: 'response_count', width: 100, render: (value) => Number(value || 0) },
     { title: '域名数', dataIndex: 'domain_count', width: 100, render: (value) => Number(value || 0) },
   ];
@@ -261,7 +261,7 @@ export default function GeoReportsPage() {
       width: 110,
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>,
     },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
   ];
@@ -282,7 +282,7 @@ export default function GeoReportsPage() {
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>,
     },
     { title: '覆盖回答', dataIndex: 'response_count', width: 100, render: (value) => Number(value || 0) },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
   ];
@@ -295,7 +295,7 @@ export default function GeoReportsPage() {
       width: 110,
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>,
     },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
     { title: '最近出现', dataIndex: 'last_seen_at', width: 180, render: formatDate },
@@ -316,7 +316,7 @@ export default function GeoReportsPage() {
       width: 110,
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>,
     },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
     { title: '最近出现', dataIndex: 'last_seen_at', width: 180, render: formatDate },
@@ -406,11 +406,11 @@ export default function GeoReportsPage() {
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="平均声量占比（SOV）" value={percent(summary.avg_share_of_voice)} suffix="%" /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="失败数" value={summary.failed_runs || 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="竞品提及次数" value={competitors.reduce((sum, item) => sum + Number(item.mentions || 0), 0)} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="明确引用率" value={Number(summary.citation_eligible_checks || 0) > 0 ? percent(summary.citation_rate) : '暂无可验证样本'} suffix={Number(summary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用率" value={Number(summary.citation_eligible_checks || 0) > 0 ? percent(summary.citation_rate) : '暂无可验证样本'} suffix={Number(summary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="自有来源覆盖率" value={Number(summary.citation_eligible_checks || 0) > 0 ? percent(summary.owned_citation_rate) : '暂无可验证样本'} suffix={Number(summary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="推荐率" value={percent(summary.recommendation_rate)} suffix="%" /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="平均品牌排名" value={formatRank(summary.avg_brand_rank)} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="明确引用来源总数" value={sourceSummary.total_citations || 0} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用源总数" value={sourceSummary.total_citations || 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="来源域名数" value={sourceSummary.source_domain_count || 0} /></Card></Col>
               </Row>
 

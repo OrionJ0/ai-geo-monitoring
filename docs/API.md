@@ -20,6 +20,7 @@ Authorization: Bearer <token>
 ### 速率限制
 - **通用 API**：500 次/15 分钟
 - **定时任务 API**：1000 次/15 分钟
+- **DeepSeek Web 只读运行状态**：1000 次/15 分钟；精确状态路径不消耗通用 API 预算，但仍先要求认证
 - **登录接口**：5 次/15 分钟
 
 ## 健康与就绪检查
@@ -54,6 +55,11 @@ Authorization: Bearer <token>
 - `POST /api/detection/create` 创建检测任务
   - 参数：`question` 必填；`platforms`、`brand`、`brand_keywords`/`highlightKeywords` 可选
 - `GET /api/detection/status/:recordId` 获取任务状态与结果摘要
+- `GET /api/detection/record/:recordId/web-captures/:artifactId` 读取 DeepSeek Web 页面证据
+  - 仅接受记录 `result_summary.web_capture.artifacts` 中声明的不透明 artifact ID
+  - 记录所有者和管理员可读；复用证据时同时校验原始 artifact owner
+  - 成功返回 `image/png`、`Content-Disposition: inline` 和 `Cache-Control: private, no-store`
+  - 不返回证据绝对路径；证据不存在、未被记录引用或无权访问时返回稳定错误
 - `GET /api/detection/stream` 流式获取AI结果（SSE）
   - 参数：`platform`、`question`、`brand`、`brand_keywords`
   - SSE 可通过查询参数 `token` 传递 JWT
@@ -64,6 +70,7 @@ Authorization: Bearer <token>
   - **权限验证**：只能查看自己的历史，管理员可查看所有
 - `DELETE /api/detection/record/:id` 删除单条历史记录
   - **权限验证**：只能删除自己的记录，管理员可删除所有
+  - 非受保护记录删除成功后同步清理其 DeepSeek Web 页面证据
 - `DELETE /api/detection/history/:userId` 批量删除历史记录
   - **权限验证**：只能删除自己的记录，管理员可删除所有
 
@@ -78,6 +85,9 @@ Authorization: Bearer <token>
 - `PUT /api/geo-projects/:projectId/prompts/:promptId` 编辑单问题
 - `DELETE /api/geo-projects/:projectId/prompts/:promptId` 删除单问题
 - `POST /api/geo-projects/:projectId/prompts/:promptId/run` 独立运行一个启用问题
+  - 必须通过 `Idempotency-Key` 请求头或请求体 `idempotency_key` 提交 8–128 位幂等键；两处同时存在时必须相同
+  - 使用与问题集相同的原子 run、配额、任务、报告和失败重试模型，但 `question_set_id` 为 `null`
+  - 返回 `202 Accepted`、`question_set_run_id`、计划/跳过平台、`idempotent_replay` 和 `report_url`
 - `GET /api/geo-projects/:projectId/question-sets` 查询问题集及成员问题
 - `POST /api/geo-projects/:projectId/question-sets` 新建问题集
   - 请求体：`name` 必填；`description`、`question_ids` 可选
@@ -88,11 +98,11 @@ Authorization: Bearer <token>
   - 同一用户、项目和幂等键的相同请求返回原 `question_set_run_id`，不会再次预留配额或创建任务；同键不同请求返回 `409 IDEMPOTENCY_KEY_REUSED`
   - 每个启用问题都使用当前项目配置的全部可用模型；单问题自身保存的平台范围不会限制问题集运行
   - run、配额预留和全部任务在一个事务内创建；返回 `202 Accepted`、`question_set_run_id`、`accepted_count`、计划/跳过平台、`idempotent_replay` 和 `report_url`
-- `GET /api/geo-projects/:projectId/question-set-runs` 分页查询当前项目的问题集运行历史
-  - Query 参数：`page` 默认 1；`pageSize` 默认 20，最大 100；`questionSetId` 可选，仅返回指定问题集的历史
+- `GET /api/geo-projects/:projectId/question-set-runs` 分页查询当前项目的单问题与问题集运行历史
+  - Query 参数：`page` 默认 1；`pageSize` 默认 20，最大 100；`questionSetId` 可选，仅返回指定问题集的历史；不传时也包含单问题运行
   - `questionSetId` 必须是正整数；非法值返回 `400 Bad Request`
   - 返回运行来源、当前状态、本次汇总和分页信息，不在列表中返回逐条回答
-- `GET /api/geo-projects/:projectId/question-set-runs/:runId` 获取一次问题集运行的独立报告
+- `GET /api/geo-projects/:projectId/question-set-runs/:runId` 获取一次单问题或问题集运行的独立报告
   - 报告只聚合关系字段归属的本次任务，包含 `execution_summary`、失败阶段、完整性摘要、逐问题逐平台结果和服务端计算的 pause/resume/retry capabilities
   - snapshot-only 与 imported 报告保持可读、可导出，但执行型 capability 为 false 并返回稳定禁用原因
 - `POST /api/geo-projects/:projectId/question-set-runs/:runId/retry-failed` 重新提交原生运行中的失败项
@@ -103,10 +113,10 @@ Authorization: Bearer <token>
   - 运行中、正在重试、没有失败项或导入报告返回 `409 Conflict`；当前不可用的平台会跳过，全部不可用时返回 `400 Bad Request`
   - 重试只按实际重新调用监测平台的数量原子扣减检测配额；配额不足时整批事务回滚，不留下待处理记录
   - 返回 `analysis_only_count`、`full_monitoring_count`、`quota_consumed`、`retry_batch_id` 和 `idempotent_replay`
-- `GET /api/geo-projects/:projectId/question-set-runs/:runId/export` 导出一次问题集运行报告
+- `GET /api/geo-projects/:projectId/question-set-runs/:runId/export` 导出一次运行报告
   - 返回 UTF-8 BOM 的 `text/csv` 文件，schema 为 `question_set_run_v1`
   - 固定单表结构，一行对应一个问题与一个平台结果；数组字段、失败阶段、分析诊断和重试链路使用 JSON 单元格保存以支持无损回导
-- `POST /api/geo-projects/:projectId/question-set-runs/import` 导入标准问题集报告 CSV
+- `POST /api/geo-projects/:projectId/question-set-runs/import` 导入标准运行报告 CSV
   - 请求：原始 CSV 文本，`Content-Type: text/csv`，最大 5MB、5000 条数据行
   - 校验：schema 版本、必要列、终态 `status`、正整数 ID、非负计数、0–100 百分比、正数排名、时间顺序、JSON 结构和引用链接协议；仅允许 HTTP/HTTPS 引用链接
   - 校验失败返回 `422`，并给出稳定 `code`、`row` 和 `column`；整份文件原子拒绝，不写入部分报告
@@ -130,7 +140,8 @@ Authorization: Bearer <token>
   - 返回：`202 Accepted`，`data.id` 为任务编号，初始 `status` 为 `queued`，`progress.phase` 为 `queued`
   - 发现来源：提交 URL、页面内链、根目录 `/sitemap.xml`、robots 声明的 Sitemap；支持 Sitemap index、URL 去重和片段移除
   - 抓取限制：默认上限 200 页、并发 3、最多读取 20 个 Sitemap、递归深度 3；达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
-  - 专项报告：`report.sitewide.version` 当前为 `sitewide-audit-v3`；在原有跨页检查之外，`internal_link_quality` 区分零入链、仅 Footer 入链和结构性入链，`navigation_crawlability` 返回无效 `<a>`、非语义化导航控件及交互后才出现的链接，`url_consistency` 校验检测入口、robots Sitemap、Sitemap 条目、Canonical 与 `og:url` 的来源一致性
+  - 专项报告：`report.sitewide.version` 当前为 `sitewide-audit-v4`；`sitemap-coverage` 独立比较有效 Sitemap 页面清单与已知可索引页面，没有有效页面地址时返回 `unknown`，疑似孤儿页与内链来源质量也不会误报为通过
+  - 导航证据：`navigation_crawlability` 返回无有效 `href` 的 `<a>`、有明确页面跳转证据的非语义化控件及交互后才创建的链接；只有点击样式、`cursor-pointer` 或通用点击事件的 `span`/`div` 不判定为 SEO 链接错误
   - 证据边界：浏览器导航抽样只触发 Header/Nav 控件的 hover/focus，不点击链接或业务按钮；渲染器不可用且静态 HTML 没有确定问题时，导航检查返回 `unknown`，不会伪装为通过
   - 私网边界：私网全站任务不会探测站外链接，也不会执行 JavaScript 渲染抽样；报告的 `networkPolicy` 会明确标记这两项为 `not_checked`
   - 容错：单页失败写入逐页账本并继续；所有入口均失败时任务标记 `failed`，且不写入伪成功历史
@@ -242,6 +253,11 @@ Authorization: Bearer <token>
 
 ## AI 平台目录（需认证）
 - `GET /api/ai-platforms` 获取未归档平台目录及是否可选择，不返回 API Key。
+- `GET /api/ai-platforms/deepseek-web/runtime-status` 获取 DeepSeek Web 全局只读运行快照。
+  - 响应设置 `Cache-Control: private, no-store`，只返回 `schema_version`、`platform`、`enabled`、`state`、`running_count`、`queued_count`、`pending_count`、`needs_action`、`action_code`、`reason_code` 和 `observed_at`。
+  - `state` 为 `idle`、`busy`、`login_required`、`verification_required`、`unavailable` 或 `shutting_down`；状态是无副作用快照，不启动 Chrome、不执行 preflight，也不替代真实运行前检查。
+  - `pending_count` 统计可执行或已持有效租约的 `deepseek-web` pending 记录；已暂停且没有有效租约的休眠记录不计入。`running_count` 只表示真实页面采集，只能为 0 或 1；`queued_count = max(pending_count - running_count, 0)`。
+  - 响应不包含问题、回答、运行/记录 ID、PID、本机路径、浏览器凭据或内部异常。读取失败返回通用 `500`，不会禁用现有运行入口。
 
 ## AI 平台管理（需管理员权限）
 - `GET /api/admin/ai-platforms` 获取管理列表。

@@ -16,7 +16,13 @@ async function git(cwd, args) {
 
 test('deployment check accepts a clean main checkout and rejects local changes', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-deploy-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const remoteDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'ai-geo-deploy-remote-')
+  );
+  t.after(() => {
+    fs.rmSync(directory, { recursive: true, force: true });
+    fs.rmSync(remoteDirectory, { recursive: true, force: true });
+  });
 
   fs.mkdirSync(path.join(directory, 'backend'), { recursive: true });
   fs.mkdirSync(path.join(directory, 'nextjs-frontend'), { recursive: true });
@@ -48,6 +54,9 @@ test('deployment check accepts a clean main checkout and rejects local changes',
     '-m',
     'fixture',
   ]);
+  await git(remoteDirectory, ['init', '--bare']);
+  await git(directory, ['remote', 'add', 'origin', remoteDirectory]);
+  await git(directory, ['push', '-u', 'origin', 'main']);
 
   const environment = {
     ...process.env,
@@ -68,5 +77,27 @@ test('deployment check accepts a clean main checkout and rejects local changes',
       { cwd: projectRoot, env: environment }
     ),
     /工作区存在未提交改动/
+  );
+
+  fs.writeFileSync(path.join(directory, 'README.md'), 'fixture\n');
+  fs.writeFileSync(path.join(directory, 'local-only.txt'), 'not pushed\n');
+  await git(directory, ['add', 'local-only.txt']);
+  await git(directory, [
+    '-c',
+    'user.name=Deployment Test',
+    '-c',
+    'user.email=deployment-test@example.com',
+    'commit',
+    '-m',
+    'local only',
+  ]);
+
+  await assert.rejects(
+    execFileAsync(
+      process.execPath,
+      [deployScript],
+      { cwd: projectRoot, env: environment }
+    ),
+    /HEAD 与 origin\/main 不一致/
   );
 });

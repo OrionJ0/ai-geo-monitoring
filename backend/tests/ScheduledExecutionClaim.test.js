@@ -15,6 +15,7 @@ const {
   QuestionRecord,
   QuestionSetRun,
   ScheduledExecution,
+  TrackedPrompt,
   UsageCounter,
   User
 } = require('../models');
@@ -279,6 +280,47 @@ test('project monitoring uses its own schedule kind without creating a question-
   assert.equal(execution.project_id, project.id);
   assert.equal(execution.status, 'completed');
   assert.equal(await QuestionSetRun.count(), 0);
+});
+
+test('project automatic monitoring forwards DeepSeek Web through the existing project runner and schedule slot', async () => {
+  const previousPlatforms = project.platforms;
+  await project.update({
+    platforms: ['deepseek-web'],
+    monitoring_enabled: true
+  });
+  const prompt = await TrackedPrompt.create({
+    project_id: project.id,
+    user_id: user.id,
+    question: 'DeepSeek 网页监测问题',
+    platforms: ['deepseek-web'],
+    enabled: true
+  });
+  const service = new schedulerModule.SchedulerService({
+    ownerId: 'project-web-monitoring-process'
+  });
+  const ProjectRunService = require('../services/ProjectRunService');
+  const originalRunProject = ProjectRunService.runProject;
+  let runOptions = null;
+  ProjectRunService.runProject = async (options) => {
+    runOptions = options;
+    return { ok: true, data: { completed: 1, failed: 0 } };
+  };
+
+  try {
+    const ok = await service.runProjectNow(project.id, {
+      advanceSchedule: false,
+      scheduledExecutionId: 712
+    });
+
+    assert.equal(ok, true);
+    assert.deepEqual(runOptions.platforms, ['deepseek-web']);
+    assert.equal(runOptions.scheduledExecutionId, 712);
+    assert.deepEqual(runOptions.prompts.map((item) => item.id), [prompt.id]);
+  } finally {
+    ProjectRunService.runProject = originalRunProject;
+    await prompt.destroy();
+    await project.update({ platforms: previousPlatforms });
+  }
 });
 
 for (const dialect of ['sqlite', 'postgres']) {

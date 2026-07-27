@@ -217,6 +217,91 @@ function summarizeExecution(rows) {
   };
 }
 
+const WEB_CAPTURE_ARTIFACT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function boundedText(value, max) {
+  return String(value || '').trim().slice(0, max);
+}
+
+function positiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function safeHttpUrl(value) {
+  const raw = boundedText(value, 2048);
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      ? parsed.toString()
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+function normalizeProviderCitations(value) {
+  const output = [];
+  const seen = new Set();
+  for (const source of Array.isArray(value) ? value : []) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+    const url = safeHttpUrl(source.url);
+    const sourceRole = boundedText(source.source_role, 80);
+    if (!url || !['explicit_citation', 'retrieval_candidate'].includes(sourceRole)) continue;
+    const key = `${sourceRole}:${url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push({
+      url,
+      title: boundedText(source.title, 500),
+      domain: boundedText(source.domain, 255) || new URL(url).hostname,
+      source_role: sourceRole
+    });
+    if (output.length >= 200) break;
+  }
+  return output;
+}
+
+function normalizeWebCapture(value, fallbackRecordId) {
+  if (
+    !value
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || value.status !== 'completed'
+  ) {
+    return null;
+  }
+  const recordId = positiveInteger(value.artifact_owner_record_id)
+    || positiveInteger(fallbackRecordId);
+  if (!recordId) return null;
+  const artifact = (kind) => {
+    const id = boundedText(value.artifacts?.[kind]?.id, 64).toLowerCase();
+    return WEB_CAPTURE_ARTIFACT_ID_RE.test(id)
+      ? { id, mime_type: 'image/png' }
+      : null;
+  };
+  const searchState = artifact('search_state');
+  const finalAnswer = artifact('final_answer');
+  if (!searchState || !finalAnswer) return null;
+  return {
+    schema_version: boundedText(value.schema_version, 100),
+    status: 'completed',
+    selector_version: boundedText(value.selector_version, 100),
+    artifact_owner_record_id: recordId,
+    captured_at: boundedText(value.captured_at || value.completed_at, 80),
+    search: {
+      requested: value.search?.requested === true,
+      observed: value.search?.observed === true,
+      evidence_type: boundedText(value.search?.evidence_type, 100)
+    },
+    artifacts: {
+      search_state: searchState,
+      final_answer: finalAnswer
+    }
+  };
+}
+
 function normalizeNativeRow(record) {
   const row = plain(record);
   const detail = plain(row.resultDetail) || {};
@@ -244,6 +329,8 @@ function normalizeNativeRow(record) {
     retry,
     analysis_diagnostics: analysisDiagnostics,
     answer: detail.ai_response_original || '',
+    provider_citations: normalizeProviderCitations(detail.provider_citations),
+    web_capture: normalizeWebCapture(row.result_summary?.web_capture, row.id),
     has_metrics: Boolean(metric),
     brand_mentioned: Boolean(metric?.brand_mentioned),
     brand_mentions: finiteNumber(metric?.brand_mentions),

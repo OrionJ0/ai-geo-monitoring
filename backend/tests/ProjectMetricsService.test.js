@@ -84,6 +84,56 @@ test('summarizes project visibility metrics by platform and competitor', () => {
   ]);
 });
 
+test('DeepSeek API 与 Web 使用平台代码作为独立聚合键', () => {
+  const summary = ProjectMetricsService.summarize([
+    {
+      platform: 'deepseek',
+      brand_mentioned: true,
+      share_of_voice: 80,
+      brand_recommended: true,
+      citation_count: 1,
+      owned_citation_count: 1,
+      brand_rank: 1,
+      ...EXPLICIT_CITATION
+    },
+    {
+      platform: 'deepseek-web',
+      brand_mentioned: false,
+      share_of_voice: 10,
+      brand_recommended: false,
+      citation_count: 0,
+      owned_citation_count: 0,
+      brand_rank: null,
+      ...EXPLICIT_CITATION
+    }
+  ]);
+
+  assert.deepEqual(summary.platforms, [
+    {
+      platform: 'deepseek',
+      checks: 1,
+      citation_eligible_checks: 1,
+      citation_unverified_checks: 0,
+      brand_mention_rate: 100,
+      avg_share_of_voice: 80,
+      citation_rate: 100,
+      recommendation_rate: 100,
+      avg_brand_rank: 1
+    },
+    {
+      platform: 'deepseek-web',
+      checks: 1,
+      citation_eligible_checks: 1,
+      citation_unverified_checks: 0,
+      brand_mention_rate: 0,
+      avg_share_of_voice: 10,
+      citation_rate: 0,
+      recommendation_rate: 0,
+      avg_brand_rank: 0
+    }
+  ]);
+});
+
 test('excludes legacy mixed citation counts from core KPI', () => {
   const summary = ProjectMetricsService.summarize([
     {

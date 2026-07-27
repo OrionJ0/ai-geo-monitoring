@@ -1,6 +1,9 @@
 const { Setting } = require('../models');
 const AIPlatformConfigService = require('./AIPlatformConfigService');
-const { getUnavailableReason } = require('./AIPlatformConfigService');
+const {
+  getUnavailableReason,
+  hasPlatformCapability
+} = require('./AIPlatformConfigService');
 
 const PLATFORM_SETTING_KEY = 'ai_analysis_platform_code';
 const MODEL_SETTING_KEY = 'ai_analysis_model_name';
@@ -41,6 +44,13 @@ class AIAnalysisConfigService {
     } catch (_) {
       throw new AIAnalysisConfigError('AI 分析 API 配置不存在', 'analysis_api_not_found', 503);
     }
+    if (!hasPlatformCapability(platform, 'analysis')) {
+      throw new AIAnalysisConfigError(
+        '该平台不能用作 AI 结构化分析 API',
+        'analysis_platform_unsupported',
+        503
+      );
+    }
     const unavailableReason = getUnavailableReason(platform);
     if (unavailableReason) {
       throw new AIAnalysisConfigError('AI 分析 API 当前不可用', `analysis_api_${unavailableReason}`, 503);
@@ -60,6 +70,15 @@ class AIAnalysisConfigService {
     }
     try {
       const platform = await this.platformConfigService.getPlatformByCode(platformCode);
+      if (!hasPlatformCapability(platform, 'analysis')) {
+        return {
+          platform_code: platformCode,
+          model_name: '',
+          configured: false,
+          unavailable_reason: 'unsupported_platform_capability',
+          platform: null
+        };
+      }
       const unavailableReason = getUnavailableReason(platform);
       const modelName = await this.getConfiguredModelName(platform);
       return {
@@ -106,6 +125,12 @@ class AIAnalysisConfigService {
       platform = await this.platformConfigService.getPlatformByCode(platformCode);
     } catch (_) {
       throw new AIAnalysisConfigError('AI 分析 API 不存在', 'analysis_api_not_found', 404);
+    }
+    if (!hasPlatformCapability(platform, 'analysis')) {
+      throw new AIAnalysisConfigError(
+        '该平台不能用作 AI 结构化分析 API',
+        'analysis_platform_unsupported'
+      );
     }
     const unavailableReason = getUnavailableReason(platform);
     if (unavailableReason) {

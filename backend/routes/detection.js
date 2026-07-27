@@ -16,6 +16,10 @@ const ProjectRunService = require('../services/ProjectRunService');
 const ProjectRecordFinalizationService = require('../services/ProjectRecordFinalizationService');
 const ScheduleProjectContextService = require('../services/ScheduleProjectContextService');
 const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
+const WebCaptureAccessService = require('../services/WebCaptureAccessService');
+const { WebCaptureAccessError } = require('../services/WebCaptureAccessService');
+const WebCaptureDeletionService = require('../services/WebCaptureDeletionService');
+const { WebCaptureCleanupError } = require('../services/WebCaptureDeletionService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('../services/AIPlatformRequestService');
 
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
@@ -36,6 +40,54 @@ function platformUnavailableMessage(status) {
   };
   return messages[status?.reason] || `${name}暂不可用`;
 }
+
+router.get(
+  '/record/:recordId/web-captures/:artifactId',
+  authRequired,
+  async (req, res) => {
+    try {
+      const opened = await WebCaptureAccessService.openForUser({
+        recordId: req.params.recordId,
+        artifactId: req.params.artifactId,
+        user: req.user
+      });
+      res.set({
+        'Content-Type': opened.mimeType,
+        'Content-Length': String(opened.bytes),
+        'Content-Disposition': 'inline',
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      opened.stream.on('error', () => {
+        if (!res.headersSent) {
+          res.status(410).json({
+            success: false,
+            error_code: 'web_capture_missing',
+            message: 'Web 证据文件已丢失'
+          });
+        } else {
+          res.destroy();
+        }
+      });
+      opened.stream.pipe(res);
+    } catch (error) {
+      if (error instanceof WebCaptureAccessError) {
+        return res.status(error.status).json({
+          success: false,
+          error_code: error.code,
+          message: error.message
+        });
+      }
+      console.error('读取 Web 证据失败:', error?.message || error);
+      return res.status(500).json({
+        success: false,
+        error_code: 'web_capture_open_failed',
+        message: '读取 Web 证据失败'
+      });
+    }
+    return undefined;
+  }
+);
 
 // 获取所有已使用的品牌列表（用于筛选）
 router.get('/brands', authRequired, async (req, res) => {
@@ -195,7 +247,9 @@ router.post('/create', authRequired, async (req, res) => {
       }
     }
 
-    const availability = await AIPlatformService.getPlatformAvailability(platforms);
+    const availability = await AIPlatformService.getPlatformAvailability(platforms, {
+      capability: 'direct_stream'
+    });
     const runnablePlatforms = availability.filter((item) => item.available);
     const skippedPlatforms = availability
       .filter((item) => !item.available)
@@ -311,7 +365,8 @@ async function processAIQuery(recordId, platform, question, platformConfig, runt
     // 调用AI平台API
     const aiResult = await AIPlatformService.queryPlatform(platform, question, {
       config: platformConfig,
-      runtimeSettings
+      runtimeSettings,
+      purpose: 'direct_stream'
     });
 
     if (!aiResult.success) {
@@ -447,7 +502,7 @@ router.get('/history', adminRequired, async (req, res) => {
     const { count, rows } = await QuestionRecord.findAndCountAll({
       where: whereClause,
       include: [
-        { model: ResultDetail, as: 'resultDetail', attributes: ['ai_response_original', 'parsing_status', 'parsing_error', 'created_at'] },
+        { model: ResultDetail, as: 'resultDetail', attributes: ['ai_response_original', 'provider_citations', 'parsing_status', 'parsing_error', 'created_at'] },
         { model: User, as: 'user', attributes: ['id', 'username', 'email'] }
       ],
       order: [['created_at', 'DESC']],
@@ -497,7 +552,7 @@ router.get('/history/:userId', authRequired, async (req, res) => {
       include: [{
         model: ResultDetail,
         as: 'resultDetail',
-        attributes: ['ai_response_original', 'parsing_status', 'parsing_error', 'created_at']
+        attributes: ['ai_response_original', 'provider_citations', 'parsing_status', 'parsing_error', 'created_at']
       }],
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
@@ -545,14 +600,24 @@ router.delete('/record/:id', authRequired, async (req, res) => {
         error: { code: 'RUN_EVIDENCE_PROTECTED' }
       });
     }
-    await sequelize.transaction(async (transaction) => {
+    await WebCaptureDeletionService.deleteRecords([Number(id)], async (transaction) => {
       await VisibilityMetric.destroy({ where: { question_record_id: id }, transaction });
       await ResultDetail.destroy({ where: { question_record_id: id }, transaction });
       await QuestionRecord.destroy({ where: { id }, transaction });
     });
     res.json({ success: true, message: '记录已删除' });
   } catch (error) {
-    console.error('删除记录失败:', error);
+    console.error('删除记录失败:', {
+      record_id: Number(req.params.id) || null,
+      error_code: String(error?.code || 'record_delete_failed').slice(0, 80)
+    });
+    if (error instanceof WebCaptureCleanupError) {
+      return res.status(500).json({
+        success: false,
+        error_code: error.code,
+        message: error.message
+      });
+    }
     res.status(500).json({ success: false, message: '删除记录失败' });
   }
 });
@@ -592,7 +657,7 @@ router.delete('/history/:userId', authRequired, async (req, res) => {
       });
     }
     let deleted = 0;
-    await sequelize.transaction(async (transaction) => {
+    await WebCaptureDeletionService.deleteRecords(ids, async (transaction) => {
       await VisibilityMetric.destroy({
         where: { question_record_id: { [Op.in]: ids } },
         transaction
@@ -614,7 +679,17 @@ router.delete('/history/:userId', authRequired, async (req, res) => {
       data: { deleted, protected: protectedCount }
     });
   } catch (error) {
-    console.error('批量删除失败:', error);
+    console.error('批量删除失败:', {
+      user_id: Number(req.params.userId) || null,
+      error_code: String(error?.code || 'history_delete_failed').slice(0, 80)
+    });
+    if (error instanceof WebCaptureCleanupError) {
+      return res.status(500).json({
+        success: false,
+        error_code: error.code,
+        message: error.message
+      });
+    }
     res.status(500).json({ success: false, message: '批量删除失败' });
   }
 });
@@ -658,12 +733,16 @@ router.get('/stream', authRequired, async (req, res) => {
     const requestedPlatform = String(platform || '').trim().toLowerCase();
     let platformStatus = null;
     if (requestedPlatform) {
-      [platformStatus] = await AIPlatformService.getPlatformAvailability([requestedPlatform]);
+      [platformStatus] = await AIPlatformService.getPlatformAvailability([requestedPlatform], {
+        capability: 'direct_stream'
+      });
     } else {
       const candidateCodes = projectContext.project_id
         ? projectContext.allowed_platforms
         : await AIPlatformService.getPlatformCodes();
-      const candidateStatuses = await AIPlatformService.getPlatformAvailability(candidateCodes);
+      const candidateStatuses = await AIPlatformService.getPlatformAvailability(candidateCodes, {
+        capability: 'direct_stream'
+      });
       platformStatus = candidateStatuses.find((item) => item.available) || candidateStatuses[0] || null;
     }
     const platformCode = platformStatus?.code || '';
@@ -698,7 +777,8 @@ router.get('/stream', authRequired, async (req, res) => {
     if (!ok) return;
 
     const result = await AIPlatformService.queryPlatform(platformCode, String(question), {
-      config: platformStatus.config
+      config: platformStatus.config,
+      purpose: 'direct_stream'
     });
     if (!result.success) {
       res.write(`data: ${JSON.stringify({

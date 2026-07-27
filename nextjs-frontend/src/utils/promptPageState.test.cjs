@@ -25,7 +25,8 @@ test('prompt page guards async list, batch creation and history responses from s
   assert.match(source, /if \(historyRequestRef\.current === requestId && currentProjectIdRef\.current === historyProjectId\)/);
   assert.match(source, /const runProjectId = selectedProjectId/);
   assert.match(source, /runRequestRef\.current === requestId && currentProjectIdRef\.current === runProjectId/);
-  assert.match(source, /router\.push\(`\/geo\/project-dashboard\?project_id=\$\{runProjectId\}`\)/);
+  assert.match(source, /if \(data\.report_url\) router\.push\(data\.report_url\)/);
+  assert.doesNotMatch(source, /router\.push\(`\/geo\/project-dashboard\?project_id=\$\{runProjectId\}`\)/);
 });
 
 test('prompt page closes stale prompt editor when switching projects', () => {

@@ -5,6 +5,7 @@
     "dev": "concurrently -n backend,next -c cyan,magenta \"npm --prefix backend start\" \"npm --prefix nextjs-frontend run dev\"",
     "dev:backend": "npm --prefix backend start",
     "dev:frontend": "npm --prefix nextjs-frontend run dev",
+    "web:login": "npm --prefix backend run web:login --",
     "build": "npm --prefix nextjs-frontend run build",
     "lint": "npm --prefix nextjs-frontend run lint",
     "deploy": "node scripts/deploy.mjs",

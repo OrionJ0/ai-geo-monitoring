@@ -10,9 +10,12 @@ node_modules/
 
 # databases and local data
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.sqlite3
 *.db
 database.sqlite
+backend/backups/
 
 # build outputs
 .next/
@@ -34,7 +37,7 @@ supabase/
 /.eslintcache
 /.turbo/
 /.vercel/
-/.runtime/
+**/.runtime/
 
 # logs
 logs/

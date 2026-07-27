@@ -24,7 +24,9 @@ router.post('/', authRequired, async (req, res) => {
     if (projectContext.error) {
       return res.status(projectContext.error.status).json({ success: false, message: projectContext.error.message });
     }
-    const availablePlatforms = await AIPlatformService.getAvailablePlatforms();
+    const availablePlatforms = await AIPlatformService.getAvailablePlatforms({
+      capability: 'legacy_schedule'
+    });
     if (!Array.isArray(platforms) || platforms.length === 0) {
       platforms = ScheduleProjectContextService.defaultPlatformsForContext(
         availablePlatforms,
@@ -145,7 +147,7 @@ router.put('/:id', authRequired, async (req, res) => {
         platforms,
         platformContext,
         '定时任务平台必须包含在项目或问题的监测平台内',
-        await AIPlatformService.getAvailablePlatforms()
+        await AIPlatformService.getAvailablePlatforms({ capability: 'legacy_schedule' })
       );
       if (!platformResult.ok) {
         return res.status(400).json({ success: false, message: platformResult.message || '定时任务平台当前不可用' });

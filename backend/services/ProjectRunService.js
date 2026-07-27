@@ -13,6 +13,7 @@ const { createHash, randomUUID } = require('node:crypto');
 const os = require('node:os');
 const { Op, Transaction } = require('sequelize');
 const AIPlatformService = require('./AIPlatformService');
+const WebPlatformService = require('./WebPlatformService');
 const ResultParserService = require('./ResultParserService');
 const VisibilityAnalysisService = require('./VisibilityAnalysisService');
 const AIResponseAnalysisService = require('./AIResponseAnalysisService');
@@ -32,6 +33,28 @@ const PLATFORM_MISMATCH_MESSAGE = '问题选择的平台不在当前项目的监
 const MIN_RECORD_LEASE_MS = 60 * 1000;
 const RECORD_LEASE_BUFFER_SECONDS = 60;
 
+const WEB_PLATFORM_ERROR_MESSAGES = {
+  web_browser_not_configured: '未配置可用的本机 Chrome',
+  web_browser_launch_failed: 'DeepSeek 网页版浏览器启动失败',
+  web_browser_closed: 'DeepSeek 网页版浏览器已关闭',
+  web_browser_unresponsive: 'DeepSeek 网页版浏览器响应超时',
+  web_browser_command_failed: 'DeepSeek 网页版浏览器命令执行失败',
+  web_browser_connection_failed: '无法连接 DeepSeek 网页版浏览器',
+  web_capture_failed: 'DeepSeek 网页版采集失败',
+  web_profile_in_use: 'DeepSeek 网页版专用浏览器会话正在使用中',
+  web_login_required: 'DeepSeek 网页版需要重新人工登录',
+  web_verification_required: 'DeepSeek 网页版需要人工完成验证',
+  web_selector_mismatch: 'DeepSeek 网页版页面结构暂不受支持',
+  web_search_state_unverified: '无法确认 DeepSeek 网页版联网搜索已开启',
+  web_generation_timeout: '等待 DeepSeek 网页版最终回答超时',
+  web_response_too_large: 'DeepSeek 网页版回答超过保存上限',
+  web_screenshot_failed: 'DeepSeek 网页版截图保存失败',
+  web_artifact_write_failed: 'DeepSeek 网页版证据保存失败',
+  web_artifact_promote_failed: 'DeepSeek 网页版证据提交失败',
+  web_capture_metadata_too_large: 'DeepSeek 网页版采集元数据超过保存上限',
+  web_shutdown: 'DeepSeek 网页版服务正在关闭'
+};
+
 class StaleWorkerWriteError extends Error {
   constructor(recordId) {
     super('执行租约已失效，拒绝迟到 worker 写入');
@@ -42,7 +65,9 @@ class StaleWorkerWriteError extends Error {
 }
 
 function runtimePlatformFailureMessage(result) {
-  return AI_PLATFORM_ERROR_MESSAGES[result?.error_code] || SAFE_PLATFORM_FAILURE_MESSAGE;
+  return WEB_PLATFORM_ERROR_MESSAGES[result?.error_code]
+    || AI_PLATFORM_ERROR_MESSAGES[result?.error_code]
+    || SAFE_PLATFORM_FAILURE_MESSAGE;
 }
 
 function metricFailureMessage(error) {
@@ -99,7 +124,18 @@ function skippedPlatformMessage(item) {
     missing_base_url: `${name}未配置接口地址`,
     missing_model: `${name}未配置默认模型`,
     archived: `${name}已归档`,
-    config_unavailable: `${name}配置暂不可用`
+    config_unavailable: `${name}配置暂不可用`,
+    web_browser_not_configured: `${name}未配置可用的本机 Chrome`,
+    web_browser_launch_failed: `${name}浏览器启动失败`,
+    web_browser_unresponsive: `${name}浏览器响应超时`,
+    web_browser_command_failed: `${name}浏览器命令执行失败`,
+    web_browser_connection_failed: `${name}浏览器连接失败`,
+    web_capture_failed: `${name}采集失败`,
+    web_profile_in_use: `${name}专用浏览器会话正在使用中`,
+    web_login_required: `${name}需要重新人工登录`,
+    web_verification_required: `${name}需要人工完成验证`,
+    web_selector_mismatch: `${name}页面结构暂不受支持`,
+    web_shutdown: `${name}服务正在关闭`
   };
   return messages[item?.reason] || `${name}暂不可用`;
 }
@@ -188,23 +224,45 @@ function retryReplayResult(batch) {
   };
 }
 
+function boundedWebCaptureReference(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const ownerRecordId = Number(value.artifact_owner_record_id);
+  if (
+    value.status !== 'completed'
+    || !Number.isSafeInteger(ownerRecordId)
+    || ownerRecordId <= 0
+    || !value.artifacts
+    || typeof value.artifacts !== 'object'
+  ) {
+    return null;
+  }
+  try {
+    const serialized = JSON.stringify(value);
+    if (Buffer.byteLength(serialized, 'utf8') > 32 * 1024) return null;
+    return JSON.parse(serialized);
+  } catch {
+    return null;
+  }
+}
+
 function retrySummaryMetadata(record) {
+  const summary = {};
   const retry = record?.result_summary?.retry;
   const previousRecordId = Number(retry?.previous_record_id);
   const attempt = Number(retry?.attempt);
-  if (!Number.isInteger(previousRecordId) || previousRecordId <= 0
-    || !Number.isInteger(attempt) || attempt <= 0) {
-    return {};
-  }
-  return {
-    retry: {
+  if (Number.isInteger(previousRecordId) && previousRecordId > 0
+    && Number.isInteger(attempt) && attempt > 0) {
+    summary.retry = {
       previous_record_id: previousRecordId,
       attempt,
       ...(record?.result_summary?.retry?.kind
         ? { kind: String(record.result_summary.retry.kind).slice(0, 40) }
         : {})
-    }
-  };
+    };
+  }
+  const webCapture = boundedWebCaptureReference(record?.result_summary?.web_capture);
+  if (webCapture) summary.web_capture = webCapture;
+  return summary;
 }
 
 function retryFailureStage(record) {
@@ -272,21 +330,6 @@ class ProjectRunService {
       return { ...user, id: projectOwnerId, actor_user_id: userId || null };
     }
     return user;
-  }
-
-  normalizeRunPromptIds(value) {
-    const explicit = value !== undefined && value !== null;
-    if (!explicit) return { explicit: false, ids: [] };
-    const raw = Array.isArray(value)
-      ? value
-      : (typeof value === 'string' ? value.split(/[,，;；\n]/) : [value]);
-    const ids = raw
-      .map((item) => Number(String(item || '').trim()))
-      .filter((item) => Number.isInteger(item) && item > 0);
-    return {
-      explicit: true,
-      ids: Array.from(new Set(ids))
-    };
   }
 
   buildPromptTargets(prompts, availablePlatforms = [], projectPlatforms = []) {
@@ -534,7 +577,8 @@ class ProjectRunService {
     project,
     competitors,
     prompt,
-    keywords
+    keywords,
+    resultSummaryPatch = {}
   }) {
     const keywordCounts = countKeywordOccurrences(responseText, keywords, true);
     try {
@@ -566,6 +610,7 @@ class ProjectRunService {
             error_message: null,
             result_summary: {
               ...retrySummaryMetadata(record),
+              ...resultSummaryPatch,
               keyword_counts: keywordCounts
             }
           }
@@ -604,6 +649,7 @@ class ProjectRunService {
         error_message: message,
         result_summary: {
           ...retrySummaryMetadata(record),
+          ...resultSummaryPatch,
           failure,
           keyword_counts: keywordCounts,
           ...(diagnostics ? { analysis: diagnostics } : {})
@@ -1204,12 +1250,13 @@ class ProjectRunService {
     const row = run?.toJSON ? run.toJSON() : run;
     const skippedPlatforms = Array.isArray(row?.skipped_platforms) ? row.skipped_platforms : [];
     const plannedPlatforms = Array.isArray(row?.planned_platforms) ? row.planned_platforms : [];
+    const runLabel = row?.question_set_id ? '问题集' : '问题';
     return {
       ok: true,
       status: 202,
       message: dispatchDeferred
         ? '运行命令已保存，任务将在调度器恢复后执行'
-        : (replay ? '已返回原运行命令' : '问题集分析已加入队列'),
+        : (replay ? '已返回原运行命令' : `${runLabel}分析已加入队列`),
       data: {
         status: 'queued',
         question_set_run_id: Number(row.id),
@@ -1745,7 +1792,7 @@ class ProjectRunService {
     ];
     if (!retryableRecords.length) {
       const message = skippedPlatforms.map((item) => item.message).join('；') || '监测平台配置暂不可用';
-      throw runError(`${message}，没有失败项可重试`, 400, {
+      throw runError(`${message}；失败项仍保留，但当前无法重新提交`, 400, {
         error_code: 'all_retry_platforms_unavailable',
         skipped_platforms: skippedPlatforms
       });
@@ -1846,6 +1893,9 @@ class ProjectRunService {
           : 'full_monitoring';
         const platformStatus = availabilityByCode.get(String(previousRecord.platform || '').toLowerCase());
         const previousAttempt = Number(previousRecord.result_summary?.retry?.attempt) || 0;
+        const retainedWebCapture = retryMode === 'analysis_only'
+          ? boundedWebCaptureReference(previousRecord.result_summary?.web_capture)
+          : null;
         await previousRecord.update({ run_slot_index: null }, { transaction });
         const retryRecord = await QuestionRecord.create({
           user_id: previousRecord.user_id,
@@ -1871,7 +1921,8 @@ class ProjectRunService {
               previous_record_id: previousRecord.id,
               attempt: previousAttempt + 1,
               kind: retryMode
-            }
+            },
+            ...(retainedWebCapture ? { web_capture: retainedWebCapture } : {})
           }
         }, { transaction });
         const previousDetail = detailsByRecordId.get(Number(previousRecord.id));
@@ -2056,6 +2107,7 @@ class ProjectRunService {
   }) {
     const prompt = target.prompt;
     let record = preparedRecord;
+    let generatedWebCapture = null;
     try {
       if (!record) {
         record = await this.createTargetRecord({ target, runUser, projectData, keywords });
@@ -2064,6 +2116,7 @@ class ProjectRunService {
       let aiResult = { data: {} };
       let originalText = String(reusedResponseText || '');
       let providerCitations = normalizeProviderCitations(reusedProviderCitations);
+      let resultSummaryPatch = {};
       if (retryMode === 'analysis_only' && !originalText.trim()) {
         const message = '结构化分析重试所需原回答缺失';
         await this.failRecord(
@@ -2084,16 +2137,47 @@ class ProjectRunService {
         };
       }
       if (retryMode !== 'analysis_only') {
-        aiResult = await AIPlatformService.queryPlatform(target.platform, prompt.question, {
+        const queryOptions = {
           config: target.platformConfig,
           runtimeSettings
-        });
+        };
+        if (target.platformConfig?.adapter_type === 'deepseek_web') {
+          queryOptions.purpose = 'project_monitoring';
+          queryOptions.capture_owner = {
+            record_id: record.id,
+            user_id: runUser.id,
+            project_id: projectData.id,
+            execution_token: executionToken
+          };
+        }
+        aiResult = await AIPlatformService.queryPlatform(
+          target.platform,
+          prompt.question,
+          queryOptions
+        );
+        if (aiResult.web_capture && typeof aiResult.web_capture === 'object') {
+          resultSummaryPatch = { web_capture: aiResult.web_capture };
+          if (aiResult.web_capture.status === 'completed') {
+            generatedWebCapture = aiResult.web_capture;
+          }
+        }
         if (!aiResult.success) {
           const message = runtimePlatformFailureMessage(aiResult);
-          await this.failRecord(record, message, {
-            stage: 'monitoring_request',
+          const webFailure = aiResult.web_capture?.status === 'failed'
+            ? aiResult.web_capture.failure
+            : null;
+          const failure = {
+            stage: String(webFailure?.stage || 'monitoring_request').slice(0, 80),
             error_code: aiResult.error_code || 'provider_error'
-          }, { executionToken });
+          };
+          await this.failRecord(record, message, failure, {
+            executionToken,
+            resultSummary: {
+              ...retrySummaryMetadata(record),
+              ...resultSummaryPatch,
+              failure
+            }
+          });
           return {
             record_id: record.id,
             prompt_id: prompt.id,
@@ -2102,8 +2186,11 @@ class ProjectRunService {
             error: message
           };
         }
-        originalText = ResultParserService.extractResponseText(aiResult.data);
-        providerCitations = this.snapshotProviderCitations(aiResult.data);
+        originalText = String(aiResult.text || '').trim()
+          || ResultParserService.extractResponseText(aiResult.data);
+        providerCitations = Array.isArray(aiResult.provider_citations)
+          ? normalizeProviderCitations(aiResult.provider_citations)
+          : this.snapshotProviderCitations(aiResult.data);
       }
       if (!String(originalText || '').trim()) {
         const message = '监测平台返回内容为空';
@@ -2134,9 +2221,19 @@ class ProjectRunService {
         project: projectData,
         competitors,
         prompt,
-        keywords
+        keywords,
+        resultSummaryPatch
       });
       if (!finalization.ok) {
+        if (
+          finalization.error_code === 'stale_worker_write_rejected'
+          && generatedWebCapture
+        ) {
+          await WebPlatformService.discardRecordCapture(
+            record.id,
+            generatedWebCapture
+          );
+        }
         return {
           record_id: record.id,
           prompt_id: prompt.id,
@@ -2160,6 +2257,13 @@ class ProjectRunService {
         brand_recommended: metric.brand_recommended
       };
     } catch (error) {
+      if (generatedWebCapture && record?.id) {
+        try {
+          await WebPlatformService.discardRecordCapture(record.id, generatedWebCapture);
+        } catch {
+          // Evidence cleanup is best-effort here; the record must still reach a failed terminal state.
+        }
+      }
       const message = SAFE_PLATFORM_FAILURE_MESSAGE;
       await this.failRecord(
         record,

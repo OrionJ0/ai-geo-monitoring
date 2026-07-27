@@ -54,23 +54,23 @@ test('exports source domain context needed for report review', () => {
     }
   });
 
-  assert.match(csv, /域名,来源类型,覆盖回答,明确引用次数,平台,问题分类/);
+  assert.match(csv, /域名,来源类型,覆盖回答,引用次数,平台,问题分类/);
   assert.match(csv, /example\.com,自有来源,2,3,豆包、DeepSeek,购买决策、竞品对比/);
-  assert.match(csv, /Top 引用 URL\nURL,域名,来源类型,覆盖回答,明确引用次数,平台,问题分类/);
-  assert.match(csv, /来源类型\n类型,明确引用次数,覆盖回答,域名数/);
+  assert.match(csv, /Top 引用 URL\nURL,域名,来源类型,覆盖回答,引用次数,平台,问题分类/);
+  assert.match(csv, /来源类型\n类型,引用次数,覆盖回答,域名数/);
   assert.match(csv, /媒体内容,4,3,2/);
   assert.match(csv, /https:\/\/example\.com\/guide,example\.com,第三方来源,1,2,DeepSeek,购买决策/);
-  assert.match(csv, /新增引用域名\n域名,来源类型,明确引用次数,平台,问题分类/);
+  assert.match(csv, /新增引用域名\n域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /new\.com,第三方来源,1,DeepSeek,购买决策/);
-  assert.match(csv, /流失引用域名\n域名,来源类型,明确引用次数,平台,问题分类/);
+  assert.match(csv, /流失引用域名\n域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /old\.com,竞品来源,2,豆包,竞品对比/);
-  assert.match(csv, /保留引用域名\n域名,来源类型,明确引用次数,平台,问题分类/);
+  assert.match(csv, /保留引用域名\n域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /kept\.com,自有来源,3,豆包、DeepSeek,购买决策/);
-  assert.match(csv, /新增引用 URL\nURL,域名,来源类型,明确引用次数,平台,问题分类/);
+  assert.match(csv, /新增引用 URL\nURL,域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /https:\/\/new\.com\/page,new\.com,第三方来源,1,DeepSeek,购买决策/);
-  assert.match(csv, /流失引用 URL\nURL,域名,来源类型,明确引用次数,平台,问题分类/);
+  assert.match(csv, /流失引用 URL\nURL,域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /https:\/\/old\.com\/page,old\.com,竞品来源,2,豆包,竞品对比/);
-  assert.match(csv, /保留引用 URL\nURL,域名,来源类型,明确引用次数,平台,问题分类/);
+  assert.match(csv, /保留引用 URL\nURL,域名,来源类型,引用次数,平台,问题分类/);
   assert.match(csv, /https:\/\/kept\.com\/page,kept\.com,自有来源,3,豆包、DeepSeek,购买决策/);
 });
 
@@ -112,12 +112,12 @@ test('exports overall report summary before detailed sections', () => {
   assert.match(csv, /失败率,20%/);
   assert.match(csv, /品牌提及率,75%/);
   assert.match(csv, /平均声量占比（SOV）,42\.5%/);
-  assert.match(csv, /明确引用率,66\.67%/);
+  assert.match(csv, /引用率,66\.67%/);
   assert.match(csv, /推荐率,25%/);
   assert.match(csv, /负向情绪率,8\.33%/);
   assert.match(csv, /平均品牌排名,2\.25/);
   assert.match(csv, /自有来源覆盖率,40%/);
-  assert.match(csv, /明确引用来源总数,18/);
+  assert.match(csv, /引用源总数,18/);
   assert.match(csv, /来源域名数,6/);
   assert.match(csv, /来源域名数,6\n\n平台表现/);
 });
@@ -132,7 +132,7 @@ test('exports unknown instead of zero percent when no explicit-citation sample i
     }
   });
 
-  assert.match(csv, /明确引用率,暂无可验证样本/);
+  assert.match(csv, /引用率,暂无可验证样本/);
 });
 
 test('exports category level run failures in report csv', () => {

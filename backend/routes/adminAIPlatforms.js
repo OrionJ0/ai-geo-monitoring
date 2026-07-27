@@ -80,6 +80,7 @@ router.delete('/:id/api-key', async (req, res) => {
 
 router.get('/:id/models', async (req, res) => {
   try {
+    await AIPlatformConfigService.requireCapability(req.params.id, 'model_listing');
     const result = await AIPlatformRequestService.listModels(req.params.id);
     if (!result.success) {
       throw new PlatformConfigError(
@@ -96,6 +97,7 @@ router.get('/:id/models', async (req, res) => {
 
 router.post('/:id/test', async (req, res) => {
   try {
+    await AIPlatformConfigService.requireCapability(req.params.id, 'connection_test');
     const result = await AIPlatformRequestService.testConnection(req.params.id);
     return res.json({ success: true, data: result });
   } catch (error) {
@@ -105,6 +107,7 @@ router.post('/:id/test', async (req, res) => {
 
 router.post('/:id/test-web-search', async (req, res) => {
   try {
+    await AIPlatformConfigService.requireCapability(req.params.id, 'api_web_search_test');
     const input = String(req.body?.input || '').trim();
     if (input.length > 1000) throw new PlatformConfigError('联网测试问题不能超过 1000 个字符');
     const result = await AIPlatformRequestService.testWebSearch(req.params.id, input);

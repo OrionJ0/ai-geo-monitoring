@@ -1,8 +1,8 @@
 ---
 title: 市场部虚拟机共享运行与 DeepSeek Web 排队状态技术方案
 date: 2026-07-27
-status: draft
-source: docs/draft-2026-07-27-001-market-team-vm-web-queue/prd.md
+status: blocked
+source: docs/blocked-2026-07-27-001-market-team-vm-web-queue/prd.md
 scope: deep
 ---
 
@@ -94,8 +94,10 @@ scope: deep
 
 - `QuestionRecord.status` 使用 `pending`、`completed`、`failed`。
 - `deepseek-web` 的所有待执行、已领取但未终态和正在等待 FIFO 的记录都仍为 `pending`。
+- `QuestionSetRun.paused_at` 使未领取的 pending 记录长期休眠；仅按 `QuestionRecord.status=pending` 全量计数会把已暂停运行错误显示为全局繁忙。
 - `execution_token`、`lease_owner`、`lease_expires_at` 和 `execution_started_at` 用于防止重复执行和迟到写入。
-- 因为 Web FIFO 只存在于单进程内，而完整待处理任务存在数据库中，公共等待数量应以数据库 pending 数量为主，并用进程活动采集数区分“正在运行”和“等待中”。
+- worker 在领取记录前检查 `paused_at`，但暂停信号到达时已经取得有效租约的记录仍会继续执行；默认运行并发为 2、配置上限为 5，而真实 Web 页面采集并发仍由 FIFO 限制为 1。
+- 因为 Web FIFO 只存在于单进程内，而完整待处理任务存在数据库中，公共等待数量应以数据库中的“可执行 pending”数量为主，并用进程活动采集数区分“正在运行”和“等待中”。
 
 ### 3.5 生产进程与虚拟机
 
@@ -123,7 +125,7 @@ scope: deep
 - REQ-004：系统必须提供认证后的 DeepSeek Web 公共运行状态。
 - REQ-005：公共状态必须包含通道状态、运行数量、等待数量、待处理总数、是否需要人工处理和稳定原因码。
 - REQ-006：状态查询必须只读且无副作用，不得启动 Chrome、执行 preflight、打开页面或改变熔断状态。
-- REQ-007：等待总数必须覆盖数据库中尚未终态的全部 `deepseek-web` 任务，而不仅是已经进入内存 FIFO 的 Promise。
+- REQ-007：`pending_count` 必须覆盖数据库中全部可执行的 `deepseek-web` pending 任务，而不仅是已经进入内存 FIFO 的 Promise；已暂停且没有有效执行租约的休眠记录必须排除。
 - REQ-008：运行数量只能是 0 或 1，并来自当前进程真实活动采集快照。
 - REQ-009：状态不得返回问题正文、项目名、运行 ID、记录 ID、Chrome 路径、profile 路径、PID、Cookie 或 Authorization。
 - REQ-010：问题库和运行报告页必须展示一致的状态文案和等待数量。
@@ -135,6 +137,9 @@ scope: deep
 - REQ-016：Web 失败继续写入原运行报告并由用户确认重试，不进行同问题自动重发。
 - REQ-017：状态 API 不替代每次运行前的真实 preflight；创建任务和消费配额前仍按现有流程检查通道。
 - REQ-018：正式运维只使用一套受管后端进程，DeepSeek profile 和证据目录位于持久磁盘。
+- REQ-019：暂停采用协作式语义；暂停前已经取得有效执行租约的记录允许完成，尚未领取的记录保持休眠，前端不得承诺只有一个“当前任务”会继续。
+- REQ-020：状态接口必须跳过通用 API 限流但继续要求认证，并在认证后应用独立只读限流；正常双浏览器持续轮询不得触发 `429`。
+- REQ-021：运行中报告每 10 秒刷新，暂停报告每 30 秒刷新；历史抽屉不得跟随每次报告轮询刷新。
 
 ### 4.2 约束
 
@@ -144,7 +149,7 @@ scope: deep
 - CON-004：共享 `admin` 保留现有完整管理员权限；本期不增加限制层。
 - CON-005：状态是一个短时快照，数据库计数与进程状态之间允许一个请求周期内的最终一致性。
 - CON-006：不得为了状态接口把不稳定的页面 DOM、Chrome DevTools 响应或第三方内容直接暴露给前端。
-- CON-007：当前通用 API 有频率限制，状态轮询不能使用高频 4 秒轮询。
+- CON-007：通用 API 当前按代理到后端的来源地址共享 `500/15 分钟` 预算；新增专用限流不得与通用限流叠加。
 - CON-008：平台被停用或没有任何项目使用时，状态能力不能影响其他 GEO/SEO 功能。
 
 ### 4.3 沿用模式
@@ -184,26 +189,46 @@ scope: deep
 ### 5.2 状态链路
 
 ```text
-QuestionRecord.count(
-  platform = deepseek-web,
-  status = pending
-)                                WebPlatformService
-          │                       getRuntimeSnapshot()
-          └──────────┬────────────────────┘
-                     ▼
-          WebPlatformRuntimeStatusService
-                     │
-                     ▼
+QuestionRecord LEFT JOIN QuestionSetRun       WebPlatformService
+  platform = deepseek-web                     getRuntimeSnapshot()
+  status = pending                                      │
+  未暂停或仍有有效执行租约                                │
+          │                                             │
+          └──────────────────┬──────────────────────────┘
+                             ▼
+                  WebPlatformRuntimeStatusService
+                             │
+                             ▼
 GET /api/ai-platforms/deepseek-web/runtime-status
-                     │
-                     ▼
+                             │
+                             ▼
 问题库 / 运行报告统一状态组件
 ```
 
 ### 5.3 数量口径
 
-- `pending_count`：数据库中 `platform = deepseek-web AND status = pending` 的记录数。
+- `observed_at`：状态服务开始本次计数时固定的数据库比较时间；租约有效性和响应时间戳使用同一基准。
+- `actionable_pending_db_count`：数据库中满足以下条件的记录数：
+
+  ```text
+  QuestionRecord.platform = deepseek-web
+  AND QuestionRecord.status = pending
+  AND (
+    QuestionRecord.question_set_run_id IS NULL
+    OR (
+      QuestionSetRun.id IS NOT NULL
+      AND QuestionSetRun.paused_at IS NULL
+    )
+    OR (
+      QuestionRecord.execution_token IS NOT NULL
+      AND QuestionRecord.lease_expires_at > observed_at
+    )
+  )
+  ```
+
+  查询必须使用 `LEFT JOIN QuestionSetRun`，保证没有父问题集运行的定时/兼容记录仍可计入；若非空父 ID 找不到父记录，不得仅因 JOIN 后 `paused_at` 为 NULL 而误计为未暂停，但记录本身持有有效执行租约时仍通过租约分支计入。
 - `running_count`：当前进程正在执行页面采集时为 1，否则为 0。
+- `pending_count`：`max(actionable_pending_db_count, running_count)`，保证数据库终态写入与进程快照之间的短暂竞态不会产生 `pending_count < running_count`。
 - `queued_count`：`max(pending_count - running_count, 0)`。
 
 该口径覆盖：
@@ -211,8 +236,17 @@ GET /api/ai-platforms/deepseek-web/runtime-status
 - 尚未被 ProjectRunService worker 领取的记录。
 - 已取得执行租约但正在等待 Web FIFO 的记录。
 - 当前正在页面交互的记录。
+- 没有 `question_set_run_id` 的可执行定时/兼容记录。
 
-它不承诺：
+该口径排除：
+
+- 所属 `QuestionSetRun.paused_at IS NOT NULL` 且没有有效执行租约的休眠记录。
+- 已暂停运行中租约已经过期的记录；恢复运行后它们重新计入。
+- 非空父 ID 指向不存在父记录、且本身没有有效执行租约的异常数据。
+
+暂停采用协作式语义：暂停信号只阻止 worker 继续领取；暂停前已经持有有效租约的记录可以继续等待 FIFO 并完成。由于 `ai_run_concurrency` 默认是 2、上限是 5，暂停后可能仍有多条已开始调度的记录完成，但 `running_count` 和真实页面采集并发仍最多为 1。
+
+该口径不承诺：
 
 - 某条具体记录的精确队列位置。
 - 固定的任务完成顺序跨越数据库恢复边界完全不变。
@@ -260,7 +294,7 @@ Authorization: Bearer <admin JWT>
 | `state` | enum | `idle`、`busy`、`login_required`、`verification_required`、`unavailable`、`shutting_down` |
 | `running_count` | integer | 只能为 0 或 1 |
 | `queued_count` | integer | 非负整数 |
-| `pending_count` | integer | 等于或大于 `running_count` |
+| `pending_count` | integer | 可执行 pending 总数；排除无有效租约的暂停休眠记录，且等于或大于 `running_count` |
 | `needs_action` | boolean | 是否需要虚拟机运维负责人介入 |
 | `action_code` | string/null | `contact_vm_operator` 或 `null` |
 | `reason_code` | string/null | 稳定平台错误码、`disabled` 或 `null` |
@@ -331,10 +365,11 @@ Authorization: Bearer <admin JWT>
 
 新增 `backend/services/WebPlatformRuntimeStatusService.js`：
 
-- 依赖注入 `QuestionRecord`、`AIPlatformConfigService` 和 `WebPlatformService`，便于单元测试。
+- 依赖注入 `QuestionRecord`、`QuestionSetRun`、`AIPlatformConfigService`、`WebPlatformService` 和时钟，便于单元测试。
 - 读取 `deepseek-web` 受管平台启用状态。
-- 统计全局 pending 记录。
+- 以同一 `observed_at` 和第 5.3 节条件统计全局可执行 pending 记录。
 - 读取进程快照并按第 6 节派生公共契约。
+- 对 `pending_count`、`running_count` 和 `queued_count` 做非负归一化，并保证 `pending_count >= running_count`。
 - 对外只输出白名单字段。
 
 该服务不缓存真实页面状态，不访问证据文件，不启动浏览器。
@@ -347,12 +382,16 @@ Authorization: Bearer <admin JWT>
 GET /deepseek-web/runtime-status
 ```
 
-必须声明在任何潜在动态平台路径之前。路由：
+当前 `aiPlatforms` 路由只有固定的 `GET /`，不存在动态路径冲突；若未来增加 `/:platform` 等动态路由，固定的 `runtime-status` 路由应置于其前。路由：
 
 - 复用已有 `authRequired`。
+- 在 `backend/app.js` 的通用 limiter 中只对精确路径 `/ai-platforms/deepseek-web/runtime-status` 执行 `skip`，不得使用会覆盖其他业务 API 的宽前缀。
+- 在 `authRequired` 之后为该固定路由应用独立只读 limiter，首版预算为每来源地址 `1000 次/15 分钟`；跳过通用 limiter 不得跳过认证，也不得让未认证请求进入独立预算后的业务处理。
 - 设置 `Cache-Control: private, no-store`。
 - 调用公共状态服务。
 - 捕获异常并返回稳定 500。
+
+现有 `scheduleLimiter` 是叠加在通用 limiter 之后的中间件，不能作为本接口的实现范例；若不先精确跳过通用 limiter，提高专用 limiter 上限不会解决共享代理/loopback 下的 `429`。
 
 ### 7.4 前端 hook 与展示组件
 
@@ -370,6 +409,13 @@ GET /deepseek-web/runtime-status
 - 页面重新可见后立即刷新并重建定时器。
 - 组件卸载或路由切换时取消旧请求结果写入。
 - 一个页面只创建一个轮询实例。
+
+现有运行报告轮询同步调整：
+
+- 报告状态为 `running` 时，每 10 秒刷新当前报告。
+- 报告状态为 `paused` 时，每 30 秒刷新当前报告。
+- 历史抽屉只在打开、用户主动刷新和当前报告发生终态转换时刷新，不跟随每次报告定时轮询。
+- 报告与状态 hook 都遵守页面可见性；两个真实浏览器持续停留在运行报告页时不得因正常读取触发 `429`。
 
 展示规则：
 
@@ -421,6 +467,8 @@ npm run web:login -- deepseek-web
 npm run prod:start
 ```
 
+`web_login_required`、`web_verification_required` 和选择器类错误会保存在后端进程内熔断状态中，当前没有生产 `force: true` 清除入口。完成登录、验证或账号切换后必须执行 `prod:start` 启动新后端进程，才能清除旧熔断；不得新增在线“强制清除熔断”接口绕过该流程。
+
 部署文档必须说明：
 
 - 后端进程必须从持久桌面会话环境启动。
@@ -435,8 +483,8 @@ npm run prod:start
 - KTD-001：保留单进程 FIFO，不增加外部队列。
   - 理由：当前问题是多人可见性，不是任务持久性或跨机器吞吐；`QuestionRecord` 已提供持久记录和恢复。
 
-- KTD-002：等待数量以数据库 pending 记录为主。
-  - 理由：只统计 Promise tail 会漏掉尚未进入 WebPlatformService 的任务，也无法跨重启恢复。
+- KTD-002：等待数量以数据库“可执行 pending”记录为主。
+  - 理由：只统计 Promise tail 会漏掉尚未进入 WebPlatformService 的任务，也无法跨重启恢复；直接统计全部 pending 又会把暂停运行的休眠记录永久显示为繁忙。
 
 - KTD-003：活动运行数使用进程快照，而不是 `execution_token` 数量。
   - 理由：多个 ProjectRunService worker 可以同时持有租约并等待同一个 Web FIFO，租约数不等于页面活动并发。
@@ -462,13 +510,28 @@ npm run prod:start
 - KTD-010：不新增数据库索引。
   - 理由：内部低量场景下现有 `platform` 索引足以支持 pending 计数；先用真实查询证据决定是否增加复合索引。
 
+- KTD-011：暂停记录按“父运行状态 + 有效执行租约”区分休眠和仍可执行。
+  - 理由：简单排除全部 `paused_at IS NOT NULL` 会隐藏暂停前已经取得租约、仍在 Web FIFO 中等待或执行的真实工作；有效租约过期后才从公共待处理数移除。
+
+- KTD-012：暂停保持现有协作式语义，不在本期增加强制取消。
+  - 理由：worker 只在领取前检查暂停；默认并发 2、上限 5，暂停时可能已有多条记录取得租约。强制取消会扩大到 Adapter 中断、迟到写入和样本一致性，不属于状态可见性需求。
+
+- KTD-013：状态路由精确跳过通用 limiter，并在认证后使用独立只读 limiter。
+  - 理由：当前通用 `500/15 分钟` 预算可能被同机代理下的多个浏览器共享；专用 limiter 若与通用 limiter 叠加，较高上限不会生效。
+
+- KTD-014：降低报告轮询并将历史刷新从报告定时器解耦。
+  - 理由：现有运行/暂停报告每 4 秒轮询约产生 `225 次/15 分钟/页面`，历史抽屉还会叠加请求；只给新状态接口降频不足以消除正常双浏览器触发 429 的风险。
+
+- KTD-015：人工恢复后通过重启后端清除永久熔断，不增加在线强制清除接口。
+  - 理由：当前正式调用链没有 `preflight({ force: true })`；既有 `prod:stop → web:login → prod:start` 可同时保证 profile 独占和熔断清零，边界更小。
+
 ## 9. 实现切片
 
 ### U1. Web 空闲/繁忙状态纵向闭环
 
 **目标：**
 
-从进程快照和数据库 pending 记录生成 `idle`/`busy` 状态，经认证 API 展示到问题库与运行报告，覆盖多人同时提交的正常排队路径。
+从进程快照和数据库可执行 pending 记录生成 `idle`/`busy` 状态，经认证 API 展示到问题库与运行报告，覆盖多人同时提交、暂停和恢复的正常排队路径。
 
 **依赖：**
 
@@ -476,12 +539,14 @@ npm run prod:start
 
 **涉及文件：**
 
+- `backend/app.js`
 - `backend/services/WebPlatformService.js`
 - `backend/services/WebPlatformRuntimeStatusService.js`
 - `backend/routes/aiPlatforms.js`
 - `backend/tests/WebPlatformService.test.js`
 - `backend/tests/WebPlatformRuntimeStatusService.test.js`
 - `backend/tests/AIPlatformsApi.test.js`
+- `docs/API.md`
 - `nextjs-frontend/src/lib/useDeepSeekWebRuntimeStatus.ts`
 - `nextjs-frontend/src/components/DeepSeekWebRuntimeStatus.tsx`
 - `nextjs-frontend/src/app/geo/prompts/page.tsx`
@@ -492,8 +557,10 @@ npm run prod:start
 **方案：**
 
 - 增加无副作用进程快照和活动采集计数。
-- 增加公共状态服务和固定 GET 路由。
-- 实现 30 秒可见页轮询。
+- 按父运行暂停状态和执行租约统计可执行 pending，排除无有效租约的暂停休眠记录。
+- 增加公共状态服务和固定 GET 路由，并使用“精确跳过通用 limiter + 认证后独立只读 limiter”。
+- 实现 30 秒可见页状态轮询；运行报告改为 running 10 秒、paused 30 秒，历史刷新与报告定时器解耦。
+- 把暂停成功提示改为“已开始调度的任务完成后暂停”。
 - 先支持 `idle`、`busy`、`disabled` 隐藏和接口未知状态。
 - 页面文案只表达全局通道，不声称当前报告的精确位置。
 
@@ -501,14 +568,19 @@ npm run prod:start
 
 - 无 pending、无活动采集时返回 idle。
 - 1 条活动、4 条等待时返回 running 1、queued 4。
+- 只有无有效租约的暂停记录时返回 idle。
+- 暂停运行中持有未过期执行租约的记录仍计入；租约过期后排除。
+- `question_set_run_id IS NULL` 的 pending 记录仍计入；非空父 ID 缺失的异常记录不因 JOIN 空值误计，但有效租约记录仍计入。
 - 多个租约等待 FIFO 时 running 仍最多 1。
+- 短时快照竞态下归一化保证 pending 不小于 running。
 - 状态查询不触发 launcher、probe 或 CDP。
+- 通用 limiter 只精确跳过状态路径，状态路由仍要求认证并命中独立只读 limiter。
 - 两个页面使用同一展示映射。
-- 页面隐藏后停止轮询，恢复可见后立即刷新。
+- 页面隐藏后停止轮询，恢复可见后立即刷新；报告运行/暂停轮询周期正确且历史抽屉不随每次定时器刷新。
 
 **验收方式：**
 
-两个浏览器同时提交 Web 问题后，两个页面都能看到全局繁忙和等待数量；实际页面采集并发仍为 1。
+两个浏览器同时提交 Web 问题后，两个页面都能看到全局繁忙和等待数量；实际页面采集并发仍为 1，持续正常轮询不返回 429。
 
 ### U2. 登录、验证与不可用状态闭环
 
@@ -537,6 +609,7 @@ U1。
 - 页面统一提示联系虚拟机运维负责人。
 - 平台 disabled 时不渲染告警。
 - 状态读取失败不禁用现有运行入口。
+- 登录、验证和选择器类熔断只通过正式停止、人工恢复、重启后端流程清除，不增加在线 force 接口。
 
 **测试场景：**
 
@@ -544,10 +617,11 @@ U1。
 - transient 浏览器错误回收后不永久保留错误状态。
 - 公共响应不含路径、问题、记录 ID、PID 或内部 Error。
 - 熔断后排队任务仍按既有规则进入失败报告，可在恢复后重试。
+- 人工恢复但未重启旧后端时熔断仍在；重启新后端后旧熔断清除。
 
 **验收方式：**
 
-模拟登录失效时，问题库和报告页显示同一人工处理提示；恢复登录后状态回到 idle/busy，原报告保留重试入口。
+模拟登录失效时，问题库和报告页显示同一人工处理提示；执行 `prod:stop → web:login → prod:start` 后状态回到 idle/busy，原报告保留重试入口。
 
 ### U3. 虚拟机单实例与共享 admin 运行约束
 
@@ -557,14 +631,13 @@ U1。
 
 **依赖：**
 
-U1。
+无。状态接口相关 API 文档由 U1 负责；本切片的部署与运维文档可并行完成。
 
 **涉及文件：**
 
 - `README.md`
 - `docs/ENVIRONMENT.md`
 - `docs/SINGLE_HOST_DEPLOYMENT.md`
-- `docs/API.md`
 - `backend/.env.example`
 - `tests/deployCli.test.mjs`
 - 必要时仅小幅调整 `scripts/production.mjs` 或 `scripts/processManager.mjs`
@@ -575,7 +648,8 @@ U1。
 - 说明所有市场部用户统一使用现有 admin，接受完整权限和无人员审计。
 - 说明 DeepSeek 账号与系统 admin 完全独立。
 - 复用现有 PID 记录、端口冲突和 profile lock；只有验证发现缺口时才小幅补强进程检查。
-- 新状态接口加入 API 文档，但不加入 `/ready`。
+- 明确 `prod:stop → web:login → prod:start` 是登录、验证和账号切换的完整恢复流程，后端重启用于清除进程内熔断。
+- 明确 `/ready` 不代表 DeepSeek Web 可用；状态接口的契约与 API 文档由 U1 交付。
 
 **测试场景：**
 
@@ -587,7 +661,7 @@ U1。
 
 **验收方式：**
 
-在目标 VM 按文档完成停止、人工登录、启动和状态检查；两个市场部浏览器可用同一 admin 登录并访问同一项目。
+在目标 VM 按文档完成停止、人工登录和启动；U4 再结合状态接口完成双浏览器终验。
 
 ### U4. 多浏览器真实入口发布验收
 
@@ -623,6 +697,9 @@ U1、U2、U3。
 - 两个浏览器主动运行相同问题。
 - 一个问题集与一个单问题同时提交。
 - Web 登录失效时已有任务失败、新任务 preflight 拒绝。
+- 暂停问题集后，无有效租约的休眠 pending 不显示为全局等待；暂停前已持有效租约的记录允许完成。
+- 暂停提示不承诺只有一个当前任务继续，恢复后休眠记录重新计入队列。
+- 两个浏览器持续轮询状态和运行报告不触发 429，历史抽屉不随报告定时器重复请求。
 - Chrome 异常回收后下一任务启动新会话。
 - 用户关闭个人浏览器后任务继续完成。
 
@@ -633,10 +710,10 @@ U1、U2、U3。
 ## 10. 验收标准
 
 - AC-001：Given 两个浏览器使用同一 admin，When 同时提交两个不同问题，Then 返回两个不同运行报告。
-- AC-002：Given 多个 pending Web 记录，When 查询运行状态，Then `pending_count` 覆盖全部记录且 `running_count <= 1`。
+- AC-002：Given 多个可执行 pending Web 记录，When 查询运行状态，Then `pending_count` 覆盖全部可执行记录且 `running_count <= 1`。
 - AC-003：Given 一个 Web 问题正在采集，When 第二个问题到达，Then 第二个进入等待且页面采集最大并发为 1。
 - AC-004：Given API 与 Web 任务同时提交，When Web 正在等待页面回答，Then API 任务不等待 Web FIFO。
-- AC-005：Given 没有 pending 记录和已知阻塞，When 查询状态，Then 返回 `idle` 且不启动 Chrome。
+- AC-005：Given 没有可执行 pending 记录和已知阻塞，When 查询状态，Then 返回 `idle` 且不启动 Chrome。
 - AC-006：Given 1 条正在采集和 4 条其他 pending，When 查询状态，Then 返回 `busy`、`running_count=1`、`queued_count=4`。
 - AC-007：Given DeepSeek 登录失效，When 查询状态，Then 返回 `login_required`、`needs_action=true`，前端提示联系虚拟机运维负责人。
 - AC-008：Given DeepSeek 需要验证，When 查询状态，Then 返回 `verification_required`，不返回页面内容或会话数据。
@@ -649,9 +726,15 @@ U1、U2、U3。
 - AC-015：Given 两次请求使用同一幂等键，When 并发提交，Then 只创建一次运行；不同幂等键各自创建运行。
 - AC-016：Given 当前报告已经完成但其他运行仍在 Web 队列，When 查看当前报告，Then 报告显示完成，公共组件只说明全局通道繁忙。
 - AC-017：Given 正式 VM 启动，When 重复执行 `prod:start`，Then 不产生第二个受管 backend。
-- AC-018：Given 运维负责人完成 web:login 并关闭登录浏览器，When 启动后端并执行 preflight，Then 同一持久 profile 恢复登录态。
+- AC-018：Given 运维负责人完成 web:login 并关闭登录浏览器，When 重启后端并执行 preflight，Then 同一持久 profile 恢复登录态且旧进程内熔断已清除。
 - AC-019：Given 任意 Web 失败，When 检查记录，Then 不调用 DeepSeek API、不生成替代回答。
 - AC-020：Given 共享 admin，When 多个浏览器操作，Then 所有业务记录归属同一个 admin 用户 ID，系统不宣称具备人员级审计。
+- AC-021：Given 暂停运行只剩没有有效租约的 pending 记录，When 查询公共状态，Then 这些休眠记录不计入 `pending_count`，通道可返回 `idle`。
+- AC-022：Given 暂停前某 Web 记录已取得未过期执行租约，When 查询公共状态，Then 该记录仍计入 `pending_count`；租约过期且未完成后从计数移除。
+- AC-023：Given 没有父问题集运行的 pending Web 记录，When 查询公共状态，Then 该记录仍计入；非空父 ID 指向缺失记录时不因 JOIN 空值误计为未暂停，但记录自身有有效租约时仍计入。
+- AC-024：Given 进程快照显示 1 条活动采集而数据库计数已短暂变为 0，When 归一化响应，Then `pending_count=1`、`running_count=1`、`queued_count=0`。
+- AC-025：Given 两个浏览器持续查看运行报告和公共状态，When 连续运行至少 15 分钟，Then 正常轮询不返回 429，running/paused 报告分别按 10/30 秒刷新，历史抽屉不随每次定时器刷新。
+- AC-026：Given 问题集在多个 worker 已领取记录后被暂停，When 已领取记录完成，Then 未领取记录保持休眠，页面提示“已开始调度的任务完成后暂停”，且页面采集并发始终不超过 1。
 
 ## 11. 测试与验证计划
 
@@ -664,7 +747,9 @@ U1、U2、U3。
   - error、recycle、circuit、shutdown 状态。
 - `WebPlatformRuntimeStatusService`：
   - 平台 enabled/disabled。
-  - pending/running/queued 数量。
+  - 可执行 pending/running/queued 数量。
+  - 未暂停、休眠暂停、暂停但有效租约、过期租约和无父运行记录。
+  - `pending_count >= running_count` 竞态归一化。
   - 状态优先级。
   - 输出白名单。
 - 前端展示映射：
@@ -680,11 +765,13 @@ U1、U2、U3。
 - 接口设置 `private, no-store`。
 - 调用接口不触发 Web launcher/probe。
 - 响应不包含敏感和内部字段。
+- 通用 limiter 仅精确跳过该接口；未认证仍返回 401，认证后使用独立只读 limiter。
 
 ### 11.3 前端契约测试
 
 - 问题库和运行报告使用同一组件。
-- 30 秒轮询和 visibility 控制。
+- 状态 30 秒轮询和 visibility 控制。
+- 运行报告 running 10 秒、paused 30 秒轮询，历史抽屉不随报告定时器刷新。
 - 旧请求不会覆盖新页面状态。
 - 状态失败不影响运行按钮。
 - 当前报告状态与全局通道状态不混淆。
@@ -696,6 +783,8 @@ U1、U2、U3。
 - 最大 Adapter capture 并发为 1。
 - API Promise 与 Web Promise 并行。
 - 服务重启后 pending 记录恢复并重新进入 FIFO。
+- 暂停只阻止后续领取，已持有效租约的记录允许完成且 Web capture 并发仍为 1。
+- 暂停恢复前后公共可执行等待数正确切换。
 
 ### 11.5 真实 VM 手工验收
 
@@ -710,6 +799,8 @@ U1、U2、U3。
 9. 关闭其中一个个人浏览器，确认任务继续。
 10. 人工退出 DeepSeek，确认状态、失败报告和恢复重试。
 11. 停止后端，确认 Chrome 关闭且 profile lock 释放。
+12. 暂停含多条 Web 记录的问题集，确认已领取记录可收敛、休眠记录不污染全局等待数，恢复后继续执行。
+13. 两个浏览器持续停留至少 15 分钟，确认状态与报告正常轮询且没有 429。
 
 ### 11.6 发布证据
 
@@ -763,8 +854,9 @@ U1、U2、U3。
 
 ### 风险 3：轮询叠加通用频率限制
 
-- 影响：多人同时停留在报告页时，现有报告轮询和状态轮询可能增加同源代理请求量。
-- 缓解：状态只在两个相关页面启用、30 秒轮询、隐藏页暂停；真实 VM 验收检查 429。如仍不足，单独评估可信代理与只读轮询限流，不在本期盲目放宽全局限制。
+- 影响：Next.js/Nginx 代理可能让多个浏览器在后端表现为同一来源地址；现有报告每 4 秒轮询并可能同步刷新历史，双浏览器即可接近或超过通用 `500/15 分钟` 预算。
+- 缓解：状态固定路径精确跳过通用 limiter，并在认证后使用独立 `1000/15 分钟` 只读 limiter；状态每 30 秒轮询，running 报告每 10 秒、paused 报告每 30 秒，历史刷新与报告定时器解耦，隐藏页暂停；真实 VM 以两个浏览器连续 15 分钟无 429 验收。
+- 退出条件：若上述口径仍不足，先根据部署代理链路和真实请求量调整专用预算；不在本期改变 `trust proxy` 或放宽其他业务 API。
 
 ### 风险 4：VM 图形会话消失
 
@@ -787,11 +879,12 @@ U1、U2、U3。
 - 假设目标 VM 可提供持续图形桌面会话和远程维护方式。
 - 假设内部峰值任务量仍适合单账号串行，等待数量提示足以解决当前使用问题。
 - 开放问题：目标 VM 的操作系统、桌面会话守护和远程桌面产品由部署实施时确认。
-- 开放问题：若真实环境出现 429，需要基于代理链路证据决定限流键和可信代理配置，不在当前方案中预设。
+- 假设目标 VM 的两个常驻报告浏览器在独立 `1000/15 分钟` 状态预算及降频后的报告请求下可稳定运行；若真实验收仍出现 429，再基于代理链路证据调整专用预算。
 
 ## 15. 后续衔接
 
-- 可拆 issue：4 个纵向切片。
-- 建议第一个 issue：Web 空闲/繁忙状态纵向闭环。
-- 适合 TDD：是。状态派生、无副作用快照、API 契约、轮询生命周期和并发上限都可以先写失败测试。
-- 下一步：使用 `$to-issues` 确认切片粒度后写入本目录 `issues/`。
+- 已拆分 4 个纵向 issue，位于本需求目录的 `issues/`。
+- U1–U3 与 U4 自动化部分已按 TDD 完成；完整后端测试、前端测试、lint、production build 与生产进程管理测试均已通过。
+- 当前正式入口仍未在目标虚拟机启动和验证，因此不能宣称本方案已在市场部正式流程生效。
+- 阻塞项仅为目标虚拟机 HITL：两个真实浏览器使用共享 `admin` 连续观察至少 15 分钟，并验证真实 Web 任务、状态、429、进程、Chrome 与 profile lock 证据。
+- 下一步：执行 `issues/004-multi-browser-release-acceptance.md` 的“目标虚拟机待验收”清单；通过后关闭四个 issue 和本需求。

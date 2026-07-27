@@ -147,7 +147,7 @@ export default function GeoSourcesPage() {
     height: 260,
     autoFit: true,
     colorField: 'type',
-    axis: { y: { title: '明确引用次数' } },
+    axis: { y: { title: '引用次数' } },
   };
 
   const domainColumns = [
@@ -158,7 +158,7 @@ export default function GeoSourcesPage() {
       width: 110,
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>
     },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0), sorter: (a, b) => Number(a.citation_count || 0) - Number(b.citation_count || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0), sorter: (a, b) => Number(a.citation_count || 0) - Number(b.citation_count || 0) },
     { title: '覆盖回答', dataIndex: 'response_count', width: 100, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
@@ -179,7 +179,7 @@ export default function GeoSourcesPage() {
       width: 110,
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>
     },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0), sorter: (a, b) => Number(a.citation_count || 0) - Number(b.citation_count || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0), sorter: (a, b) => Number(a.citation_count || 0) - Number(b.citation_count || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
   ];
@@ -192,7 +192,7 @@ export default function GeoSourcesPage() {
       width: 110,
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>
     },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
     { title: '最近出现', dataIndex: 'last_seen_at', width: 180, render: formatDate },
@@ -213,7 +213,7 @@ export default function GeoSourcesPage() {
       width: 110,
       render: (value) => <Tag color={typeColor[value] || 'default'}>{value || '未知来源'}</Tag>
     },
-    { title: '明确引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
+    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
     { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
     { title: '最近出现', dataIndex: 'last_seen_at', width: 180, render: formatDate },
@@ -299,7 +299,7 @@ export default function GeoSourcesPage() {
       />
 
       <Row gutter={[12, 12]}>
-        <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="明确引用总数" value={summary.total_citations || 0} loading={sourceLoading} /></Card></Col>
+        <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="引用总数" value={summary.total_citations || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="有引用回答" value={summary.cited_responses || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="来源域名" value={summary.source_domain_count || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="自有来源" value={summary.owned_citations || 0} loading={sourceLoading} /></Card></Col>

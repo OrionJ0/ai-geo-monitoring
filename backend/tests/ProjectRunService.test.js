@@ -8,6 +8,7 @@ const {
   BrandCompetitor
 } = require('../models');
 const AIPlatformService = require('../services/AIPlatformService');
+const WebPlatformService = require('../services/WebPlatformService');
 const ProjectRunService = require('../services/ProjectRunService');
 const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
 const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
@@ -69,23 +70,6 @@ test('attributes admin initiated project runs to the project owner', () => {
   assert.equal(owner.actor_user_id, 1);
   assert.equal(regularUser.id, 9);
   assert.equal(regularUser.actor_user_id, undefined);
-});
-
-test('normalizes explicit run prompt ids without falling back to all prompts', () => {
-  assert.deepEqual(ProjectRunService.normalizeRunPromptIds(undefined), {
-    explicit: false,
-    ids: []
-  });
-
-  assert.deepEqual(ProjectRunService.normalizeRunPromptIds(['3', 'bad', 3, 0]), {
-    explicit: true,
-    ids: [3]
-  });
-
-  assert.deepEqual(ProjectRunService.normalizeRunPromptIds('bad'), {
-    explicit: true,
-    ids: []
-  });
 });
 
 test('reports selected prompt availability separately from api key availability', async () => {
@@ -244,7 +228,17 @@ test('marks a completed AI response as failed when metric generation fails', asy
 
 test('explains that invalid AI structure is excluded instead of falling back to rules', async () => {
   const originalBuildPayload = ProjectRunService.buildVisibilityMetricPayload;
+  const originalPersistResultDetail = ProjectRunService.persistResultDetail;
+  const originalRunInTransaction = ProjectRunService.runInTransaction;
   const updates = [];
+  const persistedDetails = [];
+  const webCapture = {
+    status: 'completed',
+    artifact_owner_record_id: 13,
+    artifacts: {
+      final_answer: { id: '00000000-0000-4000-8000-000000000004' }
+    }
+  };
   ProjectRunService.buildVisibilityMetricPayload = async () => {
     throw new AIResponseAnalysisError(
       '证据不在原回答中',
@@ -260,6 +254,8 @@ test('explains that invalid AI structure is excluded instead of falling back to 
       }
     );
   };
+  ProjectRunService.persistResultDetail = async (payload) => persistedDetails.push(payload);
+  ProjectRunService.runInTransaction = async (work) => work({ id: 'failure-transaction' });
 
   try {
     const result = await ProjectRunService.finalizeSuccessfulRecord({
@@ -275,7 +271,13 @@ test('explains that invalid AI structure is excluded instead of falling back to 
       project: { id: 1, name: '广拓' },
       competitors: [],
       prompt: { id: 1, question: '示例问题' },
-      keywords: ['广拓']
+      keywords: ['广拓'],
+      providerCitations: [{
+        url: 'https://example.com/source',
+        source_role: 'explicit_citation'
+      }],
+      persistResponseDetail: true,
+      resultSummaryPatch: { web_capture: webCapture }
     });
 
     assert.equal(result.ok, false);
@@ -288,6 +290,7 @@ test('explains that invalid AI structure is excluded instead of falling back to 
           previous_record_id: 9,
           attempt: 2
         },
+        web_capture: webCapture,
         failure: {
           stage: 'analysis_validation',
           error_code: 'invalid_analysis_output'
@@ -308,8 +311,14 @@ test('explains that invalid AI structure is excluded instead of falling back to 
       }
     });
     assert.equal(updates[0].result_summary.analysis.raw_output, undefined);
+    assert.equal(persistedDetails.length, 1);
+    assert.equal(persistedDetails[0].responseText, '原始回答仍然保留');
+    assert.equal(persistedDetails[0].providerCitations.length, 1);
+    assert.deepEqual(persistedDetails[0].transaction, { id: 'failure-transaction' });
   } finally {
     ProjectRunService.buildVisibilityMetricPayload = originalBuildPayload;
+    ProjectRunService.persistResultDetail = originalPersistResultDetail;
+    ProjectRunService.runInTransaction = originalRunInTransaction;
   }
 });
 
@@ -814,6 +823,252 @@ test('runs a prepared project run target without creating a duplicate question r
   }
 });
 
+test('project executor passes bounded owner context and persists Web text, citations and capture metadata', async () => {
+  const originalQueryPlatform = AIPlatformService.queryPlatform;
+  const originalFinalize = ProjectRunService.finalizeSuccessfulRecord;
+  let queryOptions = null;
+  let finalizationInput = null;
+  const webCapture = {
+    schema_version: 'deepseek-web-capture-v1',
+    status: 'completed',
+    artifact_owner_record_id: 88
+  };
+
+  AIPlatformService.queryPlatform = async (_platform, _question, options) => {
+    queryOptions = options;
+    return {
+      success: true,
+      platform: 'deepseek-web',
+      text: 'DeepSeek 网页最终回答',
+      data: {},
+      provider_citations: [{
+        url: 'https://example.com/source',
+        domain: 'example.com',
+        source_origin: 'deepseek_web_dom',
+        source_role: 'explicit_citation'
+      }],
+      web_capture: webCapture
+    };
+  };
+  ProjectRunService.finalizeSuccessfulRecord = async (input) => {
+    finalizationInput = input;
+    return {
+      ok: true,
+      metric: {
+        sentiment: 'neutral',
+        share_of_voice: 0,
+        brand_mentioned: false,
+        citation_count: 1,
+        brand_rank: null,
+        brand_recommended: false
+      }
+    };
+  };
+
+  try {
+    const result = await ProjectRunService.runTarget({
+      target: {
+        prompt: { id: 8, question: '开源 GEO 工具有哪些' },
+        platform: 'deepseek-web',
+        platformConfig: {
+          adapter_type: 'deepseek_web',
+          default_model: 'deepseek-web-ui'
+        }
+      },
+      record: { id: 88, update: async () => {} },
+      runUser: { id: 9 },
+      projectData: { id: 2, name: 'Goodie AI' },
+      competitors: [],
+      keywords: ['Goodie AI'],
+      executionToken: 'lease-token'
+    });
+
+    assert.equal(result.status, 'completed');
+    assert.equal(queryOptions.purpose, 'project_monitoring');
+    assert.deepEqual(queryOptions.capture_owner, {
+      record_id: 88,
+      user_id: 9,
+      project_id: 2,
+      execution_token: 'lease-token'
+    });
+    assert.equal(finalizationInput.responseText, 'DeepSeek 网页最终回答');
+    assert.equal(finalizationInput.providerCitations.length, 1);
+    assert.deepEqual(finalizationInput.resultSummaryPatch, { web_capture: webCapture });
+  } finally {
+    AIPlatformService.queryPlatform = originalQueryPlatform;
+    ProjectRunService.finalizeSuccessfulRecord = originalFinalize;
+  }
+});
+
+test('a stale Web worker discards newly promoted evidence after terminal fencing rejects it', async () => {
+  const originalQueryPlatform = AIPlatformService.queryPlatform;
+  const originalFinalize = ProjectRunService.finalizeSuccessfulRecord;
+  const originalDiscard = WebPlatformService.discardRecordCapture;
+  const discarded = [];
+  const webCapture = {
+    status: 'completed',
+    artifact_owner_record_id: 88,
+    artifacts: {
+      final_answer: { id: '00000000-0000-4000-8000-000000000001' }
+    }
+  };
+
+  AIPlatformService.queryPlatform = async () => ({
+    success: true,
+    platform: 'deepseek-web',
+    text: '迟到回答',
+    data: {},
+    provider_citations: [],
+    web_capture: webCapture
+  });
+  ProjectRunService.finalizeSuccessfulRecord = async () => ({
+    ok: false,
+    status: 'stale',
+    error: '执行租约已失效',
+    error_code: 'stale_worker_write_rejected'
+  });
+  WebPlatformService.discardRecordCapture = async (...args) => discarded.push(args);
+
+  try {
+    const result = await ProjectRunService.runTarget({
+      target: {
+        prompt: { id: 8, question: '测试迟到 worker' },
+        platform: 'deepseek-web',
+        platformConfig: { adapter_type: 'deepseek_web' }
+      },
+      record: { id: 88, update: async () => {} },
+      runUser: { id: 9 },
+      projectData: { id: 2, name: 'Goodie AI' },
+      competitors: [],
+      keywords: ['Goodie AI'],
+      executionToken: 'expired-token'
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(discarded, [[88, webCapture]]);
+  } finally {
+    AIPlatformService.queryPlatform = originalQueryPlatform;
+    ProjectRunService.finalizeSuccessfulRecord = originalFinalize;
+    WebPlatformService.discardRecordCapture = originalDiscard;
+  }
+});
+
+test('an unexpected finalization failure discards newly promoted Web evidence', async () => {
+  const originalQueryPlatform = AIPlatformService.queryPlatform;
+  const originalFinalize = ProjectRunService.finalizeSuccessfulRecord;
+  const originalDiscard = WebPlatformService.discardRecordCapture;
+  const discarded = [];
+  const updates = [];
+  const webCapture = {
+    status: 'completed',
+    artifact_owner_record_id: 89,
+    artifacts: {
+      final_answer: { id: '00000000-0000-4000-8000-000000000002' }
+    }
+  };
+
+  AIPlatformService.queryPlatform = async () => ({
+    success: true,
+    platform: 'deepseek-web',
+    text: '已经生成但未能提交的回答',
+    data: {},
+    provider_citations: [],
+    web_capture: webCapture
+  });
+  ProjectRunService.finalizeSuccessfulRecord = async () => {
+    throw new Error('database connection lost');
+  };
+  WebPlatformService.discardRecordCapture = async (...args) => discarded.push(args);
+
+  try {
+    const result = await ProjectRunService.runTarget({
+      target: {
+        prompt: { id: 8, question: '测试异常终态' },
+        platform: 'deepseek-web',
+        platformConfig: { adapter_type: 'deepseek_web' }
+      },
+      record: { id: 89, update: async (payload) => updates.push(payload) },
+      runUser: { id: 9 },
+      projectData: { id: 2, name: 'Goodie AI' },
+      competitors: [],
+      keywords: ['Goodie AI']
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(discarded, [[89, webCapture]]);
+    assert.equal(updates.at(-1).status, 'failed');
+  } finally {
+    AIPlatformService.queryPlatform = originalQueryPlatform;
+    ProjectRunService.finalizeSuccessfulRecord = originalFinalize;
+    WebPlatformService.discardRecordCapture = originalDiscard;
+  }
+});
+
+test('Web failure stores only bounded failure metadata and never finalizes a metric', async () => {
+  const originalQueryPlatform = AIPlatformService.queryPlatform;
+  const originalFinalize = ProjectRunService.finalizeSuccessfulRecord;
+  const updates = [];
+  let finalizations = 0;
+
+  AIPlatformService.queryPlatform = async () => ({
+    success: false,
+    platform: 'deepseek-web',
+    error_code: 'web_generation_timeout',
+    error: 'partial answer must not escape',
+    text: '不应保存的部分回答',
+    web_capture: {
+      status: 'failed',
+      failure: {
+        stage: 'generation_finished',
+        error_code: 'web_generation_timeout'
+      }
+    }
+  });
+  ProjectRunService.finalizeSuccessfulRecord = async () => {
+    finalizations += 1;
+    throw new Error('must not finalize');
+  };
+
+  try {
+    const result = await ProjectRunService.runTarget({
+      target: {
+        prompt: { id: 8, question: '测试回答超时' },
+        platform: 'deepseek-web',
+        platformConfig: { adapter_type: 'deepseek_web' }
+      },
+      record: { id: 90, update: async (payload) => updates.push(payload) },
+      runUser: { id: 9 },
+      projectData: { id: 2, name: 'Goodie AI' },
+      competitors: [],
+      keywords: ['Goodie AI']
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error, '等待 DeepSeek 网页版最终回答超时');
+    assert.equal(finalizations, 0);
+    assert.deepEqual(updates.at(-1), {
+      status: 'failed',
+      error_message: '等待 DeepSeek 网页版最终回答超时',
+      result_summary: {
+        web_capture: {
+          status: 'failed',
+          failure: {
+            stage: 'generation_finished',
+            error_code: 'web_generation_timeout'
+          }
+        },
+        failure: {
+          stage: 'generation_finished',
+          error_code: 'web_generation_timeout'
+        }
+      }
+    });
+  } finally {
+    AIPlatformService.queryPlatform = originalQueryPlatform;
+    ProjectRunService.finalizeSuccessfulRecord = originalFinalize;
+  }
+});
+
 test('queues a project run without waiting for prepared targets to finish', async () => {
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
   const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
@@ -987,6 +1242,55 @@ test('does not consume quota or create records when every candidate platform is 
     assert.equal(result.status, 400);
     assert.equal(result.data.error_code, 'all_platforms_unavailable');
     assert.match(result.message, /DeepSeek未配置 API Key/);
+    assert.equal(quotaCalled, false);
+    assert.equal(recordsCalled, false);
+  } finally {
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.consumeRunQuota = originalConsumeQuota;
+    ProjectRunService.createRunEntries = originalCreateEntries;
+  }
+});
+
+test('Web preflight failure is reported before quota or record creation', async () => {
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  const originalCreateEntries = ProjectRunService.createRunEntries;
+  let quotaCalled = false;
+  let recordsCalled = false;
+
+  AIPlatformService.getPlatformAvailability = async () => [{
+    code: 'deepseek-web',
+    platform_name: 'DeepSeek 网页版',
+    model_name: 'deepseek-web-ui',
+    available: false,
+    reason: 'web_login_required',
+    config: null
+  }];
+  ProjectRunService.consumeRunQuota = async () => {
+    quotaCalled = true;
+    return { ok: true };
+  };
+  ProjectRunService.createRunEntries = async () => {
+    recordsCalled = true;
+    return [];
+  };
+
+  try {
+    const result = await ProjectRunService.runProject({
+      project: { id: 2, user_id: 9, status: 'active', platforms: ['deepseek-web'] },
+      prompts: [{
+        id: 3,
+        question: 'GEO 怎么做',
+        enabled: true,
+        platforms: ['deepseek-web']
+      }],
+      platforms: ['deepseek-web'],
+      user: { id: 9, role: 'user' }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.data.error_code, 'all_platforms_unavailable');
+    assert.match(result.message, /需要重新人工登录/);
     assert.equal(quotaCalled, false);
     assert.equal(recordsCalled, false);
   } finally {

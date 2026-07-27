@@ -29,7 +29,7 @@ import {
   QuestionCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import axios from 'axios';
+import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { downloadQuestionSetReportPdf } from '@/utils/downloadQuestionSetReportPdf';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
@@ -40,6 +40,8 @@ import {
 import QuestionSetRunHistoryDrawer, {
   type QuestionSetOption,
 } from './QuestionSetRunHistoryDrawer';
+import WebCaptureEvidence from '@/components/WebCaptureEvidence';
+import DeepSeekWebRuntimeStatus from '@/components/DeepSeekWebRuntimeStatus';
 import styles from './question-set-reports.module.css';
 
 const { Paragraph, Text, Title } = Typography;
@@ -132,6 +134,24 @@ type ReportRow = {
     };
   } | null;
   answer?: string;
+  provider_citations?: Array<{
+    url?: string;
+    title?: string;
+    domain?: string;
+    source_role?: 'explicit_citation' | 'retrieval_candidate' | string;
+  }>;
+  web_capture?: {
+    status?: string;
+    selector_version?: string;
+    artifact_owner_record_id?: number;
+    captured_at?: string;
+    search?: {
+      requested?: boolean;
+      observed?: boolean;
+      evidence_type?: string;
+    };
+    artifacts?: Record<string, { id?: string; mime_type?: string }>;
+  } | null;
   has_metrics?: boolean;
   brand_mentioned?: boolean;
   brand_recommended?: boolean;
@@ -241,7 +261,7 @@ function formatRank(value?: number | null) {
 }
 
 function safeFilename(value: string) {
-  return String(value || '问题集报告').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80);
+  return String(value || '运行报告').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80);
 }
 
 function reportStatusTag(status: RunReport['status']) {
@@ -317,6 +337,7 @@ export default function QuestionSetReportsPage() {
   const reportRequest = useRef(0);
   const reportSheetRef = useRef<HTMLElement>(null);
   const preferredIds = useRef<{ projectId?: number; runId?: number }>({});
+  const previousReportState = useRef<{ id: number; status: RunReport['status'] } | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -382,7 +403,7 @@ export default function QuestionSetReportsPage() {
         setHistory([]);
         setHistoryTotal(0);
         if (selectFirst) setRunId(undefined);
-        message.error(getApiErrorMessage(error, '获取问题集运行历史失败'));
+        message.error(getApiErrorMessage(error, '获取运行历史失败'));
       }
     } finally {
       if (historyRequest.current === requestId) setHistoryLoading(false);
@@ -425,7 +446,7 @@ export default function QuestionSetReportsPage() {
     } catch (error) {
       if (reportRequest.current === requestId) {
         setReport(null);
-        message.error(getApiErrorMessage(error, '获取问题集运行报告失败'));
+        message.error(getApiErrorMessage(error, '获取运行报告失败'));
       }
     } finally {
       if (reportRequest.current === requestId && !quiet) setReportLoading(false);
@@ -457,20 +478,67 @@ export default function QuestionSetReportsPage() {
 
   useEffect(() => {
     if (!projectId || !runId || (report?.status !== 'running' && report?.status !== 'paused')) return undefined;
-    const timer = window.setInterval(() => {
+    const pollInterval = report?.status === 'paused' ? 30_000 : 10_000;
+    let timer: number | undefined;
+    const stopPolling = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      timer = undefined;
+    };
+    const startPolling = () => {
+      stopPolling();
+      if (document.visibilityState !== 'visible') return;
+      timer = window.setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          loadReport(projectId, runId, true);
+        }
+      }, pollInterval);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        reportRequest.current += 1;
+        stopPolling();
+        return;
+      }
       loadReport(projectId, runId, true);
-      if (historyOpen) loadHistory(projectId, historyPage, historyQuestionSetId);
-    }, 4000);
-    return () => window.clearInterval(timer);
+      startPolling();
+    };
+
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [
     projectId,
     runId,
     report?.status,
+    loadReport,
+  ]);
+
+  useEffect(() => {
+    const nextState = report
+      ? { id: report.id, status: report.status }
+      : null;
+    const previousState = previousReportState.current;
+    previousReportState.current = nextState;
+    if (
+      historyOpen
+      && previousState
+      && nextState
+      && previousState.id === nextState.id
+      && ['running', 'paused'].includes(previousState.status)
+      && !['running', 'paused'].includes(nextState.status)
+    ) {
+      loadHistory(projectId, historyPage, historyQuestionSetId);
+    }
+  }, [
     historyOpen,
     historyPage,
     historyQuestionSetId,
     loadHistory,
-    loadReport,
+    projectId,
+    report,
   ]);
 
   const selectedProject = useMemo(
@@ -524,7 +592,7 @@ export default function QuestionSetReportsPage() {
       link.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      message.error(getApiErrorMessage(error, '导出问题集报告失败'));
+      message.error(getApiErrorMessage(error, '导出运行报告失败'));
     }
   };
 
@@ -554,7 +622,7 @@ export default function QuestionSetReportsPage() {
     if (!projectId || !report || !report.capabilities?.can_pause) return;
     try {
       await axios.post(`/api/geo-projects/${projectId}/question-set-runs/${report.id}/pause`);
-      message.success('已发送暂停信号，运行会在当前任务完成后暂停');
+      message.success('已发送暂停信号，已开始调度的任务完成后暂停');
       loadReport(projectId, report.id, true);
     } catch (error) {
       message.error(getApiErrorMessage(error, '暂停运行失败'));
@@ -615,12 +683,12 @@ export default function QuestionSetReportsPage() {
         { headers: { 'Content-Type': 'text/csv; charset=utf-8' } },
       );
       const imported = response?.data?.data as RunReport;
-      message.success('问题集运行报告已导入');
+      message.success('运行报告已导入');
       setHistoryQuestionSetId(undefined);
       await loadHistory(projectId, 1);
       selectRun(imported.id);
     } catch (error) {
-      message.error(getApiErrorMessage(error, '导入问题集报告失败'));
+      message.error(getApiErrorMessage(error, '导入运行报告失败'));
     } finally {
       setImporting(false);
     }
@@ -679,7 +747,7 @@ export default function QuestionSetReportsPage() {
       render: formatRank,
     },
     {
-      title: '明确引用',
+      title: '引用',
       dataIndex: 'citation_count',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.citations : 70,
       render: (value: number) => Number(value || 0),
@@ -696,9 +764,9 @@ export default function QuestionSetReportsPage() {
     <div className={styles.page}>
       <div className={styles.toolbar}>
         <div>
-          <Text className={styles.eyebrow}>QUESTION SET RUNS</Text>
-          <Title level={2} className={styles.pageTitle}>问题集报告</Title>
-          <Text type="secondary">每次运行独立成档，不与项目其他运行混合。</Text>
+          <Text className={styles.eyebrow}>QUESTION RUNS</Text>
+          <Title level={2} className={styles.pageTitle}>运行报告</Title>
+          <Text type="secondary">单个问题或问题集每次运行独立成档，不与其他运行混合。</Text>
         </div>
         <Space wrap>
           <Select
@@ -715,7 +783,10 @@ export default function QuestionSetReportsPage() {
           <Button
             icon={<HistoryOutlined />}
             disabled={!projectId}
-            onClick={() => setHistoryOpen(true)}
+            onClick={() => {
+              setHistoryOpen(true);
+              loadHistory(projectId, historyPage, historyQuestionSetId);
+            }}
           >
             历史报告
           </Button>
@@ -732,6 +803,8 @@ export default function QuestionSetReportsPage() {
           </Button>
         </Space>
       </div>
+
+      <DeepSeekWebRuntimeStatus />
 
       <QuestionSetRunHistoryDrawer
         open={historyOpen}
@@ -765,7 +838,7 @@ export default function QuestionSetReportsPage() {
             {!report ? (
               <Empty
                 image={<FileSearchOutlined className={styles.emptyIcon} />}
-                description={selectedProject ? '运行一次问题集后，这里会生成独立报告' : '请选择品牌项目'}
+                description={selectedProject ? '从问题库运行单个问题或问题集后，这里会生成独立报告' : '请选择品牌项目'}
               />
             ) : (
               <>
@@ -836,7 +909,7 @@ export default function QuestionSetReportsPage() {
                     type="warning"
                     showIcon
                     title="这份历史报告包含旧规则指标"
-                    description="旧记录沿用生成当时的文本规则，只用于历史回看，不代表当前结构化口径。重新运行问题集后，新记录才会使用“AI 抽取指标原料、程序统一计算指标”的口径。"
+                    description="旧记录沿用生成当时的文本规则，只用于历史回看，不代表当前结构化口径。重新运行问题或问题集后，新记录才会使用“AI 抽取指标原料、程序统一计算指标”的口径。"
                     className={styles.runningAlert}
                   />
                 ) : null}
@@ -883,7 +956,7 @@ export default function QuestionSetReportsPage() {
                       label: (
                         <span className={styles.moreMetricsLabel}>
                           <Text strong>更多指标</Text>
-                          <Text type="secondary">{hasCompetitorBaseline ? '竞品声量、明确引用和执行情况' : '明确引用和执行情况'}</Text>
+                          <Text type="secondary">{hasCompetitorBaseline ? '竞品声量、引用和执行情况' : '引用和执行情况'}</Text>
                         </span>
                       ),
                       children: (
@@ -896,28 +969,28 @@ export default function QuestionSetReportsPage() {
                             />
                           ) : null}
                           <MetricItem
-                            label="明确引用率"
+                            label="引用率"
                             value={Number(summary.citation_valid_analyses || 0) > 0
                               ? `${percent(summary.citation_rate)}%`
                               : '暂无可验证样本'}
-                            help="回答中至少包含 1 条平台明确引用标记的可验证分析数 ÷ 明确引用口径可验证分析数。正文链接、检索候选、分析模型补充来源和历史混合来源均不计入。"
+                            help="回答中至少包含 1 条平台引用标记的可验证分析数 ÷ 引用口径可验证分析数。正文链接、检索候选、分析模型补充来源和历史混合来源均不计入。"
                           />
                           <MetricItem
-                            label="官网明确引用率"
+                            label="官网引用率"
                             value={selectedProject?.website
                               ? (Number(summary.citation_valid_analyses || 0) > 0
                                   ? `${percent(summary.owned_citation_rate)}%`
                                   : '暂无可验证样本')
                               : '未配置官网'}
-                            help="至少明确引用 1 次品牌官网的可验证分析数 ÷ 明确引用口径可验证分析数。引用域名等于品牌项目中配置的官网域名或其子域名时，计为官网引用；未配置官网时无法识别。"
+                            help="至少引用 1 次品牌官网的可验证分析数 ÷ 引用口径可验证分析数。引用域名等于品牌项目中配置的官网域名或其子域名时，计为官网引用；未配置官网时无法识别。"
                           />
                           <MetricItem
-                            label="官网明确引用次数"
+                            label="官网引用次数"
                             value={selectedProject?.website ? (summary.total_owned_citations || 0) : '未配置官网'}
                             help="本次所有有效分析中，引用域名属于品牌官网或其子域名的引用条数合计。"
                           />
                           <MetricItem
-                            label="明确引用总次数"
+                            label="引用总次数"
                             value={summary.total_citations || 0}
                             help="本次所有有效分析中，平台明确标注为引用的来源条数合计；历史混合来源不进入此指标。"
                           />
@@ -938,7 +1011,7 @@ export default function QuestionSetReportsPage() {
                       <Text className={styles.panelKicker}>每个问题 × 全部项目模型</Text>
                       <Title level={4} id="run-results-title">逐问题结果</Title>
                     </div>
-                    <Text type="secondary">有效分析 {summary.valid_analyses || 0} · 明确引用 {summary.total_citations || 0}</Text>
+                    <Text type="secondary">有效分析 {summary.valid_analyses || 0} · 引用 {summary.total_citations || 0}</Text>
                   </div>
                   <Table<ReportRow>
                     size="small"
@@ -1111,17 +1184,18 @@ export default function QuestionSetReportsPage() {
                                 ))
                               : (row.answer || '暂无回答内容')}
                           </Paragraph>
+                          <WebCaptureEvidence record={row as unknown as Record<string, any>} />
                           {row.citation_evidence_status === 'legacy_unverified' ? (
                             <Alert
                               type="warning"
                               showIcon
-                              title={`历史混合来源${row.legacy_citation_count ? ` · ${row.legacy_citation_count} 条` : ''}，不计入明确引用 KPI`}
-                              description="旧记录无法可靠区分明确引用、正文链接和检索候选，因此只作历史参考，不再计入引用率和引用次数。"
+                              title={`历史混合来源${row.legacy_citation_count ? ` · ${row.legacy_citation_count} 条` : ''}，不计入引用 KPI`}
+                              description="旧记录无法可靠区分引用、正文链接和检索候选，因此只作历史参考，不再计入引用率和引用次数。"
                             />
                           ) : null}
                           {Array.isArray(row.citation_sources) && row.citation_sources.length ? (
                             <Space orientation="vertical" size={4}>
-                              <Text className={styles.answerLabel}>明确引用来源（计入核心 KPI）</Text>
+                              <Text className={styles.answerLabel}>引用源（计入核心 KPI）</Text>
                               {row.citation_sources.map((source, index) => source.url ? (
                                 <Space key={`${source.url}-${index}`} size={6}>
                                   {source.owned ? <Tag color="green">品牌官网</Tag> : null}

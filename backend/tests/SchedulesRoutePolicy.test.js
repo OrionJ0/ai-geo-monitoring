@@ -5,8 +5,11 @@ const path = require('node:path');
 
 const routeSource = fs.readFileSync(path.resolve(__dirname, '../routes/schedules.js'), 'utf8');
 
-test('schedule route resolves platform choices from the database catalog', () => {
-  assert.match(routeSource, /await AIPlatformService\.getAvailablePlatforms\(\)/);
+test('legacy schedule route resolves only legacy-schedule-capable platforms from the database catalog', () => {
+  assert.match(
+    routeSource,
+    /await AIPlatformService\.getAvailablePlatforms\(\{\s*capability:\s*'legacy_schedule'\s*\}\)/
+  );
   assert.match(routeSource, /validatePlatformsWithinContext\(/);
   assert.match(routeSource, /defaultPlatformsForContext\(/);
   assert.match(routeSource, /定时任务平台必须包含在项目或问题的监测平台内/);

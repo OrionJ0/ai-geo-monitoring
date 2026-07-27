@@ -346,9 +346,9 @@ test('结构化分析失败时复用原回答且不重新消耗监测配额', as
     user_id: user.id,
     project_id: project.id,
     tracked_prompt_id: 78,
-    platform: 'qwen',
-    platform_name: '千问',
-    model_name: 'qwen-monitoring-model',
+    platform: 'deepseek-web',
+    platform_name: 'DeepSeek 网页版',
+    model_name: 'deepseek-web-ui',
     question: '哪些周界报警厂家比较靠谱？',
     brand: project.name,
     brand_keywords: project.name,
@@ -364,6 +364,25 @@ test('结构化分析失败时复用原回答且不重新消耗监测配额', as
         stage: 'parse_or_validate',
         error_code: 'invalid_analysis_output'
       }
+    }
+  });
+  const originalWebCapture = {
+    schema_version: 'deepseek-web-capture-v1',
+    status: 'completed',
+    artifact_owner_record_id: failedRecord.id,
+    artifacts: {
+      final_answer: {
+        id: '00000000-0000-4000-8000-000000000003',
+        sha256: 'a'.repeat(64),
+        bytes: 1024,
+        mime_type: 'image/png'
+      }
+    }
+  };
+  await failedRecord.update({
+    result_summary: {
+      ...failedRecord.result_summary,
+      web_capture: originalWebCapture
     }
   });
   await ResultDetail.create({
@@ -431,6 +450,11 @@ test('结构化分析失败时复用原回答且不重新消耗监测配额', as
     });
     assert.equal(retryRecord.result_summary.retry.kind, 'analysis_only');
     assert.equal(retryRecord.execution_mode, 'analysis_only');
+    assert.deepEqual(retryRecord.result_summary.web_capture, originalWebCapture);
+    assert.equal(
+      retryRecord.result_summary.web_capture.artifact_owner_record_id,
+      failedRecord.id
+    );
     const copiedDetail = await ResultDetail.findOne({
       where: { question_record_id: retryRecord.id }
     });

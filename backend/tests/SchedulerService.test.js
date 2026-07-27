@@ -102,6 +102,13 @@ test('scheduled platform failures store safe error messages', () => {
   assert.doesNotMatch(source, /error_message:\s*result\.error/);
 });
 
+test('legacy standalone schedules request only legacy-schedule capable platforms', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
+
+  assert.match(source, /getPlatformAvailability\([\s\S]*capability:\s*'legacy_schedule'/);
+  assert.match(source, /queryPlatform\([\s\S]*purpose:\s*'legacy_schedule'/);
+});
+
 test('scheduled runs do not consume quota or create records when all platforms are unavailable', async () => {
   let quotaCalls = 0;
   let settingsCalls = 0;

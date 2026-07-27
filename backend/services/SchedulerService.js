@@ -107,7 +107,9 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   const keywordsArr = Array.isArray(highlight_keywords) ? highlight_keywords : [];
   let availability;
   try {
-    availability = await platformService.getPlatformAvailability(platformsList);
+    availability = await platformService.getPlatformAvailability(platformsList, {
+      capability: 'legacy_schedule'
+    });
   } catch (error) {
     console.warn('读取定时任务平台配置失败:', error?.message || error);
     return {
@@ -235,7 +237,8 @@ async function submitDetectionForSchedule(schedule, options = {}) {
 
       const result = await platformService.queryPlatform(platform, question, {
         config: platformStatus.config,
-        runtimeSettings
+        runtimeSettings,
+        purpose: 'legacy_schedule'
       });
       if (!result.success) {
         console.warn('定时任务平台调用失败:', result.error || result.message || platform);

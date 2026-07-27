@@ -4,6 +4,7 @@ const { encryptSecret, decryptSecret } = require('./SecretEncryptionService');
 const { validatePlatformUrl } = require('./PlatformUrlPolicyService');
 
 const ADAPTER_TYPES = new Set(['openai_responses', 'openai_chat_completions']);
+const RESERVED_PLATFORM_CODES = new Set(['deepseek-web']);
 const TEST_STATUSES = new Set(['untested', 'success', 'failed']);
 const WEB_SEARCH_TEST_STATUSES = new Set(['untested', 'success', 'failed', 'inconclusive']);
 const REQUEST_OPTIONS_MAX_BYTES = 16 * 1024;
@@ -16,6 +17,30 @@ const PROTECTED_REQUEST_OPTION_KEYS = new Set([
   'max_output_tokens'
 ]);
 const UNSAFE_JSON_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const API_CAPABILITIES = Object.freeze({
+  monitoring: true,
+  analysis: true,
+  prompt_generation: true,
+  model_listing: true,
+  api_key_management: true,
+  connection_test: true,
+  api_web_search_test: true,
+  direct_stream: true,
+  legacy_schedule: true,
+  interactive_login: false
+});
+const DEEPSEEK_WEB_CAPABILITIES = Object.freeze({
+  monitoring: true,
+  analysis: false,
+  prompt_generation: false,
+  model_listing: false,
+  api_key_management: false,
+  connection_test: false,
+  api_web_search_test: false,
+  direct_stream: false,
+  legacy_schedule: false,
+  interactive_login: true
+});
 
 const PRESET_PLATFORMS = Object.freeze([
   Object.freeze({
@@ -34,6 +59,15 @@ const PRESET_PLATFORMS = Object.freeze([
     base_url: 'https://api.deepseek.com/v1/chat/completions',
     default_model: 'deepseek-v4-flash',
     enabled: true,
+    builtin: true
+  }),
+  Object.freeze({
+    code: 'deepseek-web',
+    name: 'DeepSeek 网页版',
+    adapter_type: 'deepseek_web',
+    base_url: 'https://chat.deepseek.com',
+    default_model: 'deepseek-web-ui',
+    enabled: false,
     builtin: true
   }),
   Object.freeze({
@@ -120,20 +154,45 @@ function normalizeRequestOptions(value) {
   return JSON.parse(serialized);
 }
 
+function rowValue(row, key) {
+  return row?.get ? row.get(key) : row?.[key];
+}
+
+function getPlatformCapabilities(row) {
+  return rowValue(row, 'adapter_type') === 'deepseek_web'
+    ? { ...DEEPSEEK_WEB_CAPABILITIES }
+    : { ...API_CAPABILITIES };
+}
+
+function hasPlatformCapability(row, capability) {
+  if (!capability) return true;
+  return getPlatformCapabilities(row)[String(capability)] === true;
+}
+
+function isManagedPlatform(row) {
+  return rowValue(row, 'adapter_type') === 'deepseek_web'
+    || RESERVED_PLATFORM_CODES.has(String(rowValue(row, 'code') || '').toLowerCase());
+}
+
 function isConfigured(row) {
+  if (rowValue(row, 'adapter_type') === 'deepseek_web') {
+    return String(rowValue(row, 'base_url') || '').trim() === 'https://chat.deepseek.com'
+      && String(rowValue(row, 'default_model') || '').trim() === 'deepseek-web-ui';
+  }
   return Boolean(
-    row?.encrypted_api_key
-    && String(row?.base_url || '').trim()
-    && String(row?.default_model || '').trim()
+    rowValue(row, 'encrypted_api_key')
+    && String(rowValue(row, 'base_url') || '').trim()
+    && String(rowValue(row, 'default_model') || '').trim()
   );
 }
 
 function getUnavailableReason(row) {
   if (!row || row.archived_at) return 'archived';
   if (!row.enabled) return 'disabled';
-  if (!row.encrypted_api_key) return 'missing_api_key';
+  if (rowValue(row, 'adapter_type') !== 'deepseek_web' && !row.encrypted_api_key) return 'missing_api_key';
   if (!String(row.base_url || '').trim()) return 'missing_base_url';
   if (!String(row.default_model || '').trim()) return 'missing_model';
+  if (rowValue(row, 'adapter_type') === 'deepseek_web' && !isConfigured(row)) return 'managed_config_invalid';
   return null;
 }
 
@@ -145,7 +204,8 @@ function toAdminView(row) {
   } = value;
   return {
     ...safe,
-    configured: isConfigured(value)
+    configured: isConfigured(value),
+    capabilities: getPlatformCapabilities(value)
   };
 }
 
@@ -158,7 +218,8 @@ function toCatalogView(row) {
     enabled: Boolean(value.enabled),
     configured: isConfigured(value),
     selectable: unavailableReason === null,
-    unavailable_reason: unavailableReason
+    unavailable_reason: unavailableReason,
+    capabilities: getPlatformCapabilities(value)
   };
 }
 
@@ -181,10 +242,35 @@ class AIPlatformConfigService {
     }
 
     for (const preset of PRESET_PLATFORMS) {
+      const existing = await this.model.findOne({ where: { code: preset.code } });
+      if (
+        preset.code === 'deepseek-web'
+        && existing
+        && (!existing.builtin || existing.adapter_type !== 'deepseek_web')
+      ) {
+        throw new PlatformConfigError(
+          '保留平台标识 deepseek-web 已被其他配置占用',
+          'reserved_platform_code_conflict',
+          409
+        );
+      }
       const [row] = await this.model.findOrCreate({
         where: { code: preset.code },
         defaults: preset
       });
+      if (preset.code === 'deepseek-web') {
+        await row.update({
+          name: preset.name,
+          adapter_type: preset.adapter_type,
+          base_url: preset.base_url,
+          default_model: preset.default_model,
+          request_options: {},
+          encrypted_api_key: null,
+          api_key_last4: null,
+          builtin: true
+        });
+        continue;
+      }
       if (!row.builtin) {
         await row.update({ builtin: true });
       }
@@ -241,6 +327,9 @@ class AIPlatformConfigService {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(code) || code.length < 2) {
       throw new PlatformConfigError('唯一标识只能包含小写字母、数字和连字符，长度为 2–50');
     }
+    if (RESERVED_PLATFORM_CODES.has(code)) {
+      throw new PlatformConfigError('该平台标识由系统保留', 'reserved_platform_code', 409);
+    }
 
     const values = await this.validateEditableFields(payload, { creating: true });
     let row;
@@ -263,6 +352,21 @@ class AIPlatformConfigService {
 
   async updatePlatform(id, payload = {}) {
     const row = await this.getPlatform(id);
+    if (isManagedPlatform(row)) {
+      const requestedKeys = Object.keys(payload).filter((key) => key !== 'enabled');
+      if (requestedKeys.includes('api_key')) {
+        throw new PlatformConfigError(
+          '该平台不支持 API Key',
+          'unsupported_platform_capability'
+        );
+      }
+      if (requestedKeys.length > 0) {
+        throw new PlatformConfigError(
+          '受管 Web 平台只允许修改启用状态',
+          'managed_platform_immutable'
+        );
+      }
+    }
     const values = await this.validateEditableFields(payload, { creating: false, current: row });
     const updates = {};
     const allowed = [
@@ -304,6 +408,7 @@ class AIPlatformConfigService {
 
   async clearApiKey(id) {
     const row = await this.getPlatform(id);
+    this.assertCapability(row, 'api_key_management');
     await row.update({
       encrypted_api_key: null,
       api_key_last4: null,
@@ -314,6 +419,7 @@ class AIPlatformConfigService {
 
   async revealApiKey(id) {
     const row = await this.getPlatform(id);
+    this.assertCapability(row, 'api_key_management');
     return {
       api_key: this.decryptApiKey(row),
       api_key_last4: row.api_key_last4
@@ -330,6 +436,21 @@ class AIPlatformConfigService {
   decryptApiKey(row) {
     if (!row?.encrypted_api_key) throw new PlatformConfigError('平台未配置 API Key', 'missing_api_key');
     return decryptSecret(row.encrypted_api_key, this.encryptionKeyProvider());
+  }
+
+  assertCapability(row, capability) {
+    if (!hasPlatformCapability(row, capability)) {
+      throw new PlatformConfigError(
+        '该平台不支持此操作',
+        'unsupported_platform_capability'
+      );
+    }
+    return row;
+  }
+
+  async requireCapability(id, capability) {
+    const row = await this.getPlatform(id);
+    return this.assertCapability(row, capability);
   }
 
   async validateEditableFields(payload, { creating, current } = {}) {
@@ -432,5 +553,9 @@ module.exports.PRESET_PLATFORMS = PRESET_PLATFORMS;
 module.exports.toAdminView = toAdminView;
 module.exports.toCatalogView = toCatalogView;
 module.exports.getUnavailableReason = getUnavailableReason;
+module.exports.getPlatformCapabilities = getPlatformCapabilities;
+module.exports.hasPlatformCapability = hasPlatformCapability;
+module.exports.isManagedPlatform = isManagedPlatform;
+module.exports.isConfigured = isConfigured;
 module.exports.normalizeRequestOptions = normalizeRequestOptions;
 module.exports.REQUEST_OPTIONS_MAX_BYTES = REQUEST_OPTIONS_MAX_BYTES;

@@ -89,9 +89,10 @@ function cleanupExpired() {
   }
 }
 
-setInterval(() => {
+const cleanupTimer = setInterval(() => {
   try { cleanupExpired(); } catch (_) {}
 }, 60 * 1000);
+cleanupTimer.unref?.();
 
 module.exports = { createChallenge, verify };
 module.exports.createSvgChallenge = createSvgChallenge;

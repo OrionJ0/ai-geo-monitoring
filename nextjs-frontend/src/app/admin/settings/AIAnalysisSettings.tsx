@@ -17,6 +17,7 @@ import {
 } from 'antd';
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import type { AIPlatformCapabilities } from '@/lib/useAIPlatformCatalog';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -24,11 +25,12 @@ type PlatformRecord = {
   id: number;
   code: string;
   name: string;
-  adapter_type: 'openai_responses' | 'openai_chat_completions';
+  adapter_type: 'openai_responses' | 'openai_chat_completions' | 'deepseek_web';
   default_model: string;
   enabled: boolean;
   configured: boolean;
   archived_at?: string | null;
+  capabilities?: AIPlatformCapabilities;
 };
 
 type PromptDefinition = {
@@ -197,7 +199,12 @@ export default function AIAnalysisSettings() {
   }, [load, testForm]);
 
   const availablePlatforms = useMemo(
-    () => platforms.filter((item) => item.enabled && item.configured && !item.archived_at),
+    () => platforms.filter((item) => (
+      item.enabled
+      && item.configured
+      && !item.archived_at
+      && item.capabilities?.analysis === true
+    )),
     [platforms],
   );
   const selectedPlatform = availablePlatforms.find((item) => item.code === selectedPlatformCode);

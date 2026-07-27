@@ -186,6 +186,42 @@ test('atomically persists one launch plan and replays the same idempotency key',
   assert.equal(counter.used_count, 2);
 });
 
+test('single-question runs use the same report and retry ownership model without a persisted question set', async () => {
+  ProjectRunService.schedulePreparedRun = () => {};
+  const prompt = prompts[0];
+
+  const result = await ProjectRunService.startQuestionSetRun(startOptions({
+    questionSet: {
+      id: null,
+      name: `单问题：${prompt.question}`
+    },
+    prompts: [{
+      ...prompt.toJSON(),
+      platforms: ['doubao']
+    }],
+    platforms: project.platforms,
+    idempotencyKey: 'single-question-run-start'
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 202);
+  assert.equal(result.message, '问题分析已加入队列');
+  assert.match(result.data.report_url, /question-set-reports/);
+  const run = await QuestionSetRun.findByPk(result.data.question_set_run_id);
+  assert.equal(run.question_set_id, null);
+  assert.equal(run.question_set_name, '单问题：问题一');
+  assert.equal(run.planned_record_count, 1);
+  assert.equal(await QuestionRecord.count({
+    where: { question_set_run_id: run.id }
+  }), 1);
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+  assert.equal(report.capabilities.can_retry, false);
+  assert.equal(report.question_set_id, null);
+});
+
 test('rejects reuse of one idempotency key for a different request fingerprint', async () => {
   ProjectRunService.schedulePreparedRun = () => {};
   await ProjectRunService.startQuestionSetRun(startOptions());
@@ -267,6 +303,34 @@ test('concurrent submissions with one key commit and dispatch only one run', asy
   assert.equal(counter.used_count, 2);
 });
 
+test('concurrent active submissions with different keys create independent runs', async () => {
+  const dispatched = [];
+  ProjectRunService.schedulePreparedRun = (context) => {
+    dispatched.push(context.questionSetRunId);
+  };
+
+  const [first, second] = await Promise.all([
+    ProjectRunService.startQuestionSetRun(startOptions({
+      idempotencyKey: 'browser-a-active-submit'
+    })),
+    ProjectRunService.startQuestionSetRun(startOptions({
+      idempotencyKey: 'browser-b-active-submit'
+    }))
+  ]);
+
+  assert.notEqual(first.data.question_set_run_id, second.data.question_set_run_id);
+  assert.equal(first.data.idempotent_replay, false);
+  assert.equal(second.data.idempotent_replay, false);
+  assert.equal(await QuestionSetRun.count(), 2);
+  assert.equal(await QuestionRecord.count(), 4);
+  assert.deepEqual(
+    new Set(dispatched),
+    new Set([first.data.question_set_run_id, second.data.question_set_run_id])
+  );
+  const counter = await UsageCounter.findOne();
+  assert.equal(counter.used_count, 4);
+});
+
 test('keeps committed pending records when immediate dispatch fails and later redispatches them', async () => {
   ProjectRunService.schedulePreparedRun = () => {
     throw new Error('injected-dispatch-failure');
@@ -296,4 +360,104 @@ test('keeps committed pending records when immediate dispatch fails and later re
     result.data.question_set_run_id
   );
   assert.equal(dispatched[0].runRevision, 0);
+});
+
+test('question-set entry persists DeepSeek Web records with run ownership and adapter config', async () => {
+  const previousPlatforms = project.platforms;
+  await project.update({ platforms: ['deepseek-web'] });
+  AIPlatformService.getPlatformAvailability = async () => [{
+    code: 'deepseek-web',
+    platform_name: 'DeepSeek 网页版',
+    model_name: 'deepseek-web-ui',
+    available: true,
+    reason: null,
+    config: {
+      code: 'deepseek-web',
+      adapter_type: 'deepseek_web',
+      default_model: 'deepseek-web-ui'
+    }
+  }];
+  let scheduledContext = null;
+  ProjectRunService.schedulePreparedRun = (context) => {
+    scheduledContext = context;
+  };
+
+  try {
+    const result = await ProjectRunService.startQuestionSetRun(startOptions({
+      project,
+      prompts: prompts.map((prompt) => ({
+        ...prompt.toJSON(),
+        platforms: ['deepseek-web']
+      })),
+      platforms: ['deepseek-web'],
+      idempotencyKey: 'deepseek-web-question-set-entry'
+    }));
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data.planned_platforms, ['deepseek-web']);
+    const records = await QuestionRecord.findAll({
+      where: { question_set_run_id: result.data.question_set_run_id },
+      order: [['run_slot_index', 'ASC']]
+    });
+    assert.equal(records.length, 2);
+    assert.deepEqual(records.map((record) => record.platform), [
+      'deepseek-web',
+      'deepseek-web'
+    ]);
+    assert.deepEqual(records.map((record) => record.run_slot_index), [0, 1]);
+    assert.ok(records.every((record) => record.model_name === 'deepseek-web-ui'));
+    assert.equal(
+      scheduledContext.entries[0].target.platformConfig.adapter_type,
+      'deepseek_web'
+    );
+  } finally {
+    await project.update({ platforms: previousPlatforms });
+  }
+});
+
+test('mixed question-set run skips unavailable Web before quota and keeps API records runnable', async () => {
+  const previousPlatforms = project.platforms;
+  await project.update({ platforms: ['doubao', 'deepseek-web'] });
+  AIPlatformService.getPlatformAvailability = async () => [{
+    code: 'doubao',
+    platform_name: '豆包',
+    model_name: 'doubao-model',
+    available: true,
+    reason: null,
+    config: { code: 'doubao', adapter_type: 'openai_compatible' }
+  }, {
+    code: 'deepseek-web',
+    platform_name: 'DeepSeek 网页版',
+    model_name: 'deepseek-web-ui',
+    available: false,
+    reason: 'web_login_required',
+    config: null
+  }];
+  ProjectRunService.schedulePreparedRun = () => {};
+
+  try {
+    const result = await ProjectRunService.startQuestionSetRun(startOptions({
+      project,
+      prompts: prompts.map((prompt) => ({
+        ...prompt.toJSON(),
+        platforms: ['doubao', 'deepseek-web']
+      })),
+      platforms: ['doubao', 'deepseek-web'],
+      idempotencyKey: 'mixed-web-unavailable-entry'
+    }));
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data.planned_platforms, ['doubao']);
+    assert.equal(result.data.skipped_platforms[0].platform, 'deepseek-web');
+    assert.equal(result.data.skipped_platforms[0].reason, 'web_login_required');
+    assert.equal(await QuestionRecord.count({
+      where: { question_set_run_id: result.data.question_set_run_id }
+    }), 2);
+    const counter = await UsageCounter.findOne({
+      where: { user_id: user.id, feature: 'detection', period: 'daily' }
+    });
+    assert.equal(counter.used_count, 2);
+  } finally {
+    await project.update({ platforms: previousPlatforms });
+  }
 });

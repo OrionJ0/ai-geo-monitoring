@@ -244,6 +244,144 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   assert.equal(durableReport.rows[0].answer, '广拓可以作为周界报警方案的候选。');
 });
 
+test('单问题失败运行不依赖持久化问题集也能生成可重试报告', async () => {
+  const run = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: null,
+    question_set_name: `单问题：${prompt.question}`,
+    source: 'native',
+    schema_version: 'question_set_run_v1',
+    planned_record_count: 1,
+    started_at: new Date()
+  });
+  const failed = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    question_set_run_id: run.id,
+    run_slot_index: 0,
+    platform: 'deepseek-web',
+    platform_name: 'DeepSeek 网页版',
+    model_name: 'deepseek-web-ui',
+    question: prompt.question,
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'failed',
+    error_message: 'DeepSeek Web 浏览器无响应',
+    result_summary: {
+      failure: {
+        stage: 'generation_finished',
+        error_code: 'web_browser_unresponsive'
+      }
+    }
+  });
+
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+
+  assert.equal(report.question_set_id, null);
+  assert.equal(report.status, 'failed');
+  assert.equal(report.summary.failed, 1);
+  assert.equal(report.capabilities.can_retry, true);
+  assert.equal(report.capabilities.retry_disabled_reason, null);
+  assert.deepEqual(report.execution_summary.failure_stages, {
+    generation_finished: 1
+  });
+
+  await failed.destroy();
+  await run.destroy();
+});
+
+test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及 CSV 身份', async (t) => {
+  const run = await createNativeRun(1);
+  const record = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    question_set_run_id: run.id,
+    run_slot_index: 0,
+    platform: 'deepseek-web',
+    platform_name: 'DeepSeek 网页版',
+    model_name: 'deepseek-web-ui',
+    question: '网页版如何推荐周界报警厂家？',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'completed',
+    result_summary: {
+      web_capture: {
+        schema_version: 'deepseek-web-capture-v1',
+        status: 'completed',
+        selector_version: 'deepseek-web-v1',
+        artifact_owner_record_id: 1,
+        captured_at: '2026-07-26T08:30:00.000Z',
+        search: { requested: true, observed: true },
+        artifacts: {
+          search_state: { id: '00000000-0000-4000-8000-000000000011' },
+          final_answer: { id: '00000000-0000-4000-8000-000000000012' }
+        }
+      }
+    }
+  });
+  t.after(async () => {
+    await VisibilityMetric.destroy({ where: { question_record_id: record.id } });
+    await ResultDetail.destroy({ where: { question_record_id: record.id } });
+    await record.destroy();
+    await run.destroy();
+  });
+  await record.update({
+    result_summary: {
+      ...record.result_summary,
+      web_capture: {
+        ...record.result_summary.web_capture,
+        artifact_owner_record_id: record.id
+      }
+    }
+  });
+  const providerCitations = [
+    {
+      url: 'https://explicit.example.com/a',
+      title: '明确引用',
+      domain: 'explicit.example.com',
+      source_role: 'explicit_citation'
+    },
+    {
+      url: 'https://retrieval.example.com/b',
+      title: '检索候选',
+      domain: 'retrieval.example.com',
+      source_role: 'retrieval_candidate'
+    }
+  ];
+  await ResultDetail.create({
+    question_record_id: record.id,
+    ai_response_original: '网页版最终回答。',
+    provider_citations: providerCitations,
+    parsing_status: 'completed'
+  });
+
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+
+  assert.equal(report.rows[0].platform, 'deepseek-web');
+  assert.equal(report.rows[0].platform_name, 'DeepSeek 网页版');
+  assert.equal(report.rows[0].model_name, 'deepseek-web-ui');
+  assert.deepEqual(report.rows[0].provider_citations, providerCitations);
+  assert.equal(report.rows[0].web_capture.selector_version, 'deepseek-web-v1');
+  assert.equal(report.rows[0].web_capture.artifact_owner_record_id, record.id);
+
+  const csv = await QuestionSetRunService.exportCsv({
+    projectId: project.id,
+    runId: run.id
+  });
+  assert.match(csv, /deepseek-web/);
+  assert.match(csv, /DeepSeek 网页版/);
+  assert.match(csv, /deepseek-web-ui/);
+});
+
 test('历史混合引用不进入问题集核心 KPI，但保留可解释的旧口径提示', async () => {
   const record = await QuestionRecord.create({
     user_id: user.id,

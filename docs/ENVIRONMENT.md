@@ -56,6 +56,29 @@ npm run setup:local-key
 
 平台名称、Base URL、默认模型和 API Key 不再使用环境变量。管理员必须在 `/admin/settings` 的“AI 平台”页签人工配置；正式运行没有 `.env` 平台密钥回退。
 
+### DeepSeek Web 本机会话
+
+DeepSeek Web 使用真实、headed Chrome 和独立的持久 profile。正式环境首次使用，或登录、验证、账号切换和选择器类故障恢复时，在虚拟机的持久桌面会话中执行完整流程：
+
+```bash
+npm run prod:stop
+npm run web:login -- deepseek-web
+npm run prod:start
+```
+
+登录、验证码和其他人工验证全部在登录命令打开的 Chrome 中由虚拟机运维负责人完成；确认输入区可用后必须关闭登录浏览器，再执行 `prod:start`。新后端进程会清除旧进程内的登录、验证或选择器熔断；只完成网页登录但不重启后端，不视为恢复完成。系统不接受 Cookie、Authorization、账号或密码配置，也不会自动绕过验证。
+
+正式项目、问题集和项目自动监测共用同一个进程级 FIFO Web 队列；`deepseek-web` 失败只记录 Web 错误，不会回退到 `deepseek` API。
+
+- `DEEPSEEK_WEB_CHROME_EXECUTABLE`：可选 Chrome 可执行文件；未设置时自动检查受支持的本机安装路径。
+- `DEEPSEEK_WEB_PROFILE_DIR`：可选专用 profile，默认 `backend/.runtime/deepseek-web/profile`；不能指向日常 Chrome 或仓库受版本控制目录。
+- `DEEPSEEK_WEB_EVIDENCE_DIR`：可选证据目录，默认 `backend/.runtime/deepseek-web/evidence`。
+- `DEEPSEEK_WEB_TIMEOUT_SECONDS`：可选交互超时，允许 30–600 秒，默认 180 秒。
+
+`.runtime/` 已被版本控制忽略。profile 目录权限会收紧为 `0700`，同一时刻只允许后端或登录命令中的一个进程持有；冲突会返回 `web_profile_in_use`。
+
+生产环境覆盖的数据库、`DEEPSEEK_WEB_PROFILE_DIR` 和 `DEEPSEEK_WEB_EVIDENCE_DIR` 必须位于持久磁盘。后端必须从持续存在的图形桌面会话启动；虚拟机不得休眠，远程桌面断开不能销毁该会话。profile 不得与日常 Chrome、SEO 渲染浏览器或另一套后端共用。
+
 ## 数据库
 - `DB_STORAGE` SQLite 数据库文件路径（默认：`database.sqlite`）
 - `DATABASE_URL` Postgres 连接串；生产环境配置后会优先使用 Supabase/Postgres

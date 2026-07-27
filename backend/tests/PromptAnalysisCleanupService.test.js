@@ -1,8 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { Op } = require('sequelize');
 
 const PromptAnalysisCleanupService = require('../services/PromptAnalysisCleanupService');
+const { WebCaptureStore } = require('../services/WebCaptureStore');
+const {
+  WebCaptureDeletionService
+} = require('../services/WebCaptureDeletionService');
 
 test('deletes visibility metrics by prompt id even when prompt records are missing', async () => {
   let metricWhere = null;
@@ -58,6 +65,15 @@ test('deletes prompt metrics by prompt id and record id before removing records'
   let detailWhere = null;
   let recordWhere = null;
   const models = {
+    WebCaptureDeletionService: {
+      deleteRecords: async (recordIds, work) => {
+        calls.push('evidence:quarantine');
+        assert.deepEqual(recordIds, [11, 12]);
+        const result = await work({ id: 'cleanup-transaction' });
+        calls.push('evidence:commit');
+        return result;
+      }
+    },
     DetectionSchedule: {
       destroy: async () => {
         calls.push('schedules');
@@ -90,7 +106,14 @@ test('deletes prompt metrics by prompt id and record id before removing records'
 
   const result = await PromptAnalysisCleanupService.deleteForPrompts(7, [3, 4], models);
 
-  assert.deepEqual(calls, ['schedules', 'metrics', 'details', 'records']);
+  assert.deepEqual(calls, [
+    'evidence:quarantine',
+    'schedules',
+    'metrics',
+    'details',
+    'records',
+    'evidence:commit'
+  ]);
   assert.deepEqual(result, { records: 2, metrics: 3, details: 2, schedules: 1, reports: 0 });
   assert.equal(metricWhere.project_id, 7);
   assert.deepEqual(metricWhere[Op.or][0].prompt_id[Op.in], [3, 4]);
@@ -257,4 +280,33 @@ test('project analysis cleanup also preserves run-owned historical evidence', as
     metricWhere[Op.and][0][Op.or][1].question_record_id[Op.notIn],
     [21]
   );
+});
+
+test('prompt analysis cleanup physically removes evidence for mutable records', async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'prompt-cleanup-evidence-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const evidenceDir = path.join(root, 'records', '31');
+  await fs.promises.mkdir(evidenceDir, { recursive: true });
+  await fs.promises.writeFile(path.join(evidenceDir, 'capture.png'), 'capture');
+  const captureStore = new WebCaptureStore({ rootDir: root });
+  const deletionService = new WebCaptureDeletionService({
+    captureStore,
+    transactionRunner: async (work) => work({ id: 'cleanup-transaction' })
+  });
+  const models = {
+    WebCaptureDeletionService: deletionService,
+    DetectionSchedule: { destroy: async () => 0 },
+    QuestionRecord: {
+      findAll: async () => [{ id: 31, question_set_run_id: null }],
+      destroy: async () => 1
+    },
+    VisibilityMetric: { destroy: async () => 0 },
+    ResultDetail: { destroy: async () => 1 },
+    ReportSnapshot: { destroy: async () => 0 }
+  };
+
+  const result = await PromptAnalysisCleanupService.deleteForPrompts(7, [3], models);
+
+  assert.equal(result.records, 1);
+  await assert.rejects(fs.promises.access(evidenceDir));
 });

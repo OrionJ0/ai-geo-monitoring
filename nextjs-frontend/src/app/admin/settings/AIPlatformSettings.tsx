@@ -22,6 +22,7 @@ import {
 } from 'antd';
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import type { AIPlatformCapabilities } from '@/lib/useAIPlatformCatalog';
 
 const { Text } = Typography;
 const MASKED_API_KEY = '********************************';
@@ -33,7 +34,7 @@ type PlatformRecord = {
   id: number;
   code: string;
   name: string;
-  adapter_type: 'openai_responses' | 'openai_chat_completions';
+  adapter_type: 'openai_responses' | 'openai_chat_completions' | 'deepseek_web';
   base_url: string;
   default_model: string;
   request_timeout_seconds: number | null;
@@ -49,6 +50,7 @@ type PlatformRecord = {
   web_search_test_status: WebSearchTestStatus;
   last_web_search_tested_at: string | null;
   last_web_search_test_message: string | null;
+  capabilities: AIPlatformCapabilities;
 };
 
 type PlatformFormValues = {
@@ -84,6 +86,7 @@ const adapterOptions = [
 ];
 
 function adapterLabel(adapterType: PlatformRecord['adapter_type']) {
+  if (adapterType === 'deepseek_web') return '真实网页 · 本机 Chrome';
   return adapterOptions.find((item) => item.value === adapterType)?.label || adapterType;
 }
 
@@ -180,7 +183,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       enabled: platform.enabled,
     });
     setOpen(true);
-    if (platform.configured) {
+    if (platform.configured && platform.capabilities.model_listing) {
       void loadModels(platform.id, platform.default_model);
     } else {
       setModelOptions(platform.default_model ? [platform.default_model] : []);
@@ -386,14 +389,18 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
         <Space orientation="vertical" size={2} style={{ maxWidth: 440 }}>
           <Text type="secondary">{adapterLabel(platform.adapter_type)}</Text>
           <Text type="secondary" ellipsis={{ tooltip: platform.base_url }}>{platform.base_url}</Text>
-          <Text
-            type="secondary"
-            code
-            ellipsis={{ tooltip: stringifyRequestOptions(platform.request_options) }}
-            style={{ maxWidth: 420 }}
-          >
-            请求参数：{JSON.stringify(platform.request_options || {})}
-          </Text>
+          {platform.adapter_type === 'deepseek_web' ? (
+            <Text type="secondary">登录方式：本机人工登录并复用专用会话</Text>
+          ) : (
+            <Text
+              type="secondary"
+              code
+              ellipsis={{ tooltip: stringifyRequestOptions(platform.request_options) }}
+              style={{ maxWidth: 420 }}
+            >
+              请求参数：{JSON.stringify(platform.request_options || {})}
+            </Text>
+          )}
         </Space>
       ),
     },
@@ -408,9 +415,14 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       title: '配置状态',
       key: 'configured',
       width: 130,
-      render: (_, platform) => platform.configured
-        ? <Tag color="success">已配置 · {platform.api_key_last4}</Tag>
-        : <Tag color="warning">未配置</Tag>,
+      render: (_, platform) => {
+        if (platform.capabilities.interactive_login) {
+          return <Tag color={platform.configured ? 'processing' : 'warning'}>需本机人工登录</Tag>;
+        }
+        return platform.configured
+          ? <Tag color="success">已配置 · {platform.api_key_last4}</Tag>
+          : <Tag color="warning">未配置</Tag>;
+      },
     },
     {
       title: '启用状态',
@@ -429,20 +441,20 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       title: '连接测试',
       key: 'connection_test_status',
       width: 150,
-      render: (_, platform) => (
+      render: (_, platform) => platform.capabilities.connection_test ? (
         <Space orientation="vertical" size={2}>
           {testStatusTag(platform.test_status)}
           <Text type="secondary" style={{ fontSize: 12 }}>
             {platform.last_tested_at ? new Date(platform.last_tested_at).toLocaleString() : '尚未主动测试'}
           </Text>
         </Space>
-      ),
+      ) : <Text type="secondary">不适用</Text>,
     },
     {
       title: '联网能力',
       key: 'web_search_test_status',
       width: 170,
-      render: (_, platform) => (
+      render: (_, platform) => platform.capabilities.api_web_search_test ? (
         <Space orientation="vertical" size={2}>
           {testStatusTag(platform.web_search_test_status || 'untested', 'web_search')}
           <Text type="secondary" style={{ fontSize: 12 }}>
@@ -456,7 +468,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
             </Text>
           ) : null}
         </Space>
-      ),
+      ) : <Text type="secondary">由真实页面采集验证</Text>,
     },
     {
       title: '操作',
@@ -465,16 +477,22 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       fixed: 'right',
       render: (_, platform) => (
         <Space wrap>
-          <Button size="small" onClick={() => openEdit(platform)}>编辑</Button>
-          <Button size="small" loading={testingId === platform.id} onClick={() => testConnection(platform)}>测试连接</Button>
-          <Button
-            size="small"
-            loading={testingWebSearchId === platform.id}
-            onClick={() => testWebSearch(platform)}
-          >
-            检测联网能力
-          </Button>
-          {platform.configured ? (
+          {platform.adapter_type !== 'deepseek_web' ? (
+            <Button size="small" onClick={() => openEdit(platform)}>编辑</Button>
+          ) : null}
+          {platform.capabilities.connection_test ? (
+            <Button size="small" loading={testingId === platform.id} onClick={() => testConnection(platform)}>测试连接</Button>
+          ) : null}
+          {platform.capabilities.api_web_search_test ? (
+            <Button
+              size="small"
+              loading={testingWebSearchId === platform.id}
+              onClick={() => testWebSearch(platform)}
+            >
+              检测联网能力
+            </Button>
+          ) : null}
+          {platform.configured && platform.capabilities.api_key_management ? (
             <Popconfirm
               title="确认清除 API Key？"
               description="清除后该平台将不能参与运行，启用状态不会自动改变。"
@@ -502,8 +520,8 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       <Alert
         type="info"
         showIcon
-        title="平台统一使用 OpenAI 兼容协议"
-        description="系统不会自动导入 .env 中的 AI API 配置。调用类型只保留 Chat Completions 与 Responses 两种协议，不再按豆包、千问等供应商命名；编辑平台时可在模型下拉框中刷新供应商模型列表，列表不会保存。"
+        title="API 平台与真实网页监测使用独立能力"
+        description="自定义平台继续使用 OpenAI 兼容协议；DeepSeek 网页版是受管监测平台，只允许启停，并通过本机专用 Chrome 人工登录，不配置 API Key 或模型目录。"
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Space>
@@ -593,7 +611,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
               <Button
                 icon={<ReloadOutlined />}
                 loading={modelLoading}
-                disabled={!editing}
+                disabled={!editing || !editing.capabilities.model_listing}
                 onClick={refreshModels}
               >
                 刷新模型
@@ -604,8 +622,8 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
             name="api_key"
             label="API Key"
             extra={editing?.configured
-              ? '已配置；点击眼睛查看完整密钥，直接输入新值可替换现有密钥。'
-              : '当前未配置；可以先保存，之后再补充'}
+              ? '已配置；点击眼睛查看完整密钥，直接输入新值可替换现有密钥。系统不会自动导入浏览器或环境中的密钥。'
+              : '当前未配置；可以先保存，之后再补充。系统不会自动导入浏览器或环境中的密钥。'}
           >
             <Input.Password
               autoComplete="new-password"

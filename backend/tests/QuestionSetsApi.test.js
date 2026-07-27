@@ -194,7 +194,7 @@ test('用户可以编辑问题集，删除问题集后其中的单问题仍然�
   assert.equal(remainingQuestions.every((item) => item.prompt_group_id == null), true);
 });
 
-test('问题集内每个启用问题使用项目全部模型入队，单问题仍保留自己的模型范围', async () => {
+test('问题集和单问题都创建可重试的原子运行报告，单问题仍保留自己的模型范围', async () => {
   const questions = await TrackedPrompt.findAll({
     where: { project_id: project.id },
     order: [['id', 'ASC']]
@@ -209,21 +209,20 @@ test('问题集内每个启用问题使用项目全部模型入队，单问题�
   const questionSetId = createResponse.payload.data.id;
   const originalStartQuestionSetRun = ProjectRunService.startQuestionSetRun;
   const originalEnqueue = ProjectRunService.enqueueProjectRun;
-  const originalRun = ProjectRunService.runProject;
   const calls = [];
   let legacyEnqueueCalls = 0;
   ProjectRunService.startQuestionSetRun = async (options) => {
-    calls.push({ type: 'set', options });
+    calls.push({ type: options.questionSet?.id ? 'set' : 'single', options });
     return {
       ok: true,
       status: 202,
-      message: '问题集分析已加入队列',
+      message: options.questionSet?.id ? '问题集分析已加入队列' : '问题分析已加入队列',
       data: {
         status: 'queued',
         total: options.prompts.length,
         accepted_count: options.prompts.length,
-        question_set_run_id: 101,
-        report_url: `/geo/question-set-reports?project_id=${project.id}&run_id=101`,
+        question_set_run_id: options.questionSet?.id ? 101 : 102,
+        report_url: `/geo/question-set-reports?project_id=${project.id}&run_id=${options.questionSet?.id ? 101 : 102}`,
         idempotent_replay: false
       }
     };
@@ -232,16 +231,6 @@ test('问题集内每个启用问题使用项目全部模型入队，单问题�
     legacyEnqueueCalls += 1;
     throw new Error('legacy question-set enqueue path should not run');
   };
-  ProjectRunService.runProject = async (options) => {
-    calls.push({ type: 'single', options });
-    return {
-      ok: true,
-      status: 200,
-      message: '单问题分析已完成',
-      data: { total: options.prompts.length, completed: 1, failed: 0 }
-    };
-  };
-
   try {
     const runsBefore = await QuestionSetRun.count({
       where: { question_set_id: questionSetId }
@@ -266,17 +255,22 @@ test('问题集内每个启用问题使用项目全部模型入队，单问题�
     );
 
     const singleRunResponse = await requestRoute('post', '/:projectId/prompts/:promptId/run', {
-      params: { projectId: project.id, promptId: questions[0].id }
+      params: { projectId: project.id, promptId: questions[0].id },
+      headers: { 'Idempotency-Key': 'single-question-run-key-001' }
     });
-    assert.equal(singleRunResponse.statusCode, 200);
+    assert.equal(singleRunResponse.statusCode, 202);
     assert.equal(singleRunResponse.payload.success, true);
     assert.equal(calls[1].type, 'single');
     assert.deepEqual(calls[1].options.prompts.map((item) => item.id), [questions[0].id]);
     assert.deepEqual(calls[1].options.prompts[0].platforms, ['doubao']);
+    assert.equal(calls[1].options.questionSet.id, null);
+    assert.match(calls[1].options.questionSet.name, /问题一/);
+    assert.equal(calls[1].options.idempotencyKey, 'single-question-run-key-001');
+    assert.equal(singleRunResponse.payload.data.question_set_run_id, 102);
+    assert.match(singleRunResponse.payload.data.report_url, /run_id=102/);
   } finally {
     ProjectRunService.startQuestionSetRun = originalStartQuestionSetRun;
     ProjectRunService.enqueueProjectRun = originalEnqueue;
-    ProjectRunService.runProject = originalRun;
   }
 });
 

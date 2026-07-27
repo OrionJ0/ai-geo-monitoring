@@ -14,6 +14,7 @@ const {
   QuestionSetRetryBatch,
   ScheduledExecution
 } = require('../models');
+const WebCaptureDeletionService = require('./WebCaptureDeletionService');
 
 class ProjectDeletionService {
   normalizeIds(values) {
@@ -48,6 +49,10 @@ class ProjectDeletionService {
     const QuestionSetRunRepository = repositories.QuestionSetRun || QuestionSetRun;
     const RetryBatchRepository = repositories.QuestionSetRetryBatch || QuestionSetRetryBatch;
     const ScheduledExecutionRepository = repositories.ScheduledExecution || ScheduledExecution;
+    const captureDeletionService = repositories.WebCaptureDeletionService
+      || (Object.keys(repositories).length ? {
+        deleteRecords: async (_recordIds, work) => work(null)
+      } : WebCaptureDeletionService);
 
     const records = await RecordRepository.findAll({
       where: { project_id: projectId },
@@ -56,50 +61,88 @@ class ProjectDeletionService {
     });
     const recordIds = this.normalizeIds(records.map((item) => item.id));
 
-    const metrics = await MetricRepository.destroy({ where: { project_id: projectId } });
-    let details = 0;
-    let deletedRecords = 0;
-    if (recordIds.length) {
-      details = await DetailRepository.destroy({
-        where: { question_record_id: { [Op.in]: recordIds } }
+    return captureDeletionService.deleteRecords(recordIds, async (transaction) => {
+      const transactionOption = transaction ? { transaction } : {};
+      const metrics = await MetricRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
       });
-      deletedRecords = await RecordRepository.destroy({
-        where: {
-          project_id: projectId,
-          id: { [Op.in]: recordIds }
-        }
-      });
-    }
-
-    const schedules = await ScheduleRepository.destroy({ where: { project_id: projectId } });
-    const reports = await ReportRepository.destroy({ where: { project_id: projectId } });
-    const questionSetRetryBatches = await RetryBatchRepository.destroy({ where: { project_id: projectId } });
-    const questionSetRuns = await QuestionSetRunRepository.destroy({ where: { project_id: projectId } });
-    const scheduledExecutions = await ScheduledExecutionRepository.destroy({ where: { project_id: projectId } });
-    const alerts = await AlertRepository.destroy({ where: { project_id: projectId } });
-    const prompts = await PromptRepository.destroy({ where: { project_id: projectId } });
-    const groups = await PromptGroupRepository.destroy({ where: { project_id: projectId } });
-    const competitors = await CompetitorRepository.destroy({ where: { project_id: projectId } });
-    const projects = await ProjectRepository.destroy({ where: { id: projectId } });
-
-    return {
-      ok: true,
-      deleted: {
-        projects,
-        competitors,
-        groups,
-        prompts,
-        alerts,
-        reports,
-        questionSetRetryBatches,
-        questionSetRuns,
-        scheduledExecutions,
-        schedules,
-        records: deletedRecords,
-        details,
-        metrics
+      let details = 0;
+      let deletedRecords = 0;
+      if (recordIds.length) {
+        details = await DetailRepository.destroy({
+          where: { question_record_id: { [Op.in]: recordIds } },
+          ...transactionOption
+        });
+        deletedRecords = await RecordRepository.destroy({
+          where: {
+            project_id: projectId,
+            id: { [Op.in]: recordIds }
+          },
+          ...transactionOption
+        });
       }
-    };
+
+      const schedules = await ScheduleRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const reports = await ReportRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const questionSetRetryBatches = await RetryBatchRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const questionSetRuns = await QuestionSetRunRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const scheduledExecutions = await ScheduledExecutionRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const alerts = await AlertRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const prompts = await PromptRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const groups = await PromptGroupRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const competitors = await CompetitorRepository.destroy({
+        where: { project_id: projectId },
+        ...transactionOption
+      });
+      const projects = await ProjectRepository.destroy({
+        where: { id: projectId },
+        ...transactionOption
+      });
+
+      return {
+        ok: true,
+        deleted: {
+          projects,
+          competitors,
+          groups,
+          prompts,
+          alerts,
+          reports,
+          questionSetRetryBatches,
+          questionSetRuns,
+          scheduledExecutions,
+          schedules,
+          records: deletedRecords,
+          details,
+          metrics
+        }
+      };
+    });
   }
 }
 

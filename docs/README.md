@@ -26,8 +26,10 @@
 - `DEPLOYMENT.md`：部署与运维建议
 - `SECURITY.md`：安全加固说明与最佳实践
 - `closed-2026-07-23-002-ai-platform-settings/`：全局 AI 平台设置中心、临时模型目录、分析结构化协议与 OpenAI 兼容协议收敛的已完成需求
-- `active-2026-07-23-004-question-set-run-reports/`：问题集独立运行报告、AI 实体/关系结构化指标、失败重试可靠性、标准 CSV 往返与 A4 竖版 PDF 的当前修复需求
+- `active-2026-07-23-004-question-set-run-reports/`：单问题与问题集独立运行报告、AI 实体/关系结构化指标、失败重试可靠性、标准 CSV 往返与 A4 竖版 PDF 的当前修复需求
 - `closed-2026-07-26-001-question-set-run-reliability/`：已完成的问题集运行原子启动、调度防重、执行租约、恢复收敛、历史证据保护和发布验收
+- `closed-2026-07-26-002-deepseek-web-monitoring/`：已完成的 DeepSeek 真实网页串行采集、人工登录会话、引用/截图证据、API/Web 样本隔离，以及问题库单问题/问题集和自动监测入口验收
+- `blocked-2026-07-27-001-market-team-vm-web-queue/`：市场部共享 admin、虚拟机单实例、DeepSeek Web 公共排队状态；实现和自动化验收完成，等待目标虚拟机多浏览器发布验收
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 
@@ -79,9 +81,9 @@
 
 - 页面入口：`/geo/seo-audit`（需登录）
 - 检测模式：默认“全站检测”异步扫描同域链接、默认 Sitemap、robots 声明 Sitemap 和 Sitemap index，最多检测 200 页；“单页检测”只分析输入的精确 URL
-- 当前能力：执行 23 项页面基础检查，返回带版本号的技术健康度；全站报告另有不改写 v4 分数的专项审计层，检测重复标题/描述、Canonical 聚类与冲突、重定向链/循环、失效内外链、疑似孤儿页、内链来源质量、导航链接可抓取性、站点 URL 一致性、hreflang、Sitemap 差异、JavaScript 渲染抽样及相对上次报告的问题变化
-- 报告行动清单：顶部“优先修复内容”统一汇总页面技术问题、跨页专项问题和缺失的平台验证标签；导航问题会列出全部入口、元素类型、出现次数和有界的出现页面样本，并明确区分“问题出现页面”与“跳转目标”
-- 有效性规则：`robots.txt`、Sitemap、Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 和图片 Alt 均校验实际内容，文件返回 200、标签存在或 `robots.txt` 声明 Sitemap 本身不等于通过
+- 当前能力：执行 23 项页面基础检查，返回带版本号的技术健康度；全站报告另有不改写 v4 分数的 `sitewide-audit-v4` 专项审计层，检测重复标题/描述、Canonical 聚类与冲突、重定向链/循环、失效内外链、疑似孤儿页、内链来源质量、导航链接可抓取性、站点 URL 一致性、hreflang、Sitemap 页面覆盖、JavaScript 渲染抽样及相对上次报告的问题变化
+- 报告行动清单：顶部“优先修复内容”统一汇总页面技术问题、跨页专项问题和缺失的平台验证标签；导航问题默认只展示少量导航项名称与统一出现范围，完整标签和页面证据折叠在“查看详情”
+- 有效性规则：`robots.txt`、Sitemap、Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 和图片 Alt 均校验实际内容，文件返回 200、标签存在或 `robots.txt` 声明 Sitemap 本身不等于通过；Sitemap 可用性与页面覆盖独立展示，无有效页面清单时覆盖、疑似孤儿页和内链来源质量均为“暂时无法检查”
 - 爬虫权限：按每个被检测路径解析 `robots.txt`，展示 Googlebot、Bingbot、Baiduspider 和重要 AI 搜索、用户触发、训练类 token；搜索/AI 搜索阻断纳入评分，其余作为授权信息不计分。全开放只表示 robots 未声明限制，不能证明真实抓取、收录或引用
 - 搜索平台：固定从站点首页分别检查 Google、Bing、百度非空 HTML 验证标签；该结果只表示页面源码信号，不能证明平台后台当前已验证，也不检测 DNS 或验证文件方式
 - 权重维护：`backend/config/seoAuditRules.js` 集中维护规则版本、严重程度、权重、阈值、爬虫画像、页面上限、并发和 Sitemap 深度；Keywords 默认权重为 1，Sitemap 和爬虫权限默认权重均为 7

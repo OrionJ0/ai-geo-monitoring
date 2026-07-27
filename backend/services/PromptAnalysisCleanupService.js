@@ -46,53 +46,63 @@ class PromptAnalysisCleanupService {
       raw: true
     });
     const { mutableRecordIds, protectedRecordIds } = this.partitionRecords(records);
+    const deletionService = models.WebCaptureDeletionService || {
+      deleteRecords: async (_recordIds, work) => work(null)
+    };
+    return deletionService.deleteRecords(mutableRecordIds, async (transaction) => {
+      const transactionOption = transaction ? { transaction } : {};
+      const schedules = DetectionSchedule
+        ? await DetectionSchedule.destroy({
+          where: {
+            project_id: projectId,
+            tracked_prompt_id: { [Op.in]: ids }
+          },
+          ...transactionOption
+        })
+        : 0;
 
-    const schedules = DetectionSchedule
-      ? await DetectionSchedule.destroy({
-        where: {
+      const metricConditions = [{ prompt_id: { [Op.in]: ids } }];
+      if (mutableRecordIds.length) {
+        metricConditions.push({ question_record_id: { [Op.in]: mutableRecordIds } });
+      }
+      const metrics = await VisibilityMetric.destroy({
+        where: this.protectRunOwnedMetrics({
           project_id: projectId,
-          tracked_prompt_id: { [Op.in]: ids }
-        }
-      })
-      : 0;
+          [Op.or]: metricConditions
+        }, protectedRecordIds),
+        ...transactionOption
+      });
 
-    const metricConditions = [{ prompt_id: { [Op.in]: ids } }];
-    if (mutableRecordIds.length) {
-      metricConditions.push({ question_record_id: { [Op.in]: mutableRecordIds } });
-    }
-    const metrics = await VisibilityMetric.destroy({
-      where: this.protectRunOwnedMetrics({
-        project_id: projectId,
-        [Op.or]: metricConditions
-      }, protectedRecordIds)
+      const reports = ReportSnapshot
+        ? await ReportSnapshot.destroy({
+          where: {
+            project_id: projectId,
+            status: 'generated'
+          },
+          ...transactionOption
+        })
+        : 0;
+
+      let details = 0;
+      let deletedRecords = 0;
+      if (mutableRecordIds.length) {
+        details = await ResultDetail.destroy({
+          where: {
+            question_record_id: { [Op.in]: mutableRecordIds }
+          },
+          ...transactionOption
+        });
+        deletedRecords = await QuestionRecord.destroy({
+          where: {
+            project_id: projectId,
+            id: { [Op.in]: mutableRecordIds }
+          },
+          ...transactionOption
+        });
+      }
+
+      return { records: deletedRecords, metrics, details, schedules, reports };
     });
-
-    const reports = ReportSnapshot
-      ? await ReportSnapshot.destroy({
-        where: {
-          project_id: projectId,
-          status: 'generated'
-        }
-      })
-      : 0;
-
-    let details = 0;
-    let deletedRecords = 0;
-    if (mutableRecordIds.length) {
-      details = await ResultDetail.destroy({
-        where: {
-          question_record_id: { [Op.in]: mutableRecordIds }
-        }
-      });
-      deletedRecords = await QuestionRecord.destroy({
-        where: {
-          project_id: projectId,
-          id: { [Op.in]: mutableRecordIds }
-        }
-      });
-    }
-
-    return { records: deletedRecords, metrics, details, schedules, reports };
   }
 
   async deleteForProject(projectId, models) {
@@ -106,37 +116,46 @@ class PromptAnalysisCleanupService {
       raw: true
     });
     const { mutableRecordIds, protectedRecordIds } = this.partitionRecords(records);
+    const deletionService = models.WebCaptureDeletionService || {
+      deleteRecords: async (_recordIds, work) => work(null)
+    };
+    return deletionService.deleteRecords(mutableRecordIds, async (transaction) => {
+      const transactionOption = transaction ? { transaction } : {};
+      const metrics = await VisibilityMetric.destroy({
+        where: this.protectRunOwnedMetrics({ project_id: id }, protectedRecordIds),
+        ...transactionOption
+      });
 
-    const metrics = await VisibilityMetric.destroy({
-      where: this.protectRunOwnedMetrics({ project_id: id }, protectedRecordIds)
+      let details = 0;
+      let deletedRecords = 0;
+      if (mutableRecordIds.length) {
+        details = await ResultDetail.destroy({
+          where: {
+            question_record_id: { [Op.in]: mutableRecordIds }
+          },
+          ...transactionOption
+        });
+        deletedRecords = await QuestionRecord.destroy({
+          where: {
+            project_id: id,
+            id: { [Op.in]: mutableRecordIds }
+          },
+          ...transactionOption
+        });
+      }
+
+      const reports = ReportSnapshot
+        ? await ReportSnapshot.destroy({
+          where: {
+            project_id: id,
+            status: 'generated'
+          },
+          ...transactionOption
+        })
+        : 0;
+
+      return { records: deletedRecords, metrics, details, reports };
     });
-
-    let details = 0;
-    let deletedRecords = 0;
-    if (mutableRecordIds.length) {
-      details = await ResultDetail.destroy({
-        where: {
-          question_record_id: { [Op.in]: mutableRecordIds }
-        }
-      });
-      deletedRecords = await QuestionRecord.destroy({
-        where: {
-          project_id: id,
-          id: { [Op.in]: mutableRecordIds }
-        }
-      });
-    }
-
-    const reports = ReportSnapshot
-      ? await ReportSnapshot.destroy({
-        where: {
-          project_id: id,
-          status: 'generated'
-        }
-      })
-      : 0;
-
-    return { records: deletedRecords, metrics, details, reports };
   }
 }
 

@@ -57,7 +57,7 @@ export default function GeoLayout({
   const breadcrumbMap: Record<string, { path: string; label: string }> = {
     '/projects': { path: `${basePath}/projects`, label: '品牌项目' },
     '/prompts': { path: `${basePath}/prompts`, label: '问题库' },
-    '/question-set-reports': { path: `${basePath}/question-set-reports`, label: '问题集报告' },
+    '/question-set-reports': { path: `${basePath}/question-set-reports`, label: '运行报告' },
     '/project-dashboard': { path: `${basePath}/project-dashboard`, label: '项目看板' },
     '/seo-audit': { path: `${basePath}/seo-audit`, label: 'SEO检测' },
     '/sources': { path: `${basePath}/sources`, label: '来源分析' },
@@ -79,7 +79,7 @@ export default function GeoLayout({
     { key: '/projects', label: <Link href="/geo/projects">品牌项目</Link> },
     { key: '/seo-audit', label: <Link href="/geo/seo-audit">SEO检测</Link> },
     { key: '/prompts', label: <Link href="/geo/prompts">问题库</Link> },
-    { key: '/question-set-reports', label: <Link href="/geo/question-set-reports">问题集报告</Link> },
+    { key: '/question-set-reports', label: <Link href="/geo/question-set-reports">运行报告</Link> },
     { key: '/sources', label: <Link href="/geo/sources">来源分析</Link> },
     { key: '/project-dashboard', label: <Link href="/geo/project-dashboard">项目看板</Link> },
     {

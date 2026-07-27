@@ -1,7 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
+import axios from '@/lib/axiosConfig';
+
+export type AIPlatformCapabilities = {
+  monitoring: boolean;
+  analysis: boolean;
+  prompt_generation: boolean;
+  model_listing: boolean;
+  api_key_management: boolean;
+  connection_test: boolean;
+  api_web_search_test: boolean;
+  direct_stream: boolean;
+  legacy_schedule: boolean;
+  interactive_login: boolean;
+};
 
 export type AIPlatformCatalogItem = {
   code: string;
@@ -10,6 +23,7 @@ export type AIPlatformCatalogItem = {
   configured: boolean;
   selectable: boolean;
   unavailable_reason?: string | null;
+  capabilities?: AIPlatformCapabilities;
 };
 
 const unavailableLabels: Record<string, string> = {

@@ -9,7 +9,8 @@
     "test:postgres:scheduler": "node --test tests/integration/ScheduledExecutionPostgres.test.js",
     "audit:run-ownership": "node scripts/migrateQuestionSetRunOwnership.js",
     "migrate:run-ownership": "node scripts/migrateQuestionSetRunOwnership.js --apply",
-    "setup:local-key": "node scripts/setupLocalEncryptionKey.js"
+    "setup:local-key": "node scripts/setupLocalEncryptionKey.js",
+    "web:login": "node scripts/deepseekWebLogin.js"
   },
   "keywords": [],
   "author": "",

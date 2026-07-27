@@ -94,7 +94,7 @@ export default function QuestionSetRunHistoryDrawer({
       title={(
         <div className={styles.drawerTitle}>
           <span><HistoryOutlined /> 历史报告</span>
-          <small>每次问题集运行都会单独成档</small>
+          <small>每次问题或问题集运行都会单独成档</small>
         </div>
       )}
       open={open}
@@ -105,7 +105,7 @@ export default function QuestionSetRunHistoryDrawer({
       extra={(
         <Button
           type="text"
-          aria-label="刷新问题集历史报告"
+          aria-label="刷新运行历史报告"
           icon={<ReloadOutlined />}
           onClick={onRefresh}
           loading={loading}
@@ -138,7 +138,7 @@ export default function QuestionSetRunHistoryDrawer({
       ) : items.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={selectedQuestionSetId ? '这个问题集还没有历史报告' : '还没有问题集历史报告'}
+          description={selectedQuestionSetId ? '这个问题集还没有历史报告' : '还没有运行历史报告'}
         />
       ) : (
         <div className={styles.drawerHistoryList} aria-busy={loading}>

@@ -12,11 +12,11 @@ const layoutPath = path.resolve(__dirname, '../app/geo/layout.tsx');
 const promptPagePath = path.resolve(__dirname, '../app/geo/prompts/page.tsx');
 const dashboardCssPath = path.resolve(__dirname, '../app/geo/project-dashboard/project-dashboard.module.css');
 
-test('问题集报告页面以运行历史和单次逐条结果为中心', () => {
-  assert.equal(fs.existsSync(pagePath), true, '问题集报告页面应存在');
+test('运行报告页面以运行历史和单次逐条结果为中心', () => {
+  assert.equal(fs.existsSync(pagePath), true, '运行报告页面应存在');
   const source = fs.readFileSync(pagePath, 'utf8');
 
-  assert.match(source, /问题集报告/);
+  assert.match(source, /运行报告/);
   assert.match(source, /运行历史/);
   assert.match(source, /逐问题结果/);
   assert.match(source, /question-set-runs/);
@@ -67,17 +67,18 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.match(source, /analysis_diagnostics/);
   assert.match(source, /错误代码/);
   assert.match(source, /输出长度/);
-  assert.match(source, /官网明确引用率/);
+  assert.match(source, /官网引用率/);
   assert.match(source, /summary\.owned_citation_rate/);
   assert.match(source, /summary\.total_owned_citations/);
   assert.match(source, /source\.owned/);
   assert.match(source, /品牌官网/);
-  assert.match(source, /明确引用来源（计入核心 KPI）/);
+  assert.match(source, /引用源（计入核心 KPI）/);
   assert.match(source, /回答正文链接（不计入 KPI）/);
   assert.match(source, /平台检索候选（不计入 KPI）/);
   assert.match(source, /分析模型补充来源（不计入 KPI）/);
-  assert.match(source, /历史混合来源.*不计入明确引用 KPI/);
-  assert.match(source, /有效分析.*明确引用/);
+  assert.match(source, /历史混合来源.*不计入引用 KPI/);
+  assert.match(source, /有效分析.*引用/);
+  assert.doesNotMatch(source, /明确引用/);
 });
 
 test('问题集运行历史从右侧抽屉打开，主页面只保留单次报告', () => {
@@ -114,15 +115,22 @@ test('历史筛选说明的布局不会把问题集下拉框拆成两行', () =>
   assert.match(css, /\.historyFilter\s*>\s*div:first-child\s*\{/);
 });
 
-test('问题集报告支持标准 CSV 导入导出并轮询运行中的报告', () => {
+test('运行报告支持标准 CSV 导入导出并按可见性降频轮询', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
   const drawer = fs.readFileSync(historyDrawerPath, 'utf8');
+  const pollingStart = source.indexOf('const pollInterval');
+  const pollingEnd = source.indexOf('const nextState = report', pollingStart);
+  const pollingEffect = source.slice(pollingStart, pollingEnd);
 
   assert.match(source, /question-set-runs\/\$\{report\.id\}\/export/);
   assert.match(source, /question-set-runs\/import/);
   assert.match(source, /await file\.text\(\)/);
   assert.match(source, /report\?\.status !== 'running'/);
-  assert.match(source, /setInterval[\s\S]*4000/);
+  assert.match(pollingEffect, /report\?\.status === 'paused' \? 30_000 : 10_000/);
+  assert.match(pollingEffect, /visibilitychange/);
+  assert.match(pollingEffect, /document\.visibilityState !== 'visible'/);
+  assert.doesNotMatch(pollingEffect, /loadHistory/);
+  assert.match(source, /已开始调度的任务完成后暂停/);
   assert.match(source, /导入报告/);
   assert.match(source, /downloadQuestionSetReportPdf/);
   assert.match(source, /导出 PDF/);
@@ -182,7 +190,7 @@ test('运行中的报告和逐模型结果使用旋转图标提示仍在处理',
   assert.match(drawer, /<LoadingOutlined spin \/>/);
 });
 
-test('问题集报告成为问题库后的主入口，旧汇总入口下沉且运行后进入独立报告', () => {
+test('运行报告成为问题库后的主入口，旧汇总入口下沉且运行后进入独立报告', () => {
   const layout = fs.readFileSync(layoutPath, 'utf8');
   const prompts = fs.readFileSync(promptPagePath, 'utf8');
   const questionSetRunStart = prompts.indexOf('const runQuestionSet');
@@ -204,8 +212,8 @@ test('问题集报告成为问题库后的主入口，旧汇总入口下沉且�
   assert.ok(promptIndex >= 0, '问题库入口应存在');
   assert.ok(questionSetRunStart >= 0 && questionSetRunEnd > questionSetRunStart, '应找到问题集运行处理函数');
   assert.ok(seoIndex > projectIndex && promptIndex > seoIndex, 'SEO 检测应位于品牌项目和问题库之间');
-  assert.ok(reportIndex > promptIndex, '问题集报告应位于问题库之后');
-  assert.ok(sourceIndex > reportIndex && dashboardIndex > sourceIndex, '来源分析和项目看板应按顺序位于问题集报告之后');
+  assert.ok(reportIndex > promptIndex, '运行报告应位于问题库之后');
+  assert.ok(sourceIndex > reportIndex && dashboardIndex > sourceIndex, '来源分析和项目看板应按顺序位于运行报告之后');
   assert.ok(secondaryIndex > dashboardIndex, '其他分组应位于分析入口之后');
   assert.ok(alertsIndex > secondaryIndex && noticeIndex > alertsIndex && profileIndex > noticeIndex, '其他分组内顺序应正确');
   assert.doesNotMatch(layout.slice(layout.indexOf('const menuItems'), layout.indexOf('// 未登录')), /\/geo\/reports/);

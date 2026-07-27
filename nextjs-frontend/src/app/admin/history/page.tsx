@@ -1,10 +1,13 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, Table, Space, Button, Input, Select, Tag, message } from 'antd';
-import axios from 'axios';
+import { Card, Table, Space, Button, Input, Select, Tag, Typography, message } from 'antd';
+import axios from '@/lib/axiosConfig';
 import { resolveKeywordStats } from '@/utils/keywordStats.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
+import WebCaptureEvidence from '@/components/WebCaptureEvidence';
+
+const { Paragraph, Text } = Typography;
 
 type HistoryFilters = {
   userId?: string;
@@ -168,6 +171,19 @@ export default function AdminHistoryPage() {
           pageSize: limit,
           total,
           onChange: (p, l) => { setPage(p); setLimit(l); fetchHistory(p, l, { userId, platform, status, q }); },
+        }}
+        expandable={{
+          expandedRowRender: (record: any) => (
+            <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+              <div>
+                <Text strong>AI 原始回答</Text>
+                <Paragraph style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                  {record?.resultDetail?.ai_response_original || '暂无回答内容'}
+                </Paragraph>
+              </div>
+              <WebCaptureEvidence record={record} />
+            </Space>
+          )
         }}
       />
     </Card>

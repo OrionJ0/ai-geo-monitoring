@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,6 +30,10 @@ test('starts, reports, and stops a detached managed process', async (t) => {
   const started = await manager.start(service);
   assert.equal(started.running, true);
   assert.equal(started.pid > 0, true);
+
+  const repeatedStart = await manager.start(service);
+  assert.equal(repeatedStart.running, true);
+  assert.equal(repeatedStart.pid, started.pid);
 
   const status = await manager.status(service);
   assert.equal(status.running, true);
@@ -72,4 +77,51 @@ test('cleans up a child that fails the managed command verification', async (t) 
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.throws(() => process.kill(pid, 0));
   assert.equal((await manager.status(service)).running, false);
+});
+
+test('refuses to overwrite or stop a live PID owned by another command', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-process-unknown-'));
+  const runtimeDirectory = path.join(directory, 'run');
+  const unknownMarker = `ai-geo-unknown-${process.pid}-${Date.now()}`;
+  const child = spawn(
+    process.execPath,
+    ['-e', `process.title='${unknownMarker}';setInterval(()=>{},1000)`],
+    { detached: true, stdio: 'ignore' }
+  );
+  await new Promise((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', reject);
+  });
+  child.unref();
+
+  const manager = createProcessManager({
+    runtimeDirectory,
+    logDirectory: path.join(directory, 'logs'),
+  });
+  const service = {
+    name: 'fixture',
+    command: process.execPath,
+    args: ['-e', 'setInterval(()=>{},1000)'],
+    cwd: directory,
+    marker: 'expected-managed-command-marker',
+  };
+  fs.mkdirSync(runtimeDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(runtimeDirectory, 'fixture.json'),
+    `${JSON.stringify({ pid: child.pid })}\n`
+  );
+
+  t.after(() => {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {}
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  const status = await manager.status(service);
+  assert.equal(status.running, false);
+  assert.equal(status.pid, child.pid);
+  await assert.rejects(manager.start(service), /拒绝覆盖进程记录/);
+  await assert.rejects(manager.stop(service), /拒绝终止未知进程/);
+  assert.doesNotThrow(() => process.kill(child.pid, 0));
 });

@@ -2,22 +2,14 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
 import axios from 'axios';
-import { useRouter } from 'next/navigation';
-import { getRunResultNotice } from '@/utils/runResultMessage.cjs';
 import { isValidWebsiteInput, normalizeList, normalizeNullableText } from '@/utils/projectFieldNormalization.cjs';
-import { getProjectPromptRunBlockReason, getRunnableProjectPromptIds, summarizeProjectPrompts } from '@/utils/projectPromptSummary.cjs';
+import { getProjectPromptRunBlockReason, summarizeProjectPrompts } from '@/utils/projectPromptSummary.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
-import { getApiRunResultData } from '@/utils/apiRunResult.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 
 const { Text } = Typography;
-
-const projectRunBlockMessages = {
-  no_enabled_prompt: '该项目暂无启用的问题，请先在问题库中添加或启用问题',
-  platform_mismatch: '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置'
-};
 
 const websiteRules = [
   {
@@ -30,7 +22,6 @@ const websiteRules = [
 ];
 
 export default function GeoProjectsPage() {
-  const router = useRouter();
   const {
     labels: platformLabels,
     selectableCodes,
@@ -40,7 +31,6 @@ export default function GeoProjectsPage() {
   } = useAIPlatformCatalog();
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState([]);
-  const [runningProjectId, setRunningProjectId] = useState(null);
   const [projectOpen, setProjectOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [competitorOpen, setCompetitorOpen] = useState(false);
@@ -50,7 +40,6 @@ export default function GeoProjectsPage() {
   const [projectForm] = Form.useForm();
   const [competitorForm] = Form.useForm();
   const currentCompetitorProjectIdRef = useRef(null);
-  const projectRunRequestRef = useRef(0);
 
   const fetchProjects = useCallback(async () => {
     setLoading(true);
@@ -158,41 +147,6 @@ export default function GeoProjectsPage() {
       fetchProjects();
     } catch (error) {
       message.error(getApiErrorMessage(error, '删除品牌项目失败'));
-    }
-  };
-
-  const runProject = async (record) => {
-    const prompts = Array.isArray(record.trackedPrompts) ? record.trackedPrompts : [];
-    const runnablePromptIds = getRunnableProjectPromptIds(prompts, record.platforms);
-    if (!runnablePromptIds.length) {
-      const blockReason = getProjectPromptRunBlockReason(prompts, record.platforms);
-      message.warning(projectRunBlockMessages[blockReason] || '该项目暂无可运行的问题');
-      return;
-    }
-    const requestId = projectRunRequestRef.current + 1;
-    projectRunRequestRef.current = requestId;
-    try {
-      setRunningProjectId(record.id);
-      const res = await axios.post(`/api/geo-projects/${record.id}/run`, {
-        prompt_ids: runnablePromptIds
-      });
-      const data = res?.data?.data || {};
-      if (projectRunRequestRef.current === requestId) {
-        const notice = getRunResultNotice(data);
-        message[notice.type](notice.text);
-        router.push(`/geo/project-dashboard?project_id=${record.id}`);
-      }
-    } catch (error) {
-      const data = getApiRunResultData(error);
-      if (data && projectRunRequestRef.current === requestId) {
-        const notice = getRunResultNotice(data);
-        message[notice.type](notice.text);
-        router.push(`/geo/project-dashboard?project_id=${record.id}`);
-      } else if (projectRunRequestRef.current === requestId) {
-        message.error(getApiErrorMessage(error, '运行项目分析失败'));
-      }
-    } finally {
-      if (projectRunRequestRef.current === requestId) setRunningProjectId(null);
     }
   };
 
@@ -390,29 +344,9 @@ export default function GeoProjectsPage() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 240,
-      render: (_, row) => {
-        const promptSummary = summarizeProjectPrompts(row.trackedPrompts, row.platforms);
-        const blockReason = row.status === 'archived'
-          ? '归档项目请先恢复后再运行'
-          : getProjectPromptRunBlockReason(row.trackedPrompts, row.platforms);
-        const disabledReason = typeof blockReason === 'string'
-          ? (projectRunBlockMessages[blockReason] || blockReason)
-          : '';
-        return (
+      width: 190,
+      render: (_, row) => (
           <Space>
-            <Tooltip title={disabledReason}>
-              <span>
-                <Button
-                  size="small"
-                  loading={runningProjectId === row.id}
-                  disabled={row.status === 'archived' || !promptSummary.runnable}
-                  onClick={() => runProject(row)}
-                >
-                  运行分析
-                </Button>
-              </span>
-            </Tooltip>
             <Button size="small" disabled={row.status === 'archived'} onClick={() => openCompetitors(row)}>竞品</Button>
             <Button size="small" type="primary" disabled={row.status === 'archived'} onClick={() => openEdit(row)}>编辑</Button>
             {row.status === 'archived' ? (
@@ -428,8 +362,7 @@ export default function GeoProjectsPage() {
               </Popconfirm>
             )}
           </Space>
-        );
-      },
+      ),
     },
   ];
 

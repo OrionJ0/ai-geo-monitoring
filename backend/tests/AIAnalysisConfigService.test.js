@@ -79,3 +79,33 @@ test('falls back to the platform default model for existing analysis settings wi
   assert.equal(result.model_name, 'platform-default-model');
   assert.equal(result.platform.model_name, 'platform-default-model');
 });
+
+test('rejects a monitoring-only Web platform as the analysis provider', async () => {
+  const service = new AIAnalysisConfigService({
+    settingModel: {
+      findOne: async () => null,
+      findOrCreate: async () => {
+        throw new Error('settings must not be written');
+      }
+    },
+    platformConfigService: {
+      getPlatformByCode: async () => ({
+        code: 'deepseek-web',
+        name: 'DeepSeek 网页版',
+        adapter_type: 'deepseek_web',
+        default_model: 'deepseek-web-ui',
+        enabled: true,
+        encrypted_api_key: null,
+        base_url: 'https://chat.deepseek.com'
+      })
+    }
+  });
+
+  await assert.rejects(
+    service.setConfig({
+      platform_code: 'deepseek-web',
+      model_name: 'deepseek-web-ui'
+    }),
+    (error) => error.code === 'analysis_platform_unsupported'
+  );
+});

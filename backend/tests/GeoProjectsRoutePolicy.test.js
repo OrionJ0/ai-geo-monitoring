@@ -130,34 +130,29 @@ test('prompt inventory changes invalidate generated report snapshots', () => {
   assert.match(updateBlock, /else if \(promptVisibilityChanged\) await invalidateGeneratedReports\(req\.brandProject\.id\)/);
 });
 
-test('explicit project runs reject partially unavailable selected prompts', () => {
-  const block = routeBlock('post', '/:projectId/run');
-
-  assert.match(block, /promptSelection\.explicit/);
-  assert.match(block, /prompts\.length\s*!==\s*promptSelection\.ids\.length/);
-  assert.match(block, /选择的问题不存在或已停用/);
-});
-
-test('failed project and prompt runs include run result data for client feedback', () => {
-  const projectRunBlock = routeBlock('post', '/:projectId/run');
+test('manual runs are exposed only for questions and question sets', () => {
+  assert.doesNotMatch(routeSource, /router\.post\('\/:projectId\/run'/);
   const promptRunBlock = routeBlock('post', '/:projectId/prompts/:promptId/run');
 
-  assert.match(projectRunBlock, /success:\s*false,\s*message:\s*result\.message,\s*data:\s*result\.data/);
-  assert.match(promptRunBlock, /success:\s*false,\s*message:\s*result\.message,\s*data:\s*result\.data/);
+  assert.match(promptRunBlock, /ProjectRunService\.startQuestionSetRun/);
+  assert.match(promptRunBlock, /readRequiredIdempotencyKey\(req\)/);
+  assert.match(promptRunBlock, /idempotencyKey:\s*idempotency\.value/);
+  assert.doesNotMatch(promptRunBlock, /ProjectRunService\.runProject/);
 });
 
-test('project batch runs use the queued project runner', () => {
-  const block = routeBlock('post', '/:projectId/run');
+test('prompt suggestion generation requests only prompt-generation capable platforms', () => {
+  const block = routeBlock('post', '/:projectId/prompts/generate');
 
-  assert.match(block, /ProjectRunService\.enqueueProjectRun/);
-  assert.match(block, /res\.status\(result\.status\s*\|\|\s*200\)\.json/);
+  assert.match(block, /getPlatformAvailability\([\s\S]*capability:\s*'prompt_generation'/);
+  assert.match(block, /queryPlatform\([\s\S]*purpose:\s*'prompt_generation'/);
 });
 
 test('question-set runs use only the atomic idempotent start entry', () => {
   const block = routeBlock('post', '/:projectId/question-sets/:questionSetId/run');
 
   assert.match(block, /ProjectRunService\.startQuestionSetRun/);
-  assert.match(block, /Idempotency-Key/);
+  assert.match(block, /readRequiredIdempotencyKey\(req\)/);
+  assert.match(block, /idempotencyKey:\s*idempotency\.value/);
   assert.doesNotMatch(block, /QuestionSetRunService\.createNativeRun/);
   assert.doesNotMatch(block, /ProjectRunService\.enqueueProjectRun/);
   assert.doesNotMatch(block, /questionSetRun\.destroy/);

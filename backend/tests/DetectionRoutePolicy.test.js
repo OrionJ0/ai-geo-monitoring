@@ -14,6 +14,17 @@ test('detection routes resolve dynamic database platform availability', () => {
   assert.doesNotMatch(routeSource, /MAINLAND_MONITORING_PLATFORMS|品牌检测仅支持豆包和 DeepSeek|platform = 'deepseek'/);
 });
 
+test('direct and streaming detection request only direct-stream capable platforms', () => {
+  assert.match(
+    routeSource,
+    /getPlatformAvailability\([\s\S]*capability:\s*'direct_stream'/
+  );
+  assert.match(
+    routeSource,
+    /queryPlatform\([\s\S]*purpose:\s*'direct_stream'/
+  );
+});
+
 test('detection routes contain no legacy provider configuration or stream fallback', () => {
   assert.doesNotMatch(routeSource, /AIPlatformService\.platforms|getModelName|getMaxTokens/);
   assert.doesNotMatch(routeSource, /DOUBAO_LEGACY_STREAM|DOUBAO_|DEEPSEEK_/);

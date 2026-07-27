@@ -31,12 +31,25 @@ const PlatformSelectionService = require('../services/PlatformSelectionService')
 const PromptAnalysisCleanupService = require('../services/PromptAnalysisCleanupService');
 const ProjectArchiveService = require('../services/ProjectArchiveService');
 const ProjectDeletionService = require('../services/ProjectDeletionService');
+const WebCaptureDeletionService = require('../services/WebCaptureDeletionService');
 const ProjectLifecycleService = require('../services/ProjectLifecycleService');
 const ProjectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
 const QuestionSetRunService = require('../services/QuestionSetRunService');
 const CitationMetricSemanticsService = require('../services/CitationMetricSemanticsService');
 const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
 const { CsvValidationError } = require('../services/QuestionSetRunCsvService');
+
+function cleanupAwareError(res, error, fallbackMessage) {
+  if (error?.code === 'web_capture_cleanup_incomplete') {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+      error_code: error.code,
+      error: { code: error.code }
+    });
+  }
+  return res.status(500).json({ success: false, message: fallbackMessage });
+}
 
 function asArray(value) {
   return ProjectFieldNormalizationService.normalizeList(value);
@@ -117,6 +130,22 @@ function rejectArchivedProjectMutation(req, res, message) {
   const guard = ProjectLifecycleService.validateActiveProject(req.brandProject, message);
   if (guard.ok) return null;
   return res.status(guard.status).json({ success: false, message: guard.message });
+}
+
+function readRequiredIdempotencyKey(req) {
+  const headerKey = String(
+    req.get?.('Idempotency-Key')
+    || req.headers?.['idempotency-key']
+    || ''
+  ).trim();
+  const bodyKey = String(req.body?.idempotency_key || '').trim();
+  if (
+    (!headerKey && !bodyKey)
+    || (headerKey && bodyKey && headerKey !== bodyKey)
+  ) {
+    return { ok: false };
+  }
+  return { ok: true, value: headerKey || bodyKey };
 }
 
 function canAccess(req, row) {
@@ -227,7 +256,7 @@ async function batchDeletePrompts(req, res) {
       data: { deleted: matchedIds.length, requested: uniqueIds.length }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: '批量删除问题失败' });
+    return cleanupAwareError(res, error, '批量删除问题失败');
   }
 }
 
@@ -237,7 +266,8 @@ async function deletePromptAnalysisData(projectId, promptIds) {
     QuestionRecord,
     VisibilityMetric,
     ResultDetail,
-    ReportSnapshot
+    ReportSnapshot,
+    WebCaptureDeletionService
   });
 }
 
@@ -246,7 +276,8 @@ async function deleteProjectAnalysisData(projectId) {
     QuestionRecord,
     VisibilityMetric,
     ResultDetail,
-    ReportSnapshot
+    ReportSnapshot,
+    WebCaptureDeletionService
   });
 }
 
@@ -462,7 +493,7 @@ router.put('/:id', loadProject, async (req, res) => {
     if (projectAnalysisFieldsChanged) await deleteProjectAnalysisData(req.brandProject.id);
     res.json({ success: true, message: '品牌项目已更新', data: req.brandProject });
   } catch (error) {
-    res.status(500).json({ success: false, message: '更新品牌项目失败' });
+    cleanupAwareError(res, error, '更新品牌项目失败');
   }
 });
 
@@ -479,7 +510,7 @@ router.delete('/:id', loadProject, async (req, res) => {
     await ProjectArchiveService.archiveProject(req.brandProject);
     return res.json({ success: true, message: '品牌项目已归档' });
   } catch (error) {
-    return res.status(500).json({ success: false, message: '处理品牌项目失败' });
+    return cleanupAwareError(res, error, '处理品牌项目失败');
   }
 });
 
@@ -517,7 +548,7 @@ router.post('/:projectId/competitors', loadProject, async (req, res) => {
     await deleteProjectAnalysisData(req.brandProject.id);
     res.json({ success: true, message: '竞品已添加', data: competitor });
   } catch (error) {
-    res.status(500).json({ success: false, message: '添加竞品失败' });
+    cleanupAwareError(res, error, '添加竞品失败');
   }
 });
 
@@ -571,7 +602,7 @@ router.put('/:projectId/competitors/:competitorId', loadProject, async (req, res
     await deleteProjectAnalysisData(req.brandProject.id);
     res.json({ success: true, message: '竞品已更新', data: competitor });
   } catch (error) {
-    res.status(500).json({ success: false, message: '更新竞品失败' });
+    cleanupAwareError(res, error, '更新竞品失败');
   }
 });
 
@@ -583,7 +614,7 @@ router.delete('/:projectId/competitors/:competitorId', loadProject, async (req, 
     if (deleted) await deleteProjectAnalysisData(req.brandProject.id);
     res.json({ success: true, message: deleted ? '竞品已删除' : '竞品不存在' });
   } catch (error) {
-    res.status(500).json({ success: false, message: '删除竞品失败' });
+    cleanupAwareError(res, error, '删除竞品失败');
   }
 });
 
@@ -739,27 +770,14 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
       where: { id: questionSetId, project_id: req.brandProject.id }
     });
     if (!group) return res.status(404).json({ success: false, message: '问题集不存在' });
-    const headerIdempotencyKey = String(
-      req.get?.('Idempotency-Key')
-      || req.headers?.['idempotency-key']
-      || ''
-    ).trim();
-    const bodyIdempotencyKey = String(req.body?.idempotency_key || '').trim();
-    if (
-      (!headerIdempotencyKey && !bodyIdempotencyKey)
-      || (
-        headerIdempotencyKey
-        && bodyIdempotencyKey
-        && headerIdempotencyKey !== bodyIdempotencyKey
-      )
-    ) {
+    const idempotency = readRequiredIdempotencyKey(req);
+    if (!idempotency.ok) {
       return res.status(400).json({
         success: false,
         message: '幂等键格式无效',
         data: { error_code: 'INVALID_IDEMPOTENCY_KEY' }
       });
     }
-    const idempotencyKey = headerIdempotencyKey || bodyIdempotencyKey;
 
     const questions = await TrackedPrompt.findAll({
       where: {
@@ -788,7 +806,7 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
       platforms: projectPlatforms,
       user: req.user,
       promptSelectionExplicit: true,
-      idempotencyKey
+      idempotencyKey: idempotency.value
     });
     if (!result.ok) {
       return res.status(result.status || 400).json({ success: false, message: result.message, data: result.data });
@@ -1049,7 +1067,9 @@ router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
     const candidateCodes = projectPlatformCodes.length
       ? projectPlatformCodes
       : await AIPlatformService.getPlatformCodes();
-    const availability = await AIPlatformService.getPlatformAvailability(candidateCodes);
+    const availability = await AIPlatformService.getPlatformAvailability(candidateCodes, {
+      capability: 'prompt_generation'
+    });
     const platformStatus = availability.find((item) => item.available);
     if (!platformStatus) {
       const detail = availability.map(unavailablePlatformMessage).join('；') || '监测平台配置暂不可用';
@@ -1082,7 +1102,8 @@ router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
       excludeQuestions: existingPrompts.map((item) => item.question).filter(Boolean),
       queryPlatform: (targetPlatform, question) => AIPlatformService.queryPlatform(targetPlatform, question, {
         config: platformStatus.config,
-        runtimeSettings
+        runtimeSettings,
+        purpose: 'prompt_generation'
       }),
       extractResponseText: (data) => ResultParserService.extractResponseText(data),
       maxBrandQuestionRatio: 0.15
@@ -1271,7 +1292,7 @@ router.put('/:projectId/prompts/:promptId', loadProject, async (req, res) => {
     else if (promptVisibilityChanged) await invalidateGeneratedReports(req.brandProject.id);
     res.json({ success: true, message: '问题已更新', data: prompt });
   } catch (error) {
-    res.status(500).json({ success: false, message: '更新问题失败' });
+    cleanupAwareError(res, error, '更新问题失败');
   }
 });
 
@@ -1290,39 +1311,7 @@ router.delete('/:projectId/prompts/:promptId', loadProject, async (req, res) => 
     const deleted = await TrackedPrompt.destroy({ where: { id: promptId, project_id: req.brandProject.id } });
     res.json({ success: true, message: deleted ? '问题已删除' : '问题不存在' });
   } catch (error) {
-    res.status(500).json({ success: false, message: '删除问题失败' });
-  }
-});
-
-router.post('/:projectId/run', loadProject, async (req, res) => {
-  try {
-    if (!ProjectRunService.isRunnableProject(req.brandProject.toJSON())) {
-      return res.status(400).json({ success: false, message: '归档项目不能运行分析' });
-    }
-    const where = { project_id: req.brandProject.id, enabled: true };
-    const promptSelection = ProjectRunService.normalizeRunPromptIds(req.body.prompt_ids);
-    if (promptSelection.explicit && !promptSelection.ids.length) {
-      return res.status(400).json({ success: false, message: '请选择需要运行的问题' });
-    }
-    if (promptSelection.ids.length) where.id = { [Op.in]: promptSelection.ids };
-
-    const prompts = await TrackedPrompt.findAll({ where, order: [['updated_at', 'DESC']] });
-    if (promptSelection.explicit && prompts.length !== promptSelection.ids.length) {
-      return res.status(400).json({ success: false, message: '选择的问题不存在或已停用' });
-    }
-    const result = await ProjectRunService.enqueueProjectRun({
-      project: req.brandProject,
-      prompts: prompts.map((item) => item.toJSON()),
-      platforms: cleanPlatforms(req.brandProject.platforms),
-      user: req.user,
-      promptSelectionExplicit: promptSelection.explicit
-    });
-    if (!result.ok) {
-      return res.status(result.status || 400).json({ success: false, message: result.message, data: result.data });
-    }
-    return res.status(result.status || 200).json({ success: true, message: result.message, data: result.data });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: '运行项目分析失败' });
+    cleanupAwareError(res, error, '删除问题失败');
   }
 });
 
@@ -1335,18 +1324,42 @@ router.post('/:projectId/prompts/:promptId/run', loadProject, async (req, res) =
       where: { id: req.params.promptId, project_id: req.brandProject.id, enabled: true }
     });
     if (!prompt) return res.status(404).json({ success: false, message: '问题不存在或已停用' });
-    const result = await ProjectRunService.runProject({
+    const idempotency = readRequiredIdempotencyKey(req);
+    if (!idempotency.ok) {
+      return res.status(400).json({
+        success: false,
+        message: '幂等键格式无效',
+        data: { error_code: 'INVALID_IDEMPOTENCY_KEY' }
+      });
+    }
+    const promptData = prompt.toJSON();
+    const result = await ProjectRunService.startQuestionSetRun({
       project: req.brandProject,
-      prompts: [prompt.toJSON()],
+      questionSet: {
+        id: null,
+        name: `单问题：${String(promptData.question || '').trim()}`.slice(0, 120)
+      },
+      prompts: [promptData],
       platforms: cleanPlatforms(req.brandProject.platforms),
-      user: req.user
+      user: req.user,
+      promptSelectionExplicit: true,
+      idempotencyKey: idempotency.value
     });
     if (!result.ok) {
       return res.status(result.status || 400).json({ success: false, message: result.message, data: result.data });
     }
-    return res.json({ success: true, message: result.message, data: result.data });
+    return res.status(result.status || 202).json({
+      success: true,
+      message: result.message,
+      data: result.data
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: '运行问题分析失败' });
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({
+      success: false,
+      message: status < 500 ? error.message : '运行问题失败',
+      ...(error?.data ? { data: error.data } : {})
+    });
   }
 });
 

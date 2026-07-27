@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const { createCorsOptionsDelegate } = require('./config/corsPolicy');
+const { shouldSkipGeneralLimiter } = require('./config/apiRateLimitPolicy');
 const { resolveServerHost } = require('./config/serverBinding');
 
 const app = express();
@@ -18,25 +19,15 @@ app.use(helmet({
   contentSecurityPolicy: false // 前端使用内联样式
 }));
 
-// 公开接口白名单（不需要速率限制）
-// 注意：req.path 在挂载到 /api/ 后，不包含 /api 前缀
-const publicPaths = [
-  '/health',
-  '/ready',
-  '/captcha',
-  '/settings/seo',
-  '/settings/notice'
-];
-
 // 通用速率限制（排除公开接口）
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15分钟
   max: 500, // 限制500次请求
   message: '请求过于频繁，请稍后再试',
   skip: (req) => {
-    // 跳过公开接口的速率限制
+    // req.path 在挂载到 /api/ 后不包含 /api 前缀。
     const path = req.path || req.url || '';
-    return publicPaths.some(p => path.startsWith(p));
+    return shouldSkipGeneralLimiter(path);
   }
 });
 
@@ -69,6 +60,8 @@ const seoAuditRoutes = require('./routes/seoAudits');
 const adminAIPlatformRoutes = require('./routes/adminAIPlatforms');
 const aiPlatformRoutes = require('./routes/aiPlatforms');
 const SchedulerService = require('./services/SchedulerService');
+const WebPlatformService = require('./services/WebPlatformService');
+const { createApplicationShutdown } = require('./services/ApplicationShutdownService');
 const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
 const AIPlatformConfigService = require('./services/AIPlatformConfigService');
 const AIRuntimeSettingsService = require('./services/AIRuntimeSettingsService');
@@ -143,6 +136,26 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 3000;
 const HOST = resolveServerHost();
+let server = null;
+const shutdownApplication = createApplicationShutdown({
+  getServer: () => server,
+  schedulerService: SchedulerService,
+  webPlatformService: WebPlatformService,
+  sequelize
+});
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    shutdownApplication(signal)
+      .then(() => {
+        process.exitCode = 0;
+      })
+      .catch((error) => {
+        console.error('关闭服务失败:', error.message);
+        process.exitCode = 1;
+      });
+  });
+}
 
 // 数据库同步并启动服务器
 async function ensureExistingTableProjectColumns() {
@@ -618,6 +631,16 @@ async function ensureDefaultSettings() {
     await AIRuntimeSettingsService.ensureDefaults();
     await AIPlatformConfigService.ensurePresets();
     try {
+      const cleanedWebCaptures = await WebPlatformService
+        .getCaptureStore()
+        .reconcileTrash();
+      if (cleanedWebCaptures > 0) {
+        console.log(`已清理 ${cleanedWebCaptures} 个隔离 Web 证据目录`);
+      }
+    } catch (e) {
+      console.warn('清理隔离 Web 证据失败:', e.message);
+    }
+    try {
       const recoveredSeoAudits = await createSeoAuditJobService().recoverInterruptedJobs();
       if (recoveredSeoAudits > 0) console.log(`已恢复 ${recoveredSeoAudits} 个全站 SEO 检测任务`);
     } catch (e) {
@@ -630,7 +653,7 @@ async function ensureDefaultSettings() {
     } catch (e) {
       console.warn('启动调度器失败:', e.message);
     }
-    app.listen(PORT, HOST, () => {
+    server = app.listen(PORT, HOST, () => {
       console.log(`服务器运行在 http://${HOST}:${PORT}`);
       console.log(`健康检查: http://${HOST}:${PORT}/api/health`);
     });

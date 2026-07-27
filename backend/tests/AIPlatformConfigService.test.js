@@ -34,16 +34,23 @@ test.after(async () => {
   await sequelize.close();
 });
 
-test('seeds only non-sensitive Doubao, DeepSeek, Qwen and Hunyuan preset information', async () => {
+test('seeds API presets plus a disabled non-sensitive DeepSeek Web managed preset', async () => {
   const service = createService();
   await service.ensurePresets();
 
   const rows = await AIPlatformConfig.findAll({ order: [['code', 'ASC']] });
-  assert.deepEqual(rows.map((row) => row.code), ['deepseek', 'doubao', 'hunyuan', 'qwen']);
-  assert.equal(rows.every((row) => row.enabled && row.builtin), true);
+  assert.deepEqual(rows.map((row) => row.code), ['deepseek', 'deepseek-web', 'doubao', 'hunyuan', 'qwen']);
+  assert.equal(rows.every((row) => row.builtin), true);
   assert.equal(rows.every((row) => row.encrypted_api_key === null), true);
   assert.equal(rows.every((row) => row.api_key_last4 === null), true);
+  assert.equal(rows.filter((row) => row.code !== 'deepseek-web').every((row) => row.enabled), true);
   assert.equal(rows.find((row) => row.code === 'deepseek').default_model, 'deepseek-v4-flash');
+  const deepseekWeb = rows.find((row) => row.code === 'deepseek-web');
+  assert.equal(deepseekWeb.name, 'DeepSeek 网页版');
+  assert.equal(deepseekWeb.adapter_type, 'deepseek_web');
+  assert.equal(deepseekWeb.base_url, 'https://chat.deepseek.com');
+  assert.equal(deepseekWeb.default_model, 'deepseek-web-ui');
+  assert.equal(deepseekWeb.enabled, false);
   const doubao = rows.find((row) => row.code === 'doubao');
   assert.equal(doubao.adapter_type, 'openai_responses');
   assert.equal(doubao.base_url, 'https://ark.cn-beijing.volces.com/api/v3');
@@ -58,7 +65,37 @@ test('seeds only non-sensitive Doubao, DeepSeek, Qwen and Hunyuan preset informa
   assert.equal(hunyuan.adapter_type, 'openai_chat_completions');
   assert.equal(hunyuan.default_model, 'hy3');
   assert.equal(hunyuan.base_url, 'https://tokenhub.tencentmaas.com/v1');
-  assert.equal(PRESET_PLATFORMS.length, 4);
+  assert.equal(PRESET_PLATFORMS.length, 5);
+});
+
+test('treats the managed Web preset as configured without an API key and derives capabilities', async () => {
+  const service = createService();
+  await service.ensurePresets();
+  const deepseekWeb = await AIPlatformConfig.findOne({ where: { code: 'deepseek-web' } });
+  await service.setEnabled(deepseekWeb.id, true);
+
+  const catalog = await service.listCatalog();
+  const web = catalog.find((item) => item.code === 'deepseek-web');
+  const api = catalog.find((item) => item.code === 'deepseek');
+
+  assert.equal(web.configured, true);
+  assert.equal(web.selectable, true);
+  assert.equal(web.unavailable_reason, null);
+  assert.deepEqual(web.capabilities, {
+    monitoring: true,
+    analysis: false,
+    prompt_generation: false,
+    model_listing: false,
+    api_key_management: false,
+    connection_test: false,
+    api_web_search_test: false,
+    direct_stream: false,
+    legacy_schedule: false,
+    interactive_login: true
+  });
+  assert.equal(api.capabilities.analysis, true);
+  assert.equal(api.capabilities.api_key_management, true);
+  assert.equal(api.capabilities.interactive_login, false);
 });
 
 test('promotes an existing Qwen row to builtin without overwriting its connection settings', async () => {
@@ -259,4 +296,55 @@ test('reports a deployment configuration error when encryption is unavailable', 
     service.updatePlatform(platform.id, { api_key: 'sk-cannot-store' }),
     (error) => error.code === 'encryption_unavailable' && error.status === 503
   );
+});
+
+test('keeps managed Web identity immutable while allowing enable changes', async () => {
+  const service = createService();
+  await service.ensurePresets();
+  const web = await AIPlatformConfig.findOne({ where: { code: 'deepseek-web' } });
+
+  const enabled = await service.setEnabled(web.id, true);
+  assert.equal(enabled.enabled, true);
+  await assert.rejects(
+    service.updatePlatform(web.id, { name: 'Other Web' }),
+    (error) => error.code === 'managed_platform_immutable'
+  );
+  await assert.rejects(
+    service.updatePlatform(web.id, { base_url: 'https://example.com' }),
+    (error) => error.code === 'managed_platform_immutable'
+  );
+  await assert.rejects(
+    service.updatePlatform(web.id, { api_key: 'must-not-store' }),
+    (error) => error.code === 'unsupported_platform_capability'
+  );
+  await assert.rejects(
+    service.revealApiKey(web.id),
+    (error) => error.code === 'unsupported_platform_capability'
+  );
+  await assert.rejects(
+    service.clearApiKey(web.id),
+    (error) => error.code === 'unsupported_platform_capability'
+  );
+});
+
+test('reserves the deepseek-web code and never silently converts an existing custom row', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'deepseek-web',
+    name: 'Existing Custom Platform',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1/chat/completions',
+    default_model: 'custom-model',
+    enabled: true,
+    builtin: false
+  });
+
+  await assert.rejects(
+    service.ensurePresets(),
+    (error) => error.code === 'reserved_platform_code_conflict' && error.status === 409
+  );
+  const existing = await AIPlatformConfig.findOne({ where: { code: 'deepseek-web' } });
+  assert.equal(existing.name, 'Existing Custom Platform');
+  assert.equal(existing.adapter_type, 'openai_chat_completions');
+  assert.equal(existing.builtin, false);
 });

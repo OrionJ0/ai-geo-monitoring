@@ -12,15 +12,6 @@ function promptCanRunOnProject(prompt, projectPlatforms) {
   return promptPlatforms.some((item) => projectPlatforms.includes(item));
 }
 
-function getRunnableProjectPromptIds(prompts, projectPlatformValue) {
-  const rows = Array.isArray(prompts) ? prompts : [];
-  const projectPlatforms = normalizePlatforms(projectPlatformValue);
-  return rows
-    .filter((item) => promptCanRunOnProject(item, projectPlatforms))
-    .map((item) => item.id)
-    .filter(Boolean);
-}
-
 function getProjectPromptRunBlockReason(prompts, projectPlatformValue) {
   const rows = Array.isArray(prompts) ? prompts : [];
   const enabledPrompts = rows.filter((item) => item?.enabled !== false);
@@ -43,6 +34,5 @@ function summarizeProjectPrompts(prompts, projectPlatformValue) {
 
 module.exports = {
   getProjectPromptRunBlockReason,
-  getRunnableProjectPromptIds,
   summarizeProjectPrompts
 };

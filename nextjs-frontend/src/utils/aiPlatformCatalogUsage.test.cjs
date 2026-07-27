@@ -10,9 +10,11 @@ function source(relativePath) {
 
 test('AI platform catalog hook reads the authenticated database catalog', () => {
   const hook = source('../lib/useAIPlatformCatalog.ts');
+  assert.match(hook, /@\/lib\/axiosConfig/);
   assert.match(hook, /axios\.get\('\/api\/ai-platforms'\)/);
   assert.match(hook, /disabled:\s*!item\.selectable/);
   assert.match(hook, /管理员尚未配置/);
+  assert.match(hook, /capabilities\?:\s*AIPlatformCapabilities/);
 });
 
 test('project and reporting screens use the shared platform catalog', () => {
@@ -27,6 +29,17 @@ test('project and reporting screens use the shared platform catalog', () => {
     assert.match(page, /useAIPlatformCatalog/);
     assert.doesNotMatch(page, /\/api\/platforms\/ping|PLATFORM_OPTIONS\s*=|const platformOptions\s*=|const platformLabels\s*=/);
   }
+});
+
+test('platform settings hide API-only controls for managed Web adapters', () => {
+  const platformSettings = source('../app/admin/settings/AIPlatformSettings.tsx');
+  const analysisSettings = source('../app/admin/settings/AIAnalysisSettings.tsx');
+
+  assert.match(platformSettings, /capabilities:\s*AIPlatformCapabilities/);
+  assert.match(platformSettings, /api_key_management/);
+  assert.match(platformSettings, /model_listing/);
+  assert.match(platformSettings, /connection_test/);
+  assert.match(analysisSettings, /capabilities\?\.analysis/);
 });
 
 test('project edits preserve an existing platform that was temporarily disabled', () => {

@@ -9,6 +9,7 @@ process.env.CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 8).toString('base64');
 const { sequelize, AIPlatformConfig } = require('../models');
 const AIPlatformConfigService = require('../services/AIPlatformConfigService');
 const AIPlatformRequestService = require('../services/AIPlatformRequestService');
+const WebPlatformRuntimeStatusService = require('../services/WebPlatformRuntimeStatusService');
 const adminRouter = require('../routes/adminAIPlatforms');
 const catalogRouter = require('../routes/aiPlatforms');
 
@@ -23,7 +24,10 @@ async function api(router, method, routePath, { role, body = {}, params = {} } =
     headers: role ? { authorization: `Bearer ${token(role)}` } : {},
     body,
     params,
-    query: {}
+    query: {},
+    ip: '127.0.0.1',
+    socket: { remoteAddress: '127.0.0.1' },
+    app: { get: () => false }
   };
   const response = {
     statusCode: 200,
@@ -142,6 +146,7 @@ test('returns a non-sensitive platform catalog to authenticated users', async ()
   assert.ok(response.json.data.length >= 2);
   for (const platform of response.json.data) {
     assert.deepEqual(Object.keys(platform).sort(), [
+      'capabilities',
       'code',
       'configured',
       'enabled',
@@ -149,6 +154,116 @@ test('returns a non-sensitive platform catalog to authenticated users', async ()
       'selectable',
       'unavailable_reason'
     ]);
+  }
+});
+
+test('returns the no-store Web runtime status only to authenticated users', async () => {
+  const original = WebPlatformRuntimeStatusService.getStatus;
+  let reads = 0;
+  WebPlatformRuntimeStatusService.getStatus = async () => {
+    reads += 1;
+    return {
+      schema_version: 'deepseek-web-runtime-v1',
+      platform: 'deepseek-web',
+      enabled: true,
+      state: 'idle',
+      running_count: 0,
+      queued_count: 0,
+      pending_count: 0,
+      needs_action: false,
+      action_code: null,
+      reason_code: null,
+      observed_at: '2026-07-27T02:00:00.000Z'
+    };
+  };
+
+  try {
+    assert.equal(
+      (await api(catalogRouter, 'GET', '/deepseek-web/runtime-status')).status,
+      401
+    );
+    const response = await api(
+      catalogRouter,
+      'GET',
+      '/deepseek-web/runtime-status',
+      { role: 'user' }
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers['Cache-Control'], 'private, no-store');
+    assert.deepEqual(Object.keys(response.json.data).sort(), [
+      'action_code',
+      'enabled',
+      'needs_action',
+      'observed_at',
+      'pending_count',
+      'platform',
+      'queued_count',
+      'reason_code',
+      'running_count',
+      'schema_version',
+      'state'
+    ]);
+    assert.equal(reads, 1);
+  } finally {
+    WebPlatformRuntimeStatusService.getStatus = original;
+  }
+});
+
+test('keeps Web runtime status read failures generic and non-cacheable', async () => {
+  const original = WebPlatformRuntimeStatusService.getStatus;
+  WebPlatformRuntimeStatusService.getStatus = async () => {
+    throw new Error('database path and query details');
+  };
+
+  try {
+    const response = await api(
+      catalogRouter,
+      'GET',
+      '/deepseek-web/runtime-status',
+      { role: 'user' }
+    );
+    assert.equal(response.status, 500);
+    assert.equal(response.headers['Cache-Control'], 'private, no-store');
+    assert.equal(response.json.message, '读取 DeepSeek Web 运行状态失败');
+    assert.doesNotMatch(JSON.stringify(response.json), /database path|query details/);
+  } finally {
+    WebPlatformRuntimeStatusService.getStatus = original;
+  }
+});
+
+test('rejects API-only administrator operations for the managed Web platform', async () => {
+  const web = await AIPlatformConfig.findOne({ where: { code: 'deepseek-web' } });
+  const calls = { models: 0, connection: 0, search: 0 };
+  const originals = {
+    models: AIPlatformRequestService.listModels,
+    connection: AIPlatformRequestService.testConnection,
+    search: AIPlatformRequestService.testWebSearch
+  };
+  AIPlatformRequestService.listModels = async () => { calls.models += 1; };
+  AIPlatformRequestService.testConnection = async () => { calls.connection += 1; };
+  AIPlatformRequestService.testWebSearch = async () => { calls.search += 1; };
+
+  try {
+    for (const [method, routePath] of [
+      ['GET', '/:id/api-key'],
+      ['DELETE', '/:id/api-key'],
+      ['GET', '/:id/models'],
+      ['POST', '/:id/test'],
+      ['POST', '/:id/test-web-search']
+    ]) {
+      const response = await api(adminRouter, method, routePath, {
+        role: 'admin',
+        params: { id: web.id }
+      });
+      assert.equal(response.status, 400);
+      assert.equal(response.json.data.error_code, 'unsupported_platform_capability');
+    }
+    assert.deepEqual(calls, { models: 0, connection: 0, search: 0 });
+  } finally {
+    AIPlatformRequestService.listModels = originals.models;
+    AIPlatformRequestService.testConnection = originals.connection;
+    AIPlatformRequestService.testWebSearch = originals.search;
   }
 });
 

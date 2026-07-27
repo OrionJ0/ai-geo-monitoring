@@ -142,7 +142,7 @@ class AlertEvaluationService {
             rule_id: rule.id,
             type: rule.type,
             value,
-            message: `明确引用率 ${value}% 低于阈值 ${threshold}%`
+            message: `引用率 ${value}% 低于阈值 ${threshold}%`
           });
         }
       }

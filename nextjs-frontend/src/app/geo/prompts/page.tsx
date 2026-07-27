@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Col, Descriptions, Empty, Form, Input, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
-import axios from 'axios';
+import axios from '@/lib/axiosConfig';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -27,6 +27,8 @@ import { getProjectPromptRunBlockReason } from '@/utils/projectPromptSummary.cjs
 import { filterPromptRows } from '@/utils/promptListFilters.cjs';
 import { parseBatchQuestions } from '@/utils/questionBatchParser.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
+import WebCaptureEvidence from '@/components/WebCaptureEvidence';
+import DeepSeekWebRuntimeStatus from '@/components/DeepSeekWebRuntimeStatus';
 
 const { Text } = Typography;
 
@@ -123,6 +125,7 @@ export default function GeoPromptsPage() {
   const batchRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const runRequestRef = useRef(0);
+  const promptRunIdempotencyRef = useRef(new Map());
   const questionSetRunRequestRef = useRef(0);
   const questionSetRunIdempotencyRef = useRef(new Map());
   const batchText = Form.useWatch('questions_text', batchForm);
@@ -276,9 +279,9 @@ export default function GeoPromptsPage() {
               </Space>
             ) : <span>-</span>}
           </Descriptions.Item>
-          <Descriptions.Item label="明确引用来源" span={2}>
+          <Descriptions.Item label="引用源" span={2}>
             {citationEvidenceStatus === 'legacy_unverified' ? (
-              <Text type="warning">历史混合来源无法区分证据角色，不计入明确引用 KPI</Text>
+              <Text type="warning">历史混合来源无法区分证据角色，不计入引用 KPI</Text>
             ) : citationSources.length ? (
               <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                 {citationSources.slice(0, 8).map((source) => (
@@ -323,6 +326,7 @@ export default function GeoPromptsPage() {
             )}
           </div>
         </div>
+        <WebCaptureEvidence record={row} />
       </div>
     );
   };
@@ -765,21 +769,48 @@ export default function GeoPromptsPage() {
     const runProjectId = selectedProjectId;
     const requestId = runRequestRef.current + 1;
     runRequestRef.current = requestId;
+    const idempotencyScope = `${runProjectId}:${record.id}`;
+    let idempotencyKey = promptRunIdempotencyRef.current.get(idempotencyScope);
+    if (!idempotencyKey) {
+      idempotencyKey = window.crypto.randomUUID();
+      promptRunIdempotencyRef.current.set(idempotencyScope, idempotencyKey);
+    }
     try {
       setRunningPromptId(record.id);
-      const res = await axios.post(`/api/geo-projects/${runProjectId}/prompts/${record.id}/run`);
+      const res = await axios.post(
+        `/api/geo-projects/${runProjectId}/prompts/${record.id}/run`,
+        { idempotency_key: idempotencyKey },
+        { headers: { 'Idempotency-Key': idempotencyKey } }
+      );
       const data = res?.data?.data || {};
+      if (promptRunIdempotencyRef.current.get(idempotencyScope) === idempotencyKey) {
+        promptRunIdempotencyRef.current.delete(idempotencyScope);
+      }
       if (runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
-        const notice = getRunResultNotice(data);
-        message[notice.type](notice.text);
-        router.push(`/geo/project-dashboard?project_id=${runProjectId}`);
+        if (data.idempotent_replay) {
+          message.info('已恢复同一次运行，正在读取最新报告');
+        } else {
+          const notice = getRunResultNotice(data);
+          message[notice.type](notice.text);
+        }
+        const reportUrl = data.report_url || (data.question_set_run_id
+          ? `/geo/question-set-reports?project_id=${runProjectId}&run_id=${data.question_set_run_id}`
+          : null);
+        if (reportUrl) router.push(reportUrl);
       }
     } catch (error) {
       const data = getApiRunResultData(error);
+      const errorCode = error?.response?.data?.data?.error_code;
+      if (
+        ['IDEMPOTENCY_KEY_REUSED', 'INVALID_IDEMPOTENCY_KEY'].includes(errorCode)
+        && promptRunIdempotencyRef.current.get(idempotencyScope) === idempotencyKey
+      ) {
+        promptRunIdempotencyRef.current.delete(idempotencyScope);
+      }
       if (data && runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
         const notice = getRunResultNotice(data);
         message[notice.type](notice.text);
-        router.push(`/geo/project-dashboard?project_id=${runProjectId}`);
+        if (data.report_url) router.push(data.report_url);
       } else if (runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
         message.error(getApiErrorMessage(error, '运行问题失败'));
       }
@@ -885,7 +916,7 @@ export default function GeoPromptsPage() {
       sorter: (a, b) => Number(a.performance?.avg_brand_rank || 0) - Number(b.performance?.avg_brand_rank || 0),
     },
     {
-      title: '明确引用率',
+      title: '引用率',
       dataIndex: ['performance', 'citation_rate'],
       key: 'citation_rate',
       width: 100,
@@ -964,6 +995,7 @@ export default function GeoPromptsPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       {platformCatalogError ? <Alert type="error" showIcon title={platformCatalogError} /> : null}
+      <DeepSeekWebRuntimeStatus />
       <Card title="问题库">
         <Row gutter={[12, 12]} align="middle">
           <Col flex="360px">

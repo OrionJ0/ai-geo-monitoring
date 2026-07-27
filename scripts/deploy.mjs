@@ -170,7 +170,11 @@ async function deploy() {
     await run('git', ['pull', '--ff-only', 'origin', 'main'], {
       label: 'git pull',
     });
-    const revision = await git(['rev-parse', '--short=12', 'HEAD']);
+    const revision = await git(['rev-parse', 'HEAD']);
+    const remoteRevision = await git(['rev-parse', 'origin/main']);
+    if (revision !== remoteRevision) {
+      throw new Error('HEAD 与 origin/main 不一致，拒绝部署服务器本地提交');
+    }
     const checked = await checkPreconditions();
 
     console.log('2/8 停止受管生产进程');
@@ -215,8 +219,9 @@ async function deploy() {
     });
     servicesStopped = false;
 
-    await appendDeploymentLog(`SUCCESS ${revision}`);
-    console.log(`部署成功: ${revision}`);
+    const shortRevision = revision.slice(0, 12);
+    await appendDeploymentLog(`SUCCESS ${shortRevision}`);
+    console.log(`部署成功: ${shortRevision}`);
   } catch (error) {
     await appendDeploymentLog(`FAILED ${error.message}`).catch(() => {});
     if (servicesStopped) {

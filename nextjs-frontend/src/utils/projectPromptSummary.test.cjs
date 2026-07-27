@@ -4,7 +4,6 @@ const assert = require('node:assert/strict');
 
 const {
   getProjectPromptRunBlockReason,
-  getRunnableProjectPromptIds,
   summarizeProjectPrompts
 } = require('./projectPromptSummary.cjs');
 
@@ -18,12 +17,6 @@ test('summarizes enabled and total project prompts', () => {
     total: 3,
     runnable: false
   });
-});
-
-test('supports custom platform codes', () => {
-  assert.deepEqual(getRunnableProjectPromptIds([
-    { id: 7, enabled: true, platforms: ['custom-ai'] }
-  ], ['custom-ai']), [7]);
 });
 
 test('treats projects without enabled prompts as not runnable', () => {
@@ -69,16 +62,7 @@ test('treats prompts without their own platforms as inheriting project platforms
   });
 });
 
-test('returns only prompt ids that can run on the selected project platforms', () => {
-  assert.deepEqual(getRunnableProjectPromptIds([
-    { id: 1, enabled: true, platforms: ['doubao'] },
-    { id: 2, enabled: true, platforms: ['deepseek'] },
-    { id: 3, enabled: false, platforms: ['deepseek'] },
-    { id: 4, enabled: true, platforms: [] },
-  ], ['deepseek']), [2, 4]);
-});
-
-test('explains why project prompts cannot run from the project list', () => {
+test('explains why a single problem cannot run from the question library', () => {
   assert.equal(getProjectPromptRunBlockReason([], ['deepseek']), 'no_enabled_prompt');
   assert.equal(getProjectPromptRunBlockReason([{ id: 1, enabled: false }], ['deepseek']), 'no_enabled_prompt');
   assert.equal(

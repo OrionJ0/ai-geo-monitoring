@@ -128,7 +128,7 @@ class OpportunityInsightService {
           prompt_id: prompt.id,
           prompt: prompt.question,
           prompt_category: PromptCategoryService.derive(prompt),
-          evidence: `近 ${analysisDays} 天 ${citationChecks} 次可验证分析均未获得明确引用`,
+          evidence: `近 ${analysisDays} 天 ${citationChecks} 次可验证分析均未获得引用`,
           recommendation: '优先建设可被引用的产品页、FAQ、评测材料或权威第三方内容'
         });
       }
