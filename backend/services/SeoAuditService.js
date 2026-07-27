@@ -10,6 +10,7 @@ const {
   calculateTechnicalHealth,
   detectTechnicalHealthBlockers
 } = require('./SeoHealthScoreService');
+const { isPrivateAuditAddress } = require('./SeoSiteClient');
 
 const CATEGORY_DEFINITIONS = [
   { key: 'crawlability', label: '收录与抓取' },
@@ -36,7 +37,19 @@ function normalizeWebsiteUrl(input) {
     throw error;
   }
 
-  const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
+  const hasProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(value);
+  let defaultProtocol = 'https';
+  if (!hasProtocol) {
+    try {
+      const hostname = new URL(`http://${value}`).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+      if (hostname === 'localhost' || isPrivateAuditAddress(hostname)) {
+        defaultProtocol = 'http';
+      }
+    } catch {
+      // Keep the public default; the normal URL parser below returns the user-facing error.
+    }
+  }
+  const withProtocol = hasProtocol ? value : `${defaultProtocol}://${value}`;
   let url;
   try {
     url = new URL(withProtocol);
