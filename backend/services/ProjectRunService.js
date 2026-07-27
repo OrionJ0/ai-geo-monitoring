@@ -312,6 +312,8 @@ class ProjectRunService {
   constructor() {
     this.activeRecordIds = new Set();
     this.recordLeaseOwner = `${os.hostname()}:${process.pid}:project-run`;
+    this.acceptingBackgroundRuns = true;
+    this.backgroundRuns = new Set();
   }
 
   isRunnableProject(project) {
@@ -1636,11 +1638,36 @@ class ProjectRunService {
   }
 
   schedulePreparedRun(context) {
-    setImmediate(() => {
-      this.executePreparedRun(context).catch((error) => {
-        console.error('项目队列分析异常:', this.formatError(error));
+    if (!this.acceptingBackgroundRuns) {
+      throw runError('项目运行服务正在关闭', 503, {
+        error_code: 'project_run_shutdown'
+      });
+    }
+    let execution;
+    execution = new Promise((resolve) => {
+      setImmediate(async () => {
+        try {
+          await this.executePreparedRun(context);
+        } catch (error) {
+          console.error('项目队列分析异常:', this.formatError(error));
+        } finally {
+          this.backgroundRuns.delete(execution);
+          resolve();
+        }
       });
     });
+    this.backgroundRuns.add(execution);
+    return execution;
+  }
+
+  beginShutdown() {
+    this.acceptingBackgroundRuns = false;
+  }
+
+  async drain() {
+    while (this.backgroundRuns.size > 0) {
+      await Promise.allSettled(Array.from(this.backgroundRuns));
+    }
   }
 
   async enqueueProjectRun(options) {
@@ -2412,3 +2439,4 @@ class ProjectRunService {
 }
 
 module.exports = new ProjectRunService();
+module.exports.ProjectRunService = ProjectRunService;

@@ -56,6 +56,39 @@ async function readProcessCommand(pid) {
   }
 }
 
+async function readProcessStartTime(pid) {
+  try {
+    const { stdout } = await execFileAsync('ps', [
+      '-p',
+      String(pid),
+      '-o',
+      'lstart=',
+    ]);
+    return stdout.trim().replace(/\s+/g, ' ');
+  } catch {
+    return '';
+  }
+}
+
+function expectedMarkers(service) {
+  return [
+    service.marker,
+    ...(Array.isArray(service.alternateMarkers) ? service.alternateMarkers : []),
+  ].filter((marker) => typeof marker === 'string' && marker);
+}
+
+function matchesRecordedIdentity(record, processStartTime) {
+  if (!processStartTime) return false;
+  if (record.processStartTime) {
+    return record.processStartTime === processStartTime;
+  }
+  const recordedAt = Date.parse(record.startedAt);
+  const processStartedAt = Date.parse(processStartTime);
+  return Number.isFinite(recordedAt)
+    && Number.isFinite(processStartedAt)
+    && Math.abs(recordedAt - processStartedAt) <= 10_000;
+}
+
 async function writeJsonAtomically(filename, value) {
   const temporaryPath = `${filename}.tmp`;
   await fs.promises.writeFile(
@@ -86,15 +119,26 @@ function createProcessManager({ runtimeDirectory, logDirectory }) {
       return { running: false, pid: record.pid || null, verified: false };
     }
 
-    const commandLine = await readProcessCommand(record.pid);
-    const verified = Boolean(
-      commandLine && (!service.marker || commandLine.includes(service.marker))
+    const [commandLine, processStartTime] = await Promise.all([
+      readProcessCommand(record.pid),
+      readProcessStartTime(record.pid),
+    ]);
+    const markers = expectedMarkers(service);
+    const commandMatched = Boolean(
+      commandLine && (markers.length === 0 || markers.some(
+        (marker) => commandLine.includes(marker)
+      ))
     );
+    const identityMatched = matchesRecordedIdentity(record, processStartTime);
+    const verified = commandMatched && identityMatched;
     return {
       running: verified,
       pid: record.pid,
       verified,
       commandLine,
+      processStartTime,
+      commandMatched,
+      identityMatched,
     };
   }
 
@@ -138,9 +182,19 @@ function createProcessManager({ runtimeDirectory, logDirectory }) {
     }
 
     child.unref();
+    let processStartTime = '';
+    for (let attempt = 0; attempt < 20 && !processStartTime; attempt += 1) {
+      processStartTime = await readProcessStartTime(child.pid);
+      if (!processStartTime && isAlive(child.pid)) await delay(50);
+    }
+    if (!processStartTime) {
+      await terminateKnownChild(child.pid);
+      throw new Error(`${service.name} 启动后无法读取进程身份`);
+    }
     await writeJsonAtomically(recordPath(service), {
       pid: child.pid,
       marker: service.marker,
+      processStartTime,
       startedAt: new Date().toISOString(),
     });
 

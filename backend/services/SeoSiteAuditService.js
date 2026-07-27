@@ -21,7 +21,12 @@ function isLocalhostHostname(hostname) {
   return h === 'localhost' || h === '127.0.0.1' || h === '::1';
 }
 
-function normalizeSameOriginUrl(value, baseUrl, origin, { onLocalhostRewrite } = {}) {
+function normalizeSameOriginUrl(
+  value,
+  baseUrl,
+  origin,
+  { allowLocalhostRewrite = false, onLocalhostRewrite } = {}
+) {
   try {
     const url = new URL(value, baseUrl);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
@@ -29,7 +34,11 @@ function normalizeSameOriginUrl(value, baseUrl, origin, { onLocalhostRewrite } =
     if (url.origin !== origin) {
       const urlHost = url.hostname.toLowerCase();
       const targetHost = new URL(origin).hostname.toLowerCase();
-      if (isLocalhostHostname(urlHost) && !isLocalhostHostname(targetHost)) {
+      if (
+        allowLocalhostRewrite
+        && isLocalhostHostname(urlHost)
+        && !isLocalhostHostname(targetHost)
+      ) {
         const rewritten = new URL(origin);
         rewritten.pathname = url.pathname;
         rewritten.search = url.search;
@@ -234,7 +243,10 @@ function createSeoSiteAuditService({
       const discoveredSet = new Set();
       const sitemapLocalhostRewrites = [];
       const trackRewrite = (meta) => sitemapLocalhostRewrites.push(meta);
-      const normalizeOpts = { onLocalhostRewrite: trackRewrite };
+      const normalizeOpts = {
+        allowLocalhostRewrite: privateTarget,
+        onLocalhostRewrite: trackRewrite
+      };
       const addPage = (value, baseUrl = entryFinalUrl) => {
         const normalized = normalizeSameOriginUrl(value, baseUrl, origin, normalizeOpts);
         if (!normalized || discoveredSet.has(normalized)) return false;

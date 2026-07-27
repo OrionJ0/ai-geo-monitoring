@@ -44,7 +44,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // 数据库连接与模型
-const { sequelize, User, MembershipPlan, Setting } = require('./models');
+const { sequelize, User, MembershipPlan, Setting, QuestionRecord } = require('./models');
 const { DataTypes } = require('sequelize');
 
 // 路由
@@ -60,6 +60,7 @@ const seoAuditRoutes = require('./routes/seoAudits');
 const adminAIPlatformRoutes = require('./routes/adminAIPlatforms');
 const aiPlatformRoutes = require('./routes/aiPlatforms');
 const SchedulerService = require('./services/SchedulerService');
+const ProjectRunService = require('./services/ProjectRunService');
 const WebPlatformService = require('./services/WebPlatformService');
 const { createApplicationShutdown } = require('./services/ApplicationShutdownService');
 const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
@@ -140,6 +141,7 @@ let server = null;
 const shutdownApplication = createApplicationShutdown({
   getServer: () => server,
   schedulerService: SchedulerService,
+  projectRunService: ProjectRunService,
   webPlatformService: WebPlatformService,
   sequelize
 });
@@ -631,14 +633,19 @@ async function ensureDefaultSettings() {
     await AIRuntimeSettingsService.ensureDefaults();
     await AIPlatformConfigService.ensurePresets();
     try {
-      const cleanedWebCaptures = await WebPlatformService
+      const reconciledWebCaptures = await WebPlatformService
         .getCaptureStore()
-        .reconcileTrash();
-      if (cleanedWebCaptures > 0) {
-        console.log(`已清理 ${cleanedWebCaptures} 个隔离 Web 证据目录`);
+        .reconcileTrash({
+          recordExists: async (recordId) => Boolean(await QuestionRecord.findByPk(
+            recordId,
+            { attributes: ['id'], raw: true }
+          ))
+        });
+      if (reconciledWebCaptures > 0) {
+        console.log(`已恢复或清理 ${reconciledWebCaptures} 个隔离 Web 证据目录`);
       }
     } catch (e) {
-      console.warn('清理隔离 Web 证据失败:', e.message);
+      console.warn('恢复或清理隔离 Web 证据失败:', e.message);
     }
     try {
       const recoveredSeoAudits = await createSeoAuditJobService().recoverInterruptedJobs();

@@ -69,23 +69,14 @@ function normalizeWebsiteUrl(input) {
   return url.toString();
 }
 
-function analyzeHeadingLevels($) {
+function hasSkippedHeadingLevel($) {
   const levels = $('h1, h2, h3, h4, h5, h6')
     .map((_, element) => Number(element.tagName.slice(1)))
     .get();
 
-  if (levels.length < 2) return { hasSkip: false, hasReverse: false };
-
-  let hasSkip = false;
-  let hasReverse = false;
-
-  for (let i = 1; i < levels.length; i++) {
-    const diff = levels[i] - levels[i - 1];
-    if (diff > 1) hasSkip = true;
-    if (diff < 0) hasReverse = true;
-  }
-
-  return { hasSkip, hasReverse };
+  return levels.some((level, index) => (
+    index > 0 && level - levels[index - 1] > 1
+  ));
 }
 
 function buildCheck({ id, category, title, finding, passed, severity, weight, value, description, recommendation }) {
@@ -477,23 +468,14 @@ function createSeoAuditService({
             value: `${$('h1, h2, h3, h4, h5, h6').length} 个标题`,
             description: '连续的标题层级让用户和搜索引擎更容易理解内容结构。' },
           (() => {
-            const h = analyzeHeadingLevels($);
-            const hasIssue = h.hasSkip || h.hasReverse;
-            let finding, recommendation;
-            if (h.hasSkip && h.hasReverse) {
-              finding = '标题层级存在跳级或顺序错误';
-              recommendation = '按 H1 → H2 → H3 逐级组织内容，避免跳级并确保标题顺序不颠倒。';
-            } else if (h.hasSkip) {
-              finding = '标题层级存在跳级';
-              recommendation = '按 H1 → H2 → H3 的层级组织内容，避免跳级。';
-            } else if (h.hasReverse) {
-              finding = '标题层级顺序错误';
-              recommendation = '调整标题顺序，确保 H1 → H2 → H3 由大到小排列，不要出现低级别标题在高级别标题前面的情况。';
-            } else {
-              finding = '标题层级连续';
-              recommendation = '';
-            }
-            return { passed: !hasIssue, finding, recommendation };
+            const hasSkip = hasSkippedHeadingLevel($);
+            return {
+              passed: !hasSkip,
+              finding: hasSkip ? '标题层级存在跳级' : '标题层级连续',
+              recommendation: hasSkip
+                ? '按 H1 → H2 → H3 的层级组织内容，避免跳级。'
+                : ''
+            };
           })()
         )),
         createCheck({

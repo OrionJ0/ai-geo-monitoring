@@ -24,6 +24,7 @@ function closeHttpServer(server) {
 function createApplicationShutdown({
   getServer,
   schedulerService,
+  projectRunService,
   webPlatformService,
   sequelize
 }) {
@@ -32,8 +33,12 @@ function createApplicationShutdown({
     if (shutdownPromise) return shutdownPromise;
     shutdownPromise = (async () => {
       await closeHttpServer(getServer?.());
-      await schedulerService.stop();
-      await webPlatformService.shutdown();
+      projectRunService.beginShutdown();
+      await Promise.all([
+        schedulerService.stop(),
+        webPlatformService.shutdown(),
+        projectRunService.drain()
+      ]);
       await sequelize.close();
     })();
     return shutdownPromise;

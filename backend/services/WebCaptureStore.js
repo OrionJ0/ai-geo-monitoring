@@ -304,18 +304,66 @@ class WebCaptureStore {
     }
   }
 
-  async reconcileTrash() {
-    await this.ensureRoots();
-    const entries = await fs.promises.readdir(this.trashRoot, { withFileTypes: true });
-    let cleaned = 0;
-    for (const entry of entries) {
-      await fs.promises.rm(
-        path.join(this.trashRoot, entry.name),
-        { recursive: true, force: true }
+  async reconcileTrash({ recordExists } = {}) {
+    if (typeof recordExists !== 'function') {
+      throw storeError(
+        'web_capture_reconcile_failed',
+        '恢复隔离 Web 证据需要数据库记录检查器'
       );
-      cleaned += 1;
     }
-    return cleaned;
+    await this.ensureRoots();
+    const operations = await fs.promises.readdir(this.trashRoot, { withFileTypes: true });
+    let reconciled = 0;
+    for (const operation of operations) {
+      if (
+        !UUID_RE.test(operation.name)
+        || !operation.isDirectory()
+        || operation.isSymbolicLink()
+      ) {
+        throw storeError(
+          'web_capture_reconcile_failed',
+          '隔离 Web 证据操作目录无效'
+        );
+      }
+      const operationDir = path.join(this.trashRoot, operation.name);
+      const entries = await fs.promises.readdir(operationDir, { withFileTypes: true });
+      const decisions = [];
+      for (const entry of entries) {
+        const recordId = positiveInteger(entry.name);
+        if (!recordId || !entry.isDirectory() || entry.isSymbolicLink()) {
+          throw storeError(
+            'web_capture_reconcile_failed',
+            '隔离 Web 证据记录目录无效'
+          );
+        }
+        decisions.push({
+          entry,
+          recordId,
+          shouldRestore: Boolean(await recordExists(recordId))
+        });
+      }
+      for (const { entry, shouldRestore } of decisions) {
+        const source = path.join(operationDir, entry.name);
+        if (shouldRestore) {
+          const target = path.join(this.recordsRoot, entry.name);
+          try {
+            await fs.promises.lstat(target);
+            throw storeError(
+              'web_capture_reconcile_failed',
+              'Web 证据恢复目标已存在'
+            );
+          } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+          }
+          await fs.promises.rename(source, target);
+        } else {
+          await fs.promises.rm(source, { recursive: true, force: true });
+        }
+      }
+      await fs.promises.rm(operationDir, { recursive: true, force: true });
+      reconciled += 1;
+    }
+    return reconciled;
   }
 }
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI GEO Monitoring System for Generative Engine Optimization, with a Next.js 16.1.1 frontend (App Router) and Express.js backend. The system monitors brand visibility across AI platforms (豆包, DeepSeek, Kimi, 千问) by analyzing AI-generated responses for keyword mentions.
+This is an AI GEO Monitoring System for Generative Engine Optimization, with a Next.js 16.2.12 frontend (App Router) and Express.js backend. The system monitors brand visibility across AI platforms (豆包, DeepSeek, Kimi, 千问) by analyzing AI-generated responses for keyword mentions.
 
 ## Development Setup
 

@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createSeoSiteAuditService } = require('../services/SeoSiteAuditService');
+const {
+  createSeoSiteAuditService,
+  normalizeSameOriginUrl
+} = require('../services/SeoSiteAuditService');
 const { defaultSeoAuditRules } = require('../config/seoAuditRules');
 
 function htmlPage(url, links = []) {
@@ -22,6 +25,41 @@ function htmlPage(url, links = []) {
     </body></html>`
   };
 }
+
+test('does not rewrite localhost Sitemap declarations for a public audit origin', () => {
+  const rewrites = [];
+  const normalized = normalizeSameOriginUrl(
+    'http://localhost:3003/sitemap.xml',
+    'https://example.com/',
+    'https://example.com',
+    {
+      allowLocalhostRewrite: false,
+      onLocalhostRewrite: (entry) => rewrites.push(entry)
+    }
+  );
+
+  assert.equal(normalized, null);
+  assert.deepEqual(rewrites, []);
+});
+
+test('rewrites localhost Sitemap declarations only for a private audit origin', () => {
+  const rewrites = [];
+  const normalized = normalizeSameOriginUrl(
+    'http://localhost:3003/sitemap.xml',
+    'http://192.168.9.206:3003/',
+    'http://192.168.9.206:3003',
+    {
+      allowLocalhostRewrite: true,
+      onLocalhostRewrite: (entry) => rewrites.push(entry)
+    }
+  );
+
+  assert.equal(normalized, 'http://192.168.9.206:3003/sitemap.xml');
+  assert.deepEqual(rewrites, [{
+    originalHost: 'localhost:3003',
+    rewritten: 'http://192.168.9.206:3003/sitemap.xml'
+  }]);
+});
 
 test('discovers and audits unique same-origin pages from links and recursive sitemaps', async () => {
   const pages = new Map([

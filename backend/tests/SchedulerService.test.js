@@ -109,6 +109,24 @@ test('legacy standalone schedules request only legacy-schedule capable platforms
   assert.match(source, /queryPlatform\([\s\S]*purpose:\s*'legacy_schedule'/);
 });
 
+test('scheduler stop waits for an active tick to finish', async () => {
+  const service = new SchedulerService.SchedulerService();
+  let releaseTick;
+  const tickGate = new Promise((resolve) => { releaseTick = resolve; });
+  service._started = true;
+  service._tickPromise = tickGate;
+
+  let stopped = false;
+  const stopping = service.stop().then(() => { stopped = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stopped, false);
+  assert.equal(service._started, false);
+
+  releaseTick();
+  await stopping;
+  assert.equal(stopped, true);
+});
+
 test('scheduled runs do not consume quota or create records when all platforms are unavailable', async () => {
   let quotaCalls = 0;
   let settingsCalls = 0;

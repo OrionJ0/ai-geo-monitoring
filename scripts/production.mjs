@@ -65,6 +65,7 @@ const services = {
     cwd: frontendDirectory,
     env: sharedEnvironment,
     marker: frontendEntry,
+    alternateMarkers: ['next-server'],
   },
 };
 const manager = createProcessManager({ runtimeDirectory, logDirectory });
@@ -132,9 +133,23 @@ async function start() {
 }
 
 async function stop() {
-  const frontend = await manager.stop(services.frontend);
-  const backend = await manager.stop(services.backend);
-  return { backend, frontend };
+  const [frontendResult, backendResult] = await Promise.allSettled([
+    manager.stop(services.frontend),
+    manager.stop(services.backend),
+  ]);
+  const failures = [
+    ['frontend', frontendResult],
+    ['backend', backendResult],
+  ].filter(([, result]) => result.status === 'rejected');
+  if (failures.length) {
+    throw new Error(failures.map(([name, result]) => (
+      `${name} 停止失败: ${result.reason?.message || result.reason}`
+    )).join('；'));
+  }
+  return {
+    backend: backendResult.value,
+    frontend: frontendResult.value,
+  };
 }
 
 function printHumanStatus(status) {

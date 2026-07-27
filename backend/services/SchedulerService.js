@@ -442,6 +442,7 @@ class SchedulerService {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     this._started = false;
+    if (this._tickPromise) await this._tickPromise;
   }
 
   async dispatchPendingQuestionSetRuns() {

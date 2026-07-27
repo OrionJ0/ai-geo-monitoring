@@ -3,8 +3,12 @@ const assert = require('node:assert/strict');
 
 const { createApplicationShutdown } = require('../services/ApplicationShutdownService');
 
-test('application shutdown is idempotent and closes HTTP, scheduler, Web session and database', async () => {
+test('application shutdown drains scheduler, project runs and Web session before database', async () => {
   const events = [];
+  let releaseScheduler;
+  let releaseProjectRuns;
+  const schedulerDrained = new Promise((resolve) => { releaseScheduler = resolve; });
+  const projectRunsDrained = new Promise((resolve) => { releaseProjectRuns = resolve; });
   const shutdown = createApplicationShutdown({
     getServer: () => ({
       close(callback) {
@@ -18,6 +22,16 @@ test('application shutdown is idempotent and closes HTTP, scheduler, Web session
     schedulerService: {
       async stop() {
         events.push('scheduler');
+        await schedulerDrained;
+      }
+    },
+    projectRunService: {
+      beginShutdown() {
+        events.push('project-stop');
+      },
+      async drain() {
+        events.push('project-drain');
+        await projectRunsDrained;
       }
     },
     webPlatformService: {
@@ -32,7 +46,23 @@ test('application shutdown is idempotent and closes HTTP, scheduler, Web session
     }
   });
 
-  await Promise.all([shutdown('SIGTERM'), shutdown('SIGINT')]);
+  const first = shutdown('SIGTERM');
+  const second = shutdown('SIGINT');
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(events, ['http', 'scheduler', 'web', 'database']);
+  assert.equal(first, second);
+  assert.deepEqual(events, [
+    'http',
+    'project-stop',
+    'scheduler',
+    'web',
+    'project-drain'
+  ]);
+  assert.equal(events.includes('database'), false);
+
+  releaseScheduler();
+  releaseProjectRuns();
+  await first;
+
+  assert.equal(events.at(-1), 'database');
 });

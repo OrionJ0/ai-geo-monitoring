@@ -19,6 +19,7 @@ export default function GeoProfilePage() {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState(null);
   const [quota, setQuota] = useState(null);
+  const [profileLoadedAt, setProfileLoadedAt] = useState(null);
 
   const formatDateTimeShort = (v) => {
     try {
@@ -43,6 +44,7 @@ export default function GeoProfilePage() {
       ]);
       setProfile(pRes?.data?.data || null);
       setQuota(qRes?.data?.data || null);
+      setProfileLoadedAt(Date.now());
     } catch (error) {
       message.error(getApiErrorMessage(error, '获取个人信息失败'));
     } finally {
@@ -58,11 +60,10 @@ export default function GeoProfilePage() {
   const remainingDays = (() => {
     const lv = String(level).toLowerCase();
     if (lv === 'free') return '长期有效';
-    if (!expiresAt) return '-';
+    if (!expiresAt || !profileLoadedAt) return '-';
     try {
-      const now = Date.now();
       const end = new Date(expiresAt).getTime();
-      const diffMs = end - now;
+      const diffMs = end - profileLoadedAt;
       if (diffMs <= 0) return 0;
       return Math.ceil(diffMs / (24 * 60 * 60 * 1000));
     } catch {

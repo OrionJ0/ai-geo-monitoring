@@ -75,6 +75,31 @@ test('returns a prioritized, categorized SEO report for a public page', async ()
   assert.equal(report.priorities.every((item) => item.status === 'failed'), true);
 });
 
+test('allows heading levels to return from a subsection to a sibling section', async () => {
+  const siteClient = createSiteClient();
+  const originalFetchPage = siteClient.fetchPage;
+  siteClient.fetchPage = async (url) => ({
+    ...await originalFetchPage(url),
+    html: `<!doctype html><html lang="zh-CN"><head>
+      <title>这是一个长度合理的页面标题示例</title>
+    </head><body>
+      <h1>首页</h1>
+      <h2>产品</h2>
+      <h3>产品详情</h3>
+      <h2>服务</h2>
+      <a href="/about">关于我们</a>
+    </body></html>`
+  });
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
+  const headingOrder = report.categories
+    .flatMap((category) => category.checks)
+    .find((check) => check.id === 'heading-order');
+
+  assert.equal(headingOrder.status, 'passed');
+  assert.equal(headingOrder.finding, '标题层级连续');
+});
+
 test('does not treat empty robots and sitemap responses as healthy', async () => {
   const siteClient = {
     async fetchPage(url) {

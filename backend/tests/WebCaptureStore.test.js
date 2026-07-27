@@ -149,6 +149,56 @@ test('quarantine, restore, commit and startup reconciliation are idempotent', as
     '99'
   );
   await fs.promises.mkdir(leftover, { recursive: true });
-  assert.equal(await store.reconcileTrash(), 1);
-  assert.equal(await store.reconcileTrash(), 0);
+  assert.equal(await store.reconcileTrash({
+    recordExists: async () => false
+  }), 1);
+  assert.equal(await store.reconcileTrash({
+    recordExists: async () => false
+  }), 0);
+});
+
+test('startup reconciliation restores quarantined evidence when its database record survived', async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'web-capture-store-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const store = new WebCaptureStore({ rootDir: root });
+  const operationId = '00000000-0000-4000-8000-000000000031';
+  const recordDir = path.join(root, 'records', '12');
+  await fs.promises.mkdir(recordDir, { recursive: true });
+  await fs.promises.writeFile(path.join(recordDir, 'evidence.png'), PNG);
+  await store.quarantineRecords([12], operationId);
+
+  const reconciled = await store.reconcileTrash({
+    recordExists: async (recordId) => recordId === 12
+  });
+
+  assert.equal(reconciled, 1);
+  assert.deepEqual(
+    await fs.promises.readFile(path.join(recordDir, 'evidence.png')),
+    PNG
+  );
+  await assert.rejects(fs.promises.access(path.join(root, '.trash', operationId)));
+});
+
+test('startup reconciliation keeps quarantine intact when database state cannot be read', async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'web-capture-store-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const store = new WebCaptureStore({ rootDir: root });
+  const operationId = '00000000-0000-4000-8000-000000000032';
+  const recordDir = path.join(root, 'records', '12');
+  await fs.promises.mkdir(recordDir, { recursive: true });
+  await fs.promises.writeFile(path.join(recordDir, 'evidence.png'), PNG);
+  await store.quarantineRecords([12], operationId);
+
+  await assert.rejects(
+    store.reconcileTrash({
+      recordExists: async () => {
+        throw new Error('database unavailable');
+      }
+    }),
+    /database unavailable/
+  );
+  await fs.promises.access(
+    path.join(root, '.trash', operationId, '12', 'evidence.png')
+  );
+  await assert.rejects(fs.promises.access(recordDir));
 });

@@ -44,6 +44,97 @@ test('starts, reports, and stops a detached managed process', async (t) => {
   assert.equal((await manager.status(service)).running, false);
 });
 
+test('keeps ownership when a managed process replaces its command title', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-process-title-'));
+  const launchMarker = `ai-geo-launch-${process.pid}-${Date.now()}`;
+  const runtimeTitle = `ai-geo-runtime-${process.pid}-${Date.now()}`;
+  const manager = createProcessManager({
+    runtimeDirectory: path.join(directory, 'run'),
+    logDirectory: path.join(directory, 'logs'),
+  });
+  const service = {
+    name: 'fixture',
+    command: process.execPath,
+    args: [
+      '-e',
+      `setTimeout(()=>{process.title=${JSON.stringify(runtimeTitle)}},25);setInterval(()=>{},1000)`,
+      launchMarker,
+    ],
+    cwd: directory,
+    marker: launchMarker,
+    alternateMarkers: [runtimeTitle],
+  };
+
+  t.after(async () => {
+    await manager.stop(service, { timeoutMs: 1000 }).catch(() => {});
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  const started = await manager.start(service);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const status = await manager.status(service);
+
+  assert.equal(started.running, true);
+  assert.equal(status.running, true);
+  assert.equal(status.pid, started.pid);
+  assert.match(status.commandLine, new RegExp(runtimeTitle));
+
+  await manager.stop(service, { timeoutMs: 1000 });
+  assert.equal((await manager.status(service)).running, false);
+});
+
+test('rejects a matching process title when the recorded process start identity differs', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-process-identity-'));
+  const runtimeDirectory = path.join(directory, 'run');
+  const marker = `ai-geo-identity-${process.pid}-${Date.now()}`;
+  const child = spawn(
+    process.execPath,
+    ['-e', `process.title=${JSON.stringify(marker)};setInterval(()=>{},1000)`],
+    { detached: true, stdio: 'ignore' }
+  );
+  await new Promise((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', reject);
+  });
+  child.unref();
+
+  const manager = createProcessManager({
+    runtimeDirectory,
+    logDirectory: path.join(directory, 'logs'),
+  });
+  const service = {
+    name: 'fixture',
+    command: process.execPath,
+    args: [],
+    cwd: directory,
+    marker,
+  };
+  fs.mkdirSync(runtimeDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(runtimeDirectory, 'fixture.json'),
+    `${JSON.stringify({
+      pid: child.pid,
+      marker,
+      processStartTime: 'identity-from-another-process',
+      startedAt: new Date().toISOString(),
+    })}\n`
+  );
+
+  t.after(() => {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {}
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  const status = await manager.status(service);
+  assert.equal(status.running, false);
+  assert.equal(status.pid, child.pid);
+  assert.equal(status.commandMatched, true);
+  assert.equal(status.identityMatched, false);
+  await assert.rejects(manager.stop(service), /拒绝终止未知进程/);
+});
+
 test('cleans up a child that fails the managed command verification', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-process-fail-'));
   const pidPath = path.join(directory, 'fixture.pid');

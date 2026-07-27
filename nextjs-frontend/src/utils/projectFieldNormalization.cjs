@@ -52,7 +52,7 @@ function isValidWebsiteInput(value) {
     const raw = /^https?:\/\//i.test(text) ? text : `https://${text}`;
     const parsed = new URL(raw);
     return isValidDomain(parsed.hostname);
-  } catch (_) {
+  } catch {
     return false;
   }
 }

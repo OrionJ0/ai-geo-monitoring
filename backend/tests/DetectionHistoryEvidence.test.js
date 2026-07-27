@@ -341,7 +341,11 @@ test('数据库提交后清理失败返回稳定错误且隔离证据不再可�
   assert.equal(await QuestionRecord.findByPk(record.id), null);
   await assert.rejects(fs.promises.access(evidenceDir));
   assert.equal(
-    await WebCaptureDeletionService.captureStore.reconcileTrash(),
+    await WebCaptureDeletionService.captureStore.reconcileTrash({
+      recordExists: async (recordId) => Boolean(
+        await QuestionRecord.findByPk(recordId)
+      )
+    }),
     1
   );
 });
