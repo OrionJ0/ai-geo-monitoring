@@ -16,11 +16,34 @@ const {
 } = require('./SeoSitewideAnalysisService');
 const { createSeoRenderService } = require('./SeoRenderService');
 
-function normalizeSameOriginUrl(value, baseUrl, origin) {
+function isLocalhostHostname(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+}
+
+function normalizeSameOriginUrl(value, baseUrl, origin, { onLocalhostRewrite } = {}) {
   try {
     const url = new URL(value, baseUrl);
-    if (!['http:', 'https:'].includes(url.protocol) || url.origin !== origin) return null;
-    if (url.username || url.password) return null;
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+
+    if (url.origin !== origin) {
+      const urlHost = url.hostname.toLowerCase();
+      const targetHost = new URL(origin).hostname.toLowerCase();
+      if (isLocalhostHostname(urlHost) && !isLocalhostHostname(targetHost)) {
+        const rewritten = new URL(origin);
+        rewritten.pathname = url.pathname;
+        rewritten.search = url.search;
+        rewritten.hash = '';
+        if (onLocalhostRewrite) {
+          onLocalhostRewrite({
+            originalHost: url.host,
+            rewritten: rewritten.toString()
+          });
+        }
+        return rewritten.toString();
+      }
+      return null;
+    }
     url.hash = '';
     return url.toString();
   } catch {
@@ -76,12 +99,13 @@ function navigationIssues($, finalUrl) {
     const tag = String(element?.tagName || '').toLowerCase();
     if (['a', 'button'].includes(tag)) return false;
     const role = String($(element).attr('role') || '').toLowerCase();
-    const className = String($(element).attr('class') || '');
-    const style = String($(element).attr('style') || '');
+    const onclick = String($(element).attr('onclick') || '');
+    const declaredTarget = String(
+      $(element).attr('data-href') || $(element).attr('data-url') || ''
+    ).trim();
     return role === 'link'
-      || $(element).is('[onclick]')
-      || /(?:^|\s)cursor-pointer(?:\s|$)/.test(className)
-      || /cursor\s*:\s*pointer/i.test(style);
+      || Boolean(declaredTarget)
+      || /(?:window\.)?location(?:\.href)?\s*=|(?:window\.)?location\.(?:assign|replace)\s*\(|window\.open\s*\(/i.test(onclick);
   };
   candidates
     .filter(isClickableCandidate)
@@ -208,8 +232,11 @@ function createSeoSiteAuditService({
       const origin = new URL(entryFinalUrl).origin;
       const discovered = [];
       const discoveredSet = new Set();
+      const sitemapLocalhostRewrites = [];
+      const trackRewrite = (meta) => sitemapLocalhostRewrites.push(meta);
+      const normalizeOpts = { onLocalhostRewrite: trackRewrite };
       const addPage = (value, baseUrl = entryFinalUrl) => {
-        const normalized = normalizeSameOriginUrl(value, baseUrl, origin);
+        const normalized = normalizeSameOriginUrl(value, baseUrl, origin, normalizeOpts);
         if (!normalized || discoveredSet.has(normalized)) return false;
         discoveredSet.add(normalized);
         discovered.push(normalized);
@@ -226,7 +253,7 @@ function createSeoSiteAuditService({
       const robots = await client.probe(robotsUrl).catch(() => ({ statusCode: 0, body: '' }));
       const declaredSitemaps = [...String(robots.body || '').matchAll(/^sitemap\s*:\s*(\S+)/gim)].map((match) => match[1]);
       const sitemapQueue = [defaultSitemapUrl, ...declaredSitemaps]
-        .map((url) => ({ url: normalizeSameOriginUrl(url, origin, origin), depth: 0 }))
+        .map((url) => ({ url: normalizeSameOriginUrl(url, origin, origin, normalizeOpts), depth: 0 }))
         .filter((entry) => entry.url);
       const visitedSitemaps = new Set();
       const sitemapUrls = new Set();
@@ -241,7 +268,7 @@ function createSeoSiteAuditService({
         const parsed = sitemapLocations(result.body);
         if (parsed.type === 'urlset') {
           parsed.locations.forEach((url) => {
-            const normalized = normalizeSameOriginUrl(url, current.url, origin);
+            const normalized = normalizeSameOriginUrl(url, current.url, origin, normalizeOpts);
             if (!normalized) {
               sitemapReferences.push({
                 source: current.url,
@@ -255,7 +282,7 @@ function createSeoSiteAuditService({
           });
         } else if (parsed.type === 'index' && current.depth < rules.crawl.sitemapDepth) {
           parsed.locations.forEach((url) => {
-            const normalized = normalizeSameOriginUrl(url, current.url, origin);
+            const normalized = normalizeSameOriginUrl(url, current.url, origin, normalizeOpts);
             if (!normalized) {
               sitemapReferences.push({
                 source: current.url,
@@ -490,6 +517,7 @@ function createSeoSiteAuditService({
         sitemapUrls: Array.from(sitemapUrls),
         declaredSitemaps,
         sitemapReferences,
+        sitemapLocalhostRewrites,
         linkChecks,
         renderAnalysis,
         truncated,
@@ -582,7 +610,8 @@ function createSeoSiteAuditService({
           successfulPages: successfulPages.length,
           failedPages,
           limit: maxPages,
-          truncated
+          truncated,
+          sitemapLocalhostRewrites
         },
         platforms: firstPage.platforms,
         crawlerAccess: firstPage.crawlerAccess,

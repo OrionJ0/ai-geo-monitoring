@@ -315,7 +315,7 @@ test('v4 配置会拒绝不可维护的阻断阈值与重复爬虫 key', () => {
   );
 });
 
-test('问题优先级先列阻断，再按技术阶段排列', () => {
+test('问题优先级先列阻断，再按严重级别排列', () => {
   const result = calculateTechnicalHealth({
     instances: [
       instance('http-status', 'failed'),
@@ -344,7 +344,7 @@ test('问题优先级先列阻断，再按技术阶段排列', () => {
   assert.equal(result.priorities[2].stage, 'content');
 });
 
-test('同一阶段按严重级别优先于实际扣分排列', () => {
+test('按严重级别优先于实际扣分排列', () => {
   const rules = {
     checks: {
       'high-risk': { severity: 'high', weight: 1 },

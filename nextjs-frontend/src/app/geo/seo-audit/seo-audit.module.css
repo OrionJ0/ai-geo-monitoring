@@ -59,6 +59,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  margin-bottom: 16px;
   color: var(--blue);
   font-size: 12px;
   font-weight: 750;
@@ -751,6 +752,16 @@
   padding: 28px 30px;
 }
 
+.priorityPanel .sectionHeading h2 {
+  margin-top: 0;
+}
+
+.priorityOrderNote {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .sitewidePanel {
   padding: 28px 30px;
 }
@@ -862,7 +873,16 @@
   line-height: 1.55;
 }
 
-.navigationEvidence > ol {
+.navigationSummaryMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 7px;
+  color: #64748b;
+  font-size: 10px;
+}
+
+.navigationDetails > ol {
   display: grid;
   gap: 8px;
   margin: 10px 0 0;
@@ -870,7 +890,7 @@
   list-style: none;
 }
 
-.navigationEvidence > ol > li {
+.navigationDetails > ol > li {
   padding: 9px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;

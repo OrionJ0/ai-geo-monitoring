@@ -175,6 +175,7 @@ test('detects navigation links that only appear after hover interaction', {
     response.end(`<!doctype html><html><head><title>导航抽样</title></head><body>
       <header><nav id="nav">
         <span id="solutions" style="cursor:pointer">解决方案</span>
+        <div id="news" onclick="window.location.href='/news'">新闻中心</div>
         <button id="products" type="button">产品中心</button>
       </nav></header>
       <script>
@@ -216,6 +217,12 @@ test('detects navigation links that only appear after hover interaction', {
     assert.equal(
       navigation.nonSemanticControls.some((control) => (
         control.tag === 'span' && control.text === '解决方案'
+      )),
+      false
+    );
+    assert.equal(
+      navigation.nonSemanticControls.some((control) => (
+        control.tag === 'div' && control.text === '新闻中心'
       )),
       true
     );

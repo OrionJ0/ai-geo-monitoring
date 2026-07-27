@@ -132,6 +132,35 @@ test('continues link discovery when the first homepage link points back to the h
   ]);
 });
 
+test('keeps sitemap-dependent sitewide checks unknown when no valid page inventory exists', async () => {
+  const pages = new Map([
+    ['https://example.com/', htmlPage('https://example.com/', ['/products'])],
+    ['https://example.com/products', htmlPage('https://example.com/products')]
+  ]);
+  const siteClient = {
+    async fetchPage(url) {
+      return pages.get(url);
+    },
+    async probe(url) {
+      if (url.endsWith('/robots.txt')) {
+        return { statusCode: 200, body: 'User-agent: *\nAllow: /' };
+      }
+      return { statusCode: 200, body: '<urlset></urlset>' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+  const checks = new Map(report.sitewide.checks.map((check) => [check.id, check]));
+  const sitemapAvailability = report.issues.find((issue) => issue.id === 'sitemap');
+
+  assert.equal(sitemapAvailability.finding, 'Sitemap 中没有有效页面地址');
+  assert.equal(checks.get('sitemap-coverage').status, 'unknown');
+  assert.equal(checks.get('orphan-pages').status, 'unknown');
+  assert.equal(checks.get('internal-link-quality').status, 'unknown');
+  assert.equal(checks.get('sitemap-coverage').finding, '暂时无法检查');
+  assert.equal(checks.get('orphan-pages').finding, '暂时无法检查');
+});
+
 test('full-site audit always includes the homepage when started from a subpage', async () => {
   const pages = new Map([
     ['https://example.com/', htmlPage('https://example.com/')],
@@ -415,7 +444,7 @@ test('adds cross-page SEO evidence and JavaScript render sampling to the formal 
   const report = await createSeoSiteAuditService({ siteClient, renderService })
     .audit('https://example.com/');
 
-  assert.equal(report.sitewide.version, 'sitewide-audit-v3');
+  assert.equal(report.sitewide.version, 'sitewide-audit-v4');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'duplicate-titles').status, 'failed');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'canonical-conflicts').status, 'failed');
   assert.equal(report.sitewide.checks.find((check) => check.id === 'broken-links').status, 'failed');
@@ -431,7 +460,7 @@ test('collects navigation semantics, link regions and URL consistency evidence',
   root.html = root.html
     .replace(
       '<body>',
-      '<body><nav><span class="cursor-pointer">解决方案</span><a href="#">占位链接</a></nav><main><a href="/content">正文入口</a></main><footer><a href="/footer-only">页脚入口</a></footer>'
+      '<body><nav><span class="cursor-pointer">解决方案</span><div onclick="window.location.href=\'/news\'">新闻中心</div><a href="#">占位链接</a></nav><main><a href="/content">正文入口</a></main><footer><a href="/footer-only">页脚入口</a></footer>'
     )
     .replace(
       '<link rel="canonical" href="https://example.com/">',
@@ -479,6 +508,12 @@ test('collects navigation semantics, link regions and URL consistency evidence',
   assert.equal(
     report.sitewide.navigation_crawlability.static_issues.some((issue) => (
       issue.tag === 'span' && issue.text === '解决方案'
+    )),
+    false
+  );
+  assert.equal(
+    report.sitewide.navigation_crawlability.static_issues.some((issue) => (
+      issue.tag === 'div' && issue.text === '新闻中心'
     )),
     true
   );

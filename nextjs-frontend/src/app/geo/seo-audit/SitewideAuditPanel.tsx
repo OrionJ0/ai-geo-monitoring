@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import {
   buildCheckEvidence,
+  buildNavigationSummary,
   normalizeSitewideCheckForDisplay,
   safeReportUrl,
 } from '@/utils/seoSitewideEvidence.cjs';
@@ -25,7 +26,7 @@ const CHECK_LABELS = {
   'navigation-crawlability': '导航链接可抓取性',
   'url-consistency': '站点 URL 一致性',
   hreflang: 'hreflang 国际化声明',
-  'sitemap-coverage': 'Sitemap 与可访问页面差异',
+  'sitemap-coverage': 'Sitemap 页面覆盖',
   'javascript-rendering': 'JavaScript 渲染抽样'
 };
 
@@ -45,56 +46,70 @@ function CheckEvidence({ check }) {
   const evidence = buildCheckEvidence(check);
   if (!evidence.length) return null;
   if (check.id === 'navigation-crawlability') {
+    const summary = buildNavigationSummary(check);
     return (
       <div className={styles.navigationEvidence}>
-        <p>
-          以下列出全部导航入口。“出现页面”表示这段错误导航代码出现在哪里，不是跳转目标；
-          因为元素没有 href，目标地址无法从 HTML 读取。
-        </p>
-        <ol>
-          {evidence.map((item, index) => (
-            <li key={`${check.id}-${item.title}-${index}`}>
-              <strong>{item.title}</strong>
-              <span>{item.explanation}</span>
-              {item.occurrenceCount > 0 && (
-                <small>在 {item.occurrenceCount} 个页面出现</small>
-              )}
-              {item.occurrencePages?.length > 0 && (
-                <details>
-                  <summary>查看出现页面</summary>
-                  <div>
-                    {item.occurrencePages.slice(0, 10).map((url) => {
-                      const href = safeReportUrl(url);
-                      return href
-                        ? <a key={url} href={href} target="_blank" rel="noreferrer">{url}</a>
-                        : <span key={url}>{url}</span>;
-                    })}
-                    {item.occurrenceCount > item.occurrencePages.length && (
-                      <small>报告保留了 {item.occurrencePages.length} 个示例，共影响 {item.occurrenceCount} 个页面。</small>
-                    )}
-                  </div>
-                </details>
-              )}
-              {item.targetLinks?.length > 0 && (
-                <details>
-                  <summary>查看交互后出现的链接</summary>
-                  <div>
-                    {item.targetLinks.map((link) => {
-                      const href = safeReportUrl(link.url);
-                      return href
-                        ? (
-                            <a key={link.url} href={href} target="_blank" rel="noreferrer">
-                              {link.text || link.url}
-                            </a>
-                          )
-                        : <span key={link.url}>{link.text || link.url}</span>;
-                    })}
-                  </div>
-                </details>
-              )}
-            </li>
-          ))}
-        </ol>
+        {summary.labels.length > 0 && (
+          <p>
+            导航项：{summary.labels.join('、')}
+            {summary.hiddenCount > 0 ? `，另有 ${summary.hiddenCount} 项` : ''}
+          </p>
+        )}
+        <div className={styles.navigationSummaryMeta}>
+          {summary.occurrenceCount > 0 && (
+            <small>同类代码最多在 {summary.occurrenceCount} 个页面出现</small>
+          )}
+          {summary.interactionCount > 0 && (
+            <small>{summary.interactionCount} 组链接仅在交互后出现</small>
+          )}
+        </div>
+        <details className={styles.navigationDetails}>
+          <summary>查看详情</summary>
+          <ol>
+            {evidence.map((item, index) => (
+              <li key={`${check.id}-${item.title}-${index}`}>
+                <strong>{item.title}</strong>
+                <span>{item.explanation}</span>
+                {item.occurrenceCount > 0 && (
+                  <small>在 {item.occurrenceCount} 个页面出现</small>
+                )}
+                {item.occurrencePages?.length > 0 && (
+                  <details>
+                    <summary>查看出现页面</summary>
+                    <div>
+                      {item.occurrencePages.slice(0, 10).map((url) => {
+                        const href = safeReportUrl(url);
+                        return href
+                          ? <a key={url} href={href} target="_blank" rel="noreferrer">{url}</a>
+                          : <span key={url}>{url}</span>;
+                      })}
+                      {item.occurrenceCount > item.occurrencePages.length && (
+                        <small>报告保留了 {item.occurrencePages.length} 个示例，共影响 {item.occurrenceCount} 个页面。</small>
+                      )}
+                    </div>
+                  </details>
+                )}
+                {item.targetLinks?.length > 0 && (
+                  <details>
+                    <summary>查看交互后出现的链接</summary>
+                    <div>
+                      {item.targetLinks.map((link) => {
+                        const href = safeReportUrl(link.url);
+                        return href
+                          ? (
+                              <a key={link.url} href={href} target="_blank" rel="noreferrer">
+                                {link.text || link.url}
+                              </a>
+                            )
+                          : <span key={link.url}>{link.text || link.url}</span>;
+                      })}
+                    </div>
+                  </details>
+                )}
+              </li>
+            ))}
+          </ol>
+        </details>
       </div>
     );
   }
@@ -160,7 +175,7 @@ export default function SitewideAuditPanel({ sitewide, comparison }) {
         <span className={styles.issueCount}>{sitewide.issues?.length || 0} 类问题</span>
       </header>
       <p className={styles.sitewideNote}>
-        这些检查独立于 v4 技术健康分，覆盖跨页重复、链接关系、Sitemap 库存和浏览器渲染证据。
+        这些检查独立于 v4 技术健康分，覆盖跨页重复、链接关系、Sitemap 页面清单和浏览器渲染证据。
       </p>
 
       <div className={styles.sitewideCheckGrid}>

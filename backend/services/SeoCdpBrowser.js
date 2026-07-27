@@ -182,33 +182,41 @@ async function createCdpBrowser({
               'a[aria-haspopup]',
               '[role="link"]'
             ].join(',');
-            const isNonSemanticCandidate = (element) => {
+            const isExplicitNonSemanticNavigation = (element) => {
               const tag = element.tagName.toLowerCase();
               if (tag === 'a' || tag === 'button') return false;
               const role = (element.getAttribute('role') || '').toLowerCase();
-              const style = getComputedStyle(element);
+              const onclick = element.getAttribute('onclick') || '';
+              const declaredTarget = (
+                element.getAttribute('data-href')
+                || element.getAttribute('data-url')
+                || ''
+              ).trim();
               return role === 'link'
-                || element.hasAttribute('onclick')
-                || style.cursor === 'pointer';
+                || Boolean(declaredTarget)
+                || /(?:window\\.)?location(?:\\.href)?\\s*=|(?:window\\.)?location\\.(?:assign|replace)\\s*\\(|window\\.open\\s*\\(/i.test(onclick);
             };
             const isInteractionCandidate = (element) => {
               const tag = element.tagName.toLowerCase();
+              const style = getComputedStyle(element);
               return tag === 'button'
                 || (tag === 'a' && element.hasAttribute('aria-haspopup'))
-                || isNonSemanticCandidate(element);
+                || isExplicitNonSemanticNavigation(element)
+                || element.hasAttribute('onclick')
+                || style.cursor === 'pointer';
             };
             const candidates = Array.from(document.querySelectorAll(candidateSelector))
               .filter(isInteractionCandidate)
               .filter((element) => {
-                if (!isNonSemanticCandidate(element)) return true;
+                if (!isExplicitNonSemanticNavigation(element)) return true;
                 if (element.closest('button, a')) return false;
                 return !Array.from(element.querySelectorAll('span, div, [role="link"]'))
-                  .some(isNonSemanticCandidate);
+                  .some(isExplicitNonSemanticNavigation);
               })
               .filter((element) => normalizedText(element.textContent))
               .slice(0, 30);
             const nonSemanticControls = candidates
-              .filter(isNonSemanticCandidate)
+              .filter(isExplicitNonSemanticNavigation)
               .map((element) => ({
                 tag: element.tagName.toLowerCase(),
                 text: normalizedText(element.textContent),

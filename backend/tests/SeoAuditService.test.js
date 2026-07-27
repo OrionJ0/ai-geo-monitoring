@@ -107,6 +107,36 @@ test('does not treat empty robots and sitemap responses as healthy', async () =>
   assert.equal(report.ruleVersion, '2026-07-23-v3');
 });
 
+test('explains that a successful sitemap response contains no valid page addresses', async () => {
+  const siteClient = {
+    async fetchPage(url) {
+      return {
+        requestedUrl: url,
+        finalUrl: url,
+        statusCode: 200,
+        durationMs: 10,
+        headers: { 'content-type': 'text/html' },
+        html: '<html><head><title>这是一个长度合理的示例页面标题</title></head><body><h1>示例页面</h1></body></html>'
+      };
+    },
+    async probe(url) {
+      if (url.endsWith('/robots.txt')) {
+        return { statusCode: 200, body: 'User-agent: *\nAllow: /' };
+      }
+      return { statusCode: 200, body: '<urlset><url><loc></loc></url></urlset>' };
+    }
+  };
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
+  const sitemap = report.categories
+    .flatMap((category) => category.checks)
+    .find((check) => check.id === 'sitemap');
+
+  assert.equal(sitemap.status, 'failed');
+  assert.equal(sitemap.finding, 'Sitemap 中没有有效页面地址');
+  assert.equal(sitemap.value, 'HTTP 200 · 0 个有效页面地址 · /sitemap.xml');
+});
+
 test('validates a sitemap declared in robots.txt instead of trusting the declaration alone', async () => {
   const siteClient = {
     async fetchPage(url) {

@@ -1,4 +1,4 @@
-const SITEWIDE_VERSION = 'sitewide-audit-v3';
+const SITEWIDE_VERSION = 'sitewide-audit-v4';
 
 function normalizedText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
@@ -535,17 +535,38 @@ function urlConsistencyAnalysis({
   origin,
   pages,
   declaredSitemaps,
-  sitemapReferences
+  sitemapReferences,
+  sitemapLocalhostRewrites = []
 }) {
   const expectedOrigin = new URL(origin).origin;
   const issues = [];
+  const rewrittenHosts = new Set(
+    sitemapLocalhostRewrites.map((entry) => {
+      try {
+        return new URL(`http://${entry.originalHost}`).host;
+      } catch {
+        return String(entry.originalHost || '').toLowerCase();
+      }
+    })
+  );
+  const wasLocalhostRewritten = (urlString) => {
+    try {
+      return rewrittenHosts.has(new URL(urlString).host);
+    } catch {
+      return false;
+    }
+  };
+
   if (isNonPublicHostname(new URL(expectedOrigin).hostname)) {
+    const hasRewrites = sitemapLocalhostRewrites.length > 0;
     issues.push({
       type: 'non-public-origin',
       page: `${expectedOrigin}/`,
       target: expectedOrigin,
       expectedOrigin,
-      message: '检测入口使用 localhost、回环地址或私网地址'
+      message: hasRewrites
+        ? `检测入口使用 localhost、回环地址或私网地址；已自动将 ${sitemapLocalhostRewrites.length} 个 localhost Sitemap 引用替换为检测入口地址`
+        : '检测入口使用 localhost、回环地址或私网地址'
     });
   }
 
@@ -573,6 +594,7 @@ function urlConsistencyAnalysis({
   };
 
   (Array.isArray(declaredSitemaps) ? declaredSitemaps : []).forEach((url) => {
+    if (wasLocalhostRewritten(url)) return;
     compareOrigin({
       type: 'robots-sitemap-origin',
       page: `${expectedOrigin}/robots.txt`,
@@ -581,6 +603,7 @@ function urlConsistencyAnalysis({
     });
   });
   (Array.isArray(sitemapReferences) ? sitemapReferences : []).forEach((entry) => {
+    if (wasLocalhostRewritten(entry?.url)) return;
     compareOrigin({
       type: entry?.kind === 'sitemap' ? 'sitemap-index-origin' : 'sitemap-entry-origin',
       page: entry?.source || '',
@@ -614,7 +637,8 @@ function urlConsistencyAnalysis({
 
   return {
     expected_origin: expectedOrigin,
-    issues
+    issues,
+    localhost_rewrites: sitemapLocalhostRewrites
   };
 }
 
@@ -624,6 +648,7 @@ function analyzeSitewideEvidence({
   sitemapUrls = [],
   declaredSitemaps = [],
   sitemapReferences = [],
+  sitemapLocalhostRewrites = [],
   linkChecks = [],
   renderAnalysis,
   truncated = false,
@@ -637,6 +662,7 @@ function analyzeSitewideEvidence({
   const canonical = canonicalAnalysis(pages);
   const redirects = redirectAnalysis(pages);
   const brokenLinks = brokenLinkAnalysis(linkChecks);
+  const hasUsableSitemap = Array.isArray(sitemapUrls) && sitemapUrls.length > 0;
   brokenLinks.coverage = {
     checked_targets: Array.isArray(linkChecks) ? linkChecks.length : 0,
     complete: siteInventoryComplete && linkInventoryComplete
@@ -646,7 +672,7 @@ function analyzeSitewideEvidence({
     pages,
     sitemapUrls,
     truncated,
-    inventoryComplete: sitemapInventoryComplete
+    inventoryComplete: sitemapInventoryComplete && hasUsableSitemap
   });
   const linkQuality = internalLinkQuality({ origin, pages, sitemapUrls });
   const orphans = linkQuality.orphan_pages;
@@ -662,11 +688,25 @@ function analyzeSitewideEvidence({
   const navigationIssueCount = navigation.static_issues.length
     + navigation.rendered_controls.length
     + navigation.interaction_dependent_links.length;
+  const navigationFinding = [
+    directNavigationIssueCount > 0
+      ? `${directNavigationIssueCount} 个导航项无法直接读取地址`
+      : '',
+    navigation.interaction_dependent_links.length > 0
+      ? `${directNavigationIssueCount > 0 ? '另有 ' : ''}${navigation.interaction_dependent_links.length} 组链接仅在交互后出现`
+      : ''
+  ].filter(Boolean).join('；');
+  const navigationValue = [
+    nonLinkNavigationCount > 0 ? `${nonLinkNavigationCount} 类 div/span 跳转` : '',
+    invalidAnchorCount > 0 ? `${invalidAnchorCount} 类 a 缺少有效 href` : ''
+  ].filter(Boolean).join(' · ')
+    || `${navigation.interaction_dependent_links.length} 组交互后链接`;
   const urlConsistency = urlConsistencyAnalysis({
     origin,
     pages,
     declaredSitemaps,
-    sitemapReferences
+    sitemapReferences,
+    sitemapLocalhostRewrites
   });
   const checks = [
     check({
@@ -750,8 +790,13 @@ function analyzeSitewideEvidence({
         inboundCount: 0
       })),
       recommendation: '从相关栏目、导航或正文为重要页面增加可抓取的内部链接。',
-      complete: siteInventoryComplete && sitemapInventoryComplete,
-      unknownFinding: '站点或 Sitemap 清单不完整，无法可靠判断孤儿页面'
+      complete: siteInventoryComplete && sitemapInventoryComplete && hasUsableSitemap,
+      unknownFinding: hasUsableSitemap
+        ? '站点或 Sitemap 清单不完整，无法可靠判断孤儿页面'
+        : '暂时无法检查',
+      unknownValue: hasUsableSitemap
+        ? '证据不完整'
+        : '未获得有效 Sitemap 页面清单'
     }),
     evidenceCheck({
       id: 'internal-link-quality',
@@ -764,12 +809,17 @@ function analyzeSitewideEvidence({
       affectedPages: linkQuality.footer_only_pages,
       details: linkQuality.pages.filter((page) => page.classification === 'footer_only'),
       recommendation: '从主导航、栏目列表、面包屑、正文或相关推荐为重要页面增加上下文内链。',
-      complete: siteInventoryComplete && sitemapInventoryComplete,
-      unknownFinding: '站点或 Sitemap 清单不完整，无法可靠判断内链来源质量'
+      complete: siteInventoryComplete && sitemapInventoryComplete && hasUsableSitemap,
+      unknownFinding: hasUsableSitemap
+        ? '站点或 Sitemap 清单不完整，无法可靠判断内链来源质量'
+        : '暂时无法检查',
+      unknownValue: hasUsableSitemap
+        ? '证据不完整'
+        : '未获得有效 Sitemap 页面清单'
     }),
     evidenceCheck({
       id: 'sitemap-coverage',
-      title: 'Sitemap 与可访问页面差异',
+      title: 'Sitemap 页面覆盖',
       severity: 'high',
       failed: sitemap.missing_from_sitemap.length > 0 || sitemap.invalid_entries.length > 0,
       finding: `${sitemap.missing_from_sitemap.length} 个可索引页面缺失，${sitemap.invalid_entries.length} 个条目无效`,
@@ -785,7 +835,12 @@ function analyzeSitewideEvidence({
       ],
       recommendation: '把重要可索引页面加入 Sitemap，并移除失效、重定向或 noindex 条目。',
       complete: sitemap.inventory_complete && !hasFailedPages,
-      unknownFinding: 'Sitemap 或抓取清单不完整，无法确认两者完全一致'
+      unknownFinding: hasUsableSitemap
+        ? 'Sitemap 或抓取清单不完整，无法确认两者完全一致'
+        : '暂时无法检查',
+      unknownValue: hasUsableSitemap
+        ? '证据不完整'
+        : '未获得有效 Sitemap 页面清单'
     }),
     evidenceCheck({
       id: 'url-consistency',
@@ -821,9 +876,9 @@ function analyzeSitewideEvidence({
       title: '导航链接可抓取性',
       severity: 'medium',
       failed: navigationIssueCount > 0,
-      finding: `${directNavigationIssueCount} 类导航入口无法从 HTML 直接读取跳转地址；${navigation.interaction_dependent_links.length} 组链接只在交互后出现`,
+      finding: navigationFinding,
       passedFinding: '导航目标均可从带 href 的 a 标签直接读取',
-      value: `div/span 等点击跳转 ${nonLinkNavigationCount} 类 · 无有效 href 的 a ${invalidAnchorCount} 类`,
+      value: navigationValue,
       affectedPages: [
         ...navigation.static_issues.flatMap((issue) => issue.sourcePages),
         ...navigation.rendered_controls.map((entry) => entry.page),

@@ -1,8 +1,10 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
   buildCheckEvidence,
+  buildNavigationSummary,
   normalizeSitewideCheckForDisplay,
   safeReportUrl,
 } = require('./seoSitewideEvidence.cjs');
@@ -30,6 +32,31 @@ test('explains every navigation control and distinguishes occurrence pages from 
   );
   assert.equal(evidence[0].occurrenceCount, 125);
   assert.deepEqual(evidence[0].occurrencePages, ['https://example.com/page-0']);
+});
+
+test('导航问题摘要只展示少量名称并合并重复出现范围', () => {
+  const details = [
+    ...Array.from({ length: 8 }, (_, index) => ({
+      type: 'non-semantic-navigation-control',
+      tag: index % 2 ? 'span' : 'div',
+      text: `导航 ${index + 1}`,
+      reason: 'clickable_non_link',
+      sourcePageCount: 64,
+      sourcePages: [`https://example.com/page-${index}`]
+    })),
+    {
+      triggerText: '产品中心',
+      page: 'https://example.com/',
+      links: [{ url: 'https://example.com/products/a', text: '产品 A' }]
+    }
+  ];
+
+  assert.deepEqual(buildNavigationSummary({ details }), {
+    labels: ['导航 1', '导航 2', '导航 3', '导航 4', '导航 5', '导航 6'],
+    hiddenCount: 2,
+    occurrenceCount: 64,
+    interactionCount: 1
+  });
 });
 
 test('旧报告的导航术语会转换成直接说明 HTML 跳转地址不可读', () => {
@@ -67,9 +94,9 @@ test('旧报告的导航术语会转换成直接说明 HTML 跳转地址不可�
 
   assert.equal(
     check.finding,
-    '3 类导航入口无法从 HTML 直接读取跳转地址；1 组链接只在交互后出现'
+    '3 个导航项无法直接读取地址；另有 1 组链接仅在交互后出现'
   );
-  assert.equal(check.value, 'div/span 等点击跳转 2 类 · 无有效 href 的 a 1 类');
+  assert.equal(check.value, '2 类 div/span 跳转 · 1 类 a 缺少有效 href');
 });
 
 test('非失败状态或没有明细的导航检查保留原始结论', () => {
@@ -92,6 +119,23 @@ test('非失败状态或没有明细的导航检查保留原始结论', () => {
     normalizeSitewideCheckForDisplay(legacyCheckWithoutDetails),
     legacyCheckWithoutDetails
   );
+});
+
+test('仅有交互后链接时不显示空值或零值分类', () => {
+  const check = normalizeSitewideCheckForDisplay({
+    id: 'navigation-crawlability',
+    status: 'failed',
+    finding: '旧文案',
+    value: '旧值',
+    details: [{
+      triggerText: '产品中心',
+      links: [{ url: 'https://example.com/products', text: '全部产品' }],
+    }],
+  });
+
+  assert.equal(check.finding, '1 组链接仅在交互后出现');
+  assert.equal(check.value, '1 组交互后链接');
+  assert.doesNotMatch(`${check.finding}${check.value}`, /\b0\b/);
 });
 
 test('报告中的外部链接只允许 HTTP 和 HTTPS 协议', () => {

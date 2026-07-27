@@ -58,7 +58,10 @@ export default function SeoSiteAuditReport({ report }) {
 
       <section className={styles.priorityPanel}>
         <header className={styles.sectionHeading}>
-          <div><span className={styles.sectionKicker}>行动清单</span><h2>优先修复内容</h2></div>
+          <div>
+            <h2>优先修复内容</h2>
+            <p className={styles.priorityOrderNote}>按优先级从高到低</p>
+          </div>
           <span className={styles.issueCount}>{issues.length} 类问题</span>
         </header>
         {issues.length === 0 ? (

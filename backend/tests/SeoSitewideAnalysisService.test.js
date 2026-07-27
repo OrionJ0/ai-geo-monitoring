@@ -295,11 +295,11 @@ test('reports non-semantic navigation controls and interaction-dependent links',
   );
   assert.equal(
     result.checks.find((check) => check.id === 'navigation-crawlability').finding,
-    '1 类导航入口无法从 HTML 直接读取跳转地址；1 组链接只在交互后出现'
+    '1 个导航项无法直接读取地址；另有 1 组链接仅在交互后出现'
   );
   assert.equal(
     result.checks.find((check) => check.id === 'navigation-crawlability').value,
-    'div/span 等点击跳转 1 类 · 无有效 href 的 a 0 类'
+    '1 类 div/span 跳转'
   );
   assert.deepEqual(result.navigation_crawlability.static_issues, [{
     type: 'non-semantic-navigation-control',
@@ -318,6 +318,38 @@ test('reports non-semantic navigation controls and interaction-dependent links',
       text: '能源'
     }]
   );
+});
+
+test('describes interaction-only navigation issues without empty or zero-valued copy', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [page('https://example.com/')],
+    sitemapUrls: ['https://example.com/'],
+    linkChecks: [],
+    renderAnalysis: {
+      status: 'completed',
+      samples: [{
+        url: 'https://example.com/',
+        source: {},
+        rendered: {
+          navigation: {
+            nonSemanticControls: [],
+            interactionDependentLinks: [{
+              triggerText: '产品中心',
+              links: [{ url: 'https://example.com/products', text: '全部产品' }]
+            }]
+          }
+        }
+      }]
+    }
+  });
+
+  const navigation = result.checks.find((check) => check.id === 'navigation-crawlability');
+
+  assert.equal(navigation.status, 'failed');
+  assert.equal(navigation.finding, '1 组链接仅在交互后出现');
+  assert.equal(navigation.value, '1 组交互后链接');
+  assert.doesNotMatch(`${navigation.finding}${navigation.value}`, /\b0\b/);
 });
 
 test('bounds repeated navigation source-page evidence while retaining the total count', () => {
@@ -439,6 +471,72 @@ test('compares sitemap inventory with accessible and indexable crawled pages', (
     'https://example.com/redirected'
   ]);
   assert.equal(result.checks.find((check) => check.id === 'sitemap-coverage').status, 'failed');
+});
+
+test('does not calculate sitemap coverage without a usable sitemap page inventory', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [
+      page('https://example.com/'),
+      page('https://example.com/products')
+    ],
+    sitemapUrls: [],
+    sitemapInventoryComplete: true,
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] }
+  });
+
+  const coverage = result.checks.find((check) => check.id === 'sitemap-coverage');
+
+  assert.equal(coverage.status, 'unknown');
+  assert.equal(coverage.finding, '暂时无法检查');
+  assert.equal(coverage.value, '未获得有效 Sitemap 页面清单');
+  assert.doesNotMatch(coverage.finding, /2 个可索引页面缺失/);
+});
+
+test('does not claim that orphan pages are healthy without an independent page inventory', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [
+      page('https://example.com/', {
+        links: [{
+          url: 'https://example.com/products',
+          internal: true,
+          region: 'navigation',
+          text: '产品中心'
+        }]
+      }),
+      page('https://example.com/products')
+    ],
+    sitemapUrls: [],
+    sitemapInventoryComplete: true,
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] }
+  });
+
+  const orphanPages = result.checks.find((check) => check.id === 'orphan-pages');
+
+  assert.equal(orphanPages.status, 'unknown');
+  assert.equal(orphanPages.finding, '暂时无法检查');
+  assert.equal(orphanPages.value, '未获得有效 Sitemap 页面清单');
+  assert.notEqual(orphanPages.finding, 'Sitemap 页面均有内部链接入口');
+});
+
+test('does not claim internal-link source quality without an independent page inventory', () => {
+  const result = analyzeSitewideEvidence({
+    origin: 'https://example.com',
+    pages: [page('https://example.com/')],
+    sitemapUrls: [],
+    sitemapInventoryComplete: true,
+    linkChecks: [],
+    renderAnalysis: { status: 'unavailable', samples: [] }
+  });
+
+  const linkQuality = result.checks.find((check) => check.id === 'internal-link-quality');
+
+  assert.equal(linkQuality.status, 'unknown');
+  assert.equal(linkQuality.finding, '暂时无法检查');
+  assert.equal(linkQuality.value, '未获得有效 Sitemap 页面清单');
 });
 
 test('detects invalid, duplicate and non-reciprocal hreflang declarations', () => {

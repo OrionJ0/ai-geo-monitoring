@@ -295,7 +295,7 @@ export default function SeoAuditPage() {
 
   return (
     <main className={styles.page}>
-      <section className={styles.hero} aria-labelledby="seo-audit-title">
+      <section className={styles.hero} aria-label="技术 SEO 检测">
         <div className={styles.heroActions}>
           <Upload
             accept=".csv,text/csv"
@@ -322,7 +322,6 @@ export default function SeoAuditPage() {
         </div>
         <div className={styles.heroCopy}>
           <span className={styles.eyebrow}><SearchOutlined /> 技术 SEO 检测</span>
-          <h1 id="seo-audit-title">把整站问题落到每一条 URL</h1>
           <p>从站内链接与 Sitemap 发现同域页面，检查 Google、Bing、百度共同关注的技术基础，并按严重程度和影响范围排出修复顺序。</p>
         </div>
 
@@ -464,8 +463,8 @@ export default function SeoAuditPage() {
           <section className={styles.priorityPanel} aria-label={`从 ${report.summary.total} 项检查中生成的修复清单`}>
             <header className={styles.sectionHeading}>
               <div>
-                <span className={styles.sectionKicker}>行动清单</span>
                 <h2>优先修复内容</h2>
+                <p className={styles.priorityOrderNote}>按优先级从高到低</p>
               </div>
               <span className={styles.issueCount}>{priorities.length} 类问题</span>
             </header>

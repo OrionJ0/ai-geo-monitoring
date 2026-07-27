@@ -69,12 +69,23 @@ function normalizeWebsiteUrl(input) {
   return url.toString();
 }
 
-function hasSkippedHeadingLevel($) {
+function analyzeHeadingLevels($) {
   const levels = $('h1, h2, h3, h4, h5, h6')
     .map((_, element) => Number(element.tagName.slice(1)))
     .get();
 
-  return levels.some((level, index) => index > 0 && level - levels[index - 1] > 1);
+  if (levels.length < 2) return { hasSkip: false, hasReverse: false };
+
+  let hasSkip = false;
+  let hasReverse = false;
+
+  for (let i = 1; i < levels.length; i++) {
+    const diff = levels[i] - levels[i - 1];
+    if (diff > 1) hasSkip = true;
+    if (diff < 0) hasReverse = true;
+  }
+
+  return { hasSkip, hasReverse };
 }
 
 function buildCheck({ id, category, title, finding, passed, severity, weight, value, description, recommendation }) {
@@ -141,7 +152,11 @@ function analyzeSitemap(result) {
       }
     });
   if ((!isUrlSet && !isIndex) || locs.length === 0) {
-    return { passed: false, finding: 'Sitemap 格式无效', value: `${statusValue} · 未发现有效 loc` };
+    return {
+      passed: false,
+      finding: 'Sitemap 中没有有效页面地址',
+      value: `${statusValue} · 0 个有效页面地址`
+    };
   }
   return {
     passed: true,
@@ -406,7 +421,7 @@ function createSeoAuditService({
             : '修复 robots.txt 的访问或格式问题，再确认重要搜索与 AI 搜索爬虫的路径权限。'
         }),
         createCheck({
-          id: 'sitemap', category: 'crawlability', title: 'Sitemap.xml',
+          id: 'sitemap', category: 'crawlability', title: 'Sitemap 可用性',
           passed: sitemapAnalysis.passed, finding: sitemapAnalysis.finding,
           value: sitemapAnalysis.value,
           description: '站点地图帮助搜索引擎发现重要页面。',
@@ -457,14 +472,30 @@ function createSeoAuditService({
             ? '添加一个包含明确页面主题的非空 H1。'
             : '保留一个主 H1，其余标题改为 H2–H6。'
         }),
-        createCheck({
-          id: 'heading-order', category: 'content', title: '标题层级',
-          passed: !hasSkippedHeadingLevel($),
-          finding: hasSkippedHeadingLevel($) ? '标题层级存在跳级' : '标题层级连续',
-          value: `${$('h1, h2, h3, h4, h5, h6').length} 个标题`,
-          description: '连续的标题层级让用户和搜索引擎更容易理解内容结构。',
-          recommendation: '按 H1 → H2 → H3 的层级组织内容，避免跳级。'
-        }),
+        createCheck(Object.assign(
+          { id: 'heading-order', category: 'content', title: '标题层级',
+            value: `${$('h1, h2, h3, h4, h5, h6').length} 个标题`,
+            description: '连续的标题层级让用户和搜索引擎更容易理解内容结构。' },
+          (() => {
+            const h = analyzeHeadingLevels($);
+            const hasIssue = h.hasSkip || h.hasReverse;
+            let finding, recommendation;
+            if (h.hasSkip && h.hasReverse) {
+              finding = '标题层级存在跳级或顺序错误';
+              recommendation = '按 H1 → H2 → H3 逐级组织内容，避免跳级并确保标题顺序不颠倒。';
+            } else if (h.hasSkip) {
+              finding = '标题层级存在跳级';
+              recommendation = '按 H1 → H2 → H3 的层级组织内容，避免跳级。';
+            } else if (h.hasReverse) {
+              finding = '标题层级顺序错误';
+              recommendation = '调整标题顺序，确保 H1 → H2 → H3 由大到小排列，不要出现低级别标题在高级别标题前面的情况。';
+            } else {
+              finding = '标题层级连续';
+              recommendation = '';
+            }
+            return { passed: !hasIssue, finding, recommendation };
+          })()
+        )),
         createCheck({
           id: 'content-depth', category: 'content', title: '正文信息量',
           passed: contentCharacters >= thresholds.contentMinCharacters,

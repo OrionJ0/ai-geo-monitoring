@@ -67,6 +67,24 @@ function buildCheckEvidence(check = {}) {
   return [];
 }
 
+function buildNavigationSummary(check = {}) {
+  const evidence = buildCheckEvidence({
+    id: 'navigation-crawlability',
+    details: check.details
+  });
+  const directEvidence = evidence.filter((item) => item.targetLinks.length === 0);
+  const labels = Array.from(new Set(directEvidence.map((item) => item.title)));
+  return {
+    labels: labels.slice(0, 6),
+    hiddenCount: Math.max(0, labels.length - 6),
+    occurrenceCount: directEvidence.reduce(
+      (max, item) => Math.max(max, item.occurrenceCount || 0),
+      0
+    ),
+    interactionCount: evidence.filter((item) => item.targetLinks.length > 0).length,
+  };
+}
+
 function normalizeSitewideCheckForDisplay(check = {}) {
   if (check.id !== 'navigation-crawlability' || check.status !== 'failed') return check;
 
@@ -78,16 +96,30 @@ function normalizeSitewideCheckForDisplay(check = {}) {
     (detail) => !detail.triggerText && detail.type !== 'invalid-anchor'
   ).length;
   const unreadableTargetCount = invalidAnchorCount + nonSemanticCount;
+  const finding = [
+    unreadableTargetCount > 0
+      ? `${unreadableTargetCount} 个导航项无法直接读取地址`
+      : '',
+    interactionCount > 0
+      ? `${unreadableTargetCount > 0 ? '另有 ' : ''}${interactionCount} 组链接仅在交互后出现`
+      : ''
+  ].filter(Boolean).join('；');
+  const value = [
+    nonSemanticCount > 0 ? `${nonSemanticCount} 类 div/span 跳转` : '',
+    invalidAnchorCount > 0 ? `${invalidAnchorCount} 类 a 缺少有效 href` : ''
+  ].filter(Boolean).join(' · ')
+    || `${interactionCount} 组交互后链接`;
 
   return {
     ...check,
-    finding: `${unreadableTargetCount} 类导航入口无法从 HTML 直接读取跳转地址；${interactionCount} 组链接只在交互后出现`,
-    value: `div/span 等点击跳转 ${nonSemanticCount} 类 · 无有效 href 的 a ${invalidAnchorCount} 类`,
+    finding,
+    value,
   };
 }
 
 module.exports = {
   buildCheckEvidence,
+  buildNavigationSummary,
   normalizeSitewideCheckForDisplay,
   safeReportUrl,
 };

@@ -139,6 +139,16 @@ test('单页报告把优先修复放在技术健康分之后和四阶段检测�
   assert.ok(priorityPanelIndex < stageChecksIndex);
 });
 
+test('单页和全站优先修复内容都说明按优先级从高到低排列', () => {
+  const pageSource = fs.readFileSync(pagePath, 'utf8');
+  const siteReportSource = fs.readFileSync(siteReportPath, 'utf8');
+
+  for (const source of [pageSource, siteReportSource]) {
+    assert.match(source, /<h2>优先修复内容<\/h2>/);
+    assert.match(source, /className=\{styles\.priorityOrderNote\}>按优先级从高到低/);
+  }
+});
+
 test('全站报告展示跨页专项审计和本次与上次问题差异', () => {
   const siteReportSource = fs.readFileSync(siteReportPath, 'utf8');
   assert.equal(fs.existsSync(sitewidePanelPath), true, '全站专项审计组件应存在');
@@ -157,7 +167,7 @@ test('全站报告展示跨页专项审计和本次与上次问题差异', () =>
   assert.match(panelSource, /导航链接可抓取性/);
   assert.match(panelSource, /站点 URL 一致性/);
   assert.match(panelSource, /hreflang 国际化声明/);
-  assert.match(panelSource, /Sitemap 与可访问页面差异/);
+  assert.match(panelSource, /Sitemap 页面覆盖/);
   assert.match(panelSource, /JavaScript 渲染抽样/);
   assert.match(panelSource, /新增问题/);
   assert.match(panelSource, /已解决/);
@@ -166,13 +176,14 @@ test('全站报告展示跨页专项审计和本次与上次问题差异', () =>
   assert.match(fs.readFileSync(sitewideEvidencePath, 'utf8'), /\['http:', 'https:'\]\.includes/);
 });
 
-test('导航可抓取性展示全部入口并说明出现页面不是跳转目标', () => {
+test('导航可抓取性用摘要定位问题并把完整证据折叠到详情', () => {
   const panelSource = fs.readFileSync(sitewidePanelPath, 'utf8');
 
   assert.match(panelSource, /buildCheckEvidence/);
-  assert.match(panelSource, /出现页面.*不是跳转目标/s);
-  assert.match(panelSource, /目标地址无法从 HTML 读取/);
-  assert.doesNotMatch(panelSource, /evidence\.slice\(0,\s*3\)/);
+  assert.match(panelSource, /buildNavigationSummary/);
+  assert.match(panelSource, /导航项：/);
+  assert.match(panelSource, /查看详情/);
+  assert.doesNotMatch(panelSource, /以下列出全部导航入口/);
 });
 
 test('SEO reports show separate Google, Bing and Baidu verification tag states', () => {

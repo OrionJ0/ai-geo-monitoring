@@ -190,7 +190,7 @@ test('全站四阶段可以解释全部 22 个计分检测项', () => {
     groups.flatMap((stage) => stage.checks.map((check) => check.title)),
     [
       '页面访问状态', 'HTTPS', 'robots.txt', '搜索与 AI 爬虫权限',
-      'Sitemap.xml', '页面链接', '服务器响应时间', 'HTML 体积',
+      'Sitemap 可用性', '页面链接', '服务器响应时间', 'HTML 体积',
       '索引指令', 'Canonical 链接',
       '页面标题', 'Meta 描述', 'Keywords 标签', '标题结构',
       '标题层级', '正文信息量', '页面语言',
@@ -231,7 +231,7 @@ test('四阶段检测账本可以按处理级别和通过状态筛选', () => {
   );
 });
 
-test('报告视图按阻断、阶段、严重级别和扣分稳定重排问题', () => {
+test('报告视图按阻断、严重级别、扣分和阶段稳定重排问题', () => {
   const priorities = [
     { id: 'heading-order', kind: 'issue', stage: 'content', severity: 'medium', deduction: 6 },
     { id: 'title', kind: 'issue', stage: 'content', severity: 'high', deduction: 1 },
@@ -243,9 +243,9 @@ test('报告视图按阻断、阶段、严重级别和扣分稳定重排问题',
   assert.deepEqual(sortPriorities(priorities).map((item) => item.id), [
     'homepage-noindex',
     'sitemap',
-    'canonical',
     'title',
     'heading-order',
+    'canonical',
   ]);
   assert.deepEqual(priorities.map((item) => item.id), [
     'heading-order',

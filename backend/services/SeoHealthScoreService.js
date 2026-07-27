@@ -227,11 +227,8 @@ function calculateTechnicalHealth({
       };
     })
     .sort((left, right) => {
-      const leftStage = scoreConfig.stages.findIndex((stage) => stage.key === left.stage);
-      const rightStage = scoreConfig.stages.findIndex((stage) => stage.key === right.stage);
-      return leftStage - rightStage
-        || (SEVERITY_PRIORITY[left.severity] ?? Number.MAX_SAFE_INTEGER)
-          - (SEVERITY_PRIORITY[right.severity] ?? Number.MAX_SAFE_INTEGER)
+      return (SEVERITY_PRIORITY[left.severity] ?? Number.MAX_SAFE_INTEGER)
+        - (SEVERITY_PRIORITY[right.severity] ?? Number.MAX_SAFE_INTEGER)
         || right.deduction - left.deduction
         || Number(right.affectsHomepage) - Number(left.affectsHomepage)
         || right.coverage - left.coverage

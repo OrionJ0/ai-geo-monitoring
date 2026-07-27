@@ -21,7 +21,7 @@ const CHECK_DEFINITIONS = {
     description: '检查 robots 规则是否允许重要搜索与 AI 搜索爬虫访问。',
   },
   sitemap: {
-    title: 'Sitemap.xml',
+    title: 'Sitemap 可用性',
     description: '检查 Sitemap 是否可访问、非空、格式有效并包含可用 URL。',
   },
   'crawlable-links': {
@@ -184,13 +184,13 @@ function sortPriorities(priorities = []) {
         || String(left.id).localeCompare(String(right.id));
     }
 
-    return (STAGE_PRIORITY[left.stage] ?? Number.MAX_SAFE_INTEGER)
-      - (STAGE_PRIORITY[right.stage] ?? Number.MAX_SAFE_INTEGER)
-      || (SEVERITY_PRIORITY[left.severity] ?? Number.MAX_SAFE_INTEGER)
-        - (SEVERITY_PRIORITY[right.severity] ?? Number.MAX_SAFE_INTEGER)
+    return (SEVERITY_PRIORITY[left.severity] ?? Number.MAX_SAFE_INTEGER)
+      - (SEVERITY_PRIORITY[right.severity] ?? Number.MAX_SAFE_INTEGER)
       || Number(right.deduction || 0) - Number(left.deduction || 0)
       || Number(Boolean(right.affectsHomepage)) - Number(Boolean(left.affectsHomepage))
       || Number(right.coverage || 0) - Number(left.coverage || 0)
+      || (STAGE_PRIORITY[left.stage] ?? Number.MAX_SAFE_INTEGER)
+        - (STAGE_PRIORITY[right.stage] ?? Number.MAX_SAFE_INTEGER)
       || String(left.id).localeCompare(String(right.id));
   });
 }
