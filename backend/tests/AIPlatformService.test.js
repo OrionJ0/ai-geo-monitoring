@@ -316,6 +316,44 @@ test('routes each managed Web platform through its registered isolated service w
   assert.equal(calls.length, 0);
 });
 
+test('routes managed Web configs whose Sequelize getter fields are non-enumerable', async () => {
+  const webCalls = [];
+  const { service, rows, calls } = createService({
+    webPlatformServices: {
+      'doubao-web': {
+        queryPlatform: async (...args) => {
+          webCalls.push(args);
+          return {
+            success: true,
+            platform: 'doubao-web',
+            text: '豆包网页回答'
+          };
+        }
+      }
+    }
+  });
+  const row = rows.find((item) => item.code === 'doubao-web');
+  const sequelizeLikeConfig = {};
+  for (const [field, value] of Object.entries(row)) {
+    Object.defineProperty(sequelizeLikeConfig, field, {
+      configurable: true,
+      enumerable: false,
+      value
+    });
+  }
+
+  const result = await service.queryPlatform('doubao-web', '测试问题', {
+    config: sequelizeLikeConfig,
+    purpose: 'project_monitoring',
+    capture_owner: { record_id: 14, user_id: 7, project_id: 3 }
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.platform, 'doubao-web');
+  assert.equal(webCalls.length, 1);
+  assert.equal(calls.length, 0);
+});
+
 test('rejects Web queries without project purpose and bounded record ownership', async () => {
   const { service, rows, calls } = createService({
     webPlatformServices: {

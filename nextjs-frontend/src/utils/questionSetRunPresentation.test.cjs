@@ -6,6 +6,7 @@ const {
   PDF_TABLE_CONTENT_WIDTH,
   PDF_COLUMN_WIDTHS,
   formatFailureStages,
+  formatSkippedPlatforms,
   getRunStateNotice
 } = require('./questionSetRunPresentation.cjs');
 
@@ -34,6 +35,24 @@ test('失败阶段按数量排序并转换为用户可读说明', () => {
     }),
     '监测平台调用 3 条、结构化分析校验 2 条、执行器异常 1 条'
   );
+});
+
+test('被跳过的平台以用户可读原因进入报告提示', () => {
+  assert.equal(
+    formatSkippedPlatforms([
+      {
+        platform: 'deepseek-web',
+        name: 'DeepSeek 网页版',
+        message: 'DeepSeek 网页版需要重新人工登录'
+      },
+      {
+        platform: 'qwen',
+        name: '千问'
+      }
+    ]),
+    'DeepSeek 网页版需要重新人工登录；千问：暂不可用'
+  );
+  assert.equal(formatSkippedPlatforms(null), '');
 });
 
 test('可重试 partial 同时说明数量、阶段和下一步', () => {

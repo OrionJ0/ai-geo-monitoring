@@ -50,8 +50,8 @@ class AIPlatformService {
       const definition = definitionByCode || definitionByAdapter;
       try {
         this.webPlatformRegistry.validateManagedConfig({
-          ...options.config,
-          code
+          code,
+          adapter_type: options.config?.adapter_type
         });
       } catch {
         return webFailure(

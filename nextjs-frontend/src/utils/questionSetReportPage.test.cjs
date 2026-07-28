@@ -182,6 +182,16 @@ test('partial、快照和导入报告共用一致的状态说明', () => {
   assert.match(presentation, /历史报告仅保留快照/);
 });
 
+test('运行报告明确展示未参与运行的平台和处理入口', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /skipped_platforms/);
+  assert.match(source, /formatSkippedPlatforms/);
+  assert.match(source, /部分监测平台未参与本次运行/);
+  assert.match(source, /当前报告计数不包含它们/);
+  assert.match(source, /前往设置中心/);
+});
+
 test('运行中的报告和逐模型结果使用旋转图标提示仍在处理', () => {
   const page = fs.readFileSync(pagePath, 'utf8');
   const drawer = fs.readFileSync(historyDrawerPath, 'utf8');

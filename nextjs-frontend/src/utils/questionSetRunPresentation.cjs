@@ -49,6 +49,20 @@ function formatFailureStages(failureStages) {
     .join('、');
 }
 
+function formatSkippedPlatforms(skippedPlatforms) {
+  if (!Array.isArray(skippedPlatforms)) return '';
+  return skippedPlatforms
+    .map((item) => {
+      if (!item || typeof item !== 'object') return '';
+      const name = String(item.name || item.platform || '未知平台').trim();
+      const message = String(item.message || '').trim();
+      if (!message) return `${name}：暂不可用`;
+      return message.startsWith(name) ? message : `${name}：${message}`;
+    })
+    .filter(Boolean)
+    .join('；');
+}
+
 function getRunStateNotice({
   status,
   source,
@@ -131,5 +145,6 @@ module.exports = {
   FAILURE_STAGE_LABELS,
   CAPABILITY_REASON_MESSAGES,
   formatFailureStages,
+  formatSkippedPlatforms,
   getRunStateNotice
 };

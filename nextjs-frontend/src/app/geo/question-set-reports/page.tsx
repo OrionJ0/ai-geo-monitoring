@@ -36,6 +36,7 @@ import { downloadQuestionSetReportPdf } from '@/utils/downloadQuestionSetReportP
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import {
   PDF_COLUMN_WIDTHS,
+  formatSkippedPlatforms,
   getRunStateNotice,
 } from '@/utils/questionSetRunPresentation.cjs';
 import QuestionSetRunHistoryDrawer, {
@@ -104,6 +105,13 @@ type RunCapabilities = {
   resume_disabled_reason?: string | null;
   can_retry: boolean;
   retry_disabled_reason?: string | null;
+};
+type SkippedPlatform = {
+  platform?: string;
+  name?: string;
+  reason_code?: string;
+  reason?: string;
+  message?: string;
 };
 type ReportRow = {
   record_id?: number | null;
@@ -224,6 +232,8 @@ type RunReport = {
   };
   capabilities?: RunCapabilities;
   execution_summary?: ExecutionSummary;
+  planned_platforms?: string[];
+  skipped_platforms?: SkippedPlatform[];
   summary: ReportSummary;
   rows?: ReportRow[];
 };
@@ -556,9 +566,18 @@ export default function QuestionSetReportsPage() {
     const reportPlatforms = (report?.rows || [])
       .map((row) => row.platform)
       .filter((code): code is string => Boolean(code));
-    return reportPlatforms.length
-      ? reportPlatforms
-      : selectedProject?.platforms || [];
+    const plannedPlatforms = Array.isArray(report?.planned_platforms)
+      ? report.planned_platforms
+      : [];
+    const skippedPlatforms = (report?.skipped_platforms || [])
+      .map((item) => item.platform)
+      .filter((code): code is string => Boolean(code));
+    const reportScope = Array.from(new Set([
+      ...reportPlatforms,
+      ...plannedPlatforms,
+      ...skippedPlatforms,
+    ]));
+    return reportScope.length ? reportScope : selectedProject?.platforms || [];
   }, [report, selectedProject]);
   const summary = report?.summary || {};
   const hasCompetitorBaseline = Number(summary.competitor_baseline_count || 0) > 0;
@@ -579,6 +598,7 @@ export default function QuestionSetReportsPage() {
     capabilities: report.capabilities,
     executionSummary,
   }) as RunStateNotice : null;
+  const skippedPlatformSummary = formatSkippedPlatforms(report?.skipped_platforms);
 
   const selectRun = (nextRunId: number) => setRunId(nextRunId);
   const reportRowKey = (row: ReportRow) => (
@@ -918,6 +938,21 @@ export default function QuestionSetReportsPage() {
                     showIcon
                     title={runStateNotice.title}
                     description={runStateNotice.description}
+                    className={styles.runningAlert}
+                  />
+                ) : null}
+
+                {skippedPlatformSummary ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    title="部分监测平台未参与本次运行"
+                    description={`${skippedPlatformSummary}。这些平台未进入本次计划任务，当前报告计数不包含它们。请处理后重新运行。`}
+                    action={(
+                      <Button size="small" href="/admin/settings" data-pdf-exclude="true">
+                        前往设置中心
+                      </Button>
+                    )}
                     className={styles.runningAlert}
                   />
                 ) : null}
