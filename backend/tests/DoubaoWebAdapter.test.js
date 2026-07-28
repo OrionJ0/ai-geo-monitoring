@@ -161,6 +161,22 @@ test('Doubao page accepts only its official ready origin', async () => {
   assert.equal((await doubaoPage.assertReady()).status, 'ready');
 });
 
+test('Doubao new conversation accepts the current blank chat path without a trailing slash', async () => {
+  const doubaoPage = new DoubaoWebPage(
+    { connection: {} },
+    { sleep: async () => {} }
+  );
+  doubaoPage.callDocument = async () => ({ ok: true, count: 1 });
+  doubaoPage.evaluate = async () => ({
+    pathname: '/chat',
+    assistantCount: 0
+  });
+
+  assert.deepEqual(await doubaoPage.startNewConversation(), {
+    pageUrl: 'https://www.doubao.com/chat/'
+  });
+});
+
 test('Doubao page requires one selected deep-research chip after at most one click', async () => {
   const calls = [];
   const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });

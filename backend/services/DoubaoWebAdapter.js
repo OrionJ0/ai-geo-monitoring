@@ -87,6 +87,8 @@ class DoubaoWebPage extends DeepSeekWebPage {
     if (!clicked?.ok) {
       throw adapterError('web_selector_mismatch', '无法唯一识别豆包新对话控件');
     }
+    const blankPath = String(selectors.newConversationControl.blankUrlPath || '/chat')
+      .replace(/\/+$/, '') || '/';
     for (let attempt = 0; attempt < 40; attempt += 1) {
       await this.sleep(250);
       const state = await this.evaluate(`(() => ({
@@ -96,7 +98,8 @@ class DoubaoWebPage extends DeepSeekWebPage {
           .filter((element) => element.querySelector('.md-box-root'))
           .length
       }))()`);
-      if (state?.pathname === '/chat/' && Number(state.assistantCount) === 0) {
+      const pathname = String(state?.pathname || '').replace(/\/+$/, '') || '/';
+      if (pathname === blankPath && Number(state.assistantCount) === 0) {
         return { pageUrl: 'https://www.doubao.com/chat/' };
       }
     }
