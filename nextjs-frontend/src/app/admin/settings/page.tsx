@@ -127,8 +127,8 @@ export default function AdminSettingsPage() {
 
   const seoSettings = (
     <Form form={seoForm} layout="vertical" requiredMark={false} disabled={loading} style={{ maxWidth: 760 }}>
-      <Form.Item name="seo_title" label="站点标题（title）" rules={[{ required: true, message: '请输入站点标题' }]}>
-        <Input placeholder="示例：AI GEO Monitoring" />
+      <Form.Item name="seo_title" label="站点标题（title）" extra="留空使用应用默认标题。">
+        <Input placeholder="留空使用应用默认标题" />
       </Form.Item>
       <Form.Item name="seo_description" label="站点描述（meta description）">
         <Input.TextArea rows={4} placeholder="简要描述站点用途与价值" />

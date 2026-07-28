@@ -28,6 +28,16 @@ test('admin settings is the single settings center with an analysis API tab', ()
   assert.doesNotMatch(layoutSource, /key: 'platforms'|平台自检/);
 });
 
+test('SEO title may be cleared to use the application default', () => {
+  const titleStart = settingsSource.indexOf('<Form.Item name="seo_title"');
+  const titleEnd = settingsSource.indexOf('</Form.Item>', titleStart);
+  const titleField = settingsSource.slice(titleStart, titleEnd);
+
+  assert.ok(titleStart >= 0 && titleEnd > titleStart, '应找到站点标题字段');
+  assert.doesNotMatch(titleField, /required:\s*true/);
+  assert.match(titleField, /留空使用应用默认标题/);
+});
+
 test('analysis API settings select a configured platform and an independent model', () => {
   assert.match(analysisSource, /\/api\/settings\/analysis-api/);
   assert.match(analysisSource, /\/api\/settings\/analysis-api\/test/);
@@ -65,9 +75,15 @@ test('platform settings use the management API for every explicit operation', ()
   assert.match(platformSource, /\/ai-platforms\/\$\{platformId\}\/models/);
   assert.match(platformSource, /刷新模型/);
   assert.match(platformSource, /name="default_model"/);
+  assert.match(
+    platformSource,
+    /name="default_model"[\s\S]*?<AutoComplete/,
+    'the default model editor must accept a supplier model or an arbitrary model name',
+  );
+  assert.match(platformSource, /placeholder="选择或输入模型名称"/);
   assert.match(platformSource, /title: '接口参数'/);
   assert.match(platformSource, /title: '当前模型'/);
-  assert.doesNotMatch(platformSource, /AutoComplete|loadPlatformModels/);
+  assert.doesNotMatch(platformSource, /loadPlatformModels/);
   assert.match(platformSource, /\/test/);
   assert.match(platformSource, /\/test-web-search/);
   const maskedApiKey = platformSource.match(/const MASKED_API_KEY = '(\*+)'/)?.[1];

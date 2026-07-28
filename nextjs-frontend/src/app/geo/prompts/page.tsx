@@ -612,6 +612,7 @@ export default function GeoPromptsPage() {
   };
 
   const openCreateQuestionSet = () => {
+    setSavingQuestionSet(false);
     setEditingQuestionSet(null);
     questionSetForm.setFieldsValue({
       name: '',
@@ -622,6 +623,7 @@ export default function GeoPromptsPage() {
   };
 
   const openEditQuestionSet = (questionSet) => {
+    setSavingQuestionSet(false);
     setEditingQuestionSet(questionSet);
     questionSetForm.setFieldsValue({
       name: questionSet.name || '',
@@ -1371,6 +1373,7 @@ export default function GeoPromptsPage() {
         onCancel={() => {
           setQuestionSetModalOpen(false);
           setEditingQuestionSet(null);
+          setSavingQuestionSet(false);
           questionSetForm.resetFields();
         }}
         confirmLoading={savingQuestionSet}

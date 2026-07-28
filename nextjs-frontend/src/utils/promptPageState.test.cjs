@@ -46,6 +46,21 @@ test('prompt page resets list filters when switching projects', () => {
   assert.match(source, /setPromptCategoryFilter\('all'\)/);
 });
 
+test('opening or cancelling a question-set editor starts from an idle save state', () => {
+  const createStart = source.indexOf('const openCreateQuestionSet');
+  const editStart = source.indexOf('const openEditQuestionSet', createStart);
+  const saveStart = source.indexOf('const saveQuestionSet', editStart);
+  const modalStart = source.indexOf("title={editingQuestionSet ? '编辑问题集' : '新建问题集'}");
+  const modalEnd = source.indexOf('</Modal>', modalStart);
+
+  assert.ok(createStart >= 0 && editStart > createStart, '应找到新建问题集初始化');
+  assert.ok(saveStart > editStart, '应找到编辑问题集初始化');
+  assert.ok(modalStart >= 0 && modalEnd > modalStart, '应找到问题集编辑弹窗');
+  assert.match(source.slice(createStart, editStart), /setSavingQuestionSet\(false\)/);
+  assert.match(source.slice(editStart, saveStart), /setSavingQuestionSet\(false\)/);
+  assert.match(source.slice(modalStart, modalEnd), /onCancel=\{\(\) => \{[\s\S]*setSavingQuestionSet\(false\)/);
+});
+
 test('question library disables single-question runs when project and question platforms do not overlap', () => {
   assert.match(source, /getProjectPromptRunBlockReason/);
   assert.match(source, /问题的监测平台与项目监测平台不一致/);

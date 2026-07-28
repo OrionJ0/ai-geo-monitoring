@@ -511,7 +511,15 @@ class AIPlatformConfigService {
     }
     if (creating || has('base_url')) {
       const baseUrl = cleanRequiredText(payload.base_url, 'Base URL', 2048);
-      const validated = await this.urlValidator(baseUrl);
+      let validated;
+      try {
+        validated = await this.urlValidator(baseUrl);
+      } catch (error) {
+        throw new PlatformConfigError(
+          error?.message || 'Base URL 校验失败',
+          'invalid_platform_url'
+        );
+      }
       values.base_url = validated.url;
     }
     if (creating || has('default_model')) {

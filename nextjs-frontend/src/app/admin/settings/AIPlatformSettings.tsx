@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReloadOutlined } from '@ant-design/icons';
 import {
   Alert,
+  AutoComplete,
   Button,
   Descriptions,
   Form,
@@ -769,14 +770,13 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
                 noStyle
                 rules={[{ required: true, message: '请选择或输入默认模型' }]}
               >
-                <Select
-                  showSearch
+                <AutoComplete
                   open={modelDropdownOpen}
                   onOpenChange={setModelDropdownOpen}
-                  optionFilterProp="label"
-                  loading={modelLoading}
+                  filterOption={(inputValue, option) => (
+                    String(option?.value || '').toLowerCase().includes(inputValue.toLowerCase())
+                  )}
                   placeholder="选择或输入模型名称"
-                  mode={undefined}
                   style={{ width: '100%' }}
                   options={modelOptions.map((model) => ({ value: model, label: model }))}
                 />

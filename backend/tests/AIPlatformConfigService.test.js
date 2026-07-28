@@ -8,6 +8,7 @@ process.env.DEEPSEEK_API_KEY = 'must-not-be-imported-either';
 const { sequelize, AIPlatformConfig } = require('../models');
 const {
   AIPlatformConfigService,
+  PlatformConfigError,
   PRESET_PLATFORMS
 } = require('../services/AIPlatformConfigService');
 
@@ -348,6 +349,32 @@ test('creates enabled custom platforms and deletes only custom platforms', async
 
   const doubao = await AIPlatformConfig.findOne({ where: { code: 'doubao' } });
   await assert.rejects(service.deletePlatform(doubao.id), /预置平台不能删除/);
+});
+
+test('converts Base URL policy failures into client-visible platform validation errors', async () => {
+  const service = new AIPlatformConfigService({
+    model: AIPlatformConfig,
+    encryptionKeyProvider: () => process.env.CONFIG_ENCRYPTION_KEY,
+    urlValidator: async () => {
+      throw new Error('Base URL 不能指向本机或私网地址');
+    }
+  });
+
+  await assert.rejects(
+    service.createPlatform({
+      code: 'blocked-url-platform',
+      name: 'Blocked URL Platform',
+      adapter_type: 'openai_chat_completions',
+      base_url: 'https://api.example.com/v1',
+      default_model: 'example-model'
+    }),
+    (error) => (
+      error instanceof PlatformConfigError
+      && error.status === 400
+      && error.code === 'invalid_platform_url'
+      && error.message === 'Base URL 不能指向本机或私网地址'
+    )
+  );
 });
 
 test('clears an API key through a dedicated operation', async () => {

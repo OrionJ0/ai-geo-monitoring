@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    proxyTimeout: 300_000,
+  },
   turbopack: {
     root: path.join(__dirname),
   },
