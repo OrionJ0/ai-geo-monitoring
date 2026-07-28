@@ -31,6 +31,7 @@ let prompts;
 const originalGetPlatformAvailability = AIPlatformService.getPlatformAvailability;
 const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
 const originalSchedulePreparedRun = ProjectRunService.schedulePreparedRun;
+const originalAnalysisConfigService = ProjectRunService.analysisConfigService;
 
 function startOptions(overrides = {}) {
   return {
@@ -126,12 +127,16 @@ test.beforeEach(async () => {
     }
   ];
   ProjectRunService.getRuntimeSettings = async () => ({ ai_run_concurrency: 2 });
+  ProjectRunService.analysisConfigService = {
+    getAnalysisPlatform: async () => ({ code: 'analysis-ready' })
+  };
 });
 
 test.after(async () => {
   AIPlatformService.getPlatformAvailability = originalGetPlatformAvailability;
   ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
   ProjectRunService.schedulePreparedRun = originalSchedulePreparedRun;
+  ProjectRunService.analysisConfigService = originalAnalysisConfigService;
   await sequelize.close();
   fs.rmSync(databaseDir, { recursive: true, force: true });
 });

@@ -154,7 +154,7 @@ export default function AdminSettingsPage() {
   );
 
   return (
-    <Card title="设置中心" extra={<Button onClick={refreshAll}>刷新</Button>}>
+    <Card title="设置中心" extra={<Button onClick={refreshAll}>刷新全部设置</Button>}>
       <Tabs
         defaultActiveKey="ai-platforms"
         items={[

@@ -12,6 +12,25 @@ import WebCaptureEvidence from '@/components/WebCaptureEvidence';
 
 const { Text } = Typography;
 
+const historyMarkdownComponents = {
+  h1: ({ children }: React.PropsWithChildren) => (
+    <Typography.Title level={4} style={{ marginBlock: '16px 8px', lineHeight: 1.4 }}>
+      {children}
+    </Typography.Title>
+  ),
+  h2: ({ children }: React.PropsWithChildren) => (
+    <Typography.Title level={5} style={{ marginBlock: '14px 6px', lineHeight: 1.45 }}>
+      {children}
+    </Typography.Title>
+  ),
+  h3: ({ children }: React.PropsWithChildren) => (
+    <p style={{ marginBlock: '12px 4px' }}><Text strong>{children}</Text></p>
+  ),
+  h4: ({ children }: React.PropsWithChildren) => (
+    <p style={{ marginBlock: '10px 4px' }}><Text strong>{children}</Text></p>
+  ),
+};
+
 type HistoryFilters = {
   userId?: string;
   platform?: string;
@@ -148,7 +167,10 @@ export default function AdminHistoryPage() {
           </Text>
           <div style={{ marginTop: 8, lineHeight: 1.7 }}>
             {record?.resultDetail?.ai_response_original ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={historyMarkdownComponents}
+              >
                 {String(record.resultDetail.ai_response_original)}
               </ReactMarkdown>
             ) : (

@@ -423,7 +423,9 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
         ...current,
         [platform.code]: response?.data?.data || null,
       }));
-      if (notifyResult) message.success('页面信息已更新');
+      if (notifyResult) {
+        message.success(`${platform.name}配置信息已刷新（未验证登录）`);
+      }
     } catch (error) {
       setWebSessionStatuses((current) => ({
         ...current,
@@ -647,7 +649,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
                 loading={webSessionAction === `${platform.code}:refresh`}
                 onClick={() => refreshWebSession(platform, true)}
               >
-                重新加载
+                刷新配置信息
               </Button>
             </>
           ) : null}
@@ -692,11 +694,11 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
         type="info"
         showIcon
         title="API 平台与真实网页监测使用独立能力"
-        description="DeepSeek 网页版和豆包网页版始终走各自的真实页面采集，不配置 API Key 或请求参数。管理员可以在此打开后端机器上的专用 Chrome，人工登录或切换账号，再验证会话状态；系统不会读取账号密码或会话凭据。“重新加载”只更新页面信息，“验证登录”才会实际检查当前登录是否有效。"
+        description="DeepSeek 网页版和豆包网页版始终走各自的真实页面采集，不配置 API Key 或请求参数。管理员可以在此打开后端机器上的专用 Chrome，人工登录或切换账号，再验证会话状态；系统不会读取账号密码或会话凭据。“刷新配置信息”只读取浏览器配置、Profile 初始化状态和上次验证结果，不会检查当前登录是否仍有效；“验证登录”才会实际检查当前登录。"
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Space>
-          <Button onClick={fetchPlatforms}>刷新</Button>
+          <Button onClick={fetchPlatforms}>刷新平台列表</Button>
           <Button type="primary" onClick={openCreate}>新增平台</Button>
         </Space>
       </div>

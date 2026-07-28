@@ -26,3 +26,31 @@ test('connects without relying on the Node.js global WebSocket', async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('allows a bounded per-command timeout for slow read-only CDP commands', async () => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await once(server, 'listening');
+  const address = server.address();
+  server.on('connection', (socket) => {
+    socket.on('message', (raw) => {
+      const request = JSON.parse(String(raw));
+      setTimeout(() => {
+        socket.send(JSON.stringify({ id: request.id, result: { ok: true } }));
+      }, 60);
+    });
+  });
+
+  const connection = await connectCdp(`ws://127.0.0.1:${address.port}`, 1000);
+  connection.timeoutMs = 20;
+  try {
+    const result = await connection.send(
+      'Page.captureScreenshot',
+      {},
+      { timeoutMs: 200 }
+    );
+    assert.deepEqual(result, { ok: true });
+  } finally {
+    connection.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

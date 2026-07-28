@@ -303,6 +303,50 @@ test('new conversation waits for the sidebar control to settle before clicking o
   assert.equal(stateProbeCount, 1);
 });
 
+test('screenshot uses a dedicated timeout and retries one renderer timeout without resubmitting', async () => {
+  const calls = [];
+  const delays = [];
+  const page = new DeepSeekWebPage({
+    connection: {
+      send: async (method, _params, options) => {
+        calls.push({ method, options });
+        if (method === 'Runtime.evaluate') {
+          return {
+            result: {
+              value: { x: 100, y: 0, width: 900, height: 700, scale: 1 }
+            }
+          };
+        }
+        if (method === 'Page.captureScreenshot' && calls.filter(
+          (call) => call.method === 'Page.captureScreenshot'
+        ).length === 1) {
+          throw Object.assign(new Error('screenshot timeout'), {
+            code: 'renderer_timeout'
+          });
+        }
+        return { data: PNG.toString('base64') };
+      }
+    }
+  }, {
+    sleep: async (ms) => delays.push(ms)
+  });
+
+  const screenshot = await page.captureScreenshot();
+  const screenshotCalls = calls.filter(
+    (call) => call.method === 'Page.captureScreenshot'
+  );
+
+  assert.equal(screenshotCalls.length, 2);
+  assert.deepEqual(
+    screenshotCalls.map((call) => call.options),
+    [{ timeoutMs: 45_000 }, { timeoutMs: 45_000 }]
+  );
+  assert.deepEqual(delays, [500]);
+  assert.equal(screenshot.buffer.equals(PNG), true);
+  assert.equal(screenshot.width, 900);
+  assert.equal(screenshot.height, 700);
+});
+
 test('screenshot failure ends the capture before prompt insertion and keeps no staged evidence', async () => {
   const events = [];
   const page = createPage(events, [

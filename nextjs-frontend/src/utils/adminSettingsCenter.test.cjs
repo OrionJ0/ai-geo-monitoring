@@ -24,6 +24,7 @@ test('admin settings is the single settings center with an analysis API tab', ()
     layoutSource,
     /key: 'settings', label: <Link href="\/admin\/settings">设置中心<\/Link>/,
   );
+  assert.match(settingsSource, /刷新全部设置/);
   assert.doesNotMatch(layoutSource, /key: 'platforms'|平台自检/);
 });
 
@@ -104,9 +105,11 @@ test('platform settings treat both managed Web adapters as browser sessions inst
   assert.match(platformSource, /登录 \/ 打开 Chrome/);
   assert.match(platformSource, /切换账号/);
   assert.match(platformSource, /验证登录/);
-  assert.match(platformSource, /重新加载/);
-  assert.match(platformSource, /重新加载.*只更新页面信息/);
-  assert.match(platformSource, /页面信息已更新/);
+  assert.match(platformSource, /刷新配置信息/);
+  assert.match(platformSource, /刷新配置信息.*不会检查当前登录是否仍有效/);
+  assert.match(platformSource, /配置信息已刷新（未验证登录）/);
+  assert.match(platformSource, /刷新平台列表/);
+  assert.doesNotMatch(platformSource, /重新加载/);
   assert.doesNotMatch(platformSource, /刷新状态/);
 });
 

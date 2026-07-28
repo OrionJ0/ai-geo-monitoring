@@ -945,14 +945,19 @@ router.post('/:projectId/question-set-runs/:runId/retry-failed', loadProject, as
     });
   } catch (error) {
     const requestedStatus = Number(error?.status);
+    const errorCode = String(error?.data?.error_code || '');
     const isSafeClientError = Number.isInteger(requestedStatus)
       && requestedStatus >= 400
       && requestedStatus < 500;
-    const status = isSafeClientError ? requestedStatus : 500;
+    const isSafeAnalysisConfigError = requestedStatus === 503
+      && error?.exposeToClient === true
+      && /^analysis_[a-z0-9_]+$/.test(errorCode);
+    const isSafeError = isSafeClientError || isSafeAnalysisConfigError;
+    const status = isSafeError ? requestedStatus : 500;
     return res.status(status).json({
       success: false,
-      message: isSafeClientError && error?.message ? error.message : '重试失败项失败',
-      ...(isSafeClientError && error?.data ? { data: error.data } : {})
+      message: isSafeError && error?.message ? error.message : '重试失败项失败',
+      ...(isSafeError && error?.data ? { data: error.data } : {})
     });
   }
 });

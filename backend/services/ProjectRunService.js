@@ -18,6 +18,7 @@ const ResultParserService = require('./ResultParserService');
 const VisibilityAnalysisService = require('./VisibilityAnalysisService');
 const AIResponseAnalysisService = require('./AIResponseAnalysisService');
 const { AIResponseAnalysisError } = require('./AIResponseAnalysisService');
+const AIAnalysisConfigService = require('./AIAnalysisConfigService');
 const { AIAnalysisConfigError } = require('./AIAnalysisConfigService');
 const CitationAnalysisService = require('./CitationAnalysisService');
 const { SEMANTICS_VERSION: CITATION_SEMANTICS_VERSION } = require('./CitationMetricSemanticsService');
@@ -315,11 +316,12 @@ function normalizeProviderCitations(value) {
 }
 
 class ProjectRunService {
-  constructor() {
+  constructor(options = {}) {
     this.activeRecordIds = new Set();
     this.recordLeaseOwner = `${os.hostname()}:${process.pid}:project-run`;
     this.acceptingBackgroundRuns = true;
     this.backgroundRuns = new Set();
+    this.analysisConfigService = options.analysisConfigService || AIAnalysisConfigService;
   }
 
   isRunnableProject(project) {
@@ -376,6 +378,24 @@ class ProjectRunService {
       .filter((prompt) => prompt && prompt.enabled !== false);
     if (!enabledPrompts.length) return false;
     return enabledPrompts.every((prompt) => this.hasPromptProjectPlatformOverlap([prompt], projectPlatforms));
+  }
+
+  async getAnalysisReadinessFailure() {
+    try {
+      await this.analysisConfigService.getAnalysisPlatform();
+      return null;
+    } catch (error) {
+      if (!(error instanceof AIAnalysisConfigError)) throw error;
+      return {
+        ok: false,
+        status: Number(error.status) || 503,
+        message: `${error.message}，请先在设置中心的“AI 分析 API”中完成配置。`,
+        data: {
+          error_code: error.code || 'analysis_config_unavailable',
+          settings_url: '/admin/settings'
+        }
+      };
+    }
   }
 
   derivePromptCategory(prompt) {
@@ -1145,6 +1165,9 @@ class ProjectRunService {
       };
     }
 
+    const analysisReadinessFailure = await this.getAnalysisReadinessFailure();
+    if (analysisReadinessFailure) return analysisReadinessFailure;
+
     const candidateTargets = this.buildPromptTargets(enabledPrompts, projectPlatforms, projectPlatforms);
     const candidateCodes = normalizePlatformCodes(candidateTargets.map((target) => target.platform));
     const availability = await AIPlatformService.getPlatformAvailability(candidateCodes);
@@ -1752,6 +1775,17 @@ class ProjectRunService {
       }
     });
     if (existingBatch) return retryReplayResult(existingBatch);
+
+    const analysisReadinessFailure = await this.getAnalysisReadinessFailure();
+    if (analysisReadinessFailure) {
+      const error = runError(
+        analysisReadinessFailure.message,
+        analysisReadinessFailure.status,
+        analysisReadinessFailure.data
+      );
+      error.exposeToClient = true;
+      throw error;
+    }
 
     const orderedRecords = await QuestionRecord.findAll({
       where: {

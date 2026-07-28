@@ -4,6 +4,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
 import axios from 'axios';
+import { useRouter } from 'next/navigation';
 import { isValidWebsiteInput, normalizeList, normalizeNullableText } from '@/utils/projectFieldNormalization.cjs';
 import { getProjectPromptRunBlockReason, summarizeProjectPrompts } from '@/utils/projectPromptSummary.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
@@ -23,6 +24,7 @@ const websiteRules = [
 ];
 
 export default function GeoProjectsPage() {
+  const router = useRouter();
   const {
     platforms: platformCatalog,
     selectableCodes,
@@ -407,6 +409,20 @@ export default function GeoProjectsPage() {
       extra={<Space><Button size="small" onClick={fetchProjects}>刷新</Button><Button size="small" type="primary" onClick={openCreate} disabled={platformCatalogLoading || !selectableCodes.length}>新建项目</Button></Space>}
     >
       {platformCatalogError ? <Alert type="error" showIcon title={platformCatalogError} style={{ marginBottom: 12 }} /> : null}
+      {!platformCatalogLoading && !platformCatalogError && !selectableCodes.length ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="还不能新建项目"
+          description="请先在设置中心启用并配置至少一个监测平台。网页版平台还需要完成登录验证。"
+          action={(
+            <Button size="small" onClick={() => router.push('/admin/settings')}>
+              前往设置中心
+            </Button>
+          )}
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
       <Table
         rowKey="id"
         dataSource={projects}

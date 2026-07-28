@@ -6,6 +6,8 @@ const MAX_CAPTURE_METADATA_BYTES = 32 * 1024;
 const MAX_NETWORK_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_NETWORK_RESPONSES = 50;
 const MAX_PROVIDER_CITATIONS = 200;
+const SCREENSHOT_COMMAND_TIMEOUT_MS = 45_000;
+const SCREENSHOT_RETRY_DELAY_MS = 500;
 const DEEPSEEK_WEB_IDENTITY = Object.freeze({
   platformCode: 'deepseek-web',
   modelName: 'deepseek-web-ui',
@@ -612,12 +614,23 @@ class DeepSeekWebPage {
         scale: 1
       };
     })()`);
-    const screenshot = await this.connection.send('Page.captureScreenshot', {
-      format: 'png',
-      fromSurface: true,
-      captureBeyondViewport: false,
-      clip
-    });
+    let screenshot;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        screenshot = await this.connection.send('Page.captureScreenshot', {
+          format: 'png',
+          fromSurface: true,
+          captureBeyondViewport: false,
+          clip
+        }, {
+          timeoutMs: SCREENSHOT_COMMAND_TIMEOUT_MS
+        });
+        break;
+      } catch (error) {
+        if (error?.code !== 'renderer_timeout' || attempt > 0) throw error;
+        await this.sleep(SCREENSHOT_RETRY_DELAY_MS);
+      }
+    }
     const buffer = Buffer.from(String(screenshot.data || ''), 'base64');
     if (!buffer.length) throw adapterError('web_screenshot_failed', 'DeepSeek 页面截图失败');
     return {

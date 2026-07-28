@@ -160,6 +160,17 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 
 // 数据库同步并启动服务器
+function isMissingTableError(error) {
+  return /no such table|does not exist|no description found for .* table/i.test(
+    String(error?.message || error)
+  );
+}
+
+async function hasExistingDatabaseTables() {
+  const tables = await sequelize.getQueryInterface().showAllTables();
+  return Array.isArray(tables) && tables.length > 0;
+}
+
 async function ensureExistingTableProjectColumns() {
   const qi = sequelize.getQueryInterface();
   try {
@@ -173,7 +184,7 @@ async function ensureExistingTableProjectColumns() {
       console.log('已添加 question_records.tracked_prompt_id 列');
     }
   } catch (e) {
-    if (!/no such table/i.test(String(e?.message || e))) {
+    if (!isMissingTableError(e)) {
       console.warn('预检查 question_records 项目列失败:', e.message);
     }
   }
@@ -189,7 +200,7 @@ async function ensureExistingTableProjectColumns() {
       console.log('已添加 detection_schedules.tracked_prompt_id 列');
     }
   } catch (e) {
-    if (!/no such table/i.test(String(e?.message || e))) {
+    if (!isMissingTableError(e)) {
       console.warn('预检查 detection_schedules 项目列失败:', e.message);
     }
   }
@@ -204,7 +215,7 @@ async function ensureColumn(tableName, columnName, definition) {
       console.log(`已添加 ${tableName}.${columnName} 列`);
     }
   } catch (e) {
-    if (!/no such table/i.test(String(e?.message || e))) {
+    if (!isMissingTableError(e)) {
       console.warn(`检查/添加 ${tableName}.${columnName} 列失败:`, e.message);
     }
   }
@@ -228,7 +239,7 @@ async function ensureIndex(tableName, indexName, fields, options = {}) {
       console.log(`已添加 ${tableName}.${indexName} 索引`);
     }
   } catch (e) {
-    if (!/no such table|does not exist/i.test(String(e?.message || e))) {
+    if (!isMissingTableError(e)) {
       console.warn(`检查/添加 ${tableName}.${indexName} 索引失败:`, e.message);
     }
   }
@@ -567,9 +578,11 @@ async function ensureDefaultSettings() {
 
 (async () => {
   try {
-    await ensureExistingTableProjectColumns();
-    // 旧库上的模型索引可能引用本版本新增列；必须先补列，再让 Sequelize 同步索引。
-    await ensureGeoMonitoringColumns();
+    if (await hasExistingDatabaseTables()) {
+      await ensureExistingTableProjectColumns();
+      // 旧库上的模型索引可能引用本版本新增列；必须先补列，再让 Sequelize 同步索引。
+      await ensureGeoMonitoringColumns();
+    }
     await sequelize.sync();
     // 新库在 sync 前还没有表；再次校验可同时覆盖全新安装与旧库升级。
     await ensureGeoMonitoringColumns();

@@ -21,6 +21,7 @@ const {
 } = require('../models');
 const AIPlatformService = require('../services/AIPlatformService');
 const ProjectRunService = require('../services/ProjectRunService');
+const originalAnalysisConfigService = ProjectRunService.analysisConfigService;
 
 let user;
 let project;
@@ -195,11 +196,15 @@ test.before(async () => {
 });
 
 test.after(async () => {
+  ProjectRunService.analysisConfigService = originalAnalysisConfigService;
   await sequelize.close();
   fs.rmSync(databaseDir, { recursive: true, force: true });
 });
 
 test.beforeEach(async () => {
+  ProjectRunService.analysisConfigService = {
+    getAnalysisPlatform: async () => ({ code: 'analysis-ready' })
+  };
   await ResultDetail.destroy({ where: {} });
   await QuestionRecord.destroy({ where: {} });
   await QuestionSetRetryBatch.destroy({ where: {} });

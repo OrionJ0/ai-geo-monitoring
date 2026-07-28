@@ -1,5 +1,5 @@
 module.exports = Object.freeze({
-  selectorVersion: 'doubao-web-v1',
+  selectorVersion: 'doubao-web-v2',
   allowedOrigins: ['https://www.doubao.com'],
   loginMarkers: [
     'input[type="password"]',
@@ -15,7 +15,8 @@ module.exports = Object.freeze({
     '[data-testid*="captcha" i]'
   ],
   composer: [
-    'textarea[placeholder="发消息..."]:not([disabled])'
+    'textarea[placeholder="发消息..."]:not([disabled])',
+    '[contenteditable="true"][role="textbox"]'
   ],
   newConversationControl: Object.freeze({
     navigationText: '新对话',

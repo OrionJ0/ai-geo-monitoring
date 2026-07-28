@@ -341,6 +341,7 @@ test('ready endpoint reports verified database and scheduler startup state', asy
       last_error_code: null
     });
     assert.equal(body.checks.last_error, null);
+    assert.doesNotMatch(stderr, /No description found for .* table/);
   } finally {
     child.kill('SIGTERM');
     await new Promise((resolve) => {

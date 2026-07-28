@@ -4,15 +4,30 @@ const assert = require('node:assert/strict');
 const {
   QuestionRecord,
   QuestionSetRun,
+  QuestionSetRetryBatch,
   ResultDetail,
   BrandCompetitor
 } = require('../models');
 const AIPlatformService = require('../services/AIPlatformService');
 const WebPlatformRegistry = require('../services/WebPlatformRegistry');
 const ProjectRunService = require('../services/ProjectRunService');
+const { ProjectRunService: ProjectRunServiceClass } = require('../services/ProjectRunService');
+const { AIAnalysisConfigError } = require('../services/AIAnalysisConfigService');
 const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
 const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
 const AlertEvaluationService = require('../services/AlertEvaluationService');
+
+const originalAnalysisConfigService = ProjectRunService.analysisConfigService;
+
+test.beforeEach(() => {
+  ProjectRunService.analysisConfigService = {
+    getAnalysisPlatform: async () => ({ code: 'analysis-ready' })
+  };
+});
+
+test.after(() => {
+  ProjectRunService.analysisConfigService = originalAnalysisConfigService;
+});
 
 test('builds project run targets from enabled prompts and project platforms', () => {
   const targets = ProjectRunService.buildPromptTargets([
@@ -116,6 +131,100 @@ test('rejects explicit project runs when any selected prompt has no project plat
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
   assert.equal(result.message, '问题选择的平台不在当前项目的监测范围内。');
+});
+
+test('blocks project monitoring before platform preflight when analysis API is missing', async () => {
+  let availabilityCalls = 0;
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  AIPlatformService.getPlatformAvailability = async () => {
+    availabilityCalls += 1;
+    return [];
+  };
+  const service = new ProjectRunServiceClass({
+    analysisConfigService: {
+      getAnalysisPlatform: async () => {
+        throw new AIAnalysisConfigError(
+          '尚未配置 AI 分析 API',
+          'analysis_api_not_configured',
+          503
+        );
+      }
+    }
+  });
+
+  try {
+    const result = await service.planProjectRun({
+      project: { id: 1, user_id: 1, status: 'active', platforms: ['deepseek-web'] },
+      prompts: [{
+        id: 2,
+        question: 'GEO 怎么做',
+        enabled: true,
+        platforms: ['deepseek-web']
+      }],
+      platforms: ['deepseek-web'],
+      user: { id: 1, role: 'user' },
+      promptSelectionExplicit: true
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 503);
+    assert.equal(result.data.error_code, 'analysis_api_not_configured');
+    assert.equal(result.data.settings_url, '/admin/settings');
+    assert.match(result.message, /设置中心.*AI 分析 API/);
+    assert.equal(availabilityCalls, 0);
+  } finally {
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+  }
+});
+
+test('blocks a failed-item retry before creating another attempt when analysis API is missing', async () => {
+  const originalFindRun = QuestionSetRun.findOne;
+  const originalFindBatch = QuestionSetRetryBatch.findOne;
+  const originalFindRecords = QuestionRecord.findAll;
+  let recordReads = 0;
+  QuestionSetRun.findOne = async () => ({
+    id: 41,
+    source: 'native',
+    planned_record_count: 1
+  });
+  QuestionSetRetryBatch.findOne = async () => null;
+  QuestionRecord.findAll = async () => {
+    recordReads += 1;
+    return [];
+  };
+  const service = new ProjectRunServiceClass({
+    analysisConfigService: {
+      getAnalysisPlatform: async () => {
+        throw new AIAnalysisConfigError(
+          '尚未配置 AI 分析 API',
+          'analysis_api_not_configured',
+          503
+        );
+      }
+    }
+  });
+
+  try {
+    await assert.rejects(
+      service.retryFailedQuestionSetRun({
+        project: { id: 2, status: 'active', platforms: ['deepseek-web'] },
+        runId: 41,
+        user: { id: 1, role: 'user' },
+        idempotencyKey: 'missing-analysis-retry'
+      }),
+      (error) => (
+        error.status === 503
+        && error.exposeToClient === true
+        && error.data?.error_code === 'analysis_api_not_configured'
+        && error.data?.settings_url === '/admin/settings'
+      )
+    );
+    assert.equal(recordReads, 0);
+  } finally {
+    QuestionSetRun.findOne = originalFindRun;
+    QuestionSetRetryBatch.findOne = originalFindBatch;
+    QuestionRecord.findAll = originalFindRecords;
+  }
 });
 
 test('builds keyword stats list from brand, aliases and brand product terms', () => {

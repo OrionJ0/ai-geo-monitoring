@@ -76,13 +76,17 @@ class CdpConnection {
     });
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, options = {}) {
     const id = ++this.sequence;
+    const requestedTimeoutMs = Number(options?.timeoutMs);
+    const commandTimeoutMs = Number.isFinite(requestedTimeoutMs)
+      ? Math.min(120_000, Math.max(1, Math.round(requestedTimeoutMs)))
+      : this.timeoutMs;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(timeoutError('renderer_timeout', `执行 ${method} 超时`));
-      }, this.timeoutMs);
+      }, commandTimeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.webSocket.send(JSON.stringify({ id, method, params }));
     });

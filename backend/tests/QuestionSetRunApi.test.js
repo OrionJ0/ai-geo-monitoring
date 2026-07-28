@@ -19,6 +19,7 @@ const {
 } = require('../models');
 const AIPlatformService = require('../services/AIPlatformService');
 const ProjectRunService = require('../services/ProjectRunService');
+const originalAnalysisConfigService = ProjectRunService.analysisConfigService;
 
 let user;
 let project;
@@ -109,9 +110,13 @@ test.before(async () => {
       citation_sources: []
     }]
   });
+  ProjectRunService.analysisConfigService = {
+    getAnalysisPlatform: async () => ({ code: 'analysis-ready' })
+  };
 });
 
 test.after(async () => {
+  ProjectRunService.analysisConfigService = originalAnalysisConfigService;
   await sequelize.close();
   fs.rmSync(databaseDir, { recursive: true, force: true });
 });
@@ -700,6 +705,62 @@ test('重试接口不会把未知后端异常或数据库细节返回给浏览�
     assert.equal(response.statusCode, 500);
     assert.equal(response.payload.message, '重试失败项失败');
     assert.doesNotMatch(JSON.stringify(response.payload), /SQLITE|secret|row payload/);
+  } finally {
+    ProjectRunService.retryFailedQuestionSetRun = originalRetry;
+  }
+});
+
+test('重试接口向浏览器返回可操作的分析 API 配置错误', async () => {
+  const originalRetry = ProjectRunService.retryFailedQuestionSetRun;
+  ProjectRunService.retryFailedQuestionSetRun = async () => {
+    throw Object.assign(new Error('尚未配置 AI 分析 API，请先在设置中心完成配置。'), {
+      status: 503,
+      exposeToClient: true,
+      data: {
+        error_code: 'analysis_api_not_configured',
+        settings_url: '/admin/settings'
+      }
+    });
+  };
+
+  try {
+    const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: project.id, runId: 99999 },
+      body: { idempotency_key: 'analysis-config-error-001' }
+    });
+    assert.equal(response.statusCode, 503);
+    assert.match(response.payload.message, /尚未配置 AI 分析 API/);
+    assert.deepEqual(response.payload.data, {
+      error_code: 'analysis_api_not_configured',
+      settings_url: '/admin/settings'
+    });
+  } finally {
+    ProjectRunService.retryFailedQuestionSetRun = originalRetry;
+  }
+});
+
+test('重试接口不会仅凭 analysis 错误码透传未知 503 异常', async () => {
+  const originalRetry = ProjectRunService.retryFailedQuestionSetRun;
+  ProjectRunService.retryFailedQuestionSetRun = async () => {
+    throw Object.assign(new Error('数据库连接串等内部细节'), {
+      status: 503,
+      data: {
+        error_code: 'analysis_internal_failure',
+        settings_url: '/admin/settings'
+      }
+    });
+  };
+
+  try {
+    const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: project.id, runId: 99999 },
+      body: { idempotency_key: 'analysis-unknown-error-001' }
+    });
+    assert.equal(response.statusCode, 500);
+    assert.deepEqual(response.payload, {
+      success: false,
+      message: '重试失败项失败'
+    });
   } finally {
     ProjectRunService.retryFailedQuestionSetRun = originalRetry;
   }

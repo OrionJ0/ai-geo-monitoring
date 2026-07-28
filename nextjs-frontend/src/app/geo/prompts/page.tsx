@@ -121,6 +121,28 @@ export default function GeoPromptsPage() {
   const questionSetRunIdempotencyRef = useRef(new Map());
   const batchText = Form.useWatch('questions_text', batchForm);
 
+  const showRunError = (error, fallbackMessage) => {
+    const errorMessage = getApiErrorMessage(error, fallbackMessage);
+    const settingsUrl = error?.response?.data?.data?.settings_url === '/admin/settings'
+      ? '/admin/settings'
+      : null;
+    if (!settingsUrl) {
+      message.error(errorMessage);
+      return;
+    }
+    message.error({
+      content: (
+        <Space size={4}>
+          <span>{errorMessage}</span>
+          <Button type="link" size="small" onClick={() => router.push(settingsUrl)}>
+            前往设置中心
+          </Button>
+        </Space>
+      ),
+      duration: 8,
+    });
+  };
+
   const selectedProject = useMemo(
     () => projects.find((item) => item.id === selectedProjectId) || null,
     [projects, selectedProjectId]
@@ -711,10 +733,10 @@ export default function GeoPromptsPage() {
         message[notice.type](notice.text);
         if (data.report_url) router.push(data.report_url);
       } else if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
-        message.error(getApiErrorMessage(
+        showRunError(
           error,
           error instanceof Error ? error.message : '运行问题集失败'
-        ));
+        );
       }
     } finally {
       if (questionSetRunRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
@@ -823,10 +845,10 @@ export default function GeoPromptsPage() {
         message[notice.type](notice.text);
         if (data.report_url) router.push(data.report_url);
       } else if (runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) {
-        message.error(getApiErrorMessage(
+        showRunError(
           error,
           error instanceof Error ? error.message : '运行问题失败'
-        ));
+        );
       }
     } finally {
       if (runRequestRef.current === requestId && currentProjectIdRef.current === runProjectId) setRunningPromptId(null);

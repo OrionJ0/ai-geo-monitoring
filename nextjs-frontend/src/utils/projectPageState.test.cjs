@@ -37,3 +37,21 @@ test('project page can permanently delete archived projects', () => {
   assert.match(source, /品牌项目已删除/);
   assert.match(source, /确认永久删除该品牌项目/);
 });
+
+test('project page explains why creation is disabled and links to settings', () => {
+  assert.match(source, /还不能新建项目/);
+  assert.match(source, /请先在设置中心启用并配置至少一个监测平台/);
+  assert.match(source, /router\.push\('\/admin\/settings'\)/);
+  assert.match(source, /前往设置中心/);
+});
+
+test('prompt run analysis configuration errors include a safe settings action', () => {
+  const promptSource = fs.readFileSync(
+    path.resolve(__dirname, '../app/geo/prompts/page.tsx'),
+    'utf8',
+  );
+  assert.match(promptSource, /settings_url === '\/admin\/settings'/);
+  assert.match(promptSource, /showRunError/);
+  assert.match(promptSource, /前往设置中心/);
+  assert.match(promptSource, /router\.push\(settingsUrl\)/);
+});

@@ -6,10 +6,17 @@ const {
   DoubaoWebAdapter,
   DoubaoWebPage
 } = require('../services/DoubaoWebAdapter');
+const doubaoSelectors = require('../config/doubaoWebSelectors');
 
 const PNG = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 ]);
+
+test('Doubao composer contract includes the current contenteditable textbox', () => {
+  assert.ok(
+    doubaoSelectors.composer.includes('[contenteditable="true"][role="textbox"]')
+  );
+});
 
 function captureStore(events) {
   let sequence = 0;
@@ -114,7 +121,7 @@ test('captures one Doubao answer only after deep-research evidence is saved', as
   assert.equal(result.model_name, 'doubao-web-ui');
   assert.equal(result.text, answer);
   assert.equal(result.web_capture.schema_version, 'doubao-web-capture-v1');
-  assert.equal(result.web_capture.selector_version, 'doubao-web-v1');
+  assert.equal(result.web_capture.selector_version, 'doubao-web-v2');
   assert.equal(result.web_capture.page_origin, 'https://www.doubao.com');
   assert.equal(result.provider_citations[0].source_origin, 'doubao_web_dom');
   assert.equal(events.filter(([name]) => name === 'send').length, 1);
