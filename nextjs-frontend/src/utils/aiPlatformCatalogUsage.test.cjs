@@ -10,10 +10,12 @@ function source(relativePath) {
 
 test('AI platform catalog hook reads the authenticated database catalog', () => {
   const hook = source('../lib/useAIPlatformCatalog.ts');
+  const statusPresentation = source('./platformSelectionStatus.cjs');
   assert.match(hook, /@\/lib\/axiosConfig/);
   assert.match(hook, /axios\.get\('\/api\/ai-platforms'\)/);
   assert.match(hook, /disabled:\s*!item\.selectable/);
-  assert.match(hook, /管理员尚未配置/);
+  assert.match(hook, /getUnavailablePlatformLabel/);
+  assert.match(statusPresentation, /管理员尚未配置/);
   assert.match(hook, /capabilities\?:\s*AIPlatformCapabilities/);
 });
 
@@ -39,6 +41,9 @@ test('platform settings hide API-only controls for managed Web adapters', () => 
   assert.match(platformSettings, /api_key_management/);
   assert.match(platformSettings, /model_listing/);
   assert.match(platformSettings, /connection_test/);
+  assert.match(platformSettings, /getWebPlatformAdminSessionMeta/);
+  assert.match(platformSettings, /lastVerifiedDetail/);
+  assert.match(platformSettings, /accountDetail/);
   assert.match(analysisSettings, /capabilities\?\.analysis/);
 });
 
@@ -46,4 +51,21 @@ test('project edits preserve an existing platform that was temporarily disabled'
   const page = source('../app/geo/projects/page.tsx');
   assert.match(page, /platforms:\s*normalizeList\(record\.platforms\)/);
   assert.match(page, /normalizeList\(editingProject\?\.platforms\)\.includes\(item\)/);
+});
+
+test('project and prompt screens label selected platforms that became unavailable', () => {
+  const projectsPage = source('../app/geo/projects/page.tsx');
+  const promptsPage = source('../app/geo/prompts/page.tsx');
+
+  assert.match(projectsPage, /describeSelectedPlatforms/);
+  assert.match(projectsPage, /displayLabel/);
+  assert.match(promptsPage, /describeSelectedPlatforms/);
+  assert.match(promptsPage, /当前项目包含暂不可用的监测平台/);
+  assert.match(promptsPage, /前往设置中心/);
+});
+
+test('project platform selector exposes its full small option list to assistive technology', () => {
+  const projectsPage = source('../app/geo/projects/page.tsx');
+  assert.match(projectsPage, /aria-label="监测平台"/);
+  assert.match(projectsPage, /virtual=\{false\}/);
 });

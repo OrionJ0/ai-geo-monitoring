@@ -23,6 +23,7 @@ import {
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import {
+  getWebPlatformAdminSessionMeta,
   getWebPlatformAdminSessionPresentation,
   isManagedWebAdapter,
 } from '@/utils/webPlatformAdminSession.cjs';
@@ -541,6 +542,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
           if (!hasStatus) return <Tag>正在读取</Tag>;
           if (!status) return <Tag color="error">状态读取失败</Tag>;
           const presentation = getWebPlatformAdminSessionPresentation(status);
+          const sessionMeta = getWebPlatformAdminSessionMeta(status);
           return (
             <Space orientation="vertical" size={2}>
               <Tag color={presentation.color}>{presentation.label}</Tag>
@@ -549,6 +551,12 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
               </Text>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 专用 Profile：{status.profile_initialized ? '已初始化' : '未初始化'}
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {sessionMeta.lastVerifiedDetail}
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {sessionMeta.accountDetail}
               </Text>
             </Space>
           );

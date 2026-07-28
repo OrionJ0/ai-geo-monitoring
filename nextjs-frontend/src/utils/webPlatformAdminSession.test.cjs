@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 
 const {
   isManagedWebAdapter,
-  getWebPlatformAdminSessionPresentation
+  getWebPlatformAdminSessionPresentation,
+  getWebPlatformAdminSessionMeta
 } = require('./webPlatformAdminSession.cjs');
 
 test('recognizes both managed Web adapters without treating API adapters as Web', () => {
@@ -80,5 +81,25 @@ test('presents distinct browser and login configuration states', () => {
       last_verified_at: null
     }).label,
     '页面结构异常'
+  );
+});
+
+test('always explains verification freshness without exposing account identity', () => {
+  assert.deepEqual(
+    getWebPlatformAdminSessionMeta({ last_verified_at: null }),
+    {
+      lastVerifiedDetail: '最近验证：尚未成功验证',
+      accountDetail: '账号身份：系统不读取，请在专用 Chrome 中确认'
+    }
+  );
+
+  const verified = getWebPlatformAdminSessionMeta({
+    last_verified_at: '2026-07-27T08:00:00.000Z'
+  });
+  assert.match(verified.lastVerifiedDetail, /^最近验证：/);
+  assert.doesNotMatch(verified.lastVerifiedDetail, /尚未成功验证/);
+  assert.equal(
+    verified.accountDetail,
+    '账号身份：系统不读取，请在专用 Chrome 中确认'
   );
 });

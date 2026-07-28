@@ -369,5 +369,5 @@
 
 ## Handoff
 
-- PRD path: `docs/blocked-2026-07-27-002-doubao-web-monitoring/prd.md`
+- PRD path: `docs/active-2026-07-27-002-doubao-web-monitoring/prd.md`
 - Recommended next step: 在目标市场部虚拟机完成豆包人工登录恢复、真实回答、问题集重试、自动监测、双浏览器资源基线和正式入口验收；验收通过后再启用 `doubao-web`。

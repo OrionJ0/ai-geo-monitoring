@@ -177,6 +177,7 @@ export default function AdminHistoryPage() {
           <Select
             size="small"
             aria-label="平台筛选"
+            virtual={false}
             placeholder="平台筛选"
             allowClear
             value={platform}

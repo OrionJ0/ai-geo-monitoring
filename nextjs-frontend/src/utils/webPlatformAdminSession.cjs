@@ -17,9 +17,7 @@ function getWebPlatformAdminSessionPresentation(status) {
     ready: {
       color: 'success',
       label: '网页登录已验证',
-      detail: status.last_verified_at
-        ? `最近验证：${new Date(status.last_verified_at).toLocaleString('zh-CN')}`
-        : '本次服务进程已确认登录状态可用。'
+      detail: '本次服务进程已确认登录状态可用。'
     },
     login_required: {
       color: 'warning',
@@ -58,7 +56,21 @@ function getWebPlatformAdminSessionPresentation(status) {
   };
 }
 
+function getWebPlatformAdminSessionMeta(status) {
+  const verifiedAt = status?.last_verified_at
+    ? new Date(status.last_verified_at)
+    : null;
+  const hasValidVerifiedAt = verifiedAt && Number.isFinite(verifiedAt.getTime());
+  return {
+    lastVerifiedDetail: hasValidVerifiedAt
+      ? `最近验证：${verifiedAt.toLocaleString('zh-CN')}`
+      : '最近验证：尚未成功验证',
+    accountDetail: '账号身份：系统不读取，请在专用 Chrome 中确认'
+  };
+}
+
 module.exports = {
+  getWebPlatformAdminSessionMeta,
   getWebPlatformAdminSessionPresentation,
   isManagedWebAdapter
 };

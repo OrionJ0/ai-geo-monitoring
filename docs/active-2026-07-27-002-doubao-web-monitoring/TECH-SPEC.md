@@ -2,7 +2,7 @@
 title: 豆包 Web 可信监测技术方案
 date: 2026-07-27
 status: blocked
-source: docs/blocked-2026-07-27-002-doubao-web-monitoring/prd.md
+source: docs/active-2026-07-27-002-doubao-web-monitoring/prd.md
 scope: deep
 ---
 
@@ -597,7 +597,7 @@ last_verified_at
 
 **涉及文件：**
 
-- `docs/blocked-2026-07-27-002-doubao-web-monitoring/TECH-SPEC.md`
+- `docs/active-2026-07-27-002-doubao-web-monitoring/TECH-SPEC.md`
 - 后续测试夹具目录，具体位置在实现时按现有测试结构确定
 
 **方案：**

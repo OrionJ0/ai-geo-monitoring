@@ -7,6 +7,7 @@ import axios from 'axios';
 import { isValidWebsiteInput, normalizeList, normalizeNullableText } from '@/utils/projectFieldNormalization.cjs';
 import { getProjectPromptRunBlockReason, summarizeProjectPrompts } from '@/utils/projectPromptSummary.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { describeSelectedPlatforms } from '@/utils/platformSelectionStatus.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 
 const { Text } = Typography;
@@ -23,7 +24,7 @@ const websiteRules = [
 
 export default function GeoProjectsPage() {
   const {
-    labels: platformLabels,
+    platforms: platformCatalog,
     selectableCodes,
     options: platformOptions,
     loading: platformCatalogLoading,
@@ -267,7 +268,13 @@ export default function GeoProjectsPage() {
         if (!platforms.length) return <Text type="secondary">未配置</Text>;
         return (
           <Space wrap size={[4, 4]}>
-            {platforms.map((item) => <Tag color="processing" key={item}>{platformLabels[item] || item}</Tag>)}
+            {describeSelectedPlatforms(platforms, platformCatalog, {
+              catalogReady: !platformCatalogLoading && !platformCatalogError
+            }).map((item) => (
+              <Tag color={item.selectable ? 'processing' : 'error'} key={item.code}>
+                {item.displayLabel}
+              </Tag>
+            ))}
           </Space>
         );
       },
@@ -437,7 +444,14 @@ export default function GeoProjectsPage() {
             <SelectTags placeholder="输入品牌词、产品词并回车添加" />
           </Form.Item>
           <Form.Item name="platforms" label="监测平台" rules={[{ required: true, message: '请选择监测平台' }]}>
-            <Select mode="multiple" options={platformOptions} loading={platformCatalogLoading} placeholder="选择已配置的监测平台" />
+            <Select
+              mode="multiple"
+              aria-label="监测平台"
+              virtual={false}
+              options={platformOptions}
+              loading={platformCatalogLoading}
+              placeholder="选择已配置的监测平台"
+            />
           </Form.Item>
           <Form.Item name="monitoring_enabled" label="自动监测" valuePropName="checked">
             <Switch checkedChildren="开启" unCheckedChildren="关闭" />

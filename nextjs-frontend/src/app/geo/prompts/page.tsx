@@ -19,6 +19,10 @@ import { getApiRunResultData } from '@/utils/apiRunResult.cjs';
 import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
 import { formatOptionalDateTimeShort } from '@/utils/dateTimeDisplay.cjs';
 import {
+  describeSelectedPlatforms,
+  formatUnavailablePlatformSummary
+} from '@/utils/platformSelectionStatus.cjs';
+import {
   getSelectablePromptProjects,
   resolveSelectedPromptProjectId,
   shouldClearGeneratedPromptSuggestions,
@@ -135,6 +139,18 @@ export default function GeoPromptsPage() {
     [projectPlatforms, selectableCodes]
   );
 
+  const projectPlatformStatuses = useMemo(
+    () => describeSelectedPlatforms(projectPlatforms, platformCatalog, {
+      catalogReady: !platformCatalogLoading && !platformCatalogError
+    }),
+    [projectPlatforms, platformCatalog, platformCatalogLoading, platformCatalogError]
+  );
+
+  const unavailableProjectPlatformSummary = useMemo(
+    () => formatUnavailablePlatformSummary(projectPlatformStatuses),
+    [projectPlatformStatuses]
+  );
+
   const batchPreview = useMemo(
     () => parseBatchQuestions(batchText || ''),
     [batchText]
@@ -177,7 +193,12 @@ export default function GeoPromptsPage() {
 
   const getPromptRunDisabledReason = (row) => {
     const reason = getProjectPromptRunBlockReason([row], getProjectPlatforms());
-    return reason ? promptRunBlockMessages[reason] : '';
+    if (reason) return promptRunBlockMessages[reason];
+    const hasSelectablePlatform = getPromptPlatforms(row)
+      .some((item) => selectableProjectPlatforms.includes(item));
+    return hasSelectablePlatform
+      ? ''
+      : '当前问题没有已配置且启用的监测平台，请联系管理员处理';
   };
 
   const getBrandKeywords = (row) => {
@@ -872,7 +893,13 @@ export default function GeoPromptsPage() {
       width: 140,
       render: (_, row) => (
         <Space wrap size={[4, 4]}>
-          {getPromptPlatforms(row).map((item) => <Tag color="processing" key={item}>{platformLabels[item] || item}</Tag>)}
+          {describeSelectedPlatforms(getPromptPlatforms(row), platformCatalog, {
+            catalogReady: !platformCatalogLoading && !platformCatalogError
+          }).map((item) => (
+            <Tag color={item.selectable ? 'processing' : 'error'} key={item.code}>
+              {item.displayLabel}
+            </Tag>
+          ))}
         </Space>
       ),
     },
@@ -988,6 +1015,15 @@ export default function GeoPromptsPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       {platformCatalogError ? <Alert type="error" showIcon title={platformCatalogError} /> : null}
+      {unavailableProjectPlatformSummary ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="当前项目包含暂不可用的监测平台"
+          description={`${unavailableProjectPlatformSummary}。这些平台不会参与新运行，请启用平台或编辑项目将其移除。`}
+          action={<Button size="small" onClick={() => router.push('/admin/settings')}>前往设置中心</Button>}
+        />
+      ) : null}
       <WebPlatformRuntimeStatus platformCodes={projectPlatforms} />
       <Card title="问题库">
         <Row gutter={[12, 12]} align="middle">
@@ -1026,7 +1062,7 @@ export default function GeoPromptsPage() {
               </Tooltip>
               <Text type="secondary">
                 {selectedProject
-                  ? `当前项目：${selectedProject.name}｜监测平台：${getProjectPlatforms().map((item) => platformLabels[item] || item).join('、') || '未配置'}`
+                  ? `当前项目：${selectedProject.name}｜监测平台：${projectPlatformStatuses.map((item) => item.displayLabel).join('、') || '未配置'}`
                   : '请先在品牌项目中创建项目'}
               </Text>
             </Space>
@@ -1088,12 +1124,19 @@ export default function GeoPromptsPage() {
                 width: 230,
                 render: (_, questionSet) => (
                   <Space>
-                    <Tooltip title={Number(questionSet.enabled_question_count || 0) > 0 ? '' : '问题集中没有启用的问题'}>
+                    <Tooltip title={
+                      Number(questionSet.enabled_question_count || 0) <= 0
+                        ? '问题集中没有启用的问题'
+                        : (!selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : '')
+                    }>
                       <span>
                         <Button
                           size="small"
                           loading={runningQuestionSetId === questionSet.id}
-                          disabled={Number(questionSet.enabled_question_count || 0) <= 0}
+                          disabled={
+                            Number(questionSet.enabled_question_count || 0) <= 0
+                            || !selectableProjectPlatforms.length
+                          }
                           onClick={() => runQuestionSet(questionSet)}
                         >
                           运行问题集

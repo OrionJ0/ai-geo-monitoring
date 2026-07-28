@@ -19,4 +19,5 @@ test('管理历史筛选与操作控件有稳定的可访问名称', () => {
   assert.match(source, /aria-label="状态筛选"/);
   assert.match(source, /aria-label="搜索历史"/);
   assert.match(source, /aria-label="重置筛选"/);
+  assert.match(source, /aria-label="平台筛选"[\s\S]*?virtual=\{false\}/);
 });
