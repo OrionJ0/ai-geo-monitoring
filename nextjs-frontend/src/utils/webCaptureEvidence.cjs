@@ -90,6 +90,7 @@ function buildWebCaptureEvidence(row) {
     || [];
   return {
     recordId,
+    platformName: row.platform === 'doubao-web' ? '豆包 Web' : 'DeepSeek Web',
     modelName: bounded(row.model_name, 255),
     capturedAt: bounded(capture.captured_at || capture.completed_at, 80),
     selectorVersion: bounded(capture.selector_version, 100),

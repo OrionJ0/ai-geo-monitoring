@@ -81,7 +81,7 @@ export default function WebCaptureEvidence({ record }: WebCaptureEvidenceProps) 
   );
 
   return (
-    <Card size="small" title="DeepSeek Web 页面证据" style={{ marginTop: 12 }}>
+    <Card size="small" title={`${evidence.platformName} 页面证据`} style={{ marginTop: 12 }}>
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
           <Descriptions.Item label="联网搜索">

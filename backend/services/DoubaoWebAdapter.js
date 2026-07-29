@@ -16,6 +16,7 @@ const DOUBAO_WEB_IDENTITY = Object.freeze({
   domCitationOrigin: 'doubao_web_dom',
   networkCitationOrigin: 'doubao_web_network'
 });
+const DOUBAO_RENDERED_BLOCK_SELECTOR = selectors.message.renderedBlock.join(', ');
 
 class DoubaoWebAdapter extends DeepSeekWebAdapter {
   constructor(options) {
@@ -26,6 +27,10 @@ class DoubaoWebAdapter extends DeepSeekWebAdapter {
 class DoubaoWebPage extends DeepSeekWebPage {
   constructor(session, options = {}) {
     super(session, { ...options, identity: DOUBAO_WEB_IDENTITY });
+  }
+
+  async captureScreenshot() {
+    return super.captureScreenshot({ fromSurface: false });
   }
 
   async assertReady() {
@@ -95,7 +100,9 @@ class DoubaoWebPage extends DeepSeekWebPage {
         pathname: location.pathname,
         assistantCount: Array.from(document.querySelectorAll('[data-message-id]'))
           .filter((element) => !element.classList.contains('justify-end'))
-          .filter((element) => element.querySelector('.md-box-root'))
+          .filter((element) => element.querySelector(
+            ${JSON.stringify(DOUBAO_RENDERED_BLOCK_SELECTOR)}
+          ))
           .length
       }))()`);
       const pathname = String(state?.pathname || '').replace(/\/+$/, '') || '/';
@@ -212,11 +219,13 @@ class DoubaoWebPage extends DeepSeekWebPage {
         .filter((element) => !element.classList.contains('justify-end'))
         .map((message) => ({
           message,
-          root: message.querySelector('.md-box-root')
+          root: message.querySelector(${JSON.stringify(DOUBAO_RENDERED_BLOCK_SELECTOR)})
         }))
         .filter(({ root }) => root && visible(root));
       const generationActive = messages.some(
         ({ root }) => root.getAttribute('data-streaming') === 'true'
+          || root.matches('[data-show-indicator="true"]')
+          || Boolean(root.querySelector('[data-show-indicator="true"]'))
       ) || Array.from(document.querySelectorAll('button, [role="button"]'))
         .filter(visible)
         .some((element) => /停止|中止|stop/i.test(
@@ -238,11 +247,11 @@ class DoubaoWebPage extends DeepSeekWebPage {
   }
 
   async extractCitations(turnId) {
-    return this.callDocument(`function(messageId) {
+    return this.callDocument(`function(messageId, renderedBlockSelector) {
       const message = Array.from(this.querySelectorAll('[data-message-id]'))
         .find((element) => element.getAttribute('data-message-id') === messageId);
       if (!message || message.classList.contains('justify-end')) return [];
-      const root = message.querySelector('.md-box-root');
+      const root = message.querySelector(renderedBlockSelector);
       if (!root) return [];
       const rows = [];
       const seen = new Set();
@@ -263,7 +272,7 @@ class DoubaoWebPage extends DeepSeekWebPage {
         if (rows.length >= 200) break;
       }
       return rows;
-    }`, [String(turnId)]);
+    }`, [String(turnId), DOUBAO_RENDERED_BLOCK_SELECTOR]);
   }
 
   async getMetadata() {

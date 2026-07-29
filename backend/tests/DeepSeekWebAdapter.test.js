@@ -424,6 +424,11 @@ test('normalizes DOM citations and keeps bounded Network-only sources as retriev
       source_role: 'explicit_citation'
     },
     {
+      url: 'https://static.example.org/source.png',
+      title: '明确图片来源',
+      source_role: 'explicit_citation'
+    },
+    {
       url: 'javascript:alert(1)',
       title: '非法协议',
       source_role: 'explicit_citation'
@@ -437,6 +442,8 @@ test('normalizes DOM citations and keeps bounded Network-only sources as retriev
   page.collectRetrievalCandidates = async () => [
     { url: 'https://example.com/source', title: '与明确来源重复' },
     { url: 'https://retrieval.example.net/report', title: '仅检索候选' },
+    { url: 'https://chat.deepseek.com/internal/source', title: '平台自身资源' },
+    { url: 'https://cdn.example.net/avatar.png~signed', title: '图片资源' },
     { url: 'file:///etc/passwd', title: '非法候选' }
   ];
   const adapter = new DeepSeekWebAdapter({
@@ -459,6 +466,13 @@ test('normalizes DOM citations and keeps bounded Network-only sources as retriev
       url: 'https://example.com/source',
       domain: 'example.com',
       title: '明确来源',
+      source_origin: 'deepseek_web_dom',
+      source_role: 'explicit_citation'
+    },
+    {
+      url: 'https://static.example.org/source.png',
+      domain: 'static.example.org',
+      title: '明确图片来源',
       source_origin: 'deepseek_web_dom',
       source_role: 'explicit_citation'
     },

@@ -18,6 +18,14 @@ test('Doubao composer contract includes the current contenteditable textbox', ()
   );
 });
 
+test('Doubao message contract includes the current block-v1 assistant content', () => {
+  assert.ok(
+    doubaoSelectors.message.renderedBlock.includes(
+      '[data-container-type="block-v1"][data-render-engine="block"]'
+    )
+  );
+});
+
 function captureStore(events) {
   let sequence = 0;
   return {
@@ -166,6 +174,35 @@ test('Doubao page accepts only its official ready origin', async () => {
   }, { sleep: async () => {} });
 
   assert.equal((await doubaoPage.assertReady()).status, 'ready');
+});
+
+test('Doubao evidence screenshot completes when compositor-surface capture is unresponsive', async () => {
+  const screenshotModes = [];
+  const doubaoPage = new DoubaoWebPage({
+    connection: {
+      send: async (method, params) => {
+        if (method === 'Runtime.evaluate') {
+          return {
+            result: {
+              value: { x: 100, y: 0, width: 900, height: 700, scale: 1 }
+            }
+          };
+        }
+        screenshotModes.push(params.fromSurface);
+        if (params.fromSurface) {
+          throw Object.assign(new Error('surface screenshot timeout'), {
+            code: 'renderer_timeout'
+          });
+        }
+        return { data: PNG.toString('base64') };
+      }
+    }
+  }, { sleep: async () => {} });
+
+  const screenshot = await doubaoPage.captureScreenshot();
+
+  assert.equal(screenshot.buffer.equals(PNG), true);
+  assert.deepEqual(screenshotModes, [false]);
 });
 
 test('Doubao new conversation accepts the current blank chat path without a trailing slash', async () => {

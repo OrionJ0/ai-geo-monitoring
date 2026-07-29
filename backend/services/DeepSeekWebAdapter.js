@@ -69,6 +69,12 @@ function normalizeExternalUrl(value) {
   return normalized.length <= 2048 ? normalized : null;
 }
 
+function isRetrievalCandidateUrl(url, identity) {
+  if (identity.allowedOrigins.includes(url.origin)) return false;
+  return !/\.(?:avif|bmp|css|gif|heic|ico|jpe?g|js|map|mjs|mp3|mp4|ogg|png|svg|ttf|wav|webm|webp|woff2?)(?:~|$)/i
+    .test(url.pathname);
+}
+
 function normalizeProviderCitations(
   explicitCitations,
   retrievalCandidates,
@@ -81,6 +87,12 @@ function normalizeProviderCitations(
     const url = normalizeExternalUrl(item?.url);
     if (!url || seen.has(url)) return;
     const parsed = new URL(url);
+    if (
+      sourceRole === 'retrieval_candidate'
+      && !isRetrievalCandidateUrl(parsed, identity)
+    ) {
+      return;
+    }
     seen.add(url);
     rows.push({
       url,
@@ -585,7 +597,7 @@ class DeepSeekWebPage {
     return { requested: true, observed: false };
   }
 
-  async captureScreenshot() {
+  async captureScreenshot({ fromSurface = true } = {}) {
     const clip = await this.evaluate(`(() => {
       const composer = document.querySelector(
         'textarea:not([disabled]), [contenteditable="true"][role="textbox"]'
@@ -619,7 +631,7 @@ class DeepSeekWebPage {
       try {
         screenshot = await this.connection.send('Page.captureScreenshot', {
           format: 'png',
-          fromSurface: true,
+          fromSurface,
           captureBeyondViewport: false,
           clip
         }, {

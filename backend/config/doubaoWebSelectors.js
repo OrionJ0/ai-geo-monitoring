@@ -34,7 +34,11 @@ module.exports = Object.freeze({
   message: Object.freeze({
     owner: '[data-message-id]',
     streaming: '.md-box-root[data-streaming]',
-    renderedBlock: '[data-render-engine="node"]'
+    renderedBlock: [
+      '.md-box-root',
+      '[data-container-type="block-v1"][data-render-engine="block"]',
+      '[data-render-engine="node"]'
+    ]
   }),
   generationControls: [
     'button[aria-label*="停止"]',

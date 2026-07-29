@@ -147,6 +147,7 @@ test('豆包 Web 使用与 DeepSeek 隔离但一致的证据展示契约', () =>
   });
 
   assert.equal(evidence.modelName, 'doubao-web-ui');
+  assert.equal(evidence.platformName, '豆包 Web');
   assert.equal(evidence.selectorVersion, 'doubao-web-v1');
   assert.equal(evidence.searchObserved, true);
   assert.deepEqual(evidence.explicitCitations, []);
