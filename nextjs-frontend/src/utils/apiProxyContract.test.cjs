@@ -33,6 +33,16 @@ test('frontend development and production servers explicitly listen on all inter
   assert.match(packageJson.scripts.start, /(?:^|\s)-(?:H|-hostname)\s+0\.0\.0\.0(?:\s|$)/);
 });
 
+test('development server accepts the IPv4 loopback origin', () => {
+  const nextConfig = source('../../next.config.ts');
+
+  assert.match(
+    nextConfig,
+    /allowedDevOrigins:\s*\[[^\]]*['"]127\.0\.0\.1['"][^\]]*\]/s,
+    '127.0.0.1 访问开发页时必须允许加载同源开发资源和 HMR',
+  );
+});
+
 test('same-origin proxy covers the complete AI analysis retry budget', () => {
   const nextConfig = source('../../next.config.ts');
   const analysisService = source('../../../backend/services/AIResponseAnalysisService.js');
