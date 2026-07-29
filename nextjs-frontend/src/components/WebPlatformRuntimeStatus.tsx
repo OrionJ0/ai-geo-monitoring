@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   getWebPlatformRuntimePresentation,
   selectManagedWebPlatformCodes
@@ -37,6 +38,11 @@ function RuntimeStrip({ platform }: { platform: typeof PLATFORMS[number] }) {
         <span className={styles.kicker}>{platform.kicker} · 单通道队列</span>
         <strong>{presentation.title}</strong>
         <span className={styles.description}>{presentation.description}</span>
+        {presentation.actionHref ? (
+          <Link className={styles.action} href={presentation.actionHref}>
+            {presentation.actionLabel}
+          </Link>
+        ) : null}
       </div>
     </section>
   );

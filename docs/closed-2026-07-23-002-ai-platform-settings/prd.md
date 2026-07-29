@@ -91,7 +91,7 @@
 - 未配置 API Key 时不能参与运行。
 - 预设平台不能删除，但可以编辑接口地址、默认模型、API Key、运行参数和启用状态。
 - 千问默认使用 OpenAI Responses 兼容协议和 `qwen3.7-plus`；已有 `qwen` 自定义配置升级为预设时保留其接口、模型、密钥和启用状态。
-- 腾讯混元默认使用 TokenHub OpenAI Chat Completions 兼容协议和 `hy3`。
+- 历史初版中的腾讯混元默认使用 TokenHub OpenAI Chat Completions 兼容协议和 `hy3`；该默认值已于 2026-07-29 退役，当前正式预置为 `hy3-preview` 与 `web_search_options.enable=true`。
 
 系统不自动读取或导入现有环境变量中的平台密钥。管理员必须在页面中人工完成配置。
 

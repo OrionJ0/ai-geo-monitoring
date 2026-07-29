@@ -282,6 +282,80 @@ test('project monitoring uses its own schedule kind without creating a question-
   assert.equal(await QuestionSetRun.count(), 0);
 });
 
+test('project monitoring preserves a Web preflight failure in the scheduled execution ledger', async () => {
+  const dueAt = new Date(Date.now() - 60 * 1000);
+  await project.update({
+    monitoring_enabled: true,
+    monitoring_next_run_at: dueAt
+  });
+  const service = new schedulerModule.SchedulerService({ ownerId: 'project-web-preflight-process' });
+  service.dispatchPendingQuestionSetRuns = async () => 0;
+  service.recoverStalePendingRecords = async () => 0;
+  service.recoverStaleScheduledExecutions = async () => 0;
+  service.runProjectNow = async () => ({
+    ok: false,
+    status: 409,
+    message: 'DeepSeek 网页版需要重新登录，本次运行未创建任务',
+    data: {
+      error_code: 'web_platform_preflight_failed',
+      settings_url: '/admin/settings'
+    }
+  });
+
+  await service.tick();
+
+  const execution = await ScheduledExecution.findOne({
+    where: {
+      schedule_kind: 'project_monitoring',
+      schedule_id: project.id,
+      due_at: dueAt
+    }
+  });
+  assert.ok(execution);
+  assert.equal(execution.status, 'failed');
+  assert.equal(execution.error_code, 'web_platform_preflight_failed');
+  assert.equal(execution.error_message, 'DeepSeek 网页版需要重新登录，本次运行未创建任务');
+});
+
+test('project list status lookup returns only the latest monitoring execution per project', async () => {
+  const olderDueAt = new Date('2026-07-27T01:00:00.000Z');
+  const latestDueAt = new Date('2026-07-28T01:00:00.000Z');
+  await ScheduledExecution.bulkCreate([
+    {
+      schedule_kind: 'project_monitoring',
+      schedule_id: project.id,
+      project_id: project.id,
+      due_at: olderDueAt,
+      status: 'completed',
+      execution_token: 'old-token',
+      lease_owner: 'old-worker',
+      lease_expires_at: new Date('2026-07-27T01:10:00.000Z')
+    },
+    {
+      schedule_kind: 'project_monitoring',
+      schedule_id: project.id,
+      project_id: project.id,
+      due_at: latestDueAt,
+      status: 'failed',
+      execution_token: 'latest-token',
+      lease_owner: 'latest-worker',
+      lease_expires_at: new Date('2026-07-28T01:10:00.000Z'),
+      error_code: 'web_platform_preflight_failed',
+      error_message: '豆包网页版需要重新人工登录，本次运行未创建任务。'
+    }
+  ]);
+
+  const result = await schedulerModule.getLatestProjectMonitoringExecutions([project.id]);
+
+  assert.deepEqual(result[project.id], {
+    status: 'failed',
+    due_at: latestDueAt.toISOString(),
+    completed_at: null,
+    error_code: 'web_platform_preflight_failed',
+    error_message: '豆包网页版需要重新人工登录，本次运行未创建任务。'
+  });
+});
+
 test('project automatic monitoring forwards DeepSeek Web through the existing project runner and schedule slot', async () => {
   const previousPlatforms = project.platforms;
   await project.update({
@@ -307,12 +381,12 @@ test('project automatic monitoring forwards DeepSeek Web through the existing pr
   };
 
   try {
-    const ok = await service.runProjectNow(project.id, {
+    const result = await service.runProjectNow(project.id, {
       advanceSchedule: false,
       scheduledExecutionId: 712
     });
 
-    assert.equal(ok, true);
+    assert.equal(result.ok, true);
     assert.deepEqual(runOptions.platforms, ['deepseek-web']);
     assert.equal(runOptions.scheduledExecutionId, 712);
     assert.deepEqual(runOptions.prompts.map((item) => item.id), [prompt.id]);
@@ -348,12 +422,12 @@ test('project automatic monitoring forwards Doubao Web through the existing proj
   };
 
   try {
-    const ok = await service.runProjectNow(project.id, {
+    const result = await service.runProjectNow(project.id, {
       advanceSchedule: false,
       scheduledExecutionId: 713
     });
 
-    assert.equal(ok, true);
+    assert.equal(result.ok, true);
     assert.deepEqual(runOptions.platforms, ['doubao-web']);
     assert.equal(runOptions.scheduledExecutionId, 713);
     assert.deepEqual(runOptions.prompts.map((item) => item.id), [prompt.id]);

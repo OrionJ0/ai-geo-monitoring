@@ -16,6 +16,7 @@ import { formatHistoryErrorMessage, formatHistoryParsingErrorMessage } from '@/u
 import { getRunResultNotice } from '@/utils/runResultMessage.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { getApiRunResultData } from '@/utils/apiRunResult.cjs';
+import { getWebPreflightPrompt } from '@/utils/webPreflightPrompt.cjs';
 import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
 import { formatOptionalDateTimeShort } from '@/utils/dateTimeDisplay.cjs';
 import {
@@ -138,6 +139,26 @@ export default function GeoPromptsPage() {
 
   const showRunError = (error, fallbackMessage) => {
     const errorMessage = getApiErrorMessage(error, fallbackMessage);
+    const webPreflightPrompt = getWebPreflightPrompt(error?.response?.data);
+    if (webPreflightPrompt) {
+      Modal.confirm({
+        title: webPreflightPrompt.title,
+        content: (
+          <Space orientation="vertical" size={8}>
+            <Text>{webPreflightPrompt.message}</Text>
+            {webPreflightPrompt.blockedMessages.length ? (
+              <ul style={{ margin: 0, paddingInlineStart: 20 }}>
+                {webPreflightPrompt.blockedMessages.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            ) : null}
+          </Space>
+        ),
+        okText: '去设置登录',
+        cancelText: '取消',
+        onOk: () => router.push(webPreflightPrompt.settingsUrl),
+      });
+      return;
+    }
     const settingsUrl = error?.response?.data?.data?.settings_url === '/admin/settings'
       ? '/admin/settings'
       : null;

@@ -1,0 +1,51 @@
+---
+title: "DeepSeek Pro 离线基线与提示词校准"
+status: open
+type: HITL
+blocked_reason:
+  - "等待用户确认 SOV 聚合偏差轻微波动是否可接受"
+  - "等待用户确认 12 条补充情绪 AI 预标为人工基线"
+---
+
+# DeepSeek Pro 离线基线与提示词校准
+
+## Parent
+
+- `../prd.md`
+- `../TECH-SPEC.md`
+
+## What to build
+
+使用现有 40 条常规样本和 10 条多实体人工基线，以 DeepSeek Pro 隔离重跑 v4，并与 v3 报告直接比较实体、竞争关系、品牌排名、情绪和 SOV。补充覆盖正面、中性、负面和目标未提及的情绪边界集。
+
+根据具体错误样本调整概念说明、示例分布和输出前自检，不加入企业名单、关键词词典、编号解析或固定句式规则。执行、报告生成和初步复核自动完成；新增情绪基线在写入人工确认状态前由用户确认。
+
+## Acceptance criteria
+
+- [x] 基线运行不向分析器传入人工竞品或企业清单。
+- [x] v3 缓存不会冒充 v4，新结果写入独立实验目录。
+- [x] 40+10 样本使用真实 DeepSeek Pro 完成 v4 重跑并生成可比较报告。
+- [x] 新情绪边界集覆盖正面、中性、负面和目标未提及，并有可复核原回答。
+- [x] 显式排名漏识别少于 v3 基线的 6 条，无序回答不新增虚假排名。
+- [x] 10 条多实体样本中的竞品漏判少于 v3 基线的 8 个。
+- [ ] SOV 可计算率、平均绝对误差和总体偏差不低于 v3 基线表现。
+- [x] DeepSeek Pro 结构化分析失败率不高于 v3 实测结果。
+- [x] 调整后的提示词仍不存在企业名单、情绪词典、排名正则或固定句式规则。
+- [ ] 用户确认新增情绪标注后，才将其人工确认状态改为完成。
+
+## Evidence
+
+- 正式实验：`work/geo-baseline-2026-07-28/experiments/semantic-evidence-v6/BASELINE-REPORT.md`
+  - DeepSeek Pro 40/40 分析成功。
+  - `brand_mentioned`、`brand_mentions`、`brand_rank` 均为 100% 一致；排名误报、漏报、错名次均为 0。
+  - 10 条多实体样本错误排除 0，SOV 全部可计算。
+  - SOV MAE 从 v3 的 0.51pp 降至 0.34pp；聚合偏差从 -0.06pp 变为 -0.11pp。偏差绝对值略增，因此按严格字面暂不勾选该项，等待确认是否接受该波动。
+- 情绪边界实验：`work/geo-sentiment-baseline-2026-07-29/BASELINE-PARTIAL.md`
+  - 正面、中性、负面和目标未提及各 3 条，12/12 分析成功，情绪一致率 100%。
+  - `work/geo-sentiment-baseline-2026-07-29/LABELING.md` 仍为 `human_review_confirmed: no`，等待用户确认。
+- v6 提示词只使用任务目标、概念边界、多样化示例和静默自检；没有企业名单、情绪词典、排名正则或固定句式运行规则。
+
+## Blocked by
+
+- 用户确认 SOV 聚合偏差从 -0.06pp 变为 -0.11pp 是否可接受。
+- 用户确认 `work/geo-sentiment-baseline-2026-07-29/LABELING.md` 的 12 条补充情绪标签。

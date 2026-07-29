@@ -53,6 +53,7 @@ test('analysis API settings select a configured platform and an independent mode
   assert.match(analysisSource, /分析专用调用参数/);
   assert.match(analysisSource, /实际请求参数/);
   assert.match(analysisSource, /不设置应用层 Token 上限/);
+  assert.match(analysisSource, /高强度（reasoning_effort=high）/);
   assert.match(analysisSource, /请求超时/);
   assert.match(analysisSource, /不会修改监测平台参数/);
   assert.match(analysisSource, /测试输入/);

@@ -17,6 +17,33 @@ const DOUBAO_WEB_IDENTITY = Object.freeze({
   networkCitationOrigin: 'doubao_web_network'
 });
 const DOUBAO_RENDERED_BLOCK_SELECTOR = selectors.message.renderedBlock.join(', ');
+const DOUBAO_SEARCH_BLOCK_SELECTOR = selectors.search.resultBlock;
+
+function resolveDoubaoCitationUrl(value) {
+  let parsed;
+  try {
+    parsed = new URL(String(value || '').trim());
+  } catch {
+    return null;
+  }
+  if (parsed.hostname.toLowerCase() === 'link.wtturl.cn') {
+    const target = parsed.searchParams.get('target');
+    if (!target) return null;
+    try {
+      parsed = new URL(target);
+    } catch {
+      return null;
+    }
+  }
+  if (
+    !['http:', 'https:'].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+  ) {
+    return null;
+  }
+  return parsed.toString();
+}
 
 class DoubaoWebAdapter extends DeepSeekWebAdapter {
   constructor(options) {
@@ -135,16 +162,17 @@ class DoubaoWebPage extends DeepSeekWebPage {
       return { loginRequired: explicitLoginButton || loginForm };
     }`, [selectors.loginMarkers]);
     if (login?.loginRequired) {
-      throw adapterError('web_login_required', '豆包深入研究需要人工登录');
+      throw adapterError('web_login_required', '豆包 Web 需要重新人工登录');
     }
-    const search = await this.ensureSearchEnabled();
-    if (search?.observed === true) return search;
-    throw adapterError('web_selector_mismatch', '豆包深入研究控件无法确认可用');
+    const captureMode = await this.verifyCaptureMode();
+    if (captureMode?.observed === true) return captureMode;
+    throw adapterError('web_capture_mode_unverified', '无法确认豆包普通模式');
   }
 
-  async ensureSearchEnabled() {
+  async verifyCaptureMode() {
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const state = await this.callDocument(`function(allowClick, loginMarkers) {
+      const state = await this.callDocument(
+        `function(allowClick, selectedSelectors, actionSelector) {
         const visible = (element) => {
           const style = getComputedStyle(element);
           const rect = element.getBoundingClientRect();
@@ -153,58 +181,51 @@ class DoubaoWebPage extends DeepSeekWebPage {
             && rect.width > 0
             && rect.height > 0;
         };
-        const explicitLoginButton = Array.from(
-          this.querySelectorAll('button,[role="button"],a')
-        )
-          .filter(visible)
-          .some((element) => String(element.textContent || '')
-            .replace(/\\s+/g, ' ').trim() === '登录');
-        const loginRequired = explicitLoginButton || loginMarkers.some((selector) => (
-          Array.from(this.querySelectorAll(selector)).some(visible)
-        ));
-        if (loginRequired) {
-          return {
-            observed: false,
-            selectedCount: 0,
-            actionCount: 0,
-            loginRequired: true
-          };
-        }
         const selected = Array.from(this.querySelectorAll(
-          '[data-input-engine-action-source="actionbar"][data-value="25"]'
+          selectedSelectors.join(', ')
         )).filter(visible);
-        const actions = Array.from(this.querySelectorAll(
-          'button[data-skill-id="skill_bar_button_25"]'
-        )).filter(visible);
-        if (selected.length === 1) {
-          return { observed: true, selectedCount: 1, actionCount: actions.length };
+        const actions = Array.from(
+          this.querySelectorAll(actionSelector)
+        ).filter(visible);
+        if (selected.length === 0) {
+          return { observed: true, selectedCount: 0, actionCount: actions.length };
         }
-        if (selected.length === 0 && actions.length === 1 && allowClick) {
+        if (selected.length === 1 && actions.length === 1 && allowClick) {
           actions[0].click();
         }
         return {
           observed: false,
           selectedCount: selected.length,
-          actionCount: actions.length,
-          loginRequired: false
+          actionCount: actions.length
         };
-      }`, [attempt === 0, selectors.loginMarkers]);
-      if (state?.loginRequired) {
-        throw adapterError('web_login_required', '豆包深入研究需要人工登录');
-      }
-      if (state?.observed === true && Number(state.selectedCount) === 1) {
+      }`,
+        [attempt === 0, selectors.search.selectedChip, selectors.search.actionButton]
+      );
+      if (state?.observed === true && Number(state.selectedCount) === 0) {
         return {
-          requested: true,
+          mode: 'standard',
           observed: true,
-          evidence_type: 'dom_selected_deep_research'
+          search_requested: false,
+          search_observed: null,
+          evidence_type: 'dom_standard_mode'
         };
       }
       await this.sleep(250);
     }
-    return { requested: true, observed: false };
+    return {
+      mode: 'standard',
+      observed: false,
+      search_requested: false,
+      search_observed: null,
+      evidence_type: 'dom_standard_mode',
+      error_code: 'web_capture_mode_unverified',
+      error_message: '无法确认豆包普通模式'
+    };
   }
 
   async getConversationSnapshot() {
+    const verificationMarkers = JSON.stringify(selectors.verificationMarkers);
+    const loginMarkers = JSON.stringify(selectors.loginMarkers);
     return this.evaluate(`(() => {
       const visible = (element) => {
         const style = getComputedStyle(element);
@@ -214,15 +235,48 @@ class DoubaoWebPage extends DeepSeekWebPage {
           && rect.width > 0
           && rect.height > 0;
       };
-      const messages = Array.from(document.querySelectorAll('[data-message-id]'))
+      const hasVisibleMatch = (selectors) => selectors.some((selector) => (
+        Array.from(document.querySelectorAll(selector)).some(visible)
+      ));
+      const explicitLoginButton = Array.from(
+        document.querySelectorAll('button,[role="button"],a')
+      )
         .filter(visible)
-        .filter((element) => !element.classList.contains('justify-end'))
+        .some((element) => String(element.textContent || '')
+          .replace(/\\s+/g, ' ').trim() === '登录');
+      const resolveFinalRoot = (message) => {
+        const markdown = message.querySelector('.md-box-root');
+        if (markdown && visible(markdown)) return markdown;
+        const block = message.querySelector(
+          '[data-container-type="block-v1"][data-render-engine="block"]'
+        );
+        if (block && visible(block)) return block;
+        return Array.from(message.querySelectorAll('[data-render-engine="node"]'))
+          .filter(visible)
+          .find((node) => (
+            !String(node.getAttribute('data-plugin-identifier') || '')
+              .includes('search_query_result_block.search_type:1')
+            && String(node.innerText || node.textContent || '').trim()
+          )) || null;
+      };
+      const assistantMessages = Array.from(
+        document.querySelectorAll('[data-message-id]')
+      )
+        .filter(visible)
+        .filter((element) => !element.classList.contains('justify-end'));
+      const messages = assistantMessages
         .map((message) => ({
           message,
-          root: message.querySelector(${JSON.stringify(DOUBAO_RENDERED_BLOCK_SELECTOR)})
+          root: resolveFinalRoot(message)
         }))
         .filter(({ root }) => root && visible(root));
-      const generationActive = messages.some(
+      const searchInProgress = assistantMessages.some((message) => (
+        !resolveFinalRoot(message)
+        && Array.from(message.querySelectorAll(
+          ${JSON.stringify(DOUBAO_SEARCH_BLOCK_SELECTOR)}
+        )).some(visible)
+      ));
+      const generationActive = searchInProgress || messages.some(
         ({ root }) => root.getAttribute('data-streaming') === 'true'
           || root.matches('[data-show-indicator="true"]')
           || Boolean(root.querySelector('[data-show-indicator="true"]'))
@@ -241,17 +295,28 @@ class DoubaoWebPage extends DeepSeekWebPage {
           text: String(root.innerText || root.textContent || '').trim()
         })).filter((turn) => turn.id),
         generationActive,
-        busy: Boolean(document.querySelector('[aria-busy="true"]'))
+        busy: Boolean(document.querySelector('[aria-busy="true"]')),
+        verificationRequired: hasVisibleMatch(${verificationMarkers}),
+        loginRequired: explicitLoginButton || hasVisibleMatch(${loginMarkers})
       };
     })()`);
   }
 
   async extractCitations(turnId) {
-    return this.callDocument(`function(messageId, renderedBlockSelector) {
+    const rawCitations = await this.callDocument(`function(messageId) {
       const message = Array.from(this.querySelectorAll('[data-message-id]'))
         .find((element) => element.getAttribute('data-message-id') === messageId);
       if (!message || message.classList.contains('justify-end')) return [];
-      const root = message.querySelector(renderedBlockSelector);
+      const root = message.querySelector('.md-box-root')
+        || message.querySelector(
+          '[data-container-type="block-v1"][data-render-engine="block"]'
+        )
+        || Array.from(message.querySelectorAll('[data-render-engine="node"]'))
+          .find((node) => (
+            !String(node.getAttribute('data-plugin-identifier') || '')
+              .includes('search_query_result_block.search_type:1')
+            && String(node.innerText || node.textContent || '').trim()
+          ));
       if (!root) return [];
       const rows = [];
       const seen = new Set();
@@ -272,7 +337,18 @@ class DoubaoWebPage extends DeepSeekWebPage {
         if (rows.length >= 200) break;
       }
       return rows;
-    }`, [String(turnId), DOUBAO_RENDERED_BLOCK_SELECTOR]);
+    }`, [String(turnId)]);
+    const seen = new Set();
+    return (Array.isArray(rawCitations) ? rawCitations : [])
+      .map((citation) => ({
+        ...citation,
+        url: resolveDoubaoCitationUrl(citation?.url)
+      }))
+      .filter((citation) => {
+        if (!citation.url || seen.has(citation.url)) return false;
+        seen.add(citation.url);
+        return true;
+      });
   }
 
   async getMetadata() {
@@ -314,5 +390,6 @@ class DoubaoWebPage extends DeepSeekWebPage {
 module.exports = {
   DOUBAO_WEB_IDENTITY,
   DoubaoWebAdapter,
-  DoubaoWebPage
+  DoubaoWebPage,
+  resolveDoubaoCitationUrl
 };

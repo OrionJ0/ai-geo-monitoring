@@ -106,6 +106,19 @@ class AIPlatformService {
       .map((platform) => platform.code);
   }
 
+  async getNewProjectPlatformOptions() {
+    const catalog = await this.configService.listCatalog();
+    const selectable = catalog.filter((platform) => (
+      platform.selectable && platform.capabilities?.monitoring === true
+    ));
+    return {
+      selectablePlatforms: selectable.map((platform) => platform.code),
+      defaultPlatforms: selectable
+        .filter((platform) => platform.default_for_new_project)
+        .map((platform) => platform.code)
+    };
+  }
+
   async getPlatformCodes() {
     const catalog = await this.configService.listCatalog();
     return catalog.map((platform) => platform.code);
@@ -113,7 +126,8 @@ class AIPlatformService {
 
   async getPlatformAvailability(codes, {
     capability = 'monitoring',
-    runtimeProbe = true
+    runtimeProbe = true,
+    forceRuntimeProbe = false
   } = {}) {
     const requestedCodes = normalizeCodes(codes);
     const rows = await this.configService.listPlatformRows(requestedCodes, { includeArchived: true });
@@ -135,7 +149,9 @@ class AIPlatformService {
       ) {
         try {
           this.webPlatformRegistry.validateManagedConfig(row);
-          await this.webPlatformRegistry.getService(row.code).preflight();
+          await this.webPlatformRegistry.getService(row.code).preflight(
+            forceRuntimeProbe ? { force: true } : undefined
+          );
         } catch (error) {
           reason = (
             String(error?.code || '').startsWith('web_')

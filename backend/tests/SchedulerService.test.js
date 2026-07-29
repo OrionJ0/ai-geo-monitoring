@@ -83,6 +83,48 @@ test('marks scheduled project records as failed when metric generation fails', a
   assert.equal(result.error.message, '指标生成失败，请稍后重试');
 });
 
+test('scheduled finalization forwards the claimed lease and persists the original response', async () => {
+  const calls = [];
+  const result = await SchedulerService.finalizeScheduledProjectRecord({
+    record: {
+      id: 12,
+      project_id: 2,
+      user_id: 9,
+      tracked_prompt_id: null
+    },
+    executionToken: 'schedule-lease-token',
+    persistResponseDetail: true,
+    responseText: 'GATO 适合园区周界安防。',
+    aiResponse: { content: 'GATO 适合园区周界安防。' },
+    providerCitations: [{ url: 'https://example.test/source' }],
+    keywords: ['GATO'],
+    repositories: {
+      BrandProject: {
+        findByPk: async () => ({ id: 2, name: 'GATO' })
+      },
+      BrandCompetitor: {
+        findAll: async () => []
+      },
+      TrackedPrompt: {
+        findOne: async () => null
+      }
+    },
+    projectRunService: {
+      failRecord: async () => true,
+      finalizeSuccessfulRecord: async (payload) => {
+        calls.push(payload);
+        return { ok: true };
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].executionToken, 'schedule-lease-token');
+  assert.equal(calls[0].persistResponseDetail, true);
+  assert.deepEqual(calls[0].providerCitations, [{ url: 'https://example.test/source' }]);
+});
+
 test('scheduled detections guard empty AI responses before atomically finalizing result details', () => {
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
   const extractIndex = source.indexOf('const originalText = ResultParserService.extractResponseText');
@@ -213,6 +255,11 @@ test('scheduled detection records retain their execution ledger id', async () =>
 
     assert.equal(createdPayloads.length, 1);
     assert.equal(createdPayloads[0].scheduled_execution_id, 77);
+    assert.equal(createdPayloads[0].analysis_contract_version, 'ai_structured_v4');
+    assert.equal(
+      createdPayloads[0].metric_semantics_version,
+      'contextual_competitor_mentions_sov_v1'
+    );
   } finally {
     QuestionRecord.create = originalCreateRecord;
     QuestionRecord.update = originalUpdateRecord;
@@ -662,12 +709,26 @@ test('advances project monitoring schedule after a failed project run attempt', 
   });
   TrackedPrompt.findAll = async () => [{ toJSON: () => ({ id: 3, question: '静音轮胎怎么选', enabled: true }) }];
   User.findByPk = async () => ({ id: 9, role: 'user' });
-  ProjectRunService.runProject = async () => ({ ok: false, status: 400, message: '没有可运行的启用问题' });
+  const failure = {
+    ok: false,
+    status: 409,
+    message: 'DeepSeek 网页版需要重新登录，本次运行未创建任务',
+    data: {
+      error_code: 'web_platform_preflight_failed',
+      settings_url: '/admin/settings',
+      blocked_platforms: [{
+        code: 'deepseek-web',
+        name: 'DeepSeek 网页版',
+        reason_code: 'web_login_required'
+      }]
+    }
+  };
+  ProjectRunService.runProject = async () => failure;
 
   try {
     const result = await SchedulerService.runProjectNow(2);
 
-    assert.equal(result, false);
+    assert.deepEqual(result, failure);
     assert.equal(updates.length, 1);
     assert.equal(updates[0].monitoring_time, '09:00');
     assert.ok(updates[0].monitoring_next_run_at instanceof Date);

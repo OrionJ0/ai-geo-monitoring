@@ -4,7 +4,8 @@ const { createHash } = require('node:crypto');
 
 const {
   DoubaoWebAdapter,
-  DoubaoWebPage
+  DoubaoWebPage,
+  resolveDoubaoCitationUrl
 } = require('../services/DoubaoWebAdapter');
 const doubaoSelectors = require('../config/doubaoWebSelectors');
 
@@ -54,18 +55,23 @@ function captureStore(events) {
   };
 }
 
-function page(events, snapshots) {
+function page(events, snapshots, { retrievalCandidates = [] } = {}) {
   let index = 0;
   return {
     assertReady: async () => events.push(['ready']),
     startNewConversation: async () => events.push(['new']),
-    ensureSearchEnabled: async () => {
-      events.push(['research']);
+    verifyCaptureMode: async () => {
+      events.push(['standard-mode']);
       return {
-        requested: true,
+        mode: 'standard',
         observed: true,
-        evidence_type: 'dom_selected_deep_research'
+        search_requested: false,
+        search_observed: null,
+        evidence_type: 'dom_standard_mode'
       };
+    },
+    ensureSearchEnabled: async () => {
+      throw new Error('Doubao must not enable deep research');
     },
     captureScreenshot: async (kind) => {
       events.push(['screenshot', kind]);
@@ -83,7 +89,7 @@ function page(events, snapshots) {
       url: 'https://example.com/report#citation',
       title: '引用来源'
     }],
-    collectRetrievalCandidates: async () => [],
+    collectRetrievalCandidates: async () => retrievalCandidates,
     stopNetworkObservation: async () => {},
     getMetadata: async () => ({
       pageUrl: 'https://www.doubao.com/chat/123',
@@ -100,17 +106,26 @@ function page(events, snapshots) {
   };
 }
 
-test('captures one Doubao answer only after deep-research evidence is saved', async () => {
+test('captures one Doubao answer in standard mode without enabling deep research', async () => {
   const events = [];
   let now = 0;
   const answer = '豆包网页最终回答';
   const adapter = new DoubaoWebAdapter({
-    page: page(events, [
-      { assistantTurns: [], generationActive: false, busy: false },
-      { assistantTurns: [], generationActive: true, busy: true },
-      { assistantTurns: [{ id: 'message-1', text: answer }], generationActive: false, busy: false },
-      { assistantTurns: [{ id: 'message-1', text: answer }], generationActive: false, busy: false }
-    ]),
+    page: page(
+      events,
+      [
+        { assistantTurns: [], generationActive: false, busy: false },
+        { assistantTurns: [], generationActive: true, busy: true },
+        { assistantTurns: [{ id: 'message-1', text: answer }], generationActive: false, busy: false },
+        { assistantTurns: [{ id: 'message-1', text: answer }], generationActive: false, busy: false }
+      ],
+      {
+        retrievalCandidates: [{
+          url: 'https://search.example.com/result',
+          title: '普通模式检索候选'
+        }]
+      }
+    ),
     captureStore: captureStore(events),
     now: () => now,
     sleep: async (ms) => { now += ms; },
@@ -131,23 +146,33 @@ test('captures one Doubao answer only after deep-research evidence is saved', as
   assert.equal(result.web_capture.schema_version, 'doubao-web-capture-v1');
   assert.equal(result.web_capture.selector_version, 'doubao-web-v2');
   assert.equal(result.web_capture.page_origin, 'https://www.doubao.com');
+  assert.equal(result.web_capture.capture_mode.name, 'standard');
+  assert.equal(result.web_capture.search.requested, false);
+  assert.equal(result.web_capture.search.observed, true);
+  assert.equal(
+    result.web_capture.search.evidence_type,
+    'network_retrieval_candidates'
+  );
   assert.equal(result.provider_citations[0].source_origin, 'doubao_web_dom');
+  assert.equal(result.provider_citations[1].source_origin, 'doubao_web_network');
   assert.equal(events.filter(([name]) => name === 'send').length, 1);
+  assert.equal(events.some(([name]) => name === 'research'), false);
   assert.ok(
     events.findIndex(([name, kind]) => name === 'screenshot' && kind === 'search_state')
       < events.findIndex(([name]) => name === 'insert')
   );
 });
 
-test('never inserts or sends when Doubao deep-research state is not uniquely verified', async () => {
+test('never inserts or sends when Doubao standard mode cannot be verified', async () => {
   const events = [];
   const fakePage = page(events, [
     { assistantTurns: [], generationActive: false, busy: false }
   ]);
-  fakePage.ensureSearchEnabled = async () => ({
-    requested: true,
+  fakePage.verifyCaptureMode = async () => ({
+    mode: 'standard',
     observed: false,
-    count: 2
+    error_code: 'web_capture_mode_unverified',
+    error_message: '无法确认豆包普通模式'
   });
   const adapter = new DoubaoWebAdapter({
     page: fakePage,
@@ -156,7 +181,7 @@ test('never inserts or sends when Doubao deep-research state is not uniquely ver
 
   await assert.rejects(
     adapter.capture('不会发送', { record_id: 24, user_id: 7 }),
-    { code: 'web_search_state_unverified' }
+    { code: 'web_capture_mode_unverified' }
   );
   assert.equal(events.some(([name]) => name === 'insert'), false);
   assert.equal(events.some(([name]) => name === 'send'), false);
@@ -221,74 +246,159 @@ test('Doubao new conversation accepts the current blank chat path without a trai
   });
 });
 
-test('Doubao page requires one selected deep-research chip after at most one click', async () => {
+test('Doubao page keeps standard mode without clicking when deep research is inactive', async () => {
+  const calls = [];
+  const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
+  doubaoPage.callDocument = async (_fn, args) => {
+    calls.push(args[0]);
+    return { observed: true, selectedCount: 0, actionCount: 1 };
+  };
+
+  assert.deepEqual(await doubaoPage.verifyCaptureMode(), {
+    mode: 'standard',
+    observed: true,
+    search_requested: false,
+    search_observed: null,
+    evidence_type: 'dom_standard_mode'
+  });
+  assert.deepEqual(calls, [true]);
+});
+
+test('Doubao page deactivates an already-selected deep-research mode once', async () => {
   const calls = [];
   const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
   doubaoPage.callDocument = async (_fn, args) => {
     calls.push(args[0]);
     return calls.length === 1
-      ? { observed: false, selectedCount: 0, actionCount: 1 }
-      : { observed: true, selectedCount: 1, actionCount: 1 };
+      ? { observed: false, selectedCount: 1, actionCount: 1 }
+      : { observed: true, selectedCount: 0, actionCount: 1 };
   };
 
-  assert.deepEqual(await doubaoPage.ensureSearchEnabled(), {
-    requested: true,
+  assert.deepEqual(await doubaoPage.verifyCaptureMode(), {
+    mode: 'standard',
     observed: true,
-    evidence_type: 'dom_selected_deep_research'
+    search_requested: false,
+    search_observed: null,
+    evidence_type: 'dom_standard_mode'
   });
   assert.deepEqual(calls, [true, false]);
 });
 
-test('Doubao page reports login required when anonymous deep research opens the login gate', async () => {
-  const calls = [];
+test('Doubao page refuses to send if an active deep-research mode cannot be disabled', async () => {
   const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
-  doubaoPage.callDocument = async (_fn, args) => {
-    calls.push(args[0]);
-    return calls.length === 1
-      ? { observed: false, selectedCount: 0, actionCount: 1, loginRequired: false }
-      : { observed: false, selectedCount: 0, actionCount: 1, loginRequired: true };
-  };
-
-  await assert.rejects(
-    doubaoPage.ensureSearchEnabled(),
-    { code: 'web_login_required' }
-  );
-  assert.deepEqual(calls, [true, false]);
-});
-
-test('Doubao search wait keeps detecting a delayed explicit anonymous login control', async () => {
-  const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
-  doubaoPage.callDocument = async (functionDeclaration) => {
-    assert.match(
-      functionDeclaration,
-      /querySelectorAll\('button,\[role="button"\],a'\)/
-    );
+  doubaoPage.callDocument = async () => {
     return {
       observed: false,
-      selectedCount: 0,
-      actionCount: 0,
-      loginRequired: true
+      selectedCount: 1,
+      actionCount: 1
     };
   };
 
-  await assert.rejects(
-    doubaoPage.ensureSearchEnabled(),
-    { code: 'web_login_required' }
+  assert.deepEqual(await doubaoPage.verifyCaptureMode(), {
+    mode: 'standard',
+    observed: false,
+    search_requested: false,
+    search_observed: null,
+    evidence_type: 'dom_standard_mode',
+    error_code: 'web_capture_mode_unverified',
+    error_message: '无法确认豆包普通模式'
+  });
+});
+
+test('Doubao generation snapshot exposes a visible human-verification gate', async () => {
+  const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
+  doubaoPage.evaluate = async (expression) => {
+    assert.match(expression, /captcha/);
+    return {
+      assistantTurns: [],
+      generationActive: false,
+      busy: false,
+      verificationRequired: true,
+      loginRequired: false
+    };
+  };
+
+  const snapshot = await doubaoPage.getConversationSnapshot();
+
+  assert.equal(snapshot.verificationRequired, true);
+  assert.equal(snapshot.loginRequired, false);
+});
+
+test('Doubao generation snapshot treats search progress as busy instead of a final answer', async () => {
+  const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
+  doubaoPage.evaluate = async (expression) => {
+    assert.match(expression, /querySelector\('\.md-box-root'\)/);
+    assert.match(expression, /search_query_result_block\.search_type:1/);
+    assert.match(expression, /searchInProgress/);
+    return {
+      assistantTurns: [],
+      generationActive: true,
+      busy: false,
+      verificationRequired: false,
+      loginRequired: false
+    };
+  };
+
+  const snapshot = await doubaoPage.getConversationSnapshot();
+
+  assert.deepEqual(snapshot.assistantTurns, []);
+  assert.equal(snapshot.generationActive, true);
+});
+
+test('Doubao citation extraction targets final answer content instead of search progress', async () => {
+  const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
+  doubaoPage.callDocument = async (functionDeclaration) => {
+    assert.match(functionDeclaration, /querySelector\('\.md-box-root'\)/);
+    assert.match(functionDeclaration, /search_query_result_block\.search_type:1/);
+    return [{
+      url: 'https://link.wtturl.cn/?target=https%3A%2F%2Fopenai.com%2Findex%2Fexample',
+      title: 'OpenAI'
+    }];
+  };
+
+  const citations = await doubaoPage.extractCitations('message-1');
+
+  assert.equal(citations.length, 1);
+  assert.equal(citations[0].url, 'https://openai.com/index/example');
+});
+
+test('Doubao citation redirects resolve only a safe HTTP target', () => {
+  assert.equal(
+    resolveDoubaoCitationUrl(
+      'https://link.wtturl.cn/?target=https%3A%2F%2Fdevelopers.openai.com%2Fapi%2Fdocs%2Fmodels'
+    ),
+    'https://developers.openai.com/api/docs/models'
+  );
+  assert.equal(
+    resolveDoubaoCitationUrl('https://example.com/report#section'),
+    'https://example.com/report#section'
+  );
+  assert.equal(
+    resolveDoubaoCitationUrl(
+      'https://link.wtturl.cn/?target=javascript%3Aalert%281%29'
+    ),
+    null
+  );
+  assert.equal(
+    resolveDoubaoCitationUrl(
+      'https://link.wtturl.cn/?target=https%3A%2F%2Fuser%3Apass%40example.com%2F'
+    ),
+    null
   );
 });
 
-test('Doubao interactive login verification rejects an explicit anonymous login page before checking research', async () => {
-  let researchChecks = 0;
+test('Doubao interactive login verification rejects an explicit anonymous login page before checking mode', async () => {
+  let modeChecks = 0;
   const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
   doubaoPage.callDocument = async () => ({ loginRequired: true });
-  doubaoPage.ensureSearchEnabled = async () => {
-    researchChecks += 1;
-    return { requested: true, observed: true };
+  doubaoPage.verifyCaptureMode = async () => {
+    modeChecks += 1;
+    return { mode: 'standard', observed: true };
   };
 
   await assert.rejects(
     doubaoPage.verifyInteractiveLogin(),
     { code: 'web_login_required' }
   );
-  assert.equal(researchChecks, 0);
+  assert.equal(modeChecks, 0);
 });

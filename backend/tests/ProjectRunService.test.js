@@ -466,7 +466,7 @@ test('preserves the full answer and citations when analysis input exceeds the mo
     const result = await ProjectRunService.finalizeSuccessfulRecord({
       record: {
         id: 14,
-        analysis_contract_version: 'ai_structured_v3',
+        analysis_contract_version: 'ai_structured_v4',
         metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
         update: async (payload) => updates.push(payload)
       },
@@ -676,6 +676,48 @@ test('keeps provider retrieval candidates out of stored citation metrics', () =>
   ]);
 });
 
+test('promotes TokenHub search_results referenced by answer markers to explicit citations', () => {
+  const snapshot = ProjectRunService.snapshotProviderCitations({
+    choices: [{
+      message: {
+        content: '第一项事实来自已引用来源[1]，第二项没有引用标记，危险来源不能成为引用[3]。',
+        search_results: [{
+          index: 1,
+          name: '已引用来源',
+          url: 'https://cited.example.com/report'
+        }, {
+          index: 2,
+          name: '仅检索来源',
+          url: 'https://retrieved.example.com/result'
+        }, {
+          index: 3,
+          name: '危险来源',
+          url: 'javascript://unsafe.example.com/alert'
+        }]
+      }
+    }]
+  });
+
+  assert.deepEqual(
+    snapshot
+      .filter((source) => source.url === 'https://cited.example.com/report')
+      .map((source) => source.source_role),
+    ['retrieval_candidate', 'explicit_citation']
+  );
+  assert.deepEqual(
+    snapshot
+      .filter((source) => source.url === 'https://retrieved.example.com/result')
+      .map((source) => source.source_role),
+    ['retrieval_candidate']
+  );
+  assert.deepEqual(
+    snapshot
+      .filter((source) => source.url === 'javascript://unsafe.example.com/alert')
+      .map((source) => source.source_role),
+    []
+  );
+});
+
 test('preserves explicit citation when the same URL also appears as a retrieval candidate', () => {
   const snapshot = ProjectRunService.snapshotProviderCitations({
     output: [{
@@ -775,7 +817,7 @@ test('uses the structured analysis result when the target brand is absent', asyn
   }
 });
 
-test('persists the v3 answer-level SOV contract from a single-question run', async () => {
+test('persists the v4 answer-level SOV contract without passing project competitors into semantic analysis', async () => {
   const originalAnalyze = AIResponseAnalysisService.analyze;
   let analysisInput;
   AIResponseAnalysisService.analyze = async (input) => {
@@ -795,22 +837,31 @@ test('persists the v3 answer-level SOV contract from a single-question run', asy
         name: '海康',
         relation: 'competitor',
         reason: '提供同类周界方案',
+        evidence: ['海康都提供周界方案'],
         mentions: 2,
         surface_forms: ['海康', '海康']
       }],
       sentiment: 'neutral',
       sentiment_reason: '客观列举',
       sentiment_risk_terms: [],
-      analysis_method: 'ai_structured_v3',
+      analysis_method: 'ai_structured_v4',
       analysis_platform: 'analysis-ai',
       analysis_model: 'analysis-model',
       analysis_structure: {
-        schema_version: 'geo_metric_input_v3',
+        schema_version: 'geo_metric_input_v4',
         competitor_relations: [{
           entity_name: '海康',
           relation: 'competitor',
-          reason: '提供同类周界方案'
-        }]
+          reason: '提供同类周界方案',
+          evidence: ['海康都提供周界方案']
+        }],
+        candidate_lists: [],
+        sentiment: {
+          label: 'neutral',
+          reason: '客观列举',
+          evidence: ['广拓与海康都提供周界方案'],
+          risk_terms: []
+        }
       }
     };
   };
@@ -842,9 +893,7 @@ test('persists the v3 answer-level SOV contract from a single-question run', asy
     });
 
     assert.equal(analysisInput.question, '哪些厂商提供周界安防方案？');
-    assert.deepEqual(analysisInput.competitorHints, [
-      { name: '海康', aliases: ['海康威视'] }
-    ]);
+    assert.equal(Object.hasOwn(analysisInput, 'competitorHints'), false);
     assert.equal(
       payload.metric_semantics_version,
       'contextual_competitor_mentions_sov_v1'
@@ -855,6 +904,14 @@ test('persists the v3 answer-level SOV contract from a single-question run', asy
     assert.equal(payload.share_of_voice, null);
     assert.deepEqual(payload.competitor_mentions, []);
     assert.equal(payload.competition_entities[0].reason, '提供同类周界方案');
+    assert.deepEqual(
+      payload.competition_entities[0].evidence,
+      ['海康都提供周界方案']
+    );
+    assert.deepEqual(
+      payload.analysis_structure.sentiment.evidence,
+      ['广拓与海康都提供周界方案']
+    );
   } finally {
     AIResponseAnalysisService.analyze = originalAnalyze;
   }
@@ -1528,21 +1585,35 @@ test('does not consume quota or create records when every candidate platform is 
   }
 });
 
-test('Web preflight failure is reported before quota or record creation', async () => {
+test('blocks the whole run when a selected Web platform fails real-time preflight', async () => {
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
   const originalCreateEntries = ProjectRunService.createRunEntries;
   let quotaCalled = false;
   let recordsCalled = false;
+  let availabilityOptions;
 
-  AIPlatformService.getPlatformAvailability = async () => [{
-    code: 'deepseek-web',
-    platform_name: 'DeepSeek 网页版',
-    model_name: 'deepseek-web-ui',
-    available: false,
-    reason: 'web_login_required',
-    config: null
-  }];
+  AIPlatformService.getPlatformAvailability = async (_codes, options) => {
+    availabilityOptions = options;
+    return [
+    {
+      code: 'deepseek-web',
+      platform_name: 'DeepSeek 网页版',
+      model_name: 'deepseek-web-ui',
+      available: false,
+      reason: 'web_login_required',
+      config: null
+    },
+    {
+      code: 'qwen',
+      platform_name: '千问',
+      model_name: 'qwen-model',
+      available: true,
+      reason: null,
+      config: { code: 'qwen', default_model: 'qwen-model' }
+    }
+    ];
+  };
   ProjectRunService.consumeRunQuota = async () => {
     quotaCalled = true;
     return { ok: true };
@@ -1554,20 +1625,29 @@ test('Web preflight failure is reported before quota or record creation', async 
 
   try {
     const result = await ProjectRunService.runProject({
-      project: { id: 2, user_id: 9, status: 'active', platforms: ['deepseek-web'] },
+      project: { id: 2, user_id: 9, status: 'active', platforms: ['deepseek-web', 'qwen'] },
       prompts: [{
         id: 3,
         question: 'GEO 怎么做',
         enabled: true,
-        platforms: ['deepseek-web']
+        platforms: ['deepseek-web', 'qwen']
       }],
-      platforms: ['deepseek-web'],
+      platforms: ['deepseek-web', 'qwen'],
       user: { id: 9, role: 'user' }
     });
 
     assert.equal(result.ok, false);
-    assert.equal(result.data.error_code, 'all_platforms_unavailable');
+    assert.equal(result.status, 409);
+    assert.equal(result.data.error_code, 'web_platform_preflight_failed');
+    assert.equal(result.data.settings_url, '/admin/settings');
+    assert.deepEqual(result.data.blocked_platforms, [{
+      platform: 'deepseek-web',
+      name: 'DeepSeek 网页版',
+      reason_code: 'web_login_required',
+      message: 'DeepSeek 网页版需要重新人工登录'
+    }]);
     assert.match(result.message, /需要重新人工登录/);
+    assert.deepEqual(availabilityOptions, { forceRuntimeProbe: true });
     assert.equal(quotaCalled, false);
     assert.equal(recordsCalled, false);
   } finally {

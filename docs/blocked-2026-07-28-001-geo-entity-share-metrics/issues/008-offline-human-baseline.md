@@ -47,7 +47,10 @@ blocked_by:
 - 早期 `qwen/qwen3.7-plus` 重跑为 34/40 成功，6 条无效结构输出按 fail-closed 排除；该结果只保留在 `BASELINE-PARTIAL.md` 作为历史阶段记录。
 - 2026-07-29 正式分析配置硬切为 `deepseek/deepseek-v4-pro` 后执行 `node backend/scripts/geoBaselineEvaluate.js --refresh`：40/40 成功，38 条首次通过，S06、S39 经一次携带具体校验错误的定向重试后通过。
 - 正式 `BASELINE-REPORT.md` 覆盖 40 条目标字段和全部 10 条多实体真值，10 条均可评估；失败样本数为 0。
+- 同日以相同 40+10 人工真值比较提示词与思考模式：旧提示词关闭思考的错误排除为 42、可计算性错配 3、SOV MAE 2.77pp、聚合偏差 +4.04pp；`choice_set_few_shot_v1` + DeepSeek high 为 40/40 成功、错误排除 5、可计算性错配 0、SOV MAE 0.47pp、聚合偏差 +0.02pp，榜单一致率 62.5%。
+- 硬切后再从生产配置独立全量刷新，仍为 40/40 成功、可计算性错配 0、错误排除 8、SOV MAE 0.51pp、聚合偏差 -0.06pp；榜单一致率回落到 25%、情绪一致率为 80%，证明核心 SOV 改善可复现，但榜单与情绪仍存在模型非确定性。
+- 胜出方案已成为唯一正式提示词与 DeepSeek 请求路径；旧提示词和关闭思考开关已删除，缓存增加 `analysis_prompt_revision`，避免旧提示词结果冒充当前基线。
 
 ## Completion
 
-40+10 条标注已经多轮独立复核并由用户人工确认，正式报告已经生成。本 issue 完成关闭；当前 DeepSeek Pro 基线结构化失败为 0/40，分析失败仍保持 fail-closed，不会进入品牌指标。
+40+10 条标注已经多轮独立复核并由用户人工确认，正式报告已经生成。本 issue 完成关闭；该 v3 基线中的 `choice_set_few_shot_v1` + DeepSeek Pro high 结构化失败为 0/40，分析失败仍保持 fail-closed，不会进入品牌指标。v4 当前基线见 `../../blocked-2026-07-29-002-ai-semantic-analysis-quality/`。

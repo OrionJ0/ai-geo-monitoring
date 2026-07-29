@@ -245,7 +245,7 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   assert.equal(durableReport.rows[0].answer, '广拓可以作为周界报警方案的候选。');
 });
 
-test('单问题报告返回新版 SOV 分子分母和逐实体竞争关系', async () => {
+test('单问题报告返回 v4 排名、SOV 和可复核语义证据', async () => {
   const run = await QuestionSetRun.create({
     project_id: project.id,
     user_id: user.id,
@@ -253,7 +253,7 @@ test('单问题报告返回新版 SOV 分子分母和逐实体竞争关系', asy
     question_set_name: '单问题运行',
     source: 'native',
     schema_version: 'question_set_run_v1',
-    analysis_contract_version: 'ai_structured_v3',
+    analysis_contract_version: 'ai_structured_v4',
     metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
     planned_record_count: 2,
     started_at: new Date()
@@ -268,7 +268,7 @@ test('单问题报告返回新版 SOV 分子分母和逐实体竞争关系', asy
     question: prompt.question,
     brand: project.name,
     brand_keywords: project.name,
-    analysis_contract_version: 'ai_structured_v3',
+    analysis_contract_version: 'ai_structured_v4',
     metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
     status: 'completed'
   });
@@ -285,6 +285,7 @@ test('单问题报告返回新版 SOV 分子分母和逐实体竞争关系', asy
     platform: 'deepseek',
     brand_mentioned: true,
     brand_mentions: 1,
+    brand_rank: 2,
     visibility_score: 1,
     competitor_mentions: [],
     share_of_voice: null,
@@ -296,17 +297,35 @@ test('单问题报告返回新版 SOV 分子分母和逐实体竞争关系', asy
       name: '海康',
       relation: 'competitor',
       reason: '提供同类周界方案',
+      evidence: ['广拓与海康都提供周界方案'],
       mentions: 1,
       surface_forms: ['海康']
     }],
-    analysis_method: 'ai_structured_v3',
+    analysis_method: 'ai_structured_v4',
     analysis_structure: {
-      schema_version: 'geo_metric_input_v3',
+      schema_version: 'geo_metric_input_v4',
+      entities: [
+        { name: '广拓', type: 'brand' },
+        { name: '海康', type: 'brand' }
+      ],
       competitor_relations: [{
         entity_name: '海康',
         relation: 'competitor',
-        reason: '提供同类周界方案'
-      }]
+        reason: '提供同类周界方案',
+        evidence: ['广拓与海康都提供周界方案']
+      }],
+      candidate_lists: [{
+        ordered: true,
+        entries: ['海康', '广拓'],
+        reason: '回答表达了先后',
+        evidence: ['广拓与海康都提供周界方案']
+      }],
+      sentiment: {
+        label: 'neutral',
+        reason: '客观列举',
+        evidence: ['广拓与海康都提供周界方案'],
+        risk_terms: []
+      }
     }
   });
   const failedRecord = await QuestionRecord.create({
@@ -319,7 +338,7 @@ test('单问题报告返回新版 SOV 分子分母和逐实体竞争关系', asy
     question: '另一条周界问题',
     brand: project.name,
     brand_keywords: project.name,
-    analysis_contract_version: 'ai_structured_v3',
+    analysis_contract_version: 'ai_structured_v4',
     metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
     status: 'failed',
     error_message: '回答超出分析模型范围，本条未计入品牌指标',
@@ -368,10 +387,19 @@ test('单问题报告返回新版 SOV 分子分母和逐实体竞争关系', asy
   assert.equal(report.rows[0].answer_competitor_share, 50);
   assert.equal(report.rows[0].competition_entities[0].relation, 'competitor');
   assert.equal(report.rows[0].competition_entities[0].reason, '提供同类周界方案');
+  assert.deepEqual(
+    report.rows[0].competition_entities[0].evidence,
+    ['广拓与海康都提供周界方案']
+  );
+  assert.equal(report.rows[0].brand_rank, 2);
+  assert.deepEqual(
+    report.rows[0].analysis_structure.sentiment.evidence,
+    ['广拓与海康都提供周界方案']
+  );
   assert.equal(report.rows[1].has_metrics, false);
   assert.equal(
     report.rows[1].analysis_contract_version,
-    'ai_structured_v3'
+    'ai_structured_v4'
   );
   assert.equal(
     report.rows[1].metric_semantics_version,
@@ -495,6 +523,11 @@ test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及
         selector_version: 'deepseek-web-v1',
         artifact_owner_record_id: 1,
         captured_at: '2026-07-26T08:30:00.000Z',
+        capture_mode: {
+          name: 'web_search',
+          observed: true,
+          evidence_type: 'dom_selected_state'
+        },
         search: { requested: true, observed: true },
         artifacts: {
           search_state: { id: '00000000-0000-4000-8000-000000000011' },
@@ -550,6 +583,7 @@ test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及
   assert.deepEqual(report.rows[0].provider_citations, providerCitations);
   assert.equal(report.rows[0].web_capture.selector_version, 'deepseek-web-v1');
   assert.equal(report.rows[0].web_capture.artifact_owner_record_id, record.id);
+  assert.equal(report.rows[0].web_capture.capture_mode.name, 'web_search');
 
   const csv = await QuestionSetRunService.exportCsv({
     projectId: project.id,
@@ -558,6 +592,106 @@ test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及
   assert.match(csv, /deepseek-web/);
   assert.match(csv, /DeepSeek 网页版/);
   assert.match(csv, /deepseek-web-ui/);
+});
+
+test('豆包 Web 报告保留普通模式，且不把未知搜索状态改成失败', async (t) => {
+  const run = await createNativeRun(1);
+  const record = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    question_set_run_id: run.id,
+    run_slot_index: 0,
+    platform: 'doubao-web',
+    platform_name: '豆包网页版',
+    model_name: 'doubao-web-ui',
+    question: '普通模式测试',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'completed',
+    result_summary: {
+      web_capture: {
+        schema_version: 'doubao-web-capture-v1',
+        status: 'completed',
+        selector_version: 'doubao-web-v2',
+        captured_at: '2026-07-29T08:30:00.000Z',
+        capture_mode: {
+          name: 'standard',
+          observed: true,
+          evidence_type: 'dom_standard_mode'
+        },
+        search: {
+          requested: false,
+          observed: null,
+          evidence_type: 'dom_standard_mode'
+        },
+        artifacts: {
+          search_state: { id: '00000000-0000-4000-8000-000000000021' },
+          final_answer: { id: '00000000-0000-4000-8000-000000000022' }
+        }
+      }
+    }
+  });
+  t.after(async () => {
+    await record.destroy();
+    await run.destroy();
+  });
+  await record.update({
+    result_summary: {
+      ...record.result_summary,
+      web_capture: {
+        ...record.result_summary.web_capture,
+        artifact_owner_record_id: record.id
+      }
+    }
+  });
+  await run.update({
+    imported_rows: [{
+      record_id: record.id,
+      question_id: prompt.id,
+      question: record.question,
+      platform: 'doubao-web',
+      platform_name: '豆包网页版',
+      model_name: 'doubao-web-ui',
+      status: 'completed',
+      provider_citations: [{
+        url: 'https://example.com/search-result',
+        title: '检索候选',
+        domain: 'example.com',
+        source_role: 'retrieval_candidate'
+      }],
+      web_capture: {
+        schema_version: 'doubao-web-capture-v1',
+        status: 'completed',
+        selector_version: 'doubao-web-v2',
+        artifact_owner_record_id: record.id,
+        captured_at: '2026-07-29T08:30:00.000Z',
+        search: {
+          requested: false,
+          observed: false,
+          evidence_type: 'dom_standard_mode'
+        },
+        artifacts: {
+          search_state: { id: '00000000-0000-4000-8000-000000000021' },
+          final_answer: { id: '00000000-0000-4000-8000-000000000022' }
+        }
+      }
+    }]
+  });
+
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+
+  assert.equal(report.rows[0].web_capture.capture_mode.name, 'standard');
+  assert.equal(report.rows[0].web_capture.capture_mode.observed, true);
+  assert.equal(report.rows[0].web_capture.search.requested, false);
+  assert.equal(report.rows[0].web_capture.search.observed, true);
+  assert.equal(
+    report.rows[0].web_capture.search.evidence_type,
+    'network_retrieval_candidates'
+  );
 });
 
 test('历史混合引用不进入问题集核心 KPI，但保留可解释的旧口径提示', async () => {
@@ -613,7 +747,7 @@ test('问题集报告在品牌分析失败时仍统计独立保存的显式引�
     question: '引用证据独立统计',
     brand: project.name,
     brand_keywords: project.name,
-    analysis_contract_version: 'ai_structured_v3',
+    analysis_contract_version: 'ai_structured_v4',
     metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
     status: 'failed'
   });

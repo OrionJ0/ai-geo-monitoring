@@ -23,6 +23,7 @@ import {
 } from 'antd';
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { shouldWarnAnalysisPlatformDisable } from '@/utils/analysisPlatformDisable.cjs';
 import {
   getWebPlatformAdminSessionMeta,
   getWebPlatformAdminSessionPresentation,
@@ -145,6 +146,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
     Record<string, WebPlatformAdminSessionStatus | null>
   >({});
   const [webSessionAction, setWebSessionAction] = useState<string | null>(null);
+  const [analysisPlatformCode, setAnalysisPlatformCode] = useState('');
   const [form] = Form.useForm<PlatformFormValues>();
   const apiKeyRevealRequest = useRef(0);
   const apiKeyRevealPending = useRef(false);
@@ -174,9 +176,13 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
   const fetchPlatforms = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await axios.get('/api/admin/ai-platforms');
+      const [response, analysisResponse] = await Promise.all([
+        axios.get('/api/admin/ai-platforms'),
+        axios.get('/api/settings/analysis-api').catch(() => null),
+      ]);
       const rows = Array.isArray(response?.data?.data) ? response.data.data : [];
       setPlatforms(rows);
+      setAnalysisPlatformCode(String(analysisResponse?.data?.data?.platform_code || ''));
       await fetchWebSessionStatuses(rows);
     } catch (error) {
       message.error(getApiErrorMessage(error, '获取 AI 平台失败'));
@@ -352,6 +358,21 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
     } catch (error) {
       message.error(getApiErrorMessage(error, '更新平台状态失败'));
     }
+  };
+
+  const requestSetEnabled = (platform: PlatformRecord, enabled: boolean) => {
+    if (!shouldWarnAnalysisPlatformDisable(platform.code, enabled, analysisPlatformCode)) {
+      void setEnabled(platform, enabled);
+      return;
+    }
+    Modal.confirm({
+      title: '停用当前分析 API？',
+      content: '停用后所有监测运行都会在创建任务前被阻断，直到管理员重新启用或配置可用的分析 API。',
+      okText: '确认停用',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => setEnabled(platform, false),
+    });
   };
 
   const testConnection = async (platform: PlatformRecord) => {
@@ -578,7 +599,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
           checked={platform.enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
-          onChange={(checked) => setEnabled(platform, checked)}
+          onChange={(checked) => requestSetEnabled(platform, checked)}
         />
       ),
     },

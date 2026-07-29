@@ -8,6 +8,8 @@ scope: deep
 
 # GEO 指标口径与回答内竞品提及占比技术方案
 
+> 历史版本说明：本文记录 v3 指标链路的设计与验收背景。当前正式分析升级工作见 `../blocked-2026-07-29-002-ai-semantic-analysis-quality/`；本文中的 v3、竞品提示和旧提示词不再代表当前推荐实现。
+
 ## 1. 背景与目标
 
 当前正式链路由监测平台生成原回答，`AIResponseAnalysisService` 使用 `ai_structured_v2` 抽取实体，再由程序计算并写入 `VisibilityMetric`。现有 `share_of_voice` 只使用人工配置竞品，无法表达回答语境中的真实竞争关系；项目级查询还会用项目当前平台配置过滤历史记录，长回答则被静默截取前 12,000 个字符分析。
@@ -201,7 +203,8 @@ scope: deep
 - `competitorHints` 只作为已知名称和业务提示；提示词必须明确“已配置不等于本回答竞品，未配置也可以是竞品”。
 - `brand.industry`、`brand.primary_keywords` 和问题共同提供“满足相同需求、可作为替代选择”的判断语境。
 - 正式分析请求不发送 `max_tokens` 或 `max_output_tokens`，不设置应用层输入或输出 Token 上限；提供商拒绝完整上下文时整条失败。
-- 当前正式分析配置为 `deepseek/deepseek-v4-pro`，固定 `temperature=0`、`response_format=json_object`、`thinking=disabled`、关闭联网，最多尝试两次。
+- 该 v3 验收阶段的分析配置为 `deepseek/deepseek-v4-pro`，提示词修订为 `choice_set_few_shot_v1`：围绕“用户实际看到的品牌选择集合”给出目标品牌缺失、同需求不同技术、非竞品角色、别名归并与有序榜单四类示例；不把提示词写成静态竞品规则器。
+- DeepSeek 请求固定 `response_format=json_object`、`thinking=enabled`、`reasoning_effort=high`，不发送采样温度，关闭联网，最多尝试两次；其他适配器继续使用各自的确定性请求参数。
 - 首次结构校验失败时，第二次提示必须携带具体校验错误和上次完整无效输出，只修正结构，不改变语义判断；请求失败仍按稳定错误码处理。
 - 设置中心的“AI 分析 API”页签通过后端生成的 `request_parameters` 展示实际脱敏请求体和运行策略，不展示密钥或完整运行时正文。
 

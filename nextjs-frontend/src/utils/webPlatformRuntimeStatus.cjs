@@ -32,7 +32,9 @@ function getWebPlatformRuntimePresentation(status, options = {}) {
     return {
       type: 'warning',
       title: `${platformName} 登录已失效`,
-      description: '请联系虚拟机运维负责人处理；恢复后可从原运行报告重试。'
+      description: '请前往设置中心，在运行后端的机器上打开专用 Chrome 重新登录；恢复后可从原运行报告重试。',
+      actionHref: '/admin/settings',
+      actionLabel: '前往设置中心'
     };
   }
 
@@ -40,26 +42,30 @@ function getWebPlatformRuntimePresentation(status, options = {}) {
     return {
       type: 'warning',
       title: `${platformName} 需要人工验证`,
-      description: `请联系虚拟机运维负责人处理；不要在当前页面输入 ${platformName} 凭据。`
+      description: '请前往设置中心，在运行后端的机器上打开专用 Chrome 完成人工验证；不要在当前页面输入凭据。',
+      actionHref: '/admin/settings',
+      actionLabel: '前往设置中心'
     };
   }
 
   if (status.state === 'unavailable') {
     const reasonDescriptions = {
-      web_browser_not_configured: '虚拟机未找到可用的 Chrome，请联系虚拟机运维负责人处理。',
-      web_browser_launch_failed: '专用 Chrome 无法启动，请联系虚拟机运维负责人处理。',
-      web_profile_in_use: '专用浏览器会话正在被占用，请联系虚拟机运维负责人处理。',
-      web_runtime_config_invalid: 'Web 运行目录配置不可用，请联系虚拟机运维负责人处理。',
-      web_selector_mismatch: `${platformName} 页面结构已变化，请联系虚拟机运维负责人处理。`,
-      web_browser_connection_failed: '专用 Chrome 连接失败，请联系虚拟机运维负责人处理。',
-      web_browser_closed: '专用 Chrome 连接已关闭，请联系虚拟机运维负责人处理。',
-      config_unavailable: 'Web 平台配置暂不可用，请联系虚拟机运维负责人处理。'
+      web_browser_not_configured: '运行后端的机器上未找到可用的 Chrome，请由管理员检查。',
+      web_browser_launch_failed: '运行后端的机器无法启动专用 Chrome，请由管理员检查。',
+      web_profile_in_use: '运行后端的机器上已有专用浏览器会话占用，请由管理员检查。',
+      web_runtime_config_invalid: 'Web 运行目录配置不可用，请由管理员检查后端配置。',
+      web_selector_mismatch: `${platformName} 页面结构已变化，请由管理员检查。`,
+      web_browser_connection_failed: '专用 Chrome 连接失败，请由管理员检查运行后端的机器。',
+      web_browser_closed: '专用 Chrome 连接已关闭，请由管理员检查运行后端的机器。',
+      config_unavailable: 'Web 平台配置暂不可用，请由管理员检查。'
     };
     return {
       type: 'error',
       title: `${platformName} 当前不可用`,
       description: reasonDescriptions[status.reason_code]
-        || 'Web 运行通道暂不可用，请联系虚拟机运维负责人处理。'
+        || 'Web 运行通道暂不可用，请由管理员检查。',
+      actionHref: '/admin/settings',
+      actionLabel: '前往设置中心'
     };
   }
 

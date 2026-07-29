@@ -11,6 +11,9 @@ const {
   classifyProbeSnapshot,
   buildChromeArguments
 } = require('../services/WebPlatformService');
+const {
+  MANAGED_WEB_DEFINITIONS
+} = require('../services/WebPlatformRegistry');
 
 async function makeRuntimeDirectory() {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'deepseek-web-test-'));
@@ -85,6 +88,39 @@ test('resolves a platform-specific runtime without reading another Web platform 
   assert.equal(config.profileDir, path.join(cwd, '.runtime/doubao-web/profile'));
   assert.equal(config.evidenceDir, path.join(cwd, '.runtime/doubao-web/evidence'));
   assert.equal(config.timeoutMs, 60_000);
+});
+
+test('uses the platform-specific default timeout when no override is configured', () => {
+  const cwd = path.resolve(__dirname, '..');
+  const deepseek = resolvePlatformWebRuntimeConfig({
+    code: 'deepseek-web',
+    displayName: 'DeepSeek 网页版',
+    envPrefix: 'DEEPSEEK_WEB',
+    defaultTimeoutSeconds: 180
+  }, {
+    cwd,
+    env: {},
+    platform: 'darwin'
+  });
+  const doubao = resolvePlatformWebRuntimeConfig({
+    code: 'doubao-web',
+    displayName: '豆包网页版',
+    envPrefix: 'DOUBAO_WEB',
+    defaultTimeoutSeconds: 180
+  }, {
+    cwd,
+    env: {},
+    platform: 'darwin'
+  });
+
+  assert.equal(deepseek.timeoutMs, 180_000);
+  assert.equal(doubao.timeoutMs, 180_000);
+});
+
+test('Doubao standard mode keeps a ten-minute bound for slow provider web search', () => {
+  const definition = MANAGED_WEB_DEFINITIONS.find(({ code }) => code === 'doubao-web');
+
+  assert.equal(definition.defaultTimeoutSeconds, 600);
 });
 
 test('rejects broad or shared profile and evidence directories before touching the filesystem', () => {

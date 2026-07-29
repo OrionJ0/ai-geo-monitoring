@@ -5,10 +5,49 @@ const path = require('path');
 
 const samplePath = path.resolve(__dirname, '../scripts/geoBaselineSample.js');
 const evaluatePath = path.resolve(__dirname, '../scripts/geoBaselineEvaluate.js');
+const sentimentBaselineDir = path.resolve(
+  __dirname,
+  '../../work/geo-sentiment-baseline-2026-07-29'
+);
 const sampleScript = require('../scripts/geoBaselineSample');
 const evaluateScript = require('../scripts/geoBaselineEvaluate');
 
-test('人工基线抽样文件声明 v3 契约并标记 10 条多实体复核样本', () => {
+test('评测实验隔离输出目录并保留同一份样本和人工真值', () => {
+  const options = evaluateScript.parseArgs([
+    '--platform', 'deepseek',
+    '--experiment-name', 'choice-set-high',
+    '--refresh'
+  ]);
+  const baseDir = path.resolve('/tmp/geo-baseline-fixture');
+  const paths = evaluateScript.initPaths(baseDir, options.experimentName);
+
+  assert.equal(Object.hasOwn(options, 'promptStrategy'), false);
+  assert.equal(Object.hasOwn(options, 'deepseekThinking'), false);
+  assert.equal(paths.samples, path.join(baseDir, 'samples.json'));
+  assert.equal(paths.labeling, path.join(baseDir, 'LABELING.md'));
+  assert.equal(
+    paths.report,
+    path.join(baseDir, 'experiments', 'choice-set-high', 'BASELINE-REPORT.md')
+  );
+  assert.equal(
+    paths.raw,
+    path.join(baseDir, 'experiments', 'choice-set-high', 'raw')
+  );
+});
+
+test('评测分析器只暴露正式提示词与高思考路径', async () => {
+  const { analyzer, via } = await evaluateScript.buildAnalyzer({
+    platform: null
+  });
+  const definition = analyzer.getPromptDefinition();
+
+  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v6');
+  assert.equal(definition.request_profile.deepseek_thinking, 'high');
+  assert.match(via, /semantic_evidence_few_shot_v6/);
+  assert.match(via, /thinking=high/);
+});
+
+test('人工基线抽样文件声明当前契约并标记 10 条多实体复核样本', () => {
   const source = fs.readFileSync(samplePath, 'utf8');
 
   assert.match(source, /CURRENT_ANALYSIS_CONTRACT/);
@@ -21,15 +60,45 @@ test('人工基线抽样文件声明 v3 契约并标记 10 条多实体复核样
   assert.match(source, /少于要求的.*拒绝覆盖现有标注文件/);
 });
 
-test('人工基线评测拒绝旧缓存并将问题上下文传给 v3 分析器', () => {
+test('人工基线评测拒绝旧缓存、传入完整上下文且不泄露人工竞品', () => {
   const source = fs.readFileSync(evaluatePath, 'utf8');
 
   assert.match(source, /CURRENT_ANALYSIS_CONTRACT/);
   assert.match(source, /CURRENT_STRUCTURE_VERSION/);
   assert.match(source, /CURRENT_METRIC_SEMANTICS/);
+  assert.match(source, /cached\.ok === true/);
   assert.match(source, /cached\.analysis_method === CURRENT_ANALYSIS_CONTRACT/);
+  assert.match(source, /cached\.analysis_prompt_revision === CURRENT_PROMPT_REVISION/);
   assert.match(source, /schema_version === CURRENT_STRUCTURE_VERSION/);
   assert.match(source, /question:\s*sample\.question/);
+  assert.doesNotMatch(source, /competitorHints:\s*sample\.competitors/);
+});
+
+test('复用 AI 结构缓存时按当前确定性计算器刷新派生指标', () => {
+  const cached = {
+    ok: true,
+    result: {
+      brand_mentions: 3,
+      answer_competitor_share: 13.64,
+      analysis_platform: 'deepseek',
+      analysis_structure: {
+        schema_version: 'geo_metric_input_v4',
+        entities: []
+      }
+    }
+  };
+  const refreshed = evaluateScript.recalculateCachedResult(cached, {
+    calculate: (structure) => ({
+      brand_mentions: 2,
+      answer_competitor_share: 9.52,
+      analysis_structure: structure
+    })
+  });
+
+  assert.equal(refreshed.result.brand_mentions, 2);
+  assert.equal(refreshed.result.answer_competitor_share, 9.52);
+  assert.equal(refreshed.result.analysis_platform, 'deepseek');
+  assert.equal(refreshed.result.analysis_structure, cached.result.analysis_structure);
 });
 
 test('多实体评审报告量化错误纳入、错误排除、别名拆分与 SOV 影响', () => {
@@ -241,4 +310,28 @@ test('标注模板声明人工确认且只为指定样本生成多实体输入',
   assert.match(doc, /human_review_confirmed: no/);
   assert.equal((doc.match(/^entity_labels_json:/gmu) || []).length, 10);
   assert.equal((doc.match(/^mentioned:/gmu) || []).length, 40);
+});
+
+test('补充情绪边界集覆盖三种情绪与未提及且仍等待人工确认', () => {
+  const samples = JSON.parse(
+    fs.readFileSync(path.join(sentimentBaselineDir, 'samples.json'), 'utf8')
+  );
+  const labeling = fs.readFileSync(
+    path.join(sentimentBaselineDir, 'LABELING.md'),
+    'utf8'
+  );
+
+  assert.ok(samples.length >= 8);
+  assert.ok(samples.every((sample) => (
+    sample.analysis_contract_version === 'ai_structured_v4'
+    && sample.structure_version === 'geo_metric_input_v4'
+    && typeof sample.question === 'string'
+    && typeof sample.response_text === 'string'
+    && sample.response_text.length > 0
+  )));
+  assert.match(labeling, /^human_review_confirmed:\s*no$/mu);
+  assert.match(labeling, /^sentiment:\s*positive$/mu);
+  assert.match(labeling, /^sentiment:\s*neutral$/mu);
+  assert.match(labeling, /^sentiment:\s*negative$/mu);
+  assert.match(labeling, /^sentiment:\s*none$/mu);
 });

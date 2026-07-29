@@ -7,6 +7,7 @@ import {
   Collapse,
   Descriptions,
   Empty,
+  Modal,
   Popconfirm,
   Select,
   Space,
@@ -29,9 +30,11 @@ import {
   QuestionCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
+import { useRouter } from 'next/navigation';
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
+import { getWebPreflightPrompt } from '@/utils/webPreflightPrompt.cjs';
 import { downloadQuestionSetReportPdf } from '@/utils/downloadQuestionSetReportPdf';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import {
@@ -139,6 +142,7 @@ type CompetitionEntity = {
   relation?: 'competitor' | 'non_competitor';
   mentions?: number;
   reason?: string;
+  evidence?: string[];
   surface_forms?: string[];
 };
 type ReportRow = {
@@ -219,16 +223,31 @@ type ReportRow = {
   analysis_structure?: {
     schema_version?: string;
     target_entity_name?: string | null;
-    entities?: Array<{ name?: string; type?: 'brand' | 'company' }>;
+    entities?: Array<{
+      name?: string;
+      type?: 'brand' | 'company' | 'other_organization';
+    }>;
     mentions?: Array<{ entity_name?: string; surface_forms?: string[] }>;
     competitor_matches?: Array<{ configured_name?: string; entity_name?: string | null }>;
     competitor_relations?: Array<{
       entity_name?: string;
       relation?: 'competitor' | 'non_competitor';
       reason?: string;
+      evidence?: string[];
     }>;
-    candidate_lists?: Array<{ ordered?: boolean; entries?: string[] }>;
+    candidate_lists?: Array<{
+      ordered?: boolean;
+      entries?: string[];
+      reason?: string;
+      evidence?: string[];
+    }>;
     recommendations?: Array<{ entity_name?: string; kind?: string }>;
+    sentiment?: {
+      label?: 'positive' | 'neutral' | 'negative';
+      reason?: string;
+      evidence?: string[];
+      risk_terms?: string[];
+    };
     claims?: Array<{
       subject_name?: string;
       predicate?: string;
@@ -409,6 +428,7 @@ function MetricItem({
 }
 
 export default function QuestionSetReportsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<number>();
   const [history, setHistory] = useState<RunReport[]>([]);
@@ -662,7 +682,7 @@ export default function QuestionSetReportsPage() {
   const hasCurrentSov = summary.sov_summary?.kind === 'contextual_competitor_mentions';
   const hasLegacyAnalysis = Boolean(report?.rows?.some(
     (row) => row.has_metrics
-      && !['ai_structured_v1', 'ai_structured_v2', 'ai_structured_v3'].includes(row.analysis_method || ''),
+      && !['ai_structured_v1', 'ai_structured_v2', 'ai_structured_v3', 'ai_structured_v4'].includes(row.analysis_method || ''),
   ));
   const executionSummary: ExecutionSummary = report?.execution_summary || {
     total: summary.total,
@@ -770,10 +790,33 @@ export default function QuestionSetReportsPage() {
         loadHistory(projectId, historyPage, historyQuestionSetId),
       ]);
     } catch (error) {
-      message.error(getApiErrorMessage(
-        error,
-        error instanceof Error ? error.message : '重试失败项失败'
-      ));
+      const responseBody = axios.isAxiosError(error) ? error.response?.data : null;
+      const webPreflightPrompt = getWebPreflightPrompt(responseBody);
+      if (webPreflightPrompt) {
+        Modal.confirm({
+          title: webPreflightPrompt.title,
+          content: (
+            <Space orientation="vertical" size={8}>
+              <Text>{webPreflightPrompt.message}</Text>
+              {webPreflightPrompt.blockedMessages.length ? (
+                <ul style={{ margin: 0, paddingInlineStart: 20 }}>
+                  {webPreflightPrompt.blockedMessages.map((item: string) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </Space>
+          ),
+          okText: '去设置登录',
+          cancelText: '取消',
+          onOk: () => router.push(webPreflightPrompt.settingsUrl),
+        });
+      } else {
+        message.error(getApiErrorMessage(
+          error,
+          error instanceof Error ? error.message : '重试失败项失败'
+        ));
+      }
     } finally {
       setRetrying(false);
     }
@@ -988,7 +1031,7 @@ export default function QuestionSetReportsPage() {
                     {report.capabilities?.can_retry ? (
                         <Popconfirm
                           title={`重试 ${summary.failed || 0} 条失败项？`}
-                          description="已有完整原回答的分析失败项只会重做结构化分析；其余失败项才会使用当前设置中心的监测模型和参数重新调用。不可用平台会跳过。"
+                          description="已有完整原回答的分析失败项只会重做结构化分析；其余失败项会使用当前设置中心的监测模型和参数重新调用。任一所选 Web 平台登录或采集能力不可用时，整次重试不会创建新任务。"
                           okText="确认重试"
                           cancelText="取消"
                           onConfirm={retryFailedRows}
@@ -1264,8 +1307,10 @@ export default function QuestionSetReportsPage() {
                           {row.has_metrics ? (
                             <Space wrap size={6}>
                               <Text className={styles.answerLabel}>分析方式</Text>
-                              {row.analysis_method === 'ai_structured_v3'
-                                ? <Tag color="blue">AI 结构化 v3</Tag>
+                              {row.analysis_method === 'ai_structured_v4'
+                                ? <Tag color="blue">AI 结构化 v4</Tag>
+                                : row.analysis_method === 'ai_structured_v3'
+                                  ? <Tag>AI 结构化 v3（历史）</Tag>
                                 : row.analysis_method === 'ai_structured_v2'
                                   ? <Tag>AI 结构化 v2（历史）</Tag>
                                 : row.analysis_method === 'ai_structured_v1'
@@ -1276,7 +1321,7 @@ export default function QuestionSetReportsPage() {
                                   {row.analysis_platform}{row.analysis_model ? ` · ${row.analysis_model}` : ''}
                                 </Text>
                               ) : null}
-                              {row.analysis_method === 'ai_structured_v3' ? (
+                              {row.analysis_method === 'ai_structured_v4' ? (
                                 <Text type="secondary">
                                   契约 {row.analysis_contract_version || row.analysis_method}
                                 </Text>
@@ -1289,14 +1334,20 @@ export default function QuestionSetReportsPage() {
                           {Array.isArray(row.analysis_structure?.entities)
                             && row.analysis_structure.entities.length ? (
                             <div>
-                              <Text className={styles.answerLabel}>识别到的品牌 / 公司</Text>
+                              <Text className={styles.answerLabel}>识别到的品牌 / 公司 / 其他组织</Text>
                               <Space wrap size={[4, 4]}>
                                 {row.analysis_structure.entities.map((entity, index) => (
                                   <Tag
                                     key={`${entity.name || 'entity'}-${index}`}
                                     color={entity.name === row.analysis_structure?.target_entity_name ? 'blue' : undefined}
                                   >
-                                    {entity.name || '-'} · {entity.type === 'company' ? '公司' : '品牌'}
+                                    {entity.name || '-'} · {
+                                      entity.type === 'company'
+                                        ? '公司'
+                                        : entity.type === 'other_organization'
+                                          ? '其他组织'
+                                          : '品牌'
+                                    }
                                   </Tag>
                                 ))}
                               </Space>
@@ -1327,6 +1378,11 @@ export default function QuestionSetReportsPage() {
                                     <Text strong>{entity.name || '-'}</Text>
                                     <Text>提及 {entity.mentions ?? 0} 次</Text>
                                     <Text type="secondary">{entity.reason || '-'}</Text>
+                                    {Array.isArray(entity.evidence)
+                                      ? entity.evidence.map((quote) => (
+                                        <Text type="secondary" key={quote}>“{quote}”</Text>
+                                      ))
+                                      : null}
                                   </Space>
                                 ))}
                               </Space>
@@ -1338,10 +1394,29 @@ export default function QuestionSetReportsPage() {
                               <Text className={styles.answerLabel}>候选顺序</Text>
                               <Space orientation="vertical" size={4}>
                                 {row.analysis_structure.candidate_lists.map((list, index) => (
-                                  <Text key={`candidate-list-${index}`}>
-                                    {list.ordered ? '明确排序' : '普通列表'}：
-                                    {(list.entries || []).join(' → ') || '-'}
-                                  </Text>
+                                  <div key={`candidate-list-${index}`}>
+                                    <Text>
+                                      {list.ordered ? '明确排序' : '普通列表'}：
+                                      {(list.entries || []).join(' → ') || '-'}
+                                    </Text>
+                                    {list.reason ? <Text type="secondary"> · {list.reason}</Text> : null}
+                                    {Array.isArray(list.evidence)
+                                      ? list.evidence.map((quote) => (
+                                        <div key={quote}><Text type="secondary">“{quote}”</Text></div>
+                                      ))
+                                      : null}
+                                  </div>
+                                ))}
+                              </Space>
+                            </div>
+                          ) : null}
+                          {Array.isArray(row.analysis_structure?.sentiment?.evidence)
+                            && row.analysis_structure.sentiment.evidence.length ? (
+                            <div>
+                              <Text className={styles.answerLabel}>情绪依据</Text>
+                              <Space orientation="vertical" size={4}>
+                                {row.analysis_structure.sentiment.evidence.map((quote) => (
+                                  <Text key={quote}>“{quote}”</Text>
                                 ))}
                               </Space>
                             </div>

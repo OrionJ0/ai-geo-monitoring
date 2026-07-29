@@ -9,6 +9,7 @@ import { isValidWebsiteInput, normalizeList, normalizeNullableText } from '@/uti
 import { getProjectPromptRunBlockReason, summarizeProjectPrompts } from '@/utils/projectPromptSummary.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { describeSelectedPlatforms } from '@/utils/platformSelectionStatus.cjs';
+import { describeMonitoringExecution } from '@/utils/projectMonitoringStatus.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 
 const { Text } = Typography;
@@ -28,6 +29,7 @@ export default function GeoProjectsPage() {
   const {
     platforms: platformCatalog,
     selectableCodes,
+    defaultCodes,
     options: platformOptions,
     loading: platformCatalogLoading,
     error: platformCatalogError
@@ -68,7 +70,7 @@ export default function GeoProjectsPage() {
       website: '',
       industry: '',
       primary_keywords: [],
-      platforms: selectableCodes,
+      platforms: defaultCodes,
       monitoring_enabled: false,
       monitoring_time: '09:00',
     });
@@ -325,15 +327,35 @@ export default function GeoProjectsPage() {
     {
       title: '自动监测',
       key: 'monitoring',
-      width: 150,
-      render: (_, row) => row.monitoring_enabled ? (
-        <Space orientation="vertical" size={2}>
-          <Tag color="processing">每日 {row.monitoring_time || '09:00'}</Tag>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            下次 {row.monitoring_next_run_at ? new Date(row.monitoring_next_run_at).toLocaleString() : '-'}
-          </Text>
-        </Space>
-      ) : <Tag>未开启</Tag>,
+      width: 260,
+      render: (_, row) => {
+        if (!row.monitoring_enabled) return <Tag>未开启</Tag>;
+        const execution = describeMonitoringExecution(row.latest_monitoring_execution);
+        return (
+          <Space orientation="vertical" size={2}>
+            <Tag color="processing">每日 {row.monitoring_time || '09:00'}</Tag>
+            {execution ? <Tag color={execution.color}>{execution.label}</Tag> : null}
+            {execution?.detail ? (
+              <Text type="danger" style={{ fontSize: 12 }}>
+                {execution.detail}
+              </Text>
+            ) : null}
+            {execution?.settingsUrl ? (
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0, height: 'auto' }}
+                onClick={() => router.push(execution.settingsUrl)}
+              >
+                去设置登录
+              </Button>
+            ) : null}
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              下次 {row.monitoring_next_run_at ? new Date(row.monitoring_next_run_at).toLocaleString() : '-'}
+            </Text>
+          </Space>
+        );
+      },
     },
     {
       title: '状态',

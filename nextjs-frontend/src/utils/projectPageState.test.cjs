@@ -52,6 +52,9 @@ test('prompt run analysis configuration errors include a safe settings action', 
   );
   assert.match(promptSource, /settings_url === '\/admin\/settings'/);
   assert.match(promptSource, /showRunError/);
+  assert.match(promptSource, /getWebPreflightPrompt/);
+  assert.match(promptSource, /Modal\.confirm/);
+  assert.match(promptSource, /去设置登录/);
   assert.match(promptSource, /前往设置中心/);
   assert.match(promptSource, /router\.push\(settingsUrl\)/);
 });

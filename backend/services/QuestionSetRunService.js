@@ -18,7 +18,8 @@ const SCHEMA_VERSION = 'question_set_run_v1';
 const STRUCTURED_ANALYSIS_METHODS = new Set([
   'ai_structured_v1',
   'ai_structured_v2',
-  'ai_structured_v3'
+  'ai_structured_v3',
+  'ai_structured_v4'
 ]);
 
 function plain(row) {
@@ -389,9 +390,22 @@ function normalizeWebCapture(value, fallbackRecordId) {
     selector_version: boundedText(value.selector_version, 100),
     artifact_owner_record_id: recordId,
     captured_at: boundedText(value.captured_at || value.completed_at, 80),
+    capture_mode: {
+      name: boundedText(value.capture_mode?.name, 40),
+      observed: value.capture_mode?.observed === true
+        ? true
+        : value.capture_mode?.observed === false
+          ? false
+          : null,
+      evidence_type: boundedText(value.capture_mode?.evidence_type, 100)
+    },
     search: {
       requested: value.search?.requested === true,
-      observed: value.search?.observed === true,
+      observed: value.search?.observed === true
+        ? true
+        : value.search?.observed === false
+          ? false
+          : null,
       evidence_type: boundedText(value.search?.evidence_type, 100)
     },
     artifacts: {
@@ -528,6 +542,41 @@ function normalizeRowMetricSemantics(row, fallbackVersion) {
   return normalized;
 }
 
+function normalizeStoredWebCapture(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const webCapture = normalizeWebCapture(row.web_capture, row.record_id || row.id);
+  if (!webCapture) return row;
+  const isDoubaoStandard = row.platform === 'doubao-web'
+    && (
+      webCapture.capture_mode.name === 'standard'
+      || webCapture.search.evidence_type === 'dom_standard_mode'
+    );
+  const hasRetrievalCandidates = (Array.isArray(row.provider_citations)
+    ? row.provider_citations
+    : []
+  ).some((source) => source?.source_role === 'retrieval_candidate');
+  return {
+    ...row,
+    web_capture: {
+      ...webCapture,
+      capture_mode: isDoubaoStandard
+        ? {
+            name: 'standard',
+            observed: true,
+            evidence_type: webCapture.capture_mode.evidence_type || 'dom_standard_mode'
+          }
+        : webCapture.capture_mode,
+      search: isDoubaoStandard && hasRetrievalCandidates
+        ? {
+            ...webCapture.search,
+            observed: true,
+            evidence_type: 'network_retrieval_candidates'
+          }
+        : webCapture.search
+    }
+  };
+}
+
 class QuestionSetRunService {
   async findRun({ projectId, runId, repositories = {} }) {
     const Run = repositories.QuestionSetRun || QuestionSetRun;
@@ -568,6 +617,7 @@ class QuestionSetRunService {
       || sourceRows.find((row) => row?.metric_semantics_version)?.metric_semantics_version
       || LEGACY_METRIC_SEMANTICS;
     const rows = sourceRows
+      .map(normalizeStoredWebCapture)
       .map((row) => normalizeRowMetricSemantics(row, fallbackMetricSemanticsVersion))
       .map(normalizeCitationSemantics)
       .map((row) => {

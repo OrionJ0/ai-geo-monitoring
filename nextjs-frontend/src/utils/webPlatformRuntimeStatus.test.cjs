@@ -99,7 +99,9 @@ test('maps login, verification, unavailable and shutdown to operator-safe guidan
   }), {
     type: 'warning',
     title: 'DeepSeek Web 登录已失效',
-    description: '请联系虚拟机运维负责人处理；恢复后可从原运行报告重试。'
+    description: '请前往设置中心，在运行后端的机器上打开专用 Chrome 重新登录；恢复后可从原运行报告重试。',
+    actionHref: '/admin/settings',
+    actionLabel: '前往设置中心'
   });
   assert.deepEqual(present({
     enabled: true,
@@ -108,7 +110,9 @@ test('maps login, verification, unavailable and shutdown to operator-safe guidan
   }), {
     type: 'warning',
     title: 'DeepSeek Web 需要人工验证',
-    description: '请联系虚拟机运维负责人处理；不要在当前页面输入 DeepSeek Web 凭据。'
+    description: '请前往设置中心，在运行后端的机器上打开专用 Chrome 完成人工验证；不要在当前页面输入凭据。',
+    actionHref: '/admin/settings',
+    actionLabel: '前往设置中心'
   });
   assert.deepEqual(present({
     enabled: true,
@@ -117,7 +121,9 @@ test('maps login, verification, unavailable and shutdown to operator-safe guidan
   }), {
     type: 'error',
     title: 'DeepSeek Web 当前不可用',
-    description: '专用浏览器会话正在被占用，请联系虚拟机运维负责人处理。'
+    description: '运行后端的机器上已有专用浏览器会话占用，请由管理员检查。',
+    actionHref: '/admin/settings',
+    actionLabel: '前往设置中心'
   });
   assert.deepEqual(present({
     enabled: true,
@@ -151,6 +157,8 @@ test('shared component polls only on visible pages and is mounted at both decisi
   assert.match(component, /getWebPlatformRuntimePresentation/);
   assert.match(component, /selectManagedWebPlatformCodes\(platformCodes\)/);
   assert.match(component, /aria-live="polite"/);
+  assert.match(component, /presentation\.actionHref/);
+  assert.match(component, /前往设置中心|presentation\.actionLabel/);
   assert.match(prompts, /<WebPlatformRuntimeStatus\s+platformCodes=\{projectPlatforms\}\s*\/>/);
   assert.match(reports, /<WebPlatformRuntimeStatus\s+platformCodes=\{relevantWebPlatformCodes\}\s*\/>/);
 });

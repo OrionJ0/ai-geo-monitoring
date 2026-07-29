@@ -7,12 +7,12 @@ const analysisPath = path.resolve(__dirname, '../services/AIResponseAnalysisServ
 const metricsPath = path.resolve(__dirname, '../services/ProjectMetricsService.js');
 const runPath = path.resolve(__dirname, '../services/ProjectRunService.js');
 
-test('正式分析器只有 v3 完整输入路径且没有旧版或截断回退', () => {
+test('正式分析器只有 v4 完整输入路径且没有旧版、名单或截断回退', () => {
   const source = fs.readFileSync(analysisPath, 'utf8');
 
   assert.match(source, /CURRENT_ANALYSIS_CONTRACT/);
   assert.match(source, /CURRENT_STRUCTURE_VERSION/);
-  assert.doesNotMatch(source, /ai_structured_v2|geo_metric_input_v2|slice\(0,\s*12000\)|competitor_matches/);
+  assert.doesNotMatch(source, /ai_structured_v[23]|geo_metric_input_v[23]|slice\(0,\s*12000\)|competitor_matches|competitorHints|competitor_hints/);
   assert.doesNotMatch(source, /fallback|回退到旧|legacy_rules_v1/iu);
 });
 

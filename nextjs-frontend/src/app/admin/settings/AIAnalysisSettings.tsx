@@ -35,11 +35,12 @@ type PlatformRecord = {
 
 type PromptDefinition = {
   version: string;
+  prompt_revision: string;
   template: string;
   runtime_fields: string[];
   expected_output: Record<string, unknown>;
   request_profile: {
-    temperature: number;
+    temperature: number | null;
     timeout_seconds: number;
     max_attempts: number;
     web_search: boolean;
@@ -124,7 +125,8 @@ function thinkingModeLabel(
   profile?: PromptDefinition['request_profile'],
 ) {
   if (platform?.code !== 'deepseek') return '不适用';
-  return profile?.deepseek_thinking === 'disabled' ? '关闭' : '按平台配置';
+  if (profile?.deepseek_thinking === 'high') return '高强度（reasoning_effort=high）';
+  return profile?.deepseek_thinking === 'disabled' ? '关闭' : '启用';
 }
 
 export default function AIAnalysisSettings() {
@@ -301,6 +303,7 @@ export default function AIAnalysisSettings() {
           <Space>
             <span>当前分析提示词</span>
             {promptDefinition?.version ? <Tag>{promptDefinition.version}</Tag> : null}
+            {promptDefinition?.prompt_revision ? <Tag>{promptDefinition.prompt_revision}</Tag> : null}
           </Space>
         )}
         loading={loading && !promptDefinition}

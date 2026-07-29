@@ -1,5 +1,5 @@
-const CURRENT_ANALYSIS_CONTRACT = 'ai_structured_v3';
-const CURRENT_STRUCTURE_VERSION = 'geo_metric_input_v3';
+const CURRENT_ANALYSIS_CONTRACT = 'ai_structured_v4';
+const CURRENT_STRUCTURE_VERSION = 'geo_metric_input_v4';
 const CURRENT_METRIC_SEMANTICS = 'contextual_competitor_mentions_sov_v1';
 const LEGACY_METRIC_SEMANTICS = 'configured_competitor_sov_v1';
 

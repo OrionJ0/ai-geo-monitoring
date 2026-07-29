@@ -15,8 +15,20 @@ test('AI platform catalog hook reads the authenticated database catalog', () => 
   assert.match(hook, /axios\.get\('\/api\/ai-platforms'\)/);
   assert.match(hook, /disabled:\s*!item\.selectable/);
   assert.match(hook, /getUnavailablePlatformLabel/);
+  assert.match(hook, /getApiWebSearchStatusLabel/);
+  assert.match(hook, /web_search_test_status/);
   assert.match(statusPresentation, /管理员尚未配置/);
   assert.match(hook, /capabilities\?:\s*AIPlatformCapabilities/);
+});
+
+test('new projects default only to catalog-marked platforms', () => {
+  const hook = source('../lib/useAIPlatformCatalog.ts');
+  const projectsPage = source('../app/geo/projects/page.tsx');
+
+  assert.match(hook, /default_for_new_project:\s*boolean/);
+  assert.match(hook, /const defaultCodes = useMemo/);
+  assert.match(projectsPage, /platforms:\s*defaultCodes/);
+  assert.doesNotMatch(projectsPage, /platforms:\s*selectableCodes/);
 });
 
 test('project and reporting screens use the shared platform catalog', () => {
@@ -45,6 +57,15 @@ test('platform settings hide API-only controls for managed Web adapters', () => 
   assert.match(platformSettings, /lastVerifiedDetail/);
   assert.match(platformSettings, /accountDetail/);
   assert.match(analysisSettings, /capabilities\?\.analysis/);
+});
+
+test('platform settings warn before disabling the API used for structural analysis', () => {
+  const platformSettings = source('../app/admin/settings/AIPlatformSettings.tsx');
+
+  assert.match(platformSettings, /\/api\/settings\/analysis-api/);
+  assert.match(platformSettings, /shouldWarnAnalysisPlatformDisable/);
+  assert.match(platformSettings, /停用当前分析 API/);
+  assert.match(platformSettings, /所有监测运行都会在创建任务前被阻断/);
 });
 
 test('project edits preserve an existing platform that was temporarily disabled', () => {

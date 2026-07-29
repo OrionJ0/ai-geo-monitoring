@@ -189,7 +189,7 @@ test('calls an OpenAI compatible platform from the saved database configuration'
   assert.equal(request.options.maxRedirects, 0);
 });
 
-test('calls the Hunyuan preset through TokenHub Chat Completions with hy3', async () => {
+test('calls the Hunyuan preset through TokenHub Chat Completions with web search enabled', async () => {
   let request;
   const row = {
     id: 5,
@@ -198,7 +198,10 @@ test('calls the Hunyuan preset through TokenHub Chat Completions with hy3', asyn
     adapter_type: 'openai_chat_completions',
     base_url: 'https://tokenhub.tencentmaas.com/v1',
     encrypted_api_key: 'encrypted',
-    default_model: 'hy3',
+    default_model: 'hy3-preview',
+    request_options: {
+      web_search_options: { enable: true }
+    },
     enabled: true,
     archived_at: null
   };
@@ -206,7 +209,21 @@ test('calls the Hunyuan preset through TokenHub Chat Completions with hy3', asyn
     row,
     post: async (url, body) => {
       request = { url, body };
-      return { data: { choices: [{ message: { content: '你好' } }] }, headers: {} };
+      return {
+        data: {
+          choices: [{
+            message: {
+              content: '你好',
+              search_results: [{
+                index: 1,
+                name: '腾讯云文档',
+                url: 'https://cloud.tencent.com/document/product/1823/132358'
+              }]
+            }
+          }]
+        },
+        headers: {}
+      };
     }
   });
 
@@ -214,9 +231,11 @@ test('calls the Hunyuan preset through TokenHub Chat Completions with hy3', asyn
 
   assert.equal(result.success, true);
   assert.equal(request.url, 'https://tokenhub.tencentmaas.com/v1/chat/completions');
-  assert.equal(request.body.model, 'hy3');
+  assert.equal(request.body.model, 'hy3-preview');
   assert.deepEqual(request.body.messages, [{ role: 'user', content: '你好' }]);
+  assert.deepEqual(request.body.web_search_options, { enable: true });
   assert.equal(request.body.stream, undefined);
+  assert.equal(result.citation_observation_status, 'observed');
 });
 
 test('appends the Chat Completions path to an OpenAI-compatible Base URL and merges request parameters', async () => {
@@ -493,6 +512,38 @@ test('removes built-in web search tools from Responses requests used only for an
   assert.equal('tools' in requestBody, false);
 });
 
+test('removes TokenHub web search options from Chat requests used only for analysis', async () => {
+  let requestBody;
+  const row = {
+    id: 7,
+    code: 'hunyuan',
+    name: '腾讯混元',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://tokenhub.tencentmaas.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'hy3-preview',
+    request_options: {
+      web_search_options: { enable: true }
+    },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (_url, body) => {
+      requestBody = body;
+      return { data: { choices: [{ message: { content: '{}' } }] }, headers: {} };
+    }
+  });
+
+  const result = await service.queryConfig(row, '结构化回答', {
+    disableWebSearch: true
+  });
+
+  assert.equal(result.success, true);
+  assert.equal('web_search_options' in requestBody, false);
+});
+
 test('normalizes provider failures without exposing raw provider data', async () => {
   const row = {
     id: 3,
@@ -629,6 +680,148 @@ test('web-search test succeeds only when the provider response contains search e
     plugins: { search: { count: 1 } }
   });
   assert.equal(savedResults[0].result.status, 'success');
+});
+
+test('web-search test recognizes TokenHub Chat search_results as provider evidence', async () => {
+  const savedResults = [];
+  const row = {
+    id: 13,
+    code: 'hunyuan',
+    name: '腾讯混元',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://tokenhub.tencentmaas.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'hy3-preview',
+    request_options: {
+      web_search_options: { enable: true }
+    },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    savedResults,
+    post: async () => ({
+      data: {
+        choices: [{
+          message: {
+            content: '已联网查询。[1]',
+            search_results: [
+              {
+                index: 1,
+                name: '腾讯云文档',
+                url: 'https://cloud.tencent.com/document/product/1823/132358'
+              },
+              {
+                index: 2,
+                name: '无效来源',
+                url: 'javascript:alert(1)'
+              }
+            ]
+          }
+        }]
+      },
+      headers: {}
+    })
+  });
+
+  const result = await service.testWebSearch(row.id, '请搜索腾讯混元联网能力');
+
+  assert.equal(result.web_search.status, 'success');
+  assert.equal(result.web_search.evidence_type, 'provider_search_results');
+  assert.equal(savedResults[0].result.status, 'success');
+});
+
+test('web-search test retries one transient TokenHub gateway timeout', async () => {
+  const savedResults = [];
+  let calls = 0;
+  const row = {
+    id: 14,
+    code: 'hunyuan',
+    name: '腾讯混元',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://tokenhub.tencentmaas.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'hy3-preview',
+    request_options: {
+      web_search_options: { enable: true }
+    },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    savedResults,
+    post: async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error('upstream timeout'), {
+          response: {
+            status: 504,
+            data: { error: { code: '504001' } }
+          }
+        });
+      }
+      return {
+        data: {
+          choices: [{
+            message: {
+              content: '已联网查询。[1]',
+              search_results: [{
+                index: 1,
+                name: '腾讯云文档',
+                url: 'https://cloud.tencent.com/document/product/1823/132358'
+              }]
+            }
+          }]
+        },
+        headers: {}
+      };
+    }
+  });
+
+  const result = await service.testWebSearch(row.id);
+
+  assert.equal(calls, 2);
+  assert.equal(result.web_search.status, 'success');
+});
+
+test('web-search test gives Hunyuan administrators an actionable tool-subscription hint', async () => {
+  const savedResults = [];
+  const row = {
+    id: 15,
+    code: 'hunyuan',
+    name: '腾讯混元',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://tokenhub.tencentmaas.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'hy3-preview',
+    request_options: {
+      web_search_options: { enable: true }
+    },
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    savedResults,
+    post: async () => ({
+      data: {
+        choices: [{
+          message: {
+            content: '我目前无法使用联网搜索功能。'
+          }
+        }]
+      },
+      headers: {}
+    })
+  });
+
+  const result = await service.testWebSearch(row.id);
+
+  assert.equal(result.web_search.status, 'inconclusive');
+  assert.match(result.web_search.message, /「工具管理」/);
+  assert.match(result.web_search.message, /免费资源包|后付费/);
 });
 
 test('web-search test reports inconclusive when generation succeeds without provider search evidence', async () => {

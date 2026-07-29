@@ -5,40 +5,34 @@ const {
   AIResponseAnalysisService
 } = require('../services/AIResponseAnalysisService');
 
-test('exposes the same versioned prompt template used by runtime analysis', () => {
+test('exposes the v4 semantic evidence prompt and DeepSeek high-thinking profile by default', () => {
   const service = new AIResponseAnalysisService();
   const definition = service.getPromptDefinition();
 
-  assert.equal(definition.version, 'ai_structured_v3');
-  assert.match(definition.template, /你是 GEO 回答结构化器/);
+  assert.equal(definition.version, 'ai_structured_v4');
+  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v6');
+  assert.match(definition.template, /<analysis_input>/);
+  assert.match(definition.template, /完整抽取/);
+  assert.equal((definition.template.match(/<example focus=/g) || []).length, 10);
   assert.match(definition.template, /\{\{目标品牌\}\}/);
   assert.match(definition.template, /\{\{待分析的 AI 回答\}\}/);
-  assert.match(definition.template, /全部品牌或公司实体/);
   assert.match(definition.template, /target_entity_name/);
   assert.match(definition.template, /competitor_relations/);
-  assert.match(
-    definition.template,
-    /target_entity_name 为 null[\s\S]*competitor_relations 长度必须等于 entities 长度/
-  );
   assert.match(definition.template, /\{\{当前问题\}\}/);
-  assert.match(definition.template, /已配置不等于本回答竞品/);
   assert.match(definition.template, /JSON 输出骨架/);
   assert.match(definition.template, /"entities":\[\]/);
-  assert.match(definition.template, /不必负责提及顺序/);
-  assert.match(definition.template, /每个 entities 项都必须至少有一个 mentions 项/);
-  assert.match(definition.template, /不要人为限制 surface_forms 数量/);
-  assert.match(definition.template, /无法精确引用 entities\.name 时就省略该项/);
-  assert.match(definition.template, /原回答扫描结果/);
-  assert.match(definition.template, /不要返回 mention_count、recommended、rank、比例、分数/);
+  assert.match(definition.template, /"subject_name":"必须引用 entities\.name"/);
+  assert.match(definition.template, /不要输出提及次数、排序、比例、分数、SOV/);
+  assert.doesNotMatch(definition.template, /你是 GEO 回答结构化器/);
   assert.doesNotMatch(definition.template, /逐字原文/);
   assert.deepEqual(definition.request_profile, {
-    temperature: 0,
+    temperature: null,
     timeout_seconds: 120,
     max_attempts: 2,
     web_search: false,
     token_limit: null,
     json_mode: 'chat_completions_only',
-    deepseek_thinking: 'disabled'
+    deepseek_thinking: 'high'
   });
   assert.deepEqual(definition.runtime_fields, [
     '当前问题',
@@ -46,12 +40,44 @@ test('exposes the same versioned prompt template used by runtime analysis', () =
     '品牌别名',
     '目标品牌行业',
     '目标品牌关键词',
-    '竞品提示',
     '待分析的 AI 回答'
   ]);
 });
 
-test('requests deterministic JSON output for Chat Completions analysis', async () => {
+test('grounds the production semantic prompt with diverse focused examples', () => {
+  const service = new AIResponseAnalysisService();
+  const definition = service.getPromptDefinition();
+
+  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v6');
+  assert.match(definition.template, /<analysis_input>/);
+  assert.match(definition.template, /完整抽取/);
+  assert.match(definition.template, /<examples>/);
+  assert.equal(
+    (definition.template.match(/<example focus=/g) || []).length,
+    10
+  );
+  assert.match(definition.template, /focus="target_absent"/);
+  assert.match(definition.template, /focus="exhaustive_entities_neutral"/);
+  assert.match(definition.template, /focus="unordered_table_neutral"/);
+  assert.match(definition.template, /focus="numbered_ordered"/);
+  assert.match(definition.template, /focus="preference_set_not_full_rank"/);
+  assert.match(definition.template, /focus="multi_group_local_order"/);
+  assert.match(definition.template, /focus="broad_question_multiple_interpretations"/);
+  assert.match(definition.template, /focus="delivery_role_competition"/);
+  assert.match(definition.template, /focus="ordered_positive_alias"/);
+  assert.match(definition.template, /focus="negative"/);
+  assert.match(
+    definition.template,
+    /<example focus="ordered_positive_alias">(?:(?!<\/example>)[\s\S])*"candidate_lists":\[\{"ordered":true/
+  );
+  assert.match(definition.template, /competitor_relations/);
+  assert.match(definition.template, /"entities":\[\]/);
+  assert.match(definition.template, /"subject_name":"必须引用 entities\.name"/);
+  assert.match(definition.template, /"predicate":"属性或关系"/);
+  assert.doesNotMatch(definition.template, /你是 GEO 回答结构化器/);
+});
+
+test('requests DeepSeek high thinking and JSON output without sampling or token limits', async () => {
   let requestOptions;
   const service = new AIResponseAnalysisService({
     configService: {
@@ -75,7 +101,7 @@ test('requests deterministic JSON output for Chat Completions analysis', async (
             candidate_lists: [],
             recommendations: [],
             claims: [],
-            sentiment: { label: 'neutral', reason: '未提及目标品牌', risk_terms: [] }
+            sentiment: { label: 'neutral', reason: '未提及目标品牌', evidence: [], risk_terms: [] }
           })
         };
       }
@@ -90,9 +116,9 @@ test('requests deterministic JSON output for Chat Completions analysis', async (
   });
 
   assert.deepEqual(requestOptions.requestOptions, {
-    temperature: 0,
     response_format: { type: 'json_object' },
-    thinking: { type: 'disabled' }
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high'
   });
   assert.equal(requestOptions.maxTokens, undefined);
   assert.equal(requestOptions.omitTokenLimit, true);
@@ -100,6 +126,7 @@ test('requests deterministic JSON output for Chat Completions analysis', async (
   assert.equal(result.sov_numerator, 0);
   assert.equal(result.sov_denominator, 0);
   assert.equal(result.answer_competitor_share, null);
+  assert.equal(result.analysis_structure.prompt_revision, 'semantic_evidence_few_shot_v6');
 });
 
 test('disables Responses reasoning for deterministic low-latency analysis', async () => {
@@ -126,7 +153,7 @@ test('disables Responses reasoning for deterministic low-latency analysis', asyn
             candidate_lists: [],
             recommendations: [],
             claims: [],
-            sentiment: { label: 'neutral', reason: '未提及目标品牌', risk_terms: [] }
+            sentiment: { label: 'neutral', reason: '未提及目标品牌', evidence: [], risk_terms: [] }
           })
         };
       }
@@ -180,7 +207,7 @@ test('retries one malformed structured response before dropping the sample', asy
             candidate_lists: [],
             recommendations: [],
             claims: [],
-            sentiment: { label: 'neutral', reason: '未提及目标品牌', risk_terms: [] }
+            sentiment: { label: 'neutral', reason: '未提及目标品牌', evidence: [], risk_terms: [] }
           })
         };
       }
@@ -198,7 +225,8 @@ test('retries one malformed structured response before dropping the sample', asy
   assert.equal(result.brand_mentioned, false);
   assert.match(prompts[1], /具体错误：AI 分析 API 未返回有效 JSON/);
   assert.match(prompts[1], /上一次无效输出：\s*\{"entities":/);
-  assert.match(prompts[1], /只修正结构问题，不改变对原回答的语义判断/);
+  assert.match(prompts[1], /重新通读当前问题和完整回答/);
+  assert.doesNotMatch(prompts[1], /不改变对原回答的语义判断/);
 });
 
 test('reports bounded diagnostics after the final malformed response', async () => {
@@ -346,17 +374,21 @@ test('structures all entities and relations, then computes target metrics outsid
             {
               entity_name: '海康威视',
               relation: 'competitor',
-              reason: '提供同类综合安防方案'
+              reason: '提供同类综合安防方案',
+              evidence: ['海康威视：综合安防能力强']
             },
             {
               entity_name: '大华股份',
               relation: 'competitor',
-              reason: '提供同类项目安防方案'
+              reason: '提供同类项目安防方案',
+              evidence: ['大华股份：项目覆盖广']
             }
           ],
           candidate_lists: [{
             ordered: true,
-            entries: ['海康威视', '大华股份', '上海广拓']
+            entries: ['海康威视', '大华股份', '上海广拓'],
+            reason: '回答以编号表达候选顺序',
+            evidence: ['1. 海康威视：综合安防能力强']
           }],
           recommendations: [{
             entity_name: '上海广拓',
@@ -370,6 +402,7 @@ test('structures all entities and relations, then computes target metrics outsid
           sentiment: {
             label: 'positive',
             reason: '列为专业头部选择',
+            evidence: ['是专业领域的头部选择'],
             risk_terms: []
           }
         })
@@ -389,7 +422,7 @@ test('structures all entities and relations, then computes target metrics outsid
   assert.equal(result.brand_recommended, true);
   assert.equal(result.brand_rank, 3);
   assert.equal(result.answer_competitor_share, 33.33);
-  assert.equal(result.analysis_method, 'ai_structured_v3');
+  assert.equal(result.analysis_method, 'ai_structured_v4');
   assert.equal(result.analysis_platform, 'analysis-ai');
   assert.equal(result.analysis_model, 'analysis-model');
   assert.deepEqual(result.analysis_structure.entities.map((item) => item.name), [
@@ -431,7 +464,12 @@ test('accepts nested surface forms that refer to the same mention occurrence', a
           candidate_lists: [],
           recommendations: [],
           claims: [],
-          sentiment: { label: 'positive', reason: '值得关注', risk_terms: [] }
+          sentiment: {
+            label: 'positive',
+            reason: '值得关注',
+            evidence: ['上海广拓信息技术有限公司值得关注'],
+            risk_terms: []
+          }
         })
       })
     }
@@ -450,6 +488,86 @@ test('accepts nested surface forms that refer to the same mention occurrence', a
   assert.equal(result.answer_competitor_share, 100);
 });
 
+test('counts a full name with multiple aliases in one parenthetical as one mention', () => {
+  const service = new AIResponseAnalysisService();
+  const responseText = [
+    '上海广拓信息技术有限公司（广拓 Gato）提供方案。',
+    '建议优先联系上海广拓。'
+  ].join('\n');
+  const structured = service.parseOutput(JSON.stringify({
+    entities: [{ name: '上海广拓信息技术有限公司', type: 'company' }],
+    mentions: [{
+      entity_name: '上海广拓信息技术有限公司',
+      surface_forms: [
+        '上海广拓信息技术有限公司',
+        '上海广拓',
+        '广拓',
+        'Gato'
+      ]
+    }],
+    target_entity_name: '上海广拓信息技术有限公司',
+    competitor_relations: [],
+    candidate_lists: [],
+    recommendations: [{ entity_name: '上海广拓信息技术有限公司', kind: 'explicit' }],
+    claims: [],
+    sentiment: {
+      label: 'positive',
+      reason: '回答建议优先联系目标品牌',
+      evidence: ['建议优先联系上海广拓'],
+      risk_terms: []
+    }
+  }), {
+    responseText,
+    brand: { name: '上海广拓信息技术有限公司' }
+  });
+
+  const result = service.calculate(structured);
+  assert.equal(result.brand_mentions, 2);
+  assert.equal(result.sov_numerator, 2);
+  assert.equal(result.sov_denominator, 2);
+});
+
+test('replays cached surface forms against the original answer before recalculating metrics', () => {
+  const service = new AIResponseAnalysisService();
+  const responseText = [
+    '上海广拓信息技术有限公司（广拓 Gato）提供方案。',
+    '建议优先联系上海广拓。'
+  ].join('\n');
+  const staleStructure = {
+    schema_version: 'geo_metric_input_v4',
+    entities: [{ name: '上海广拓信息技术有限公司', type: 'company' }],
+    mentions: [
+      {
+        entity_name: '上海广拓信息技术有限公司',
+        surface_forms: ['上海广拓信息技术有限公司', '广拓']
+      },
+      {
+        entity_name: '上海广拓信息技术有限公司',
+        surface_forms: ['Gato']
+      },
+      {
+        entity_name: '上海广拓信息技术有限公司',
+        surface_forms: ['广拓']
+      }
+    ],
+    target_entity_name: '上海广拓信息技术有限公司',
+    competitor_relations: [],
+    candidate_lists: [],
+    recommendations: [{ entity_name: '上海广拓信息技术有限公司', kind: 'explicit' }],
+    claims: [],
+    sentiment: {
+      label: 'positive',
+      reason: '回答建议优先联系目标品牌',
+      evidence: ['建议优先联系上海广拓'],
+      risk_terms: []
+    }
+  };
+
+  const result = service.recalculateFromStructure(staleStructure, responseText);
+  assert.equal(result.brand_mentions, 2);
+  assert.equal(result.analysis_structure.mentions.length, 2);
+});
+
 test('rejects duplicate entities in an ordered candidate list instead of producing a false rank', () => {
   const service = new AIResponseAnalysisService();
   const output = JSON.stringify({
@@ -465,7 +583,8 @@ test('rejects duplicate entities in an ordered candidate list instead of produci
     competitor_relations: [{
       entity_name: '竞品甲',
       relation: 'competitor',
-      reason: '提供同类产品'
+      reason: '提供同类产品',
+      evidence: ['竞品甲']
     }],
     candidate_lists: [{
       ordered: true,
@@ -537,7 +656,12 @@ test('accepts all validated surface forms instead of rejecting an entity after e
     candidate_lists: [],
     recommendations: [],
     claims: [],
-    sentiment: { label: 'positive', reason: '目标品牌被正面提及', risk_terms: [] }
+    sentiment: {
+      label: 'positive',
+      reason: '目标品牌被正面提及',
+      evidence: ['上海广拓信息技术有限公司'],
+      risk_terms: []
+    }
   }), {
     responseText: surfaceForms.join('、'),
     brand: { name: '上海广拓' }
@@ -572,12 +696,18 @@ test('derives mention order and repeated counts from the original answer instead
           competitor_relations: [{
             entity_name: '海康',
             relation: 'competitor',
-            reason: '在当前回答中是同类选择'
+            reason: '在当前回答中是同类选择',
+            evidence: ['海康先被列出']
           }],
           candidate_lists: [],
           recommendations: [],
           claims: [],
-          sentiment: { label: 'neutral', reason: '客观列举', risk_terms: [] }
+          sentiment: {
+            label: 'neutral',
+            reason: '客观列举',
+            evidence: ['随后是广拓'],
+            risk_terms: []
+          }
         })
       })
     }
@@ -613,7 +743,12 @@ test('treats omitted non-metric claims as an empty optional collection', async (
           competitor_relations: [],
           candidate_lists: [],
           recommendations: [],
-          sentiment: { label: 'neutral', reason: '未提及目标品牌', risk_terms: [] }
+          sentiment: {
+            label: 'neutral',
+            reason: '未提及目标品牌',
+            evidence: [],
+            risk_terms: []
+          }
         })
       })
     }
@@ -685,12 +820,18 @@ test('computes SOV from structured mention counts for contextual competitors', a
           competitor_relations: [{
             entity_name: '海康',
             relation: 'competitor',
-            reason: '在当前回答中是同类选择'
+            reason: '在当前回答中是同类选择',
+            evidence: ['海康出现两次']
           }],
           candidate_lists: [],
           recommendations: [],
           claims: [],
-          sentiment: { label: 'neutral', reason: '客观列举', risk_terms: [] }
+          sentiment: {
+            label: 'neutral',
+            reason: '客观列举',
+            evidence: ['广拓出现一次'],
+            risk_terms: []
+          }
         })
       })
     }
@@ -709,6 +850,7 @@ test('computes SOV from structured mention counts for contextual competitors', a
     name: '海康',
     relation: 'competitor',
     reason: '在当前回答中是同类选择',
+    evidence: ['海康出现两次'],
     mentions: 2,
     surface_forms: ['海康', '海康']
   });
@@ -818,12 +960,14 @@ test('computes answer-level SOV from contextual competitors instead of configure
               {
                 entity_name: '海康',
                 relation: 'competitor',
-                reason: '在当前问题中提供同类周界方案'
+                reason: '在当前问题中提供同类周界方案',
+                evidence: ['海康提供周界方案']
               },
               {
                 entity_name: '国家电网',
                 relation: 'non_competitor',
-                reason: '回答中是采购方而不是替代方案'
+                reason: '回答中是采购方而不是替代方案',
+                evidence: ['国家电网是采购方']
               }
             ],
             candidate_lists: [],
@@ -832,6 +976,7 @@ test('computes answer-level SOV from contextual competitors instead of configure
             sentiment: {
               label: 'neutral',
               reason: '客观列举',
+              evidence: ['广拓也提供方案'],
               risk_terms: []
             }
           })
@@ -848,12 +993,13 @@ test('computes answer-level SOV from contextual competitors instead of configure
       industry: '周界安防',
       primary_keywords: ['电子围栏']
     },
-    competitorHints: [{ name: '国家电网' }]
+    competitorHints: [{ name: '不应出现的配置企业' }]
   });
 
-  assert.match(submittedPrompt, /当前问题：周界安防方案有哪些可选厂商/);
+  assert.match(submittedPrompt, /"question": "周界安防方案有哪些可选厂商？"/);
   assert.match(submittedPrompt, /国家电网/);
-  assert.equal(result.analysis_method, 'ai_structured_v3');
+  assert.doesNotMatch(submittedPrompt, /不应出现的配置企业/);
+  assert.equal(result.analysis_method, 'ai_structured_v4');
   assert.equal(
     result.metric_semantics_version,
     'contextual_competitor_mentions_sov_v1'
@@ -868,6 +1014,7 @@ test('computes answer-level SOV from contextual competitors instead of configure
       name: '海康',
       relation: 'competitor',
       reason: '在当前问题中提供同类周界方案',
+      evidence: ['海康提供周界方案'],
       mentions: 2,
       surface_forms: ['海康', '海康']
     },
@@ -875,6 +1022,7 @@ test('computes answer-level SOV from contextual competitors instead of configure
       name: '国家电网',
       relation: 'non_competitor',
       reason: '回答中是采购方而不是替代方案',
+      evidence: ['国家电网是采购方'],
       mentions: 1,
       surface_forms: ['国家电网']
     }
@@ -1000,12 +1148,18 @@ test('returns zero SOV when only a contextual competitor is mentioned', async ()
           competitor_relations: [{
             entity_name: '海康',
             relation: 'competitor',
-            reason: '在当前回答中提供所需方案'
+            reason: '在当前回答中提供所需方案',
+            evidence: ['海康提供相关方案']
           }],
           candidate_lists: [],
           recommendations: [],
           claims: [],
-          sentiment: { label: 'neutral', reason: '未提及目标品牌', risk_terms: [] }
+          sentiment: {
+            label: 'neutral',
+            reason: '未提及目标品牌',
+            evidence: [],
+            risk_terms: []
+          }
         })
       })
     }
@@ -1069,7 +1223,7 @@ test('rejects a missing competitor relation reason', async () => {
   );
 });
 
-test('keeps the complete answer in the v3 analysis prompt', () => {
+test('keeps the complete answer in the v4 analysis prompt', () => {
   const service = new AIResponseAnalysisService();
   const tailMarker = '回答尾部竞品标识';
   const responseText = `${'前'.repeat(12050)}${tailMarker}`;
@@ -1081,5 +1235,5 @@ test('keeps the complete answer in the v3 analysis prompt', () => {
   });
 
   assert.match(prompt, new RegExp(tailMarker));
-  assert.equal(prompt.endsWith(responseText), true);
+  assert.equal(prompt.includes(JSON.stringify(responseText)), true);
 });

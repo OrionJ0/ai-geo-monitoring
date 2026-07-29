@@ -346,6 +346,90 @@ test('用户可以在原报告中重试失败项且重复提交不会创建第�
   }
 });
 
+test('完整监测重试在 Web 登录失效时整批阻断且不创建任务', async () => {
+  const previousPlatforms = project.platforms;
+  await project.update({ platforms: ['deepseek-web', 'qwen'] });
+  const failedRecord = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: 779,
+    platform: 'deepseek-web',
+    platform_name: 'DeepSeek 网页版',
+    model_name: 'deepseek-web-ui',
+    question: 'Web 登录失效时是否仍会重试？',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'failed',
+    error_message: '上次监测失败'
+  });
+  const nativeRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: 890,
+    question_set_name: 'Web 前置校验重试',
+    source: 'native',
+    planned_record_count: 1,
+    completed_at: new Date()
+  });
+  await failedRecord.update({
+    question_set_run_id: nativeRun.id,
+    run_slot_index: 0
+  });
+
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  const originalSchedule = ProjectRunService.schedulePreparedRun;
+  let availabilityOptions = null;
+  let quotaCalls = 0;
+  let scheduleCalls = 0;
+  AIPlatformService.getPlatformAvailability = async (_codes, options) => {
+    availabilityOptions = options;
+    return [{
+      code: 'deepseek-web',
+      platform_name: 'DeepSeek 网页版',
+      model_name: 'deepseek-web-ui',
+      available: false,
+      reason: 'web_login_required',
+      config: null
+    }];
+  };
+  ProjectRunService.consumeRunQuota = async () => {
+    quotaCalls += 1;
+    return { ok: true };
+  };
+  ProjectRunService.schedulePreparedRun = () => {
+    scheduleCalls += 1;
+  };
+
+  try {
+    const beforeCount = await QuestionRecord.count({ where: { project_id: project.id } });
+    const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+      params: { projectId: project.id, runId: nativeRun.id },
+      body: { idempotency_key: 'retry-web-preflight-001' }
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.payload.success, false);
+    assert.equal(response.payload.data.error_code, 'web_platform_preflight_failed');
+    assert.equal(response.payload.data.settings_url, '/admin/settings');
+    assert.deepEqual(response.payload.data.blocked_platforms, [{
+      platform: 'deepseek-web',
+      name: 'DeepSeek 网页版',
+      reason_code: 'web_login_required',
+      message: 'DeepSeek 网页版需要重新人工登录'
+    }]);
+    assert.deepEqual(availabilityOptions, { forceRuntimeProbe: true });
+    assert.equal(quotaCalls, 0);
+    assert.equal(scheduleCalls, 0);
+    assert.equal(await QuestionRecord.count({ where: { project_id: project.id } }), beforeCount);
+  } finally {
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.consumeRunQuota = originalConsumeQuota;
+    ProjectRunService.schedulePreparedRun = originalSchedule;
+    await project.update({ platforms: previousPlatforms });
+  }
+});
+
 test('结构化分析失败时复用原回答且不重新消耗监测配额', async () => {
   const failedRecord = await QuestionRecord.create({
     user_id: user.id,

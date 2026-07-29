@@ -67,6 +67,11 @@ export default function WebCaptureEvidence({ record }: WebCaptureEvidenceProps) 
   }, [evidence, evidenceKey]); // evidenceKey 只由后端受控的证据读取地址组成
 
   if (!evidence) return null;
+  const isStandardDoubao = evidence.platformName === '豆包 Web'
+    && evidence.captureMode === 'standard';
+  const captureModeLabel = evidence.captureMode === 'web_search'
+    ? '智能搜索'
+    : evidence.captureMode || '网页搜索模式';
 
   const renderSources = (sources: any[], emptyText: string) => (
     sources.length ? (
@@ -83,11 +88,18 @@ export default function WebCaptureEvidence({ record }: WebCaptureEvidenceProps) 
   return (
     <Card size="small" title={`${evidence.platformName} 页面证据`} style={{ marginTop: 12 }}>
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-        <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
+        <Descriptions bordered size="small" column={2}>
+          <Descriptions.Item label="采集模式">
+            {isStandardDoubao
+              ? <Tag color="blue">普通模式（不启用深入研究）</Tag>
+              : <Tag>{captureModeLabel}</Tag>}
+          </Descriptions.Item>
           <Descriptions.Item label="联网搜索">
-            {evidence.searchObserved
-              ? <Tag color="success">已确认开启</Tag>
-              : <Tag color="error">未确认</Tag>}
+            {evidence.searchObserved === true
+              ? <Tag color="success">本次已观察到网页检索</Tag>
+              : isStandardDoubao
+                ? <Tag color="blue">由豆包普通模式自动决定</Tag>
+                : <Tag color="error">未确认</Tag>}
           </Descriptions.Item>
           <Descriptions.Item label="采集时间">
             {formatCapturedAt(evidence.capturedAt)}
@@ -95,7 +107,7 @@ export default function WebCaptureEvidence({ record }: WebCaptureEvidenceProps) 
           <Descriptions.Item label="选择器版本">
             {evidence.selectorVersion || '-'}
           </Descriptions.Item>
-          <Descriptions.Item label="实际模型">
+          <Descriptions.Item label="实际模型" span={2}>
             {evidence.modelName || '-'}
           </Descriptions.Item>
           <Descriptions.Item label="引用" span={2}>
@@ -107,7 +119,12 @@ export default function WebCaptureEvidence({ record }: WebCaptureEvidenceProps) 
         </Descriptions>
 
         {loadError ? <Alert type="error" showIcon title={loadError} /> : null}
-        {loading ? <Spin size="small" tip="正在读取私有证据图片" /> : null}
+        {loading ? (
+          <Space size={8}>
+            <Spin size="small" />
+            <Text type="secondary">正在读取私有证据图片</Text>
+          </Space>
+        ) : null}
         <Space wrap align="start" size={12}>
           {evidence.artifacts.map((artifact: any) => imageUrls[artifact.kind] ? (
             <Card key={artifact.kind} size="small" title={artifact.label}>

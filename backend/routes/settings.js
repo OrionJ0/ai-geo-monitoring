@@ -108,7 +108,6 @@ router.post('/analysis-api/test', adminRequired, async (req, res) => {
       question: questionText,
       responseText,
       brand: { name: brandName, aliases: brandAliases },
-      competitorHints: [],
       includeRawOutput: true
     });
     return res.json({

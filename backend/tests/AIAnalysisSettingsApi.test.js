@@ -100,15 +100,20 @@ test('returns the versioned runtime analysis prompt template to administrators',
 
     assert.equal(response.status, 200);
     assert.equal(response.headers['cache-control'], 'no-store');
-    assert.equal(response.json.data.version, 'ai_structured_v3');
+    assert.equal(response.json.data.version, 'ai_structured_v4');
+    assert.equal(response.json.data.prompt_revision, 'semantic_evidence_few_shot_v6');
     assert.match(response.json.data.template, /\{\{目标品牌\}\}/);
     assert.match(response.json.data.template, /\{\{当前问题\}\}/);
-    assert.match(response.json.data.template, /全部品牌或公司实体/);
+    assert.match(response.json.data.template, /完整抽取/);
     assert.match(response.json.data.template, /competitor_relations/);
+    assert.match(response.json.data.template, /other_organization/);
+    assert.match(response.json.data.template, /evidence/);
+    assert.doesNotMatch(response.json.data.template, /competitor_hints|竞品提示/);
     assert.equal(response.json.data.request_profile.token_limit, null);
     assert.equal(response.json.data.request_profile.timeout_seconds, 120);
     assert.equal(response.json.data.request_profile.max_attempts, 2);
     assert.equal(response.json.data.request_profile.web_search, false);
+    assert.equal(response.json.data.request_profile.deepseek_thinking, 'high');
     assert.deepEqual(response.json.data.request_parameters, {
       adapter_type: 'openai_chat_completions',
       request_body: {
@@ -117,9 +122,9 @@ test('returns the versioned runtime analysis prompt template to administrators',
           role: 'user',
           content: '<运行时注入完整结构化提示词>'
         }],
-        temperature: 0,
         response_format: { type: 'json_object' },
-        thinking: { type: 'disabled' }
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'high'
       },
       runtime_policy: {
         timeout_seconds: 120,
@@ -145,7 +150,7 @@ test('returns temporary analysis test input and output without a persistence con
     brand_recommended: false,
     brand_rank: 3,
     analysis_structure: {
-      schema_version: 'geo_metric_input_v3',
+      schema_version: 'geo_metric_input_v4',
       entities: [{ name: '广拓', type: 'brand' }]
     },
     raw_output: '{"entities":[{"name":"广拓","type":"brand"}]}'
@@ -164,7 +169,7 @@ test('returns temporary analysis test input and output without a persistence con
     });
     assert.equal(response.status, 200);
     assert.equal(analysisInput.question, '周界安防厂商有哪些？');
-    assert.deepEqual(analysisInput.competitorHints, []);
+    assert.equal(Object.hasOwn(analysisInput, 'competitorHints'), false);
     assert.equal(
       response.json.data.input.question_text,
       '周界安防厂商有哪些？'

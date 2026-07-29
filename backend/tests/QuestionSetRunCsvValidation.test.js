@@ -64,10 +64,10 @@ function parseReport(overrides = {}, rowOverrides = {}) {
 
 function currentReport(rowOverrides = {}) {
   return reportWith({
-    analysis_contract_version: 'ai_structured_v3',
+    analysis_contract_version: 'ai_structured_v4',
     metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
   }, {
-    analysis_method: 'ai_structured_v3',
+    analysis_method: 'ai_structured_v4',
     metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
     share_of_voice: null,
     answer_competitor_share: 50,
@@ -78,8 +78,24 @@ function currentReport(rowOverrides = {}) {
       relation: 'competitor',
       mentions: 1,
       reason: '提供同类周界方案',
+      evidence: ['上海广拓可作为候选'],
       surface_forms: ['海康']
     }],
+    analysis_structure: {
+      schema_version: 'geo_metric_input_v4',
+      candidate_lists: [{
+        ordered: true,
+        entries: ['上海广拓', '海康'],
+        reason: '回答表达了顺序',
+        evidence: ['上海广拓可作为候选']
+      }],
+      sentiment: {
+        label: 'neutral',
+        reason: '事实陈述',
+        evidence: ['上海广拓可作为候选'],
+        risk_terms: []
+      }
+    },
     ...rowOverrides
   });
 }
@@ -101,9 +117,31 @@ test('新版 CSV 在旧列尾部追加可判定语义并保持旧 SOV 列为空'
   assert.equal(parsed.rows[0].sov_numerator, 1);
   assert.equal(parsed.rows[0].sov_denominator, 2);
   assert.equal(parsed.rows[0].competition_entities[0].reason, '提供同类周界方案');
+  assert.deepEqual(
+    parsed.rows[0].competition_entities[0].evidence,
+    ['上海广拓可作为候选']
+  );
+  assert.deepEqual(
+    parsed.rows[0].analysis_structure.sentiment.evidence,
+    ['上海广拓可作为候选']
+  );
 });
 
 test('新版 CSV 拒绝旧列值、混合语义、非法分母和非法竞争实体证据', () => {
+  assert.throws(
+    () => QuestionSetRunCsvService.parseCsv(
+      QuestionSetRunCsvService.buildCsv(currentReport({
+        competition_entities: [{
+          name: '海康',
+          relation: 'competitor',
+          mentions: 1,
+          reason: '提供同类周界方案',
+          surface_forms: ['海康']
+        }]
+      }))
+    ),
+    (error) => error.code === 'INVALID_COMPETITION_ENTITY'
+  );
   assert.throws(
     () => QuestionSetRunCsvService.parseCsv(
       QuestionSetRunCsvService.buildCsv(currentReport({ share_of_voice: 50 }))

@@ -174,6 +174,28 @@ function detectWebSearchEvidence(adapterType, data) {
     return { detected: true, type: 'provider_search_usage', count: searchCount };
   }
 
+  const providerSearchResults = (Array.isArray(data?.choices) ? data.choices : [])
+    .flatMap((choice) => (
+      Array.isArray(choice?.message?.search_results)
+        ? choice.message.search_results
+        : []
+    ))
+    .filter((item) => {
+      try {
+        const url = new URL(String(item?.url || ''));
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch (_) {
+        return false;
+      }
+    });
+  if (providerSearchResults.length > 0) {
+    return {
+      detected: true,
+      type: 'provider_search_results',
+      count: providerSearchResults.length
+    };
+  }
+
   if (isResponsesAdapter(adapterType)) {
     const output = Array.isArray(data?.output) ? data.output : [];
     const hasSearchItem = output.some((item) => (
@@ -269,6 +291,7 @@ class AIPlatformRequestService {
       delete requestBody.tools;
       delete requestBody.enable_search;
       delete requestBody.search_options;
+      delete requestBody.web_search_options;
     }
     const requestOptions = this.buildRequestOptions({ apiKey, timeoutSeconds, validation });
     let lastFailure = null;
@@ -281,13 +304,17 @@ class AIPlatformRequestService {
         const text = extractResponseText(config.adapter_type, response?.data);
         if (!text) return this.failure(platform, 'invalid_provider_response');
         const headerTime = Number(response?.headers?.['x-response-time']);
+        const webSearchEvidence = detectWebSearchEvidence(config.adapter_type, response?.data);
         return {
           success: true,
           data: response.data,
           text,
           platform,
           model_name: config.default_model,
-          citation_observation_status: isResponsesAdapter(config.adapter_type)
+          citation_observation_status: (
+            isResponsesAdapter(config.adapter_type)
+            || webSearchEvidence.detected
+          )
             ? 'observed'
             : 'unavailable',
           responseTime: Number.isFinite(headerTime) && headerTime >= 0
@@ -428,7 +455,7 @@ class AIPlatformRequestService {
     const connection = await this.queryConfig(
       config,
       testInput,
-      { allowDisabled: true, retryCount: 0 }
+      { allowDisabled: true, retryCount: 1 }
     );
 
     let result;
@@ -461,7 +488,9 @@ class AIPlatformRequestService {
             success: false,
             status: 'inconclusive',
             error_code: 'search_evidence_missing',
-            message: '模型调用成功，但供应商响应中没有可验证的联网搜索证据',
+            message: config.code === 'hunyuan'
+              ? '模型调用成功，但 TokenHub 没有返回联网搜索证据。请检查「工具管理」是否已有可用的联网搜索免费资源包或后付费；若已开通，请稍后重试。'
+              : '模型调用成功，但供应商响应中没有可验证的联网搜索证据',
             response_time_ms: connection.responseTime,
             model_name: connection.model_name,
             input: testInput,

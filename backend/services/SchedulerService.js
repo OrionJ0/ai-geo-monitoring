@@ -10,13 +10,17 @@ const {
 } = require('../models');
 const { randomUUID } = require('node:crypto');
 const os = require('node:os');
-const { Op, Transaction } = require('sequelize');
+const { Op, Transaction, fn, col } = require('sequelize');
 const AIPlatformService = require('./AIPlatformService');
 const ResultParserService = require('./ResultParserService');
 const ProjectRunService = require('./ProjectRunService');
 const ProjectRecordFinalizationService = require('./ProjectRecordFinalizationService');
 const QuestionSetRunService = require('./QuestionSetRunService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
+const {
+  CURRENT_ANALYSIS_CONTRACT,
+  CURRENT_METRIC_SEMANTICS
+} = require('./GeoMetricSemanticsService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
@@ -171,6 +175,8 @@ async function submitDetectionForSchedule(schedule, options = {}) {
             question,
             brand: schedule.brand,
             brand_keywords: keywordsArr.join(','),
+            analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
+            metric_semantics_version: CURRENT_METRIC_SEMANTICS,
             status: 'failed',
             error_message: errMsg
           });
@@ -209,7 +215,9 @@ async function submitDetectionForSchedule(schedule, options = {}) {
         model_name: platformStatus.model_name,
         question,
         brand: schedule.brand,
-        brand_keywords: keywordsArr.join(',')
+        brand_keywords: keywordsArr.join(','),
+        analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
+        metric_semantics_version: CURRENT_METRIC_SEMANTICS
       });
 
       const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
@@ -314,16 +322,22 @@ async function submitDetectionForSchedule(schedule, options = {}) {
 
 async function finalizeScheduledProjectRecord({
   record,
+  executionToken = null,
+  persistResponseDetail = false,
   responseText,
   aiResponse = null,
+  providerCitations = [],
   keywords = [],
   repositories = {},
   projectRunService = ProjectRunService
 }) {
   const result = await ProjectRecordFinalizationService.finalize({
     record,
+    executionToken,
+    persistResponseDetail,
     responseText,
     aiResponse,
+    providerCitations,
     keywords,
     repositories,
     projectRunService
@@ -400,6 +414,48 @@ class SchedulerService {
 
   getScheduledExecutionStats() {
     return { ...this._scheduledExecutionStats };
+  }
+
+  async getLatestProjectMonitoringExecutions(projectIds, options = {}) {
+    const ids = Array.from(new Set(
+      (Array.isArray(projectIds) ? projectIds : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0)
+    ));
+    if (!ids.length) return {};
+    const ExecutionRepository = options.ScheduledExecution || ScheduledExecution;
+    const latestDueRows = await ExecutionRepository.findAll({
+      attributes: [
+        'project_id',
+        [fn('MAX', col('due_at')), 'latest_due_at']
+      ],
+      where: {
+        schedule_kind: 'project_monitoring',
+        project_id: { [Op.in]: ids }
+      },
+      group: ['project_id'],
+      raw: true
+    });
+    if (!latestDueRows.length) return {};
+    const rows = await ExecutionRepository.findAll({
+      where: {
+        schedule_kind: 'project_monitoring',
+        [Op.or]: latestDueRows.map((row) => ({
+          project_id: Number(row.project_id),
+          due_at: new Date(row.latest_due_at)
+        }))
+      }
+    });
+    return Object.fromEntries(rows.map((entry) => {
+      const row = entry?.toJSON ? entry.toJSON() : entry;
+      return [Number(row.project_id), {
+        status: row.status,
+        due_at: row.due_at ? new Date(row.due_at).toISOString() : null,
+        completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null,
+        error_code: row.error_code || null,
+        error_message: row.error_message || null
+      }];
+    }));
   }
 
   normalizeProjectMonitoring(project) {
@@ -720,16 +776,17 @@ class SchedulerService {
         execution = claim.execution;
         if (!await this.startScheduledExecution(execution)) continue;
 
-        const ok = await this.runProjectNow(project.id, {
+        const result = await this.runProjectNow(project.id, {
           advanceSchedule: false,
           scheduledExecutionId: execution.id
         });
-        await this.finalizeScheduledExecution(execution, ok
+        const succeeded = result === true || result?.ok === true;
+        await this.finalizeScheduledExecution(execution, succeeded
           ? { status: 'completed' }
           : {
               status: 'failed',
-              errorCode: 'project_monitoring_failed',
-              errorMessage: '项目自动监测执行失败'
+              errorCode: result?.data?.error_code || 'project_monitoring_failed',
+              errorMessage: result?.message || '项目自动监测执行失败'
             });
       } catch (e) {
         if (execution) {
@@ -767,7 +824,7 @@ class SchedulerService {
           monitoring_next_run_at: computeNextRun(normalized.monitoring_time)
         });
       }
-      return false;
+      return result;
     }
     const updatePayload = {
       monitoring_time: normalized.monitoring_time,
@@ -777,7 +834,7 @@ class SchedulerService {
       updatePayload.monitoring_next_run_at = computeNextRun(normalized.monitoring_time);
     }
     await project.update(updatePayload);
-    return true;
+    return result;
   }
 
   async recoverStalePendingRecords(options = {}) {

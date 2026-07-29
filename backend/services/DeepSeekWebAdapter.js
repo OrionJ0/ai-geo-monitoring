@@ -147,6 +147,20 @@ class DeepSeekWebAdapter {
     let finalTurn = null;
     while (this.now() - startedAt <= this.timeoutMs) {
       const snapshot = await this.page.getConversationSnapshot();
+      if (snapshot.verificationRequired === true) {
+        throw adapterError(
+          'web_verification_required',
+          `${this.identity.displayName} 需要人工完成验证`,
+          'generation_finished'
+        );
+      }
+      if (snapshot.loginRequired === true) {
+        throw adapterError(
+          'web_login_required',
+          `${this.identity.displayName} 需要重新人工登录`,
+          'generation_finished'
+        );
+      }
       const newTurns = (snapshot.assistantTurns || []).filter(
         (turn) => !baselineIds.has(String(turn.id))
       );
@@ -204,16 +218,17 @@ class DeepSeekWebAdapter {
           'new_conversation_verified'
         );
       }
-      currentStage = 'search_enabled_verified';
-      const search = await this.page.ensureSearchEnabled();
-      if (search?.observed !== true) {
+      currentStage = 'capture_mode_verified';
+      const captureMode = await this.page.verifyCaptureMode();
+      if (captureMode?.observed !== true) {
         throw adapterError(
-          'web_search_state_unverified',
-          `无法确认${this.identity.displayName}联网搜索已开启`,
-          'search_enabled_verified'
+          captureMode?.error_code || 'web_search_state_unverified',
+          captureMode?.error_message
+            || `无法确认${this.identity.displayName}联网搜索已开启`,
+          'capture_mode_verified'
         );
       }
-      currentStage = 'search_evidence_saved';
+      currentStage = 'capture_mode_evidence_saved';
       const searchScreenshot = await this.page.captureScreenshot('search_state');
       await this.captureStore.writeArtifact(
         capture,
@@ -230,8 +245,9 @@ class DeepSeekWebAdapter {
       currentStage = 'prompt_sent';
       await this.page.startNetworkObservation?.();
       await this.page.sendPrompt();
+      const generationStartedAt = this.now();
       currentStage = 'generation_finished';
-      const finalTurn = await this.waitForFinalTurn(baselineIds, startedAt);
+      const finalTurn = await this.waitForFinalTurn(baselineIds, generationStartedAt);
       if (Buffer.byteLength(finalTurn.text, 'utf8') > MAX_RESPONSE_BYTES) {
         throw adapterError(
           'web_response_too_large',
@@ -242,6 +258,17 @@ class DeepSeekWebAdapter {
       currentStage = 'content_extracted';
       const explicitCitations = await this.page.extractCitations(finalTurn.id);
       const retrievalCandidates = await this.page.collectRetrievalCandidates?.() || [];
+      const configuredSearchObserved = captureMode.search_observed === undefined
+        ? captureMode.observed
+        : captureMode.search_observed;
+      const searchObserved = configuredSearchObserved == null
+        && retrievalCandidates.length > 0
+        ? true
+        : configuredSearchObserved;
+      const searchEvidenceType = configuredSearchObserved == null
+        && retrievalCandidates.length > 0
+        ? 'network_retrieval_candidates'
+        : captureMode.evidence_type || 'dom_selected_state';
       const providerCitations = normalizeProviderCitations(
         explicitCitations,
         retrievalCandidates,
@@ -269,10 +296,21 @@ class DeepSeekWebAdapter {
         completed_at: safeIso(completedAt),
         captured_at: safeIso(completedAt),
         response_sha256: createHash('sha256').update(finalTurn.text).digest('hex'),
-        search: {
-          requested: true,
+        capture_mode: {
+          name: bounded(captureMode.mode || 'web_search', 40),
           observed: true,
-          evidence_type: bounded(search.evidence_type || 'dom_selected_state', 80)
+          evidence_type: bounded(
+            captureMode.evidence_type || 'dom_selected_state',
+            80
+          )
+        },
+        search: {
+          requested: captureMode.search_requested ?? captureMode.requested ?? true,
+          observed: searchObserved,
+          evidence_type: bounded(
+            searchEvidenceType,
+            80
+          )
         },
         completion: {
           state: 'stable',
@@ -561,6 +599,16 @@ class DeepSeekWebPage {
     throw adapterError('web_selector_mismatch', 'DeepSeek 新对话未进入空白状态');
   }
 
+  async verifyCaptureMode() {
+    const search = await this.ensureSearchEnabled();
+    return {
+      ...search,
+      mode: 'web_search',
+      search_requested: true,
+      search_observed: search?.observed === true
+    };
+  }
+
   async ensureSearchEnabled() {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const state = await this.callDocument(`function(allowClick) {
@@ -597,7 +645,7 @@ class DeepSeekWebPage {
     return { requested: true, observed: false };
   }
 
-  async captureScreenshot({ fromSurface = true } = {}) {
+  async captureScreenshot({ fromSurface = false } = {}) {
     const clip = await this.evaluate(`(() => {
       const composer = document.querySelector(
         'textarea:not([disabled]), [contenteditable="true"][role="textbox"]'
@@ -631,7 +679,7 @@ class DeepSeekWebPage {
       try {
         screenshot = await this.connection.send('Page.captureScreenshot', {
           format: 'png',
-          fromSurface,
+          fromSurface: attempt === 0 ? fromSurface : false,
           captureBeyondViewport: false,
           clip
         }, {
@@ -701,6 +749,8 @@ class DeepSeekWebPage {
   }
 
   async getConversationSnapshot() {
+    const verificationMarkers = JSON.stringify(selectors.verificationMarkers);
+    const loginMarkers = JSON.stringify(selectors.loginMarkers);
     return this.evaluate(`(() => {
       const visible = (element) => {
         const style = getComputedStyle(element);
@@ -710,6 +760,9 @@ class DeepSeekWebPage {
           && rect.width > 0
           && rect.height > 0;
       };
+      const hasVisibleMatch = (selectors) => selectors.some((selector) => (
+        Array.from(document.querySelectorAll(selector)).some(visible)
+      ));
       const turns = Array.from(document.querySelectorAll(
         '.ds-markdown.ds-assistant-message-main-content'
       )).filter(visible);
@@ -729,7 +782,9 @@ class DeepSeekWebPage {
           text: String(element.innerText || element.textContent || '').trim()
         })),
         generationActive,
-        busy
+        busy,
+        verificationRequired: hasVisibleMatch(${verificationMarkers}),
+        loginRequired: hasVisibleMatch(${loginMarkers})
       };
     })()`);
   }

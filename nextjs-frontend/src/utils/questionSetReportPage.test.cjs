@@ -59,7 +59,7 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.match(source, /历史规则/);
   assert.match(source, /这份历史报告包含旧规则指标/);
   assert.match(source, /不代表当前结构化口径/);
-  assert.match(source, /识别到的品牌 \/ 公司/);
+  assert.match(source, /识别到的品牌 \/ 公司 \/ 其他组织/);
   assert.match(source, /目标品牌映射/);
   assert.match(source, /候选顺序/);
   assert.match(source, /待核验事实声明/);
@@ -81,7 +81,7 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.doesNotMatch(source, /明确引用/);
 });
 
-test('新版单回答详情展示回答内竞品提及占比及逐实体判断依据', () => {
+test('v4 单回答详情展示回答内竞品提及占比及可复核语义证据', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 
   assert.match(source, /metric_semantics_version/);
@@ -92,11 +92,17 @@ test('新版单回答详情展示回答内竞品提及占比及逐实体判断�
   assert.match(source, /competition_entities/);
   assert.match(source, /回答内竞品提及占比（SOV）/);
   assert.match(source, /formatAnswerSov/);
-  assert.match(source, /AI 结构化 v3/);
+  assert.match(source, /AI 结构化 v4/);
+  assert.match(source, /other_organization/);
+  assert.match(source, /其他组织/);
   assert.match(source, /竞品判断/);
   assert.match(source, /entity\.relation === 'competitor'/);
   assert.match(source, /entity\.mentions/);
   assert.match(source, /entity\.reason/);
+  assert.match(source, /entity\.evidence/);
+  assert.match(source, /list\.evidence/);
+  assert.match(source, /analysis_structure\?\.sentiment\?\.evidence/);
+  assert.match(source, /情绪依据/);
 });
 
 test('新口径运行用已采集回答计算并展示分析覆盖率', () => {
@@ -212,9 +218,14 @@ test('原生问题集报告可以确认后重试失败项', () => {
   assert.doesNotMatch(source, /window\.crypto\.randomUUID\(\)/);
   assert.match(source, /idempotency_key/);
   assert.match(source, /已有完整原回答/);
+  assert.match(source, /任一所选 Web 平台登录或采集能力不可用时，整次重试不会创建新任务/);
+  assert.doesNotMatch(source, /不可用平台会跳过/);
   assert.match(source, /summary\.failed/);
   assert.match(source, /setRetrying/);
   assert.match(source, /report\.capabilities\?\.can_retry/);
+  assert.match(source, /getWebPreflightPrompt/);
+  assert.match(source, /Modal\.confirm/);
+  assert.match(source, /去设置登录/);
   assert.match(source, /report\.capabilities\?\.can_pause/);
   assert.match(source, /report\.capabilities\?\.can_resume/);
   assert.match(source, /retry_disabled_reason/);

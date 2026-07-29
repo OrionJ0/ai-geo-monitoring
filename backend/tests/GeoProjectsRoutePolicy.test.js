@@ -28,8 +28,17 @@ test('project creation validates supported platforms without requiring an existi
   const block = routeBlock('post', '/');
 
   assert.match(block, /PlatformSelectionService\.validate\(req\.body\.platforms,\s*\{[\s\S]*availablePlatforms:\s*selectablePlatforms/);
-  assert.match(block, /await getSelectablePlatformCodes\(\)/);
+  assert.match(block, /await AIPlatformService\.getNewProjectPlatformOptions\(\)/);
+  assert.match(block, /defaultPlatforms/);
+  assert.doesNotMatch(block, /defaultPlatforms:\s*selectablePlatforms/);
   assert.doesNotMatch(block, /validateWithinProject\(req\.body\.platforms/);
+});
+
+test('project list includes the latest automatic monitoring execution status', () => {
+  const block = routeBlock('get', '/');
+
+  assert.match(block, /SchedulerService\.getLatestProjectMonitoringExecutions/);
+  assert.match(block, /latest_monitoring_execution/);
 });
 
 test('prompt create and update validate platforms within the selected project', () => {

@@ -8,18 +8,20 @@ const {
 
 const ANALYSIS_METHOD = CURRENT_ANALYSIS_CONTRACT;
 const STRUCTURE_VERSION = CURRENT_STRUCTURE_VERSION;
-const VALID_ENTITY_TYPES = new Set(['brand', 'company']);
+const PROMPT_REVISION = 'semantic_evidence_few_shot_v6';
+const VALID_ENTITY_TYPES = new Set(['brand', 'company', 'other_organization']);
 const VALID_COMPETITOR_RELATIONS = new Set(['competitor', 'non_competitor']);
 const VALID_RECOMMENDATION_KINDS = new Set(['explicit']);
 const VALID_SENTIMENTS = new Set(['positive', 'neutral', 'negative']);
+const DEFAULT_TEMPERATURE = 0;
 const ANALYSIS_REQUEST_PROFILE = Object.freeze({
-  temperature: 0,
+  temperature: null,
   timeout_seconds: 120,
   max_attempts: 2,
   web_search: false,
   token_limit: null,
   json_mode: 'chat_completions_only',
-  deepseek_thinking: 'disabled'
+  deepseek_thinking: 'high'
 });
 const RETRYABLE_REQUEST_ERROR_CODES = new Set([
   'invalid_provider_response',
@@ -34,27 +36,29 @@ const PROMPT_RUNTIME_FIELDS = Object.freeze([
   '品牌别名',
   '目标品牌行业',
   '目标品牌关键词',
-  '竞品提示',
   '待分析的 AI 回答'
 ]);
 const EXPECTED_OUTPUT = Object.freeze({
   entities: [{
-    name: '回答中的品牌或公司标准名称',
-    type: 'brand | company'
+    name: '回答中的品牌、公司或其他具名组织标准名称',
+    type: 'brand | company | other_organization'
   }],
   mentions: [{
     entity_name: '必须引用 entities.name',
-    surface_forms: ['原回答中实际出现的品牌/公司短名称或别名；程序据此计算次数和顺序']
+    surface_forms: ['原回答中实际出现的实体短名称、全称或别名；程序据此计算次数和顺序']
   }],
   target_entity_name: '目标品牌对应的 entities.name；回答未提及则为 null',
   competitor_relations: [{
     entity_name: '必须精确引用非目标 entities.name',
     relation: 'competitor | non_competitor',
-    reason: '当前问题和回答场景中的替代关系判断理由'
+    reason: '当前问题和回答场景中的替代关系判断理由',
+    evidence: ['支持判断且能在原回答中精确定位的原文片段']
   }],
   candidate_lists: [{
     ordered: true,
-    entries: ['按回答顺序引用 entities.name']
+    entries: ['按回答表达的候选顺序引用 entities.name'],
+    reason: '为什么该候选集合有序或无序',
+    evidence: ['支持判断且能在原回答中精确定位的原文片段']
   }],
   recommendations: [{
     entity_name: '必须引用 entities.name',
@@ -68,7 +72,8 @@ const EXPECTED_OUTPUT = Object.freeze({
   }],
   sentiment: {
     label: 'positive | neutral | negative',
-    reason: '目标品牌情绪判断依据',
+    reason: '回答对目标品牌整体选择倾向的判断依据',
+    evidence: ['目标品牌相关且能在原回答中精确定位的原文片段；目标未提及时为空数组'],
     risk_terms: ['风险词']
   }
 });
@@ -83,9 +88,498 @@ const JSON_OUTPUT_SKELETON = Object.freeze({
   sentiment: {
     label: 'neutral',
     reason: '',
+    evidence: [],
     risk_terms: []
   }
 });
+const CHOICE_SET_EXAMPLES = Object.freeze([
+  {
+    focus: 'target_absent',
+    input: {
+      question: '企业终端安全产品有哪些可选厂商？',
+      target_brand: '甲盾',
+      answer: '乙卫和丙安都提供企业终端防护产品，可并列比较。'
+    },
+    output: {
+      entities: [
+        { name: '乙卫', type: 'brand' },
+        { name: '丙安', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '乙卫', surface_forms: ['乙卫'] },
+        { entity_name: '丙安', surface_forms: ['丙安'] }
+      ],
+      target_entity_name: null,
+      competitor_relations: [
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '在当前问题中是企业终端安全产品的可替代选择',
+          evidence: ['乙卫和丙安都提供企业终端防护产品']
+        },
+        {
+          entity_name: '丙安',
+          relation: 'competitor',
+          reason: '在当前问题中是企业终端安全产品的可替代选择',
+          evidence: ['乙卫和丙安都提供企业终端防护产品']
+        }
+      ],
+      candidate_lists: [{
+        ordered: false,
+        entries: ['乙卫', '丙安'],
+        reason: '回答明确表示两者并列，没有先后',
+        evidence: ['可并列比较']
+      }],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'neutral',
+        reason: '回答未提及目标品牌',
+        evidence: [],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'exhaustive_entities_neutral',
+    input: {
+      question: '园区周界入侵告警方案有哪些品牌可选？',
+      target_brand: '甲盾',
+      answer: '甲盾为华东大学部署了光纤周界方案，系统运行在云舟云；乙卫也提供同类园区周界告警产品。'
+    },
+    output: {
+      entities: [
+        { name: '甲盾', type: 'brand' },
+        { name: '华东大学', type: 'other_organization' },
+        { name: '云舟云', type: 'company' },
+        { name: '乙卫', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '甲盾', surface_forms: ['甲盾'] },
+        { entity_name: '华东大学', surface_forms: ['华东大学'] },
+        { entity_name: '云舟云', surface_forms: ['云舟云'] },
+        { entity_name: '乙卫', surface_forms: ['乙卫'] }
+      ],
+      target_entity_name: '甲盾',
+      competitor_relations: [
+        {
+          entity_name: '华东大学',
+          relation: 'non_competitor',
+          reason: '回答中是方案使用方，不是替代供应商',
+          evidence: ['甲盾为华东大学部署了光纤周界方案']
+        },
+        {
+          entity_name: '云舟云',
+          relation: 'non_competitor',
+          reason: '回答中是承载平台，不是替代供应商',
+          evidence: ['系统运行在云舟云']
+        },
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '在当前问题中提供同类可替代产品',
+          evidence: ['乙卫也提供同类园区周界告警产品']
+        }
+      ],
+      candidate_lists: [],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'neutral',
+        reason: '回答只陈述目标品牌的部署事实，没有表达选择倾向',
+        evidence: ['甲盾为华东大学部署了光纤周界方案'],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'unordered_table_neutral',
+    input: {
+      question: '园区周界入侵告警方案有哪些品牌可选？',
+      target_brand: '甲盾',
+      answer: '| 品牌 | 技术路线 |\n| --- | --- |\n| 甲盾 | 光纤感知 |\n| 乙卫 | 雷达融合 |\n两者都能提供园区周界入侵告警。'
+    },
+    output: {
+      entities: [
+        { name: '甲盾', type: 'brand' },
+        { name: '乙卫', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '甲盾', surface_forms: ['甲盾'] },
+        { entity_name: '乙卫', surface_forms: ['乙卫'] }
+      ],
+      target_entity_name: '甲盾',
+      competitor_relations: [
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '技术路线虽不同，但在当前问题中满足同一购买需求',
+          evidence: ['两者都能提供园区周界入侵告警']
+        }
+      ],
+      candidate_lists: [{
+        ordered: false,
+        entries: ['甲盾', '乙卫'],
+        reason: '表格行序只用于展示并列候选，没有表达排名方向',
+        evidence: ['| 甲盾 | 光纤感知 |', '| 乙卫 | 雷达融合 |']
+      }],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'neutral',
+        reason: '回答客观比较目标品牌的技术路线，没有给出偏好',
+        evidence: ['| 甲盾 | 光纤感知 |'],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'numbered_ordered',
+    input: {
+      question: '园区周界方案品牌如何排序？',
+      target_brand: '甲盾',
+      answer: '按综合适配度从高到低：\n1. 甲盾：项目经验更匹配。\n2. 乙卫：集成能力较强。'
+    },
+    output: {
+      entities: [
+        { name: '甲盾', type: 'brand' },
+        { name: '乙卫', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '甲盾', surface_forms: ['甲盾'] },
+        { entity_name: '乙卫', surface_forms: ['乙卫'] }
+      ],
+      target_entity_name: '甲盾',
+      competitor_relations: [
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '回答将两者放在园区周界方案的同一排序中',
+          evidence: ['按综合适配度从高到低']
+        }
+      ],
+      candidate_lists: [{
+        ordered: true,
+        entries: ['甲盾', '乙卫'],
+        reason: '回答用编号候选清单表达了从高到低的完整次序',
+        evidence: [
+          '按综合适配度从高到低',
+          '1. 甲盾：项目经验更匹配。',
+          '2. 乙卫：集成能力较强。'
+        ]
+      }],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'positive',
+        reason: '回答把目标品牌列在综合适配度第一位并给出匹配理由',
+        evidence: ['1. 甲盾：项目经验更匹配。'],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'preference_set_not_full_rank',
+    input: {
+      question: '园区周界方案有哪些厂家可选？',
+      target_brand: '甲盾',
+      answer: '优先联系甲盾获取方案，同时可对比乙卫、丙安的产品。'
+    },
+    output: {
+      entities: [
+        { name: '甲盾', type: 'brand' },
+        { name: '乙卫', type: 'brand' },
+        { name: '丙安', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '甲盾', surface_forms: ['甲盾'] },
+        { entity_name: '乙卫', surface_forms: ['乙卫'] },
+        { entity_name: '丙安', surface_forms: ['丙安'] }
+      ],
+      target_entity_name: '甲盾',
+      competitor_relations: [
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '回答把乙卫作为同一需求下的对比候选',
+          evidence: ['同时可对比乙卫、丙安']
+        },
+        {
+          entity_name: '丙安',
+          relation: 'competitor',
+          reason: '回答把丙安作为同一需求下的对比候选',
+          evidence: ['同时可对比乙卫、丙安']
+        }
+      ],
+      candidate_lists: [{
+        ordered: false,
+        entries: ['甲盾', '乙卫', '丙安'],
+        reason: '回答只表达甲盾优先以及另外两家可对比，没有给三家分配完整相对名次',
+        evidence: ['优先联系甲盾获取方案', '同时可对比乙卫、丙安']
+      }],
+      recommendations: [{ entity_name: '甲盾', kind: 'explicit' }],
+      claims: [],
+      sentiment: {
+        label: 'positive',
+        reason: '回答明确建议优先联系目标品牌',
+        evidence: ['优先联系甲盾获取方案'],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'multi_group_local_order',
+    input: {
+      question: '感知系统有哪些厂家可选？',
+      target_brand: '甲盾',
+      answer: '第一类：\n1. 乙卫\n2. 丙安\n第二类：\n1. 甲盾\n2. 丁科'
+    },
+    output: {
+      entities: [
+        { name: '乙卫', type: 'brand' },
+        { name: '丙安', type: 'brand' },
+        { name: '甲盾', type: 'brand' },
+        { name: '丁科', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '乙卫', surface_forms: ['乙卫'] },
+        { entity_name: '丙安', surface_forms: ['丙安'] },
+        { entity_name: '甲盾', surface_forms: ['甲盾'] },
+        { entity_name: '丁科', surface_forms: ['丁科'] }
+      ],
+      target_entity_name: '甲盾',
+      competitor_relations: [
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '回答在宽泛问题下把乙卫列为可选厂家',
+          evidence: ['第一类：']
+        },
+        {
+          entity_name: '丙安',
+          relation: 'competitor',
+          reason: '回答在宽泛问题下把丙安列为可选厂家',
+          evidence: ['第一类：']
+        },
+        {
+          entity_name: '丁科',
+          relation: 'competitor',
+          reason: '与目标品牌同属第二类候选厂家',
+          evidence: ['第二类：']
+        }
+      ],
+      candidate_lists: [
+        {
+          ordered: true,
+          entries: ['乙卫', '丙安'],
+          reason: '第一类中的编号候选次序',
+          evidence: ['第一类：', '1. 乙卫', '2. 丙安']
+        },
+        {
+          ordered: true,
+          entries: ['甲盾', '丁科'],
+          reason: '第二类中的编号候选次序；各分组分别记录候选次序，不压平成全局排名',
+          evidence: ['第二类：', '1. 甲盾', '2. 丁科']
+        }
+      ],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'neutral',
+        reason: '回答只把目标品牌列入候选，没有表达选择倾向',
+        evidence: ['1. 甲盾'],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'broad_question_multiple_interpretations',
+    input: {
+      question: '感知电缆有哪些厂家可选？',
+      target_brand: '甲盾',
+      answer: '这个名称常见两种应用。周界探测可选甲盾和乙卫；电力监测可选丙安和丁科。你尚未限定具体应用。'
+    },
+    output: {
+      entities: [
+        { name: '甲盾', type: 'brand' },
+        { name: '乙卫', type: 'brand' },
+        { name: '丙安', type: 'brand' },
+        { name: '丁科', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '甲盾', surface_forms: ['甲盾'] },
+        { entity_name: '乙卫', surface_forms: ['乙卫'] },
+        { entity_name: '丙安', surface_forms: ['丙安'] },
+        { entity_name: '丁科', surface_forms: ['丁科'] }
+      ],
+      target_entity_name: '甲盾',
+      competitor_relations: [
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '与目标品牌同属周界探测候选',
+          evidence: ['周界探测可选甲盾和乙卫']
+        },
+        {
+          entity_name: '丙安',
+          relation: 'competitor',
+          reason: '问题没有限定应用，回答把电力监测解释为同一宽泛购买问题的另一类候选',
+          evidence: ['电力监测可选丙安和丁科']
+        },
+        {
+          entity_name: '丁科',
+          relation: 'competitor',
+          reason: '问题没有限定应用，回答把电力监测解释为同一宽泛购买问题的另一类候选',
+          evidence: ['电力监测可选丙安和丁科']
+        }
+      ],
+      candidate_lists: [
+        {
+          ordered: false,
+          entries: ['甲盾', '乙卫'],
+          reason: '周界探测分组内并列可选',
+          evidence: ['周界探测可选甲盾和乙卫']
+        },
+        {
+          ordered: false,
+          entries: ['丙安', '丁科'],
+          reason: '电力监测分组内并列可选',
+          evidence: ['电力监测可选丙安和丁科']
+        }
+      ],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'neutral',
+        reason: '回答只并列列出目标品牌',
+        evidence: ['周界探测可选甲盾和乙卫'],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'delivery_role_competition',
+    input: {
+      question: '园区周界平台谁能建设和交付？',
+      target_brand: '甲盾',
+      answer: '甲盾提供完整周界平台；乙集成提供系统集成与长期维保，也能承担项目交付；丙研究院参与行业标准研究。'
+    },
+    output: {
+      entities: [
+        { name: '甲盾', type: 'brand' },
+        { name: '乙集成', type: 'company' },
+        { name: '丙研究院', type: 'other_organization' }
+      ],
+      mentions: [
+        { entity_name: '甲盾', surface_forms: ['甲盾'] },
+        { entity_name: '乙集成', surface_forms: ['乙集成'] },
+        { entity_name: '丙研究院', surface_forms: ['丙研究院'] }
+      ],
+      target_entity_name: '甲盾',
+      competitor_relations: [
+        {
+          entity_name: '乙集成',
+          relation: 'competitor',
+          reason: '当前问题询问建设交付方，系统集成和维保能力能满足同一购买需求',
+          evidence: ['乙集成提供系统集成与长期维保，也能承担项目交付']
+        },
+        {
+          entity_name: '丙研究院',
+          relation: 'non_competitor',
+          reason: '回答只说明其参与标准研究，没有独立提供建设交付方案',
+          evidence: ['丙研究院参与行业标准研究']
+        }
+      ],
+      candidate_lists: [],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'neutral',
+        reason: '回答只陈述目标品牌的供给能力',
+        evidence: ['甲盾提供完整周界平台'],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'ordered_positive_alias',
+    input: {
+      question: '园区周界方案品牌如何排序？',
+      target_brand: '上海甲盾科技',
+      target_aliases: ['甲盾'],
+      answer: '综合适配度：首选甲盾（上海甲盾科技），其次乙卫。甲盾的项目经验更匹配本次需求。'
+    },
+    output: {
+      entities: [
+        { name: '上海甲盾科技', type: 'company' },
+        { name: '乙卫', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '上海甲盾科技', surface_forms: ['甲盾', '上海甲盾科技'] },
+        { entity_name: '乙卫', surface_forms: ['乙卫'] }
+      ],
+      target_entity_name: '上海甲盾科技',
+      competitor_relations: [
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '回答把乙卫和目标品牌放入同一方案选择集合',
+          evidence: ['首选甲盾（上海甲盾科技），其次乙卫']
+        }
+      ],
+      candidate_lists: [{
+        ordered: true,
+        entries: ['上海甲盾科技', '乙卫'],
+        reason: '回答表达了明确的首选和其次',
+        evidence: ['首选甲盾（上海甲盾科技），其次乙卫']
+      }],
+      recommendations: [{ entity_name: '上海甲盾科技', kind: 'explicit' }],
+      claims: [],
+      sentiment: {
+        label: 'positive',
+        reason: '回答把目标品牌作为首选并给出匹配理由',
+        evidence: ['甲盾的项目经验更匹配本次需求'],
+        risk_terms: []
+      }
+    }
+  },
+  {
+    focus: 'negative',
+    input: {
+      question: '园区周界方案应该选择甲盾还是乙卫？',
+      target_brand: '甲盾',
+      answer: '甲盾和乙卫都能提供方案，但甲盾在本次需求下稳定性不足，不建议优先选择。'
+    },
+    output: {
+      entities: [
+        { name: '甲盾', type: 'brand' },
+        { name: '乙卫', type: 'brand' }
+      ],
+      mentions: [
+        { entity_name: '甲盾', surface_forms: ['甲盾'] },
+        { entity_name: '乙卫', surface_forms: ['乙卫'] }
+      ],
+      target_entity_name: '甲盾',
+      competitor_relations: [
+        {
+          entity_name: '乙卫',
+          relation: 'competitor',
+          reason: '回答将两者作为当前需求的替代选择',
+          evidence: ['甲盾和乙卫都能提供方案']
+        }
+      ],
+      candidate_lists: [],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'negative',
+        reason: '回答明确降低选择目标品牌的意愿',
+        evidence: ['甲盾在本次需求下稳定性不足，不建议优先选择'],
+        risk_terms: ['稳定性不足']
+      }
+    }
+  }
+]);
 
 class AIResponseAnalysisError extends Error {
   constructor(message, code = 'invalid_analysis_output', details = {}) {
@@ -121,15 +615,82 @@ function boundedString(
   return text;
 }
 
-function normalizeSentiment(value) {
+function buildEvidenceSearchText(value) {
+  const source = String(value || '');
+  const positions = [];
+  let text = '';
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (/[\s*_`#>|~-]/u.test(character)) continue;
+    text += character.toLowerCase();
+    positions.push(index);
+  }
+  return { text, positions };
+}
+
+function locateOriginalEvidence(responseText, submittedEvidence) {
+  const source = String(responseText || '');
+  const submitted = String(submittedEvidence || '').trim();
+  if (source.includes(submitted)) return submitted;
+
+  const haystack = buildEvidenceSearchText(source);
+  const needle = buildEvidenceSearchText(submitted).text;
+  if (!needle) return null;
+  const normalizedStart = haystack.text.indexOf(needle);
+  if (normalizedStart < 0) return null;
+  const sourceStart = haystack.positions[normalizedStart];
+  const sourceEnd = haystack.positions[normalizedStart + needle.length - 1];
+  if (!Number.isInteger(sourceStart) || !Number.isInteger(sourceEnd)) return null;
+  return source.slice(sourceStart, sourceEnd + 1);
+}
+
+function normalizeEvidence(value, responseText, field, { required = true } = {}) {
+  if (!Array.isArray(value)) {
+    throw new AIResponseAnalysisError(`${field} 必须是数组`);
+  }
+  if (value.length > 20) {
+    throw new AIResponseAnalysisError(`${field} 最多返回 20 项`);
+  }
+  const source = String(responseText || '');
+  const seen = new Set();
+  const evidence = [];
+  value.forEach((item, index) => {
+    const text = String(item || '').trim();
+    if (!text) {
+      throw new AIResponseAnalysisError(`${field}[${index}] 不能为空`);
+    }
+    const locatedText = locateOriginalEvidence(source, text);
+    if (!locatedText) return;
+    if (!seen.has(locatedText)) {
+      seen.add(locatedText);
+      evidence.push(locatedText);
+    }
+  });
+  if (required && evidence.length === 0) {
+    const message = value.length
+      ? `${field} 无法在原回答中定位任何证据`
+      : `${field} 至少包含 1 条原文证据`;
+    throw new AIResponseAnalysisError(message);
+  }
+  return evidence;
+}
+
+function normalizeSentiment(value, responseText, targetEntityName) {
   const sentiment = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const label = String(sentiment.label || 'neutral').trim().toLowerCase();
   if (!VALID_SENTIMENTS.has(label)) {
     throw new AIResponseAnalysisError('sentiment.label 不受支持');
   }
+  const targetMentioned = Boolean(targetEntityName);
   return {
     label,
-    reason: boundedString(sentiment.reason, 'sentiment.reason', 120, { required: false }),
+    reason: boundedString(sentiment.reason, 'sentiment.reason', 120),
+    evidence: normalizeEvidence(
+      sentiment.evidence,
+      responseText,
+      'sentiment.evidence',
+      { required: targetMentioned }
+    ),
     risk_terms: (Array.isArray(sentiment.risk_terms) ? sentiment.risk_terms : [])
       .map((item, index) => boundedString(item, `sentiment.risk_terms[${index}]`, 30))
       .filter(Boolean)
@@ -165,6 +726,25 @@ function requireEntity(entityMap, value, field) {
   const entity = entityMap.get(key);
   if (!entity) throw new AIResponseAnalysisError(`${field} 必须引用 entities.name`);
   return entity;
+}
+
+function hasUnclosedAliasBracket(value) {
+  const expectedClosings = {
+    '(': ')',
+    '（': '）',
+    '[': ']',
+    '【': '】'
+  };
+  const stack = [];
+  for (const character of String(value || '')) {
+    const expectedClosing = expectedClosings[character];
+    if (expectedClosing) {
+      stack.push(expectedClosing);
+    } else if (stack.at(-1) === character) {
+      stack.pop();
+    }
+  }
+  return stack.length > 0;
 }
 
 function normalizeMentions(value, responseText, entityMap) {
@@ -251,11 +831,14 @@ function normalizeMentions(value, responseText, entityMap) {
       (surfaceForm) => occurrence.surface_forms.includes(surfaceForm)
     );
     const isAliasSeparator = /^(?:\s*[（(【\[]\s*|\s*\/\s*)$/u.test(separator);
+    const continuesAliasGroup = previous
+      ? hasUnclosedAliasBracket(source.slice(previous.start, occurrence.start))
+      : false;
     if (
       previous
       && compact(previous.entity_name) === compact(occurrence.entity_name)
       && !repeatsSameSurface
-      && isAliasSeparator
+      && (isAliasSeparator || continuesAliasGroup)
     ) {
       previous.surface_forms = [...new Set([
         ...previous.surface_forms,
@@ -280,7 +863,8 @@ function normalizeCompetitorRelations(
   entities,
   targetEntityName,
   entityMap,
-  mentionedEntityKeys
+  mentionedEntityKeys,
+  responseText
 ) {
   if (!Array.isArray(value)) {
     throw new AIResponseAnalysisError(
@@ -333,6 +917,11 @@ function normalizeCompetitorRelations(
         `competitor_relations[${index}].reason`,
         160,
         { code: 'analysis_relation_reason_invalid' }
+      ),
+      evidence: normalizeEvidence(
+        item?.evidence,
+        responseText,
+        `competitor_relations[${index}].evidence`
       )
     };
   });
@@ -342,7 +931,7 @@ function normalizeCompetitorRelations(
   return expected.map((entity) => byEntityName.get(compact(entity.name)));
 }
 
-function normalizeCandidateLists(value, entityMap, mentionedEntityKeys) {
+function normalizeCandidateLists(value, entityMap, mentionedEntityKeys, responseText) {
   if (!Array.isArray(value)) throw new AIResponseAnalysisError('candidate_lists 必须是数组');
   if (value.length > 20) throw new AIResponseAnalysisError('candidate_lists 最多返回 20 项');
   return value.map((item, index) => {
@@ -375,7 +964,20 @@ function normalizeCandidateLists(value, entityMap, mentionedEntityKeys) {
         `candidate_lists[${index}] 有序榜单至少需要 2 个不同实体`
       );
     }
-    return { ordered: item.ordered, entries };
+    return {
+      ordered: item.ordered,
+      entries,
+      reason: boundedString(
+        item?.reason,
+        `candidate_lists[${index}].reason`,
+        160
+      ),
+      evidence: normalizeEvidence(
+        item?.evidence,
+        responseText,
+        `candidate_lists[${index}].evidence`
+      )
+    };
   });
 }
 
@@ -446,43 +1048,54 @@ class AIResponseAnalysisService {
     this.requestService = options.requestService || AIPlatformRequestService;
   }
 
-  buildPrompt({ question, responseText, brand, competitorHints }) {
-    const hints = (Array.isArray(competitorHints) ? competitorHints : [])
-      .map((item) => ({
-        name: String(item?.name || '').trim(),
-        aliases: Array.isArray(item?.aliases)
-          ? item.aliases.map((alias) => String(alias || '').trim()).filter(Boolean)
-          : []
-      }))
-      .filter((item) => item.name);
+  buildPrompt({ question, responseText, brand }) {
+    const analysisInput = {
+      question: String(question || '').trim(),
+      target_brand: String(brand?.name || '').trim(),
+      target_aliases: Array.isArray(brand?.aliases) ? brand.aliases : [],
+      target_industry: String(brand?.industry || '').trim() || null,
+      target_keywords: Array.isArray(brand?.primary_keywords) ? brand.primary_keywords : [],
+      answer: String(responseText || '')
+    };
+    const examples = CHOICE_SET_EXAMPLES.map((example) => [
+      `<example focus="${example.focus}">`,
+      `<input>${JSON.stringify(example.input)}</input>`,
+      `<output>${JSON.stringify(example.output)}</output>`,
+      '</example>'
+    ].join('\n')).join('\n');
+
     return [
-      '你是 GEO 回答结构化器，只把原回答转换为结构化原料，不计算任何指标。',
-      `当前问题：${String(question || '').trim()}`,
-      `目标品牌：${String(brand?.name || '').trim()}`,
-      `品牌别名：${(Array.isArray(brand?.aliases) ? brand.aliases : []).join('、') || '无'}`,
-      `目标品牌行业：${String(brand?.industry || '').trim() || '未提供'}`,
-      `目标品牌关键词：${(Array.isArray(brand?.primary_keywords) ? brand.primary_keywords : []).join('、') || '无'}`,
-      `竞品提示：${hints.length ? JSON.stringify(hints) : '无'}`,
-      '竞品提示只提供名称、别名和业务背景：已配置不等于本回答竞品，未配置也可以是本回答竞品。',
-      '只返回一个 JSON 对象，不要 Markdown。',
+      '<analysis_input>',
+      JSON.stringify(analysisInput, null, 2),
+      '</analysis_input>',
+      '',
+      '<task>',
+      '从买家阅读这条回答的视角，把回答转换为可审查的结构化分析原料；指标由程序另行计算。',
+      '</task>',
+      '',
+      '<analysis_process>',
+      '第一阶段，完整抽取：通读回答全部内容，收录实际出现的品牌、公司和其他具名组织；先不要因为它看起来不像竞品而省略。把同一实体的全称和别名归并，并保留原回答中的实际表述。',
+      '第二阶段，逐一判断竞争关系：对目标实体之外的每个实体，结合当前问题表达的购买或选择需求，判断买家是否可能把它当作目标品牌的替代选择。以买家问题实际限定的范围为准；问题宽泛且回答给出多个合理应用解释时，各解释下的供应商仍是这次购买问题的候选，不要替买家擅自缩窄需求。问建设或交付方时，能承担集成、实施或维保交付的企业也可能是竞品；只参与研究、标准、采购或合作的组织不是。实体类型本身不决定竞争关系。',
+      '第三阶段，独立判断候选顺序：识别回答中的同一候选集合，并判断作者是否表达了相对先后。编号候选清单如果用于组织可比较候选项，就是作者给出的显式次序；编号若只是章节或步骤则不是排名。存在多个类别时，各分组分别记录候选次序，目标排名是目标所在分组内的位置，不能压平成全局次序。不同分组、层级标题、核心厂家与其他备选不能合并成一个全局候选次序；“优先考虑一个、同时对比其他”只表达推荐偏好，不等于给全部候选分配完整名次。普通正文提及顺序、无序项目符号、并列集合和表格行序本身不代表排名；表格只有明确写出排名、名次或比较方向时才是有序候选集合。',
+      '第四阶段，判断目标品牌的整体选择倾向：positive 表示回答整体增加选择目标品牌的理由或意愿；neutral 表示主要陈述事实或正反平衡、没有明显选择方向；negative 表示整体降低选择意愿。局部词语不能脱离完整语境决定标签。',
+      '第五阶段，输出前静默复核：重新检查是否扫描了全部段落、是否遗漏实体或关系、候选集合是否完整、所有证据是否来自原回答、所有实体引用是否一致。不要输出复核过程。',
+      '</analysis_process>',
+      '',
+      '<examples>',
+      examples,
+      '</examples>',
+      '',
+      '<output_contract>',
+      '只输出一个 JSON 对象，不要输出 Markdown。',
       `JSON 输出骨架（按需填充数组）：${JSON.stringify(JSON_OUTPUT_SKELETON)}`,
-      'entities：列出回答中出现的全部品牌或公司实体，不限于目标品牌和已配置竞品；每项只含 name、type(brand|company)。',
-      'mentions：为每个实体列出原回答实际出现过的不同短名称或别名；每项只含 entity_name 和 surface_forms。',
-      '每个 entities 项都必须至少有一个 mentions 项；不要返回无法用原回答短实体词定位的 entity。',
-      '相同 surface form 不必按出现次数重复返回，也不必负责提及顺序；程序会用 surface_forms 扫描原回答并计算次数和顺序。',
-      'surface_forms 只能放原回答实际出现的短实体词，不要复制完整句子；不要人为限制 surface_forms 数量。',
-      'target_entity_name：判断 entities 中哪一项对应目标品牌；必须精确引用 entities.name，目标品牌未出现时返回 null。不要让程序再按名称相似度猜测。',
-      'competitor_relations：目标实体之外的每个 entities 项都必须恰好返回一项；entity_name 精确引用 entities.name，relation 只能是 competitor 或 non_competitor，并提供非空 reason。',
-      '即使 target_entity_name 为 null，也必须判断全部 entities：此时 competitor_relations 长度必须等于 entities 长度，不得返回空数组；目标实体非 null 时，长度必须等于 entities 长度减 1。',
-      'competitor 表示该实体在当前问题和回答场景中能满足与目标品牌相同需求、可作为替代选择；客户、合作方、平台和机构等不可替代实体必须是 non_competitor。',
-      'candidate_lists：抽取同一候选列表，entries 按回答顺序引用 entities.name 且不能重复；只有回答有明确序号或名次、并至少包含 2 个不同实体时 ordered=true，普通项目符号、单项列表或正文顺序为 false；无法精确引用 entities.name 时就省略该项。',
-      'recommendations：只抽取明确建议、首选、优先或明确认可的品牌/公司；每项只含 entity_name、kind，kind 固定为 explicit；普通列举不算推荐。',
-      'claims：抽取回答对品牌/公司的事实性声称，每项只含 subject_name、predicate、value、qualifier；无法精确引用 entities.name 时就省略该项；这只是待核验声明，不代表事实正确。',
-      'sentiment：只判断目标品牌，返回 label(positive|neutral|negative)、reason、risk_terms。',
-      '所有 entity_name、subject_name 和 entries 都必须精确引用 entities.name。',
-      '不要返回 mention_count、recommended、rank、比例、分数、SOV 或任何汇总指标；程序会根据原回答扫描结果、数组关系和候选顺序统一计算。',
-      '不要返回引用数量、来源 URL 或官网判断；引用由系统直接解析监测平台原始响应，避免模型猜测。',
-      `原回答：\n${String(responseText || '')}`
+      `字段形状（示例文本说明字段含义，不要原样复制）：${JSON.stringify(EXPECTED_OUTPUT)}`,
+      'entities 收录回答中出现的品牌、公司和其他具名组织；mentions 的 entity_name 引用 entities.name，surface_forms 保留回答中实际出现的短实体词。',
+      'target_entity_name 引用目标品牌对应的 entities.name，未出现则为 null；competitor_relations 覆盖目标实体之外的全部 entities，并给出 competitor 或 non_competitor、简短理由及原文 evidence。',
+      'candidate_lists 记录同一候选集合及作者表达的顺序；ordered 由回答语义决定，reason 和 evidence 说明判断依据。recommendations 只记录回答明确建议的实体，kind 为 explicit。',
+      'claims 记录回答中的品牌事实性声称；sentiment 只评价目标品牌，label 为 positive、neutral 或 negative，并提供目标品牌相关 evidence。目标品牌未出现时使用 neutral 作为传输占位，evidence 为空数组。',
+      'evidence 中的每条文本必须能在待分析回答中精确定位，不要改写、概括或补充回答没有说过的内容。',
+      '所有关系字段中的实体名称引用 entities.name。不要输出提及次数、排序、比例、分数、SOV、引用数量或来源 URL。',
+      '</output_contract>'
     ].join('\n');
   }
 
@@ -530,11 +1143,11 @@ class AIResponseAnalysisService {
           aliases: ['{{品牌别名}}'],
           industry: '{{目标品牌行业}}',
           primary_keywords: ['{{目标品牌关键词}}']
-        },
-        competitorHints: [{ name: '{{竞品提示}}' }]
+        }
       }),
       runtime_fields: [...PROMPT_RUNTIME_FIELDS],
       expected_output: EXPECTED_OUTPUT,
+      prompt_revision: PROMPT_REVISION,
       request_profile: { ...ANALYSIS_REQUEST_PROFILE },
       request_parameters: platform ? this.buildRequestParameters(platform) : null
     };
@@ -582,12 +1195,14 @@ class AIResponseAnalysisService {
         entities,
         targetEntityName,
         entityMap,
-        mentionedEntityKeys
+        mentionedEntityKeys,
+        context.responseText
       ),
       candidate_lists: normalizeCandidateLists(
         parsed.candidate_lists,
         entityMap,
-        mentionedEntityKeys
+        mentionedEntityKeys,
+        context.responseText
       ),
       recommendations: normalizeRecommendations(
         parsed.recommendations,
@@ -595,9 +1210,28 @@ class AIResponseAnalysisService {
         mentionedEntityKeys
       ),
       claims: normalizeClaims(parsed.claims ?? [], entityMap),
-      sentiment: normalizeSentiment(parsed.sentiment)
+      sentiment: normalizeSentiment(
+        parsed.sentiment,
+        context.responseText,
+        targetEntityName
+      )
     };
     return structured;
+  }
+
+  recalculateFromStructure(structured, responseText) {
+    const entities = normalizeEntities(structured?.entities);
+    const entityMap = buildEntityMap(entities);
+    const mentions = normalizeMentions(
+      structured?.mentions,
+      responseText,
+      entityMap
+    );
+    return this.calculate({
+      ...structured,
+      entities,
+      mentions
+    });
   }
 
   calculate(structured) {
@@ -620,6 +1254,7 @@ class AIResponseAnalysisService {
         name: entity.name,
         relation: relation.relation,
         reason: relation.reason,
+        evidence: relation.evidence,
         mentions: observation.mentions,
         surface_forms: observation.surface_forms
       };
@@ -650,7 +1285,10 @@ class AIResponseAnalysisService {
   }
 
   buildAnalysisRequestOptions(platform) {
-    const options = { temperature: ANALYSIS_REQUEST_PROFILE.temperature };
+    const deepseekHighThinking = platform?.code === 'deepseek';
+    const options = deepseekHighThinking
+      ? {}
+      : { temperature: DEFAULT_TEMPERATURE };
     if (platform?.adapter_type === 'openai_chat_completions') {
       options.response_format = { type: 'json_object' };
     }
@@ -658,7 +1296,8 @@ class AIResponseAnalysisService {
       options.reasoning = { effort: 'none' };
     }
     if (platform?.code === 'deepseek') {
-      options.thinking = { type: 'disabled' };
+      options.thinking = { type: 'enabled' };
+      options.reasoning_effort = 'high';
     }
     return options;
   }
@@ -708,7 +1347,6 @@ class AIResponseAnalysisService {
     question,
     responseText,
     brand,
-    competitorHints,
     includeRawOutput = false
   }) {
     const normalizedQuestion = String(question || '').trim();
@@ -720,12 +1358,10 @@ class AIResponseAnalysisService {
       );
     }
     const platform = await this.configService.getAnalysisPlatform();
-    const hints = Array.isArray(competitorHints) ? competitorHints : [];
     const basePrompt = this.buildPrompt({
       question: normalizedQuestion,
       responseText: normalizedResponseText,
-      brand,
-      competitorHints: hints
+      brand
     });
     let lastError = null;
     let lastInvalidOutput = '';
@@ -740,7 +1376,8 @@ class AIResponseAnalysisService {
           `具体错误：${lastError?.message || '结构无效'}`,
           '上一次无效输出：',
           lastInvalidOutput,
-          '请只修正结构问题，不改变对原回答的语义判断；重新输出一份完整、合法且严格符合约束的 JSON 对象，不要输出解释或 Markdown。'
+          '请重新通读当前问题和完整回答，根据校验错误重新审阅实体、关系、候选顺序、情绪和原文证据。',
+          '不要复用无法在原回答定位的内容；重新输出一份完整、合法且严格符合 v4 契约的 JSON 对象，不要输出解释或 Markdown。'
         ].join('\n');
       const connection = await this.requestService.queryConfig(
         platform,
@@ -775,9 +1412,15 @@ class AIResponseAnalysisService {
           responseText: normalizedResponseText,
           brand
         });
+        const calculated = this.calculate(structured);
         const result = {
-          ...this.calculate(structured),
+          ...calculated,
+          analysis_structure: {
+            ...calculated.analysis_structure,
+            prompt_revision: PROMPT_REVISION
+          },
           analysis_method: ANALYSIS_METHOD,
+          analysis_prompt_revision: PROMPT_REVISION,
           analysis_platform: platform.code,
           analysis_model: platform.default_model,
           analysis_attempts: attempt

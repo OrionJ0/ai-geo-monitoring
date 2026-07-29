@@ -55,6 +55,7 @@ function webPlatformErrorMessage(result) {
     web_login_required: `${name}需要重新人工登录`,
     web_verification_required: `${name}需要人工完成验证`,
     web_selector_mismatch: `${name}页面结构暂不受支持`,
+    web_capture_mode_unverified: `无法确认 ${name}普通模式`,
     web_search_state_unverified: `无法确认 ${name}联网搜索已开启`,
     web_generation_timeout: `等待 ${name}最终回答超时`,
     web_response_too_large: `${name}回答超过保存上限`,
@@ -161,6 +162,36 @@ function skippedPlatformMessage(item) {
     web_shutdown: `${name}服务正在关闭`
   };
   return messages[item?.reason] || `${name}暂不可用`;
+}
+
+function buildWebPreflightFailure(availability) {
+  const blockedPlatforms = (Array.isArray(availability) ? availability : [])
+    .filter((item) => (
+      WebPlatformRegistry.hasDefinition(item.code)
+      && !item.available
+      && (
+        String(item.reason || '').startsWith('web_')
+        || item.reason === 'managed_config_invalid'
+      )
+    ))
+    .map((item) => ({
+      platform: item.code,
+      name: item.platform_name,
+      reason_code: item.reason,
+      message: skippedPlatformMessage(item)
+    }));
+  if (!blockedPlatforms.length) return null;
+  return {
+    ok: false,
+    status: 409,
+    message: `${blockedPlatforms.map((item) => item.message).join('；')}，本次运行未创建任务。`,
+    data: {
+      error_code: 'web_platform_preflight_failed',
+      settings_url: '/admin/settings',
+      blocked_platforms: blockedPlatforms,
+      skipped_platforms: []
+    }
+  };
 }
 
 function countKeywordOccurrences(text, keywords) {
@@ -331,6 +362,40 @@ function normalizeProviderCitations(value) {
     .filter(Boolean);
 }
 
+function isHttpProviderCitation(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
+function extractIndexedChatCitations(aiResponse) {
+  return (Array.isArray(aiResponse?.choices) ? aiResponse.choices : [])
+    .flatMap((choice) => {
+      const message = choice?.message;
+      const content = String(message?.content || '');
+      const citedIndexes = new Set(
+        Array.from(content.matchAll(/\[(\d+)\]/gu))
+          .map((match) => Number(match[1]))
+          .filter((index) => Number.isSafeInteger(index) && index > 0)
+      );
+      if (!citedIndexes.size || !Array.isArray(message?.search_results)) return [];
+      return message.search_results
+        .filter((source) => (
+          citedIndexes.has(Number(source?.index))
+          && isHttpProviderCitation(source?.url)
+        ))
+        .map((source) => ({
+          ...(source?.url ? { url: source.url } : {}),
+          ...(source?.name ? { title: source.name } : {}),
+          source_role: CitationAnalysisService.SOURCE_ROLES.explicit,
+          source_origin: 'citation_metadata'
+        }));
+    });
+}
+
 class ProjectRunService {
   constructor(options = {}) {
     this.activeRecordIds = new Set();
@@ -419,7 +484,10 @@ class ProjectRunService {
   }
 
   snapshotProviderCitations(aiResponse) {
-    return normalizeProviderCitations(CitationAnalysisService.collectMetadataSources(aiResponse));
+    return normalizeProviderCitations([
+      ...CitationAnalysisService.collectMetadataSources(aiResponse),
+      ...extractIndexedChatCitations(aiResponse)
+    ]);
   }
 
   buildCitationAnalysis({
@@ -463,8 +531,7 @@ class ProjectRunService {
     const analysis = await AIResponseAnalysisService.analyze({
       question: String(prompt?.question || record?.question || '').trim(),
       responseText,
-      brand: projectData,
-      competitorHints: competitorData
+      brand: projectData
     });
     const citationAnalysis = providedCitationAnalysis || this.buildCitationAnalysis({
       responseText,
@@ -1249,7 +1316,12 @@ class ProjectRunService {
 
     const candidateTargets = this.buildPromptTargets(enabledPrompts, projectPlatforms, projectPlatforms);
     const candidateCodes = normalizePlatformCodes(candidateTargets.map((target) => target.platform));
-    const availability = await AIPlatformService.getPlatformAvailability(candidateCodes);
+    const availability = await AIPlatformService.getPlatformAvailability(
+      candidateCodes,
+      { forceRuntimeProbe: true }
+    );
+    const webPreflightFailure = buildWebPreflightFailure(availability);
+    if (webPreflightFailure) return webPreflightFailure;
     const availabilityByCode = new Map(availability.map((item) => [item.code, item]));
     const targets = candidateTargets
       .filter((target) => availabilityByCode.get(target.platform)?.available)
@@ -1914,7 +1986,18 @@ class ProjectRunService {
       && !projectPlatformSet.has(String(record.platform || '').trim().toLowerCase())
     ));
     const platformCodes = normalizePlatformCodes(monitoringCandidates.map((record) => record.platform));
-    const availability = await AIPlatformService.getPlatformAvailability(platformCodes);
+    const availability = await AIPlatformService.getPlatformAvailability(
+      platformCodes,
+      { forceRuntimeProbe: true }
+    );
+    const webPreflightFailure = buildWebPreflightFailure(availability);
+    if (webPreflightFailure) {
+      throw runError(
+        webPreflightFailure.message,
+        webPreflightFailure.status,
+        webPreflightFailure.data
+      );
+    }
     const availabilityByCode = new Map(availability.map((item) => [item.code, item]));
     const retryableMonitoringIds = new Set(
       monitoringCandidates

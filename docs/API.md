@@ -80,7 +80,7 @@ Authorization: Bearer <token>
 
 ### 当前 GEO 指标契约
 
-- 新运行的 `analysis_contract_version` 固定为 `ai_structured_v3`，结构版本为 `geo_metric_input_v3`，`metric_semantics_version` 固定为 `contextual_competitor_mentions_sov_v1`。
+- 新运行的 `analysis_contract_version` 固定为 `ai_structured_v4`，结构版本为 `geo_metric_input_v4`，`metric_semantics_version` 固定为 `contextual_competitor_mentions_sov_v1`。v4 的竞争关系、候选顺序和目标品牌情绪均保留可定位的原文证据；v3 及更早记录只按已存历史结构读取。
 - 单条 `sov` 是判别联合：`status=calculated` 时提供 `value`、`numerator` 和 `denominator`；目标品牌与竞品均未提及时返回 `status=not_applicable`、`value=null` 和 `0/0`。
 - 聚合 `sov_summary.average` 是可计算单回答 SOV 的等权平均，`calculable_answers` 是参与平均的回答数。分析失败不进入品牌指标，只进入 `analysis_coverage_rate`。
 - 当前接口不会为新记录返回无版本含义的旧 SOV 标量。历史运行和历史快照继续按已存版本展示原值与“历史竞品配置口径”，不参与新版聚合。

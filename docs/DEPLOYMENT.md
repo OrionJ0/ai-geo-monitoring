@@ -117,7 +117,7 @@ server {
 - 存活检查：`GET https://<你的域名>/api/health`，只表示 HTTP 进程存活。
 - 就绪检查：`GET https://<你的域名>/api/ready`。只有返回 `200` 且 `status=ready` 才能接入流量；SQLite 部署还必须显示 `journal_mode=wal`、`busy_timeout_ms>=5000`、`synchronous=normal`，并确认 scheduler 已启动且首次 recovery 无错误。
 - 问题集可靠性迁移前先生成可恢复的数据库备份并执行 `PRAGMA quick_check`；迁移后运行 `cd backend && npm run audit:run-ownership`，确认新运行无悬空归属、重复槽位或完整性错误。未完成生产迁移和回滚确认时不得把需求标记为已关闭。
-- AI 平台配置：管理员登录 `/admin/settings`，人工填写 API Key 和供应商明确支持的模型请求参数，再分别执行“测试连接”和“检测联网能力”
+- AI 平台配置：管理员登录 `/admin/settings`，人工填写 API Key 和供应商明确支持的模型请求参数，再分别执行“测试连接”和“检测联网能力”。腾讯混元还需先在 TokenHub“工具管理”领取联网搜索免费资源包或开通后付费；普通对话成功但没有 `search_results` 时仍是“证据不足”
 - 登录验证：使用默认管理员登录并立即修改密码（见下方安全建议）
 
 ## 安全与合规建议
@@ -141,7 +141,7 @@ server {
 
 ## 常见问题排查
 - API Key 未配置：管理员进入 `/admin/settings` 的“AI 平台”页签人工填写；平台配置不会从 `.env` 导入
-- 联网能力显示“证据不足”：说明模型调用成功，但供应商协议没有返回可验证的搜索证据，或当前没有配置官方强制联网参数；不要据此擅自复制其他平台参数
+- 联网能力显示“证据不足”：说明模型调用成功，但供应商协议没有返回可验证的搜索证据，或当前没有配置官方强制联网参数；腾讯混元应检查 TokenHub“工具管理”的联网搜索资源，其他平台不要据此擅自复制混元参数
 - 429/网络错误：后端已包含重试与代理支持，设置 `HTTPS_PROXY`/`HTTP_PROXY` 即可
 - SSE 推流中断：检查 Nginx `proxy_buffering off` 与 `proxy_read_timeout` 配置
 - CORS 错误：同机部署先确认 `API_BASE_URL=http://127.0.0.1:3002`；分域或容器代理再检查 `ALLOWED_ORIGINS`

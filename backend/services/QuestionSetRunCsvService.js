@@ -343,7 +343,12 @@ function parseCitationSources(value, column, line) {
   return sources;
 }
 
-function parseCompetitionEntities(value, column, line) {
+function parseCompetitionEntities(
+  value,
+  column,
+  line,
+  { requireEvidence = false, answer = '' } = {}
+) {
   const entities = parseObjectArray(value, column, line);
   const seen = new Set();
   entities.forEach((entity) => {
@@ -352,6 +357,16 @@ function parseCompetitionEntities(value, column, line) {
     const reason = String(entity.reason || '').replace(/\s+/gu, ' ').trim();
     const mentions = Number(entity.mentions);
     const key = name.toLowerCase();
+    const evidence = entity.evidence;
+    const validEvidence = (
+      Array.isArray(evidence)
+      && evidence.length > 0
+      && evidence.every((item) => (
+        typeof item === 'string'
+        && item.trim()
+        && String(answer).includes(item.trim())
+      ))
+    );
     if (
       !name
       || name.length > 120
@@ -361,6 +376,7 @@ function parseCompetitionEntities(value, column, line) {
       || mentions < 1
       || !reason
       || reason.length > 160
+      || (requireEvidence && !validEvidence)
       || (
         entity.surface_forms !== undefined
         && (
@@ -558,7 +574,11 @@ function parseCsv(csv) {
       ? parseCompetitionEntities(
           valueAt(row, 'competition_entities_json'),
           'competition_entities_json',
-          line
+          line,
+          {
+            requireEvidence: currentAnalysisContractVersion === 'ai_structured_v4',
+            answer: valueAt(row, 'answer')
+          }
         )
       : [];
     if (currentMetricSemanticsVersion === CURRENT_METRIC_SEMANTICS) {

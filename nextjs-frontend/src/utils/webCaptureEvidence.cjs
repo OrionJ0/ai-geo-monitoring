@@ -79,8 +79,15 @@ function buildWebCaptureEvidence(row) {
   const fallbackRecordId = positiveInteger(row.record_id ?? row.id);
   const recordId = positiveInteger(capture.artifact_owner_record_id) || fallbackRecordId;
   if (!recordId) return null;
+  const isDoubaoStandard = row.platform === 'doubao-web'
+    && bounded(capture.capture_mode?.name, 40) === 'standard';
   const artifacts = [
-    normalizeArtifact(capture, 'search_state', '联网搜索状态', recordId),
+    normalizeArtifact(
+      capture,
+      'search_state',
+      isDoubaoStandard ? '普通模式状态' : '联网搜索状态',
+      recordId
+    ),
     normalizeArtifact(capture, 'final_answer', '最终回答页面', recordId)
   ];
   if (artifacts.some((artifact) => !artifact)) return null;
@@ -88,17 +95,33 @@ function buildWebCaptureEvidence(row) {
   const providerCitations = row.provider_citations
     || row.resultDetail?.provider_citations
     || [];
+  const explicitCitations = normalizeCitations(providerCitations, 'explicit_citation');
+  const retrievalCandidates = normalizeCitations(providerCitations, 'retrieval_candidate');
+  const rawSearchObserved = capture.search?.observed;
+  const searchObserved = rawSearchObserved === true
+    ? true
+    : rawSearchObserved === false
+      ? false
+      : retrievalCandidates.length > 0
+        ? true
+        : null;
   return {
     recordId,
     platformName: row.platform === 'doubao-web' ? '豆包 Web' : 'DeepSeek Web',
     modelName: bounded(row.model_name, 255),
     capturedAt: bounded(capture.captured_at || capture.completed_at, 80),
     selectorVersion: bounded(capture.selector_version, 100),
+    captureMode: bounded(capture.capture_mode?.name, 40),
     searchRequested: capture.search?.requested === true,
-    searchObserved: capture.search?.observed === true,
-    searchEvidenceType: bounded(capture.search?.evidence_type, 100),
-    explicitCitations: normalizeCitations(providerCitations, 'explicit_citation'),
-    retrievalCandidates: normalizeCitations(providerCitations, 'retrieval_candidate'),
+    searchObserved,
+    searchEvidenceType: bounded(
+      searchObserved === true && rawSearchObserved == null
+        ? 'network_retrieval_candidates'
+        : capture.search?.evidence_type,
+      100
+    ),
+    explicitCitations,
+    retrievalCandidates,
     artifacts
   };
 }

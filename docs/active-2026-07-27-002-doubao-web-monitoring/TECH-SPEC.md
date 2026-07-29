@@ -12,7 +12,7 @@ scope: deep
 
 ## 1. 背景与目标
 
-本方案为市场部现有 GEO 监测流程新增托管平台 `doubao-web`，在目标虚拟机的真实豆包网页中完成新会话、强制联网搜索、回答与引用采集、截图留证，并复用现有单问题、问题集、失败重试、自动监测、分析、历史、报告和导出链路。
+本方案为市场部现有 GEO 监测流程新增托管平台 `doubao-web`，在运行后端机器的真实豆包网页中使用普通模式完成新会话、回答与引用采集、截图留证，并复用现有单问题、问题集、失败重试、自动监测、分析、历史、报告和导出链路。豆包普通模式自带联网搜索，正式采集不得开启“深入研究”。
 
 当前 DeepSeek Web 已具备可运行的网页采集链路，但浏览器生命周期、平台路由、证据存储、运行状态和登录脚本都直接绑定 `deepseek-web`。直接复制整套服务会形成两份难以同步的运行时、清理和关机逻辑，也会让正式调用方继续依赖 DeepSeek 单例。
 
@@ -22,7 +22,7 @@ scope: deep
 - DeepSeek Web 和豆包 Web 各自拥有独立账号、Profile、浏览器、FIFO、熔断状态和证据目录。
 - 使用平台注册表统一解析受管 Web 平台，消除正式调用链中的平台判断分支。
 - 豆包页面行为由独立 Adapter 和版本化页面规则实现。
-- 联网搜索状态无法验证时失败关闭，并保证问题尚未发送。
+- 普通模式无法验证或残留“深入研究”无法关闭时失败关闭，并保证问题尚未发送。
 - 保持现有 `deepseek-web` 外部接口、配置身份、历史数据和运行语义兼容。
 - 通过真实用户入口证明 `doubao-web` 走网页采集路径，任何失败均不调用 `doubao` API。
 
@@ -33,7 +33,7 @@ scope: deep
 - 受管 Web 平台注册表和可实例化运行内核。
 - `doubao-web` 内置平台、能力声明、默认启用预置和配置保护。
 - 豆包专用环境变量、Profile、证据目录、Chrome 会话和 Profile 锁。
-- 豆包页面登录预检、新会话、联网搜索、回答完成、引用和截图采集。
+- 豆包页面登录预检、新会话、普通模式、回答完成、引用和截图采集。
 - 单问题、问题集、失败重试、项目自动监测的正式接入。
 - 双 Web 独立 FIFO、跨平台并行、状态 API 和前端状态展示。
 - 多证据目录的访问、删除、启动恢复和异常证据回收。
@@ -144,9 +144,9 @@ scope: deep
 - REQ-001：注册内置平台 `doubao-web`，与 `doubao` API 永久分离。
 - REQ-002：新初始化的 `doubao-web` 默认启用且标记为内置预置，不配置 API Key，不具备分析、模型目录、连接测试和旧入口能力；已有数据库的启停值不被预置同步覆盖。
 - REQ-003：每条豆包 Web 问题必须创建新会话。
-- REQ-004：每次发送前必须主动启用并读取页面状态确认联网搜索已开启。
-- REQ-005：联网搜索状态不确定时必须在发送前失败。
-- REQ-006：成功结果必须包含最终正文、联网状态证据、最终截图和有界采集信息。
+- REQ-004：每次发送前必须读取页面状态确认“深入研究”未开启；若存在唯一明确的残留选中态，只允许关闭一次。
+- REQ-005：普通模式状态不确定时必须在发送前失败。
+- REQ-006：成功结果必须包含最终正文、普通模式证据、最终截图和有界采集信息。
 - REQ-007：页面平台引用进入引用 KPI；普通正文链接和检索候选不进入。
 - REQ-008：无平台引用是合法成功结果，引用数量为 `0`。
 - REQ-009：豆包 Web 使用独立 Profile、证据目录、Chrome、FIFO、预检缓存和熔断状态。
@@ -280,7 +280,7 @@ responseTime
 - `assertReady`
 - `startNewConversation`
 - `getConversationSnapshot`
-- `ensureSearchEnabled`
+- `verifyCaptureMode`
 - `captureScreenshot`
 - `insertPrompt`
 - `sendPrompt`
@@ -294,8 +294,8 @@ responseTime
 capture_started
 → session_ready_checked
 → new_conversation_verified
-→ search_enabled_verified
-→ search_evidence_saved
+→ capture_mode_verified
+→ capture_mode_evidence_saved
 → prompt_inserted
 → prompt_sent
 → generation_finished
@@ -310,7 +310,7 @@ capture_started
 
 - 当前页面必须位于 `allowedOrigins`。
 - 新会话必须没有旧回答区域。
-- 搜索控件必须唯一，并能读取确定的开启状态。
+- 豆包必须确认“深入研究”未选中；存在唯一残留选中态时只关闭一次，不能主动开启。
 - 当前回答必须是发送后唯一新增的回答。
 - 回答必须非空、生成停止、页面非 busy 且连续稳定。
 - 引用 URL 只允许 HTTP/HTTPS，去除 fragment 并限制长度和数量。
@@ -329,11 +329,14 @@ DeepSeek Adapter 迁移到同一状态机后，现有 DeepSeek 行为和测试�
 - `web_capture.selector_version`: 由技术侦察确认后的版本化值
 - `web_capture.status`: `completed`
 - `web_capture.page_url`: 豆包允许源站内的当前会话 URL
-- `web_capture.search.requested`: `true`
-- `web_capture.search.observed`: `true`
-- `web_capture.search.evidence_type`: 有界状态证明类型
+- `web_capture.capture_mode.name`: `standard`
+- `web_capture.capture_mode.observed`: `true`
+- `web_capture.search.requested`: `false`
+- `web_capture.search.observed`: 初始为 `null`；若本次网络观测取得检索候选则保存为 `true`
+- `web_capture.search.evidence_type`: 普通模式本身为 `dom_standard_mode`；实际取得检索候选时为 `network_retrieval_candidates`
+- `web_capture.search.evidence_type`: `dom_standard_mode`
 - `web_capture.completion.state`: `stable`
-- `web_capture.artifacts.search_state`: 联网状态截图引用
+- `web_capture.artifacts.search_state`: 采集模式截图引用（字段名为兼容既有证据合同保留）
 - `web_capture.artifacts.final_answer`: 最终回答截图引用
 
 `provider_citations` 只包含：
@@ -501,7 +504,7 @@ last_verified_at
 - Profile 和证据目录必须不同。
 - 两个平台的 Profile、证据目录不能相等、互相包含或指向日常 Chrome。
 - 豆包变量不得读取 `DEEPSEEK_WEB_*` 作为 fallback。
-- 超时继续限制为 30–600 秒。
+- 超时限制为 30–600 秒；豆包普通模式默认 600 秒，并从问题发送后开始计算。真实入口曾证明普通模式联网搜索超过 180 秒仍未返回，因此不能沿用 DeepSeek 的三分钟默认值。
 
 ### 5.11 多证据目录协调
 
@@ -547,6 +550,7 @@ last_verified_at
 - `web_login_required`
 - `web_verification_required`
 - `web_selector_mismatch`
+- `web_capture_mode_unverified`
 - `web_search_state_unverified`
 - `web_generation_timeout`
 - `web_browser_unresponsive`
@@ -577,7 +581,7 @@ last_verified_at
 - KTD-003：保留 `deepseek_web`，新增 `doubao_web`。不迁移现有 adapter type，降低历史配置和前端兼容风险。
 - KTD-004：使用参数化状态 URL，但保持 DeepSeek 原 URL 和 schema。新能力是增量扩展，不要求现有消费者升级。
 - KTD-005：页面 DOM 和可见状态是豆包采集主证据。不依赖未公开接口；第一版检索候选只来自页面可验证内容。
-- KTD-006：联网搜索采用失败关闭。点击动作不是成功证据，只有点击后读取到唯一、确定的开启状态才能发送问题。
+- KTD-006：豆包普通模式采用失败关闭。系统不得主动开启“深入研究”；若发现唯一、明确的残留选中态，只关闭一次并再次观测，只有确认普通模式后才能发送问题。DeepSeek Web 仍按自身合同启用并验证“智能搜索”。
 - KTD-007：通用采集状态机只依赖页面接口。DeepSeek 和豆包 Page 分别实现 DOM 细节，禁止在通用内核中出现平台选择器。
 - KTD-008：证据根据记录平台路由，删除操作跨 Store 协调。不能继续把所有 artifact id 交给 DeepSeek 单例。
 - KTD-009：跨平台允许并行，单平台保持串行。每个实例有自己的 Promise tail 和 Profile lock，不增加全局 Web 锁。
@@ -589,7 +593,7 @@ last_verified_at
 
 **目标：**
 
-在目标虚拟机已授权账号中确认豆包官方入口、允许源站、新会话、输入区、联网搜索、回答完成、引用区域和登录/验证状态，并测量双有头 Chrome 的基础资源占用。
+在已授权账号中确认豆包官方入口、允许源站、新会话、输入区、普通模式、回答完成、引用区域和登录/验证状态；目标虚拟机资源基线属于后续独立验收。
 
 **依赖：**
 
@@ -603,7 +607,7 @@ last_verified_at
 **方案：**
 
 - 仅记录脱敏后的页面语义、属性组合、URL 范围和状态截图，不记录 Cookie、Token、账号标识或完整页面存档。
-- 覆盖搜索关闭、搜索开启、有引用、无引用、长回答、登录失效和人工验证。
+- 覆盖普通模式、残留“深入研究”关闭、有引用、无引用、长回答、登录失效和人工验证。
 - 确认引用 href 是目标 URL 还是重定向 URL，并定义规范化规则。
 - 同时启动 DeepSeek 与豆包专用 Chrome，记录空闲和各自运行时 CPU、内存及交互稳定性。
 - 侦察结论回填正式 `doubaoWebSelectors` 和目标虚拟机资源验收阈值，不扩大产品范围。
@@ -722,7 +726,7 @@ U1、U2。
 
 **目标：**
 
-从问题库单问题正式入口完成一次豆包新会话、强制联网搜索、最终回答、引用和截图采集。
+从问题库单问题正式入口完成一次豆包普通模式新会话、最终回答、引用和截图采集。
 
 **依赖：**
 
@@ -849,7 +853,7 @@ U4、U5。
 **测试场景：**
 
 - 问题集包含豆包 API、豆包 Web 和 DeepSeek Web 时各自保存平台身份。
-- 豆包 Web 不可用时其他平台继续运行。
+- 任一所选 Web 平台不可用时整次运行不创建任务或消费配额；API 不作为跳过 Web 后的继续路径。
 - 同一幂等键不重复创建记录和扣配额。
 - 分析重试不产生第二次豆包 Web 页面发送。
 - 自动监测实际调用豆包 Adapter。
@@ -1013,7 +1017,7 @@ U1–U7。
 - 自动化测试输出。
 - 前端生产构建结果。
 - 真实运行报告 ID 和平台字段。
-- 联网状态及最终回答截图。
+- 普通模式及最终回答截图。
 - 两个队列的运行时间区间和状态 API 快照。
 - 目标虚拟机 CPU、内存和 Chrome 进程记录。
 - 代码搜索证明不存在豆包 Web → 豆包 API fallback、旧单例正式引用和旧登录脚本。
@@ -1023,14 +1027,14 @@ U1–U7。
 - 风险：豆包页面 DOM 或文案变化导致选择器失效。
   缓解：使用版本化页面规则、语义与属性组合、唯一性检查和失败关闭；不使用宽泛文本匹配猜测。
 
-- 风险：点击搜索控件后 UI 尚未完成状态切换。
-  缓解：点击与观测分离，轮询读取确定状态；超时返回 `web_search_state_unverified`，不得发送问题。
+- 风险：旧会话残留“深入研究”，关闭动作后 UI 尚未完成状态切换。
+  缓解：只在观察到唯一残留选中态时点击一次关闭，随后轮询确认普通模式；超时返回 `web_capture_mode_unverified`，不得发送问题。
 
 - 风险：回答区域包含旧会话、多个新回答或流式残片。
   缓解：创建空白新会话、记录发送前基线、只接受唯一新增回答，并联合生成状态、busy 状态和稳定窗口判定。
 
-- 风险：豆包引用使用跳转链接或延迟展开卡片。
-  缓解：U1 确认链接合同；仅处理可见、可校验的 HTTP/HTTPS 地址，并保留平台 URL 与规范化结果的有界证据。
+- 风险：豆包引用使用跳转链接，搜索进度又先于最终正文出现。
+  缓解：最终回答根优先选择 `.md-box-root`、`block-v1`、非搜索 `node`；只有搜索进度时继续等待。对已验证的 `link.wtturl.cn` 跳转只解析 `target` 参数，并仅接受无账号凭据的 HTTP/HTTPS 目标 URL。
 
 - 风险：多证据目录导致访问或删除路由错误。
   缓解：以数据库记录平台为唯一 Store 路由依据；owner 记录平台必须一致；跨 Store 删除具备统一恢复。
@@ -1055,13 +1059,13 @@ U1–U7。
 以下技术问题由 U1 在实现前确认：
 
 - 豆包正式会话入口和允许源站的精确值。
-- 新会话、输入区、联网搜索开关、当前回答、生成结束和引用区域的稳定页面语义。
-- 搜索开启状态是否在新会话间继承，以及每次重置后的实际行为。
-- 引用 href 是否直接指向来源，还是需要处理豆包安全跳转。
+- 新会话、输入区、普通模式、“深入研究”残留选中态、当前回答、生成结束和引用区域的稳定页面语义。
+- “深入研究”选中状态是否在新会话间继承，以及每次重置后的实际行为。
+- 已确认引用 href 使用 `link.wtturl.cn` 安全跳转，真实来源在 `target` 参数；不得把跳转域计为来源域。
 - 页面是否提供可验证的检索候选；若没有，第一版返回空候选，不使用未公开接口补齐。
 - 目标虚拟机同时运行两个有头 Chrome 时的资源阈值。
 
-若无法可靠验证联网搜索状态、无法隔离新会话，或无法唯一识别当前最终回答，则保持需求为 `blocked`，不进入正式接入。
+若无法可靠验证豆包普通模式、无法隔离新会话，或无法唯一识别当前最终回答，则保持需求为 `blocked`，不进入正式接入。
 
 ## 12. 后续衔接
 

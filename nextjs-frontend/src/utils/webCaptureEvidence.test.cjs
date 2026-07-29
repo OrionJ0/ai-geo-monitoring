@@ -55,6 +55,11 @@ test('Web 证据按角色分组并只生成记录 ID 与 artifact ID 组成的�
       selector_version: 'deepseek-web-v1',
       captured_at: '2026-07-26T08:30:00.000Z',
       artifact_owner_record_id: 37,
+      capture_mode: {
+        name: 'web_search',
+        observed: true,
+        evidence_type: 'dom_selected_state'
+      },
       search: {
         requested: true,
         observed: true,
@@ -76,6 +81,7 @@ test('Web 证据按角色分组并只生成记录 ID 与 artifact ID 组成的�
 
   assert.equal(evidence.recordId, 37);
   assert.equal(evidence.modelName, 'deepseek-web-ui');
+  assert.equal(evidence.captureMode, 'web_search');
   assert.equal(evidence.searchObserved, true);
   assert.equal(evidence.selectorVersion, 'deepseek-web-v1');
   assert.deepEqual(evidence.explicitCitations, [{
@@ -137,7 +143,12 @@ test('豆包 Web 使用与 DeepSeek 隔离但一致的证据展示契约', () =>
         status: 'completed',
         selector_version: 'doubao-web-v1',
         artifact_owner_record_id: 51,
-        search: { requested: true, observed: true },
+        capture_mode: {
+          name: 'standard',
+          observed: true,
+          evidence_type: 'dom_standard_mode'
+        },
+        search: { requested: false, observed: null },
         artifacts: {
           search_state: { id: SEARCH_ARTIFACT_ID },
           final_answer: { id: FINAL_ARTIFACT_ID }
@@ -149,7 +160,35 @@ test('豆包 Web 使用与 DeepSeek 隔离但一致的证据展示契约', () =>
   assert.equal(evidence.modelName, 'doubao-web-ui');
   assert.equal(evidence.platformName, '豆包 Web');
   assert.equal(evidence.selectorVersion, 'doubao-web-v1');
-  assert.equal(evidence.searchObserved, true);
+  assert.equal(evidence.captureMode, 'standard');
+  assert.equal(evidence.searchRequested, false);
+  assert.equal(evidence.searchObserved, null);
   assert.deepEqual(evidence.explicitCitations, []);
   assert.equal(evidence.artifacts.length, 2);
+  assert.equal(evidence.artifacts[0].label, '普通模式状态');
+});
+
+test('豆包普通模式存在网络检索候选时，历史空状态也按本次已观察到搜索展示', () => {
+  const evidence = buildWebCaptureEvidence({
+    id: 52,
+    platform: 'doubao-web',
+    provider_citations: [{
+      url: 'https://example.com/search-result',
+      source_role: 'retrieval_candidate'
+    }],
+    result_summary: {
+      web_capture: {
+        status: 'completed',
+        capture_mode: { name: 'standard', observed: true },
+        search: { requested: false, observed: null },
+        artifacts: {
+          search_state: { id: SEARCH_ARTIFACT_ID },
+          final_answer: { id: FINAL_ARTIFACT_ID }
+        }
+      }
+    }
+  });
+
+  assert.equal(evidence.searchObserved, true);
+  assert.equal(evidence.searchEvidenceType, 'network_retrieval_candidates');
 });

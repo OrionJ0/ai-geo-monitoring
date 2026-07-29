@@ -66,7 +66,7 @@ npm run web:login -- <deepseek-web|doubao-web>
 npm run prod:start
 ```
 
-登录、验证码和其他人工验证全部在登录命令打开的 Chrome 中由虚拟机运维负责人完成；确认输入区可用后必须关闭登录浏览器，再执行 `prod:start`。新后端进程会清除旧进程内的登录、验证或选择器熔断；只完成网页登录但不重启后端，不视为恢复完成。系统不接受 Cookie、Authorization、账号或密码配置，也不会自动绕过验证。
+登录、验证码和其他人工验证全部在登录命令打开的 Chrome 中由运行后端机器的管理员完成；确认输入区可用后必须关闭登录浏览器，再执行 `prod:start`。新后端进程会清除旧进程内的登录、验证或选择器熔断；只完成网页登录但不重启后端，不视为恢复完成。系统不接受 Cookie、Authorization、账号或密码配置，也不会自动绕过验证。
 
 正式项目、问题集和项目自动监测使用平台注册表中的独立 FIFO：同平台串行，`deepseek-web` 与 `doubao-web` 可并行。Web 失败只记录对应错误，不会回退到同品牌 API。
 
@@ -77,11 +77,11 @@ npm run prod:start
 - `DOUBAO_WEB_CHROME_EXECUTABLE`：可选豆包专用 Chrome 可执行文件；未设置时使用相同的受支持本机路径探测。
 - `DOUBAO_WEB_PROFILE_DIR`：可选豆包专用 profile，默认 `backend/.runtime/doubao-web/profile`；不得与 DeepSeek Web、日常 Chrome 或其他后端实例共用。
 - `DOUBAO_WEB_EVIDENCE_DIR`：可选豆包证据目录，默认 `backend/.runtime/doubao-web/evidence`。
-- `DOUBAO_WEB_TIMEOUT_SECONDS`：可选豆包交互超时，允许 30–600 秒，默认 180 秒。
+- `DOUBAO_WEB_TIMEOUT_SECONDS`：可选豆包交互超时，允许 30–600 秒，普通模式默认 600 秒；计时从问题发送后开始，避免将供应商较慢的真实联网搜索误判为失败。
 
 `.runtime/` 已被版本控制忽略。profile 目录权限会收紧为 `0700`，同一时刻只允许后端或登录命令中的一个进程持有；冲突会返回 `web_profile_in_use`。
 
-生产环境覆盖的数据库、两个平台的 Profile 和证据目录都必须位于持久磁盘。后端必须从持续存在的图形桌面会话启动；虚拟机不得休眠，远程桌面断开不能销毁该会话。两个 Profile 彼此独立，也不得与日常 Chrome、SEO 渲染浏览器或另一套后端共用。豆包 Web 在目标虚拟机真实验收完成前必须保持禁用。
+生产环境覆盖的数据库、两个平台的 Profile 和证据目录都必须位于持久磁盘。后端必须从持续存在的图形桌面会话启动；虚拟机不得休眠，远程桌面断开不能销毁该会话。两个 Profile 彼此独立，也不得与日常 Chrome、SEO 渲染浏览器或另一套后端共用。全新安装默认启用两个 Web 预置，但默认启用不等于登录有效或目标机器已经验收；正式运行仍由实时预检决定。
 
 ## 数据库
 - `DB_STORAGE` SQLite 数据库文件路径（默认：`database.sqlite`）

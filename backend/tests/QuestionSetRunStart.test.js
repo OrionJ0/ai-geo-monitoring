@@ -171,7 +171,7 @@ test('atomically persists one launch plan and replays the same idempotency key',
   assert.equal(run.request_fingerprint.length, 64);
   assert.deepEqual(run.planned_platforms, ['doubao']);
   assert.equal(run.skipped_platforms.length, 1);
-  assert.equal(run.analysis_contract_version, 'ai_structured_v3');
+  assert.equal(run.analysis_contract_version, 'ai_structured_v4');
   assert.equal(
     run.metric_semantics_version,
     'contextual_competitor_mentions_sov_v1'
@@ -182,7 +182,7 @@ test('atomically persists one launch plan and replays the same idempotency key',
   });
   assert.deepEqual(report.planned_platforms, ['doubao']);
   assert.deepEqual(report.skipped_platforms, run.skipped_platforms);
-  assert.equal(report.analysis_contract_version, 'ai_structured_v3');
+  assert.equal(report.analysis_contract_version, 'ai_structured_v4');
   assert.equal(
     report.metric_semantics_version,
     'contextual_competitor_mentions_sov_v1'
@@ -195,7 +195,7 @@ test('atomically persists one launch plan and replays the same idempotency key',
   assert.deepEqual(records.map((record) => record.run_slot_index), [0, 1]);
   assert.deepEqual(
     records.map((record) => record.analysis_contract_version),
-    ['ai_structured_v3', 'ai_structured_v3']
+    ['ai_structured_v4', 'ai_structured_v4']
   );
   assert.deepEqual(
     records.map((record) => record.metric_semantics_version),
@@ -490,7 +490,7 @@ test('question-set entry persists Doubao Web records through the same prepared-r
   }
 });
 
-test('mixed question-set run skips unavailable Web before quota and keeps API records runnable', async () => {
+test('mixed question-set run blocks every platform before quota when one Web login is unavailable', async () => {
   const previousPlatforms = project.platforms;
   await project.update({ platforms: ['doubao', 'deepseek-web'] });
   AIPlatformService.getPlatformAvailability = async () => [{
@@ -508,7 +508,10 @@ test('mixed question-set run skips unavailable Web before quota and keeps API re
     reason: 'web_login_required',
     config: null
   }];
-  ProjectRunService.schedulePreparedRun = () => {};
+  let scheduled = false;
+  ProjectRunService.schedulePreparedRun = () => {
+    scheduled = true;
+  };
 
   try {
     const result = await ProjectRunService.startQuestionSetRun(startOptions({
@@ -521,17 +524,16 @@ test('mixed question-set run skips unavailable Web before quota and keeps API re
       idempotencyKey: 'mixed-web-unavailable-entry'
     }));
 
-    assert.equal(result.ok, true);
-    assert.deepEqual(result.data.planned_platforms, ['doubao']);
-    assert.equal(result.data.skipped_platforms[0].platform, 'deepseek-web');
-    assert.equal(result.data.skipped_platforms[0].reason, 'web_login_required');
-    assert.equal(await QuestionRecord.count({
-      where: { question_set_run_id: result.data.question_set_run_id }
-    }), 2);
-    const counter = await UsageCounter.findOne({
-      where: { user_id: user.id, feature: 'detection', period: 'daily' }
-    });
-    assert.equal(counter.used_count, 2);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 409);
+    assert.equal(result.data.error_code, 'web_platform_preflight_failed');
+    assert.equal(result.data.blocked_platforms[0].platform, 'deepseek-web');
+    assert.equal(result.data.blocked_platforms[0].reason_code, 'web_login_required');
+    assert.deepEqual(result.data.skipped_platforms, []);
+    assert.equal(await QuestionSetRun.count(), 0);
+    assert.equal(await QuestionRecord.count(), 0);
+    assert.equal(await UsageCounter.count(), 0);
+    assert.equal(scheduled, false);
   } finally {
     await project.update({ platforms: previousPlatforms });
   }

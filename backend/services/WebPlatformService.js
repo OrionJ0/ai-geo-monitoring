@@ -23,6 +23,7 @@ const DEFAULT_DEEPSEEK_DEFINITION = Object.freeze({
   captureSchemaVersion: 'deepseek-web-capture-v1',
   runtimeSchemaVersion: 'deepseek-web-runtime-v1',
   envPrefix: 'DEEPSEEK_WEB',
+  defaultTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
   pageFactory: (session) => new DeepSeekWebPage(session),
   adapterFactory: (adapterOptions) => new DeepSeekWebAdapter(adapterOptions)
 });
@@ -92,9 +93,13 @@ function opensCircuit(errorCode) {
   ].includes(errorCode);
 }
 
-function parseTimeoutSeconds(value, envName = 'DEEPSEEK_WEB_TIMEOUT_SECONDS') {
+function parseTimeoutSeconds(
+  value,
+  envName = 'DEEPSEEK_WEB_TIMEOUT_SECONDS',
+  defaultTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS
+) {
   if (value === undefined || value === null || String(value).trim() === '') {
-    return DEFAULT_TIMEOUT_SECONDS;
+    return defaultTimeoutSeconds;
   }
   const parsed = Number(value);
   if (
@@ -217,7 +222,8 @@ function resolvePlatformWebRuntimeConfig(definition, {
     evidenceDir,
     timeoutMs: parseTimeoutSeconds(
       env[`${envPrefix}_TIMEOUT_SECONDS`],
-      `${envPrefix}_TIMEOUT_SECONDS`
+      `${envPrefix}_TIMEOUT_SECONDS`,
+      Number(definition.defaultTimeoutSeconds) || DEFAULT_TIMEOUT_SECONDS
     ) * 1000,
     cdpTimeoutMs: DEFAULT_CDP_TIMEOUT_MS
   };

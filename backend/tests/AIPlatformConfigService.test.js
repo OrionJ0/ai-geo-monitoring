@@ -35,7 +35,7 @@ test.after(async () => {
   await sequelize.close();
 });
 
-test('seeds API presets plus managed Web presets with Doubao Web enabled by default', async () => {
+test('seeds both managed Web presets enabled by default', async () => {
   const service = createService();
   await service.ensurePresets();
 
@@ -61,7 +61,7 @@ test('seeds API presets plus managed Web presets with Doubao Web enabled by defa
   assert.equal(deepseekWeb.adapter_type, 'deepseek_web');
   assert.equal(deepseekWeb.base_url, 'https://chat.deepseek.com');
   assert.equal(deepseekWeb.default_model, 'deepseek-web-ui');
-  assert.equal(deepseekWeb.enabled, false);
+  assert.equal(deepseekWeb.enabled, true);
   const doubaoWeb = rows.find((row) => row.code === 'doubao-web');
   assert.equal(doubaoWeb.name, '豆包网页版');
   assert.equal(doubaoWeb.adapter_type, 'doubao_web');
@@ -83,8 +83,11 @@ test('seeds API presets plus managed Web presets with Doubao Web enabled by defa
   const hunyuan = rows.find((row) => row.code === 'hunyuan');
   assert.equal(hunyuan.name, '腾讯混元');
   assert.equal(hunyuan.adapter_type, 'openai_chat_completions');
-  assert.equal(hunyuan.default_model, 'hy3');
+  assert.equal(hunyuan.default_model, 'hy3-preview');
   assert.equal(hunyuan.base_url, 'https://tokenhub.tencentmaas.com/v1');
+  assert.deepEqual(hunyuan.request_options, {
+    web_search_options: { enable: true }
+  });
   assert.equal(PRESET_PLATFORMS.length, 6);
 });
 
@@ -141,6 +144,23 @@ test('treats both managed Web presets as configured without API keys and derives
   assert.equal(api.capabilities.analysis, true);
   assert.equal(api.capabilities.api_key_management, true);
   assert.equal(api.capabilities.interactive_login, false);
+  assert.equal(api.web_search_test_status, 'untested');
+});
+
+test('catalog marks only selectable managed Web platforms as new-project defaults', async () => {
+  const service = createService();
+  await service.ensurePresets();
+
+  const catalog = await service.listCatalog();
+  assert.deepEqual(
+    catalog.filter((item) => item.default_for_new_project).map((item) => item.code).sort(),
+    ['deepseek-web', 'doubao-web']
+  );
+  assert.equal(
+    catalog.filter((item) => !['deepseek-web', 'doubao-web'].includes(item.code))
+      .every((item) => item.default_for_new_project === false),
+    true
+  );
 });
 
 test('promotes an existing Qwen row to builtin without overwriting its connection settings', async () => {
@@ -221,6 +241,56 @@ test('upgrades an existing Qwen empty request configuration to the forced-search
   await service.ensurePresets();
   await qwen.reload();
   assert.deepEqual(qwen.request_options, { temperature: 0.2 });
+});
+
+test('upgrades the legacy official Hunyuan preset to a web-search capable model and request', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'hunyuan',
+    name: '腾讯混元',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://tokenhub.tencentmaas.com/v1',
+    default_model: 'hy3',
+    request_options: {},
+    enabled: true,
+    builtin: true,
+    test_status: 'success',
+    web_search_test_status: 'inconclusive'
+  });
+
+  await service.ensurePresets();
+  const hunyuan = await AIPlatformConfig.findOne({ where: { code: 'hunyuan' } });
+
+  assert.equal(hunyuan.default_model, 'hy3-preview');
+  assert.deepEqual(hunyuan.request_options, {
+    web_search_options: { enable: true }
+  });
+  assert.equal(hunyuan.test_status, 'untested');
+  assert.equal(hunyuan.web_search_test_status, 'untested');
+});
+
+test('does not overwrite administrator-customized Hunyuan connection or request settings', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'hunyuan',
+    name: '混元企业账号',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://workspace.example.com/v1',
+    default_model: 'hy3',
+    request_options: { temperature: 0.2 },
+    enabled: false,
+    builtin: false
+  });
+
+  await service.ensurePresets();
+  const hunyuan = await AIPlatformConfig.findOne({ where: { code: 'hunyuan' } });
+
+  assert.equal(hunyuan.builtin, true);
+  assert.equal(hunyuan.name, '混元企业账号');
+  assert.equal(hunyuan.base_url, 'https://workspace.example.com/v1');
+  assert.equal(hunyuan.default_model, 'hy3');
+  assert.deepEqual(hunyuan.request_options, { temperature: 0.2 });
+  assert.equal(hunyuan.enabled, false);
 });
 
 test('upgrades the retired DeepSeek Flash preset to Pro and keeps unconfigured accounts disabled', async () => {

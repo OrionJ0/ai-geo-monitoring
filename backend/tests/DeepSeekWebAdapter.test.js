@@ -57,6 +57,15 @@ function createPage(events, snapshots) {
       events.push(['search_enabled']);
       return { requested: true, observed: true, evidence_type: 'dom_selected_state' };
     },
+    async verifyCaptureMode() {
+      const search = await this.ensureSearchEnabled();
+      return {
+        ...search,
+        mode: 'web_search',
+        search_requested: true,
+        search_observed: search.observed === true
+      };
+    },
     async captureScreenshot(kind) {
       events.push(['capture', kind]);
       return { buffer: PNG, width: 1200, height: 800 };
@@ -212,6 +221,39 @@ test('does not insert or send when visible search state cannot be verified', asy
   assert.equal(events.at(-1)[0], 'discard_capture');
 });
 
+test('stops waiting immediately when the provider requests human verification after send', async () => {
+  const events = [];
+  let now = 0;
+  const page = createPage(events, [
+    { assistantTurns: [], generationActive: false, busy: false },
+    { assistantTurns: [], generationActive: false, busy: false },
+    {
+      assistantTurns: [],
+      generationActive: false,
+      busy: false,
+      verificationRequired: true
+    }
+  ]);
+  const adapter = new DeepSeekWebAdapter({
+    page,
+    captureStore: createCaptureStore(events),
+    now: () => now,
+    sleep: async (ms) => { now += ms; },
+    timeoutMs: 600_000
+  });
+
+  await assert.rejects(
+    adapter.capture('测试问题', { record_id: 123, user_id: 7 }),
+    (error) => (
+      error.code === 'web_verification_required'
+      && error.stage === 'generation_finished'
+    )
+  );
+  assert.equal(now, 0);
+  assert.equal(events.filter(([name]) => name === 'send_prompt').length, 1);
+  assert.equal(events.at(-1)[0], 'discard_capture');
+});
+
 test('adds the current capture stage to low-level renderer failures', async () => {
   const events = [];
   const page = createPage(events, []);
@@ -308,8 +350,8 @@ test('screenshot uses a dedicated timeout and retries one renderer timeout witho
   const delays = [];
   const page = new DeepSeekWebPage({
     connection: {
-      send: async (method, _params, options) => {
-        calls.push({ method, options });
+      send: async (method, params, options) => {
+        calls.push({ method, params, options });
         if (method === 'Runtime.evaluate') {
           return {
             result: {
@@ -331,7 +373,7 @@ test('screenshot uses a dedicated timeout and retries one renderer timeout witho
     sleep: async (ms) => delays.push(ms)
   });
 
-  const screenshot = await page.captureScreenshot();
+  const screenshot = await page.captureScreenshot({ fromSurface: true });
   const screenshotCalls = calls.filter(
     (call) => call.method === 'Page.captureScreenshot'
   );
@@ -341,10 +383,80 @@ test('screenshot uses a dedicated timeout and retries one renderer timeout witho
     screenshotCalls.map((call) => call.options),
     [{ timeoutMs: 45_000 }, { timeoutMs: 45_000 }]
   );
+  assert.deepEqual(
+    screenshotCalls.map((call) => call.params.fromSurface),
+    [true, false]
+  );
   assert.deepEqual(delays, [500]);
   assert.equal(screenshot.buffer.equals(PNG), true);
   assert.equal(screenshot.width, 900);
   assert.equal(screenshot.height, 700);
+});
+
+test('screenshot defaults to the renderer view mode that works in headed Chrome', async () => {
+  const modes = [];
+  const page = new DeepSeekWebPage({
+    connection: {
+      send: async (method, params) => {
+        if (method === 'Runtime.evaluate') {
+          return {
+            result: {
+              value: { x: 100, y: 0, width: 900, height: 700, scale: 1 }
+            }
+          };
+        }
+        modes.push(params.fromSurface);
+        return { data: PNG.toString('base64') };
+      }
+    }
+  });
+
+  await page.captureScreenshot();
+
+  assert.deepEqual(modes, [false]);
+});
+
+test('generation timeout starts after the prompt is sent instead of during capture preparation', async () => {
+  const events = [];
+  let now = 0;
+  const page = createPage(events, [
+    { assistantTurns: [], generationActive: false, busy: false },
+    { assistantTurns: [], generationActive: false, busy: false },
+    {
+      assistantTurns: [{ id: 'turn-1', text: '最终回答' }],
+      generationActive: false,
+      busy: false
+    },
+    {
+      assistantTurns: [{ id: 'turn-1', text: '最终回答' }],
+      generationActive: false,
+      busy: false
+    }
+  ]);
+  let screenshotCount = 0;
+  page.captureScreenshot = async (kind) => {
+    events.push(['capture', kind]);
+    screenshotCount += 1;
+    if (screenshotCount === 1) now += 10_000;
+    return { buffer: PNG, width: 1200, height: 800 };
+  };
+  const adapter = new DeepSeekWebAdapter({
+    page,
+    captureStore: createCaptureStore(events),
+    now: () => now,
+    sleep: async (ms) => { now += ms; },
+    pollMs: 1,
+    stableMs: 1,
+    timeoutMs: 5_000
+  });
+
+  const result = await adapter.capture('测试问题', {
+    record_id: 124,
+    user_id: 7
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.text, '最终回答');
 });
 
 test('screenshot failure ends the capture before prompt insertion and keeps no staged evidence', async () => {
@@ -356,7 +468,7 @@ test('screenshot failure ends the capture before prompt insertion and keeps no s
     events.push(['capture_failed']);
     throw Object.assign(new Error('screenshot failed'), {
       code: 'web_screenshot_failed',
-      stage: 'search_evidence_saved'
+      stage: 'capture_mode_evidence_saved'
     });
   };
   const adapter = new DeepSeekWebAdapter({

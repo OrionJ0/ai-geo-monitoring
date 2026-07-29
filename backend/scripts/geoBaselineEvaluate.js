@@ -12,6 +12,8 @@
  *   node backend/scripts/geoBaselineEvaluate.js --refresh        # 忽略缓存重新分析
  *   node backend/scripts/geoBaselineEvaluate.js --platform deepseek  # 只读旁路：用指定平台配置分析，
  *                                                                    # 不要求平台处于启用状态、不改库
+ *   node backend/scripts/geoBaselineEvaluate.js --platform deepseek \
+ *     --experiment-name prompt-revision-check --refresh          # 隔离输出的评测实验
  */
 const path = require('path');
 
@@ -32,26 +34,39 @@ const {
 const DEFAULT_DIR = path.resolve(__dirname, '../../work/geo-baseline-2026-07-28');
 const CONCURRENCY = 3;
 const ANALYSIS_METHOD = CURRENT_ANALYSIS_CONTRACT;
+const CURRENT_PROMPT_DEFINITION = AIResponseAnalysisService.getPromptDefinition();
+const CURRENT_PROMPT_REVISION = CURRENT_PROMPT_DEFINITION.prompt_revision;
 
 // main() 起始时按 --dir 覆盖；其余函数统一引用 PATHS
 const PATHS = {};
-function initPaths(baseDir) {
+function initPaths(baseDir, experimentName = null) {
+  const normalizedExperimentName = String(experimentName || '').trim();
+  if (
+    normalizedExperimentName
+    && !/^[a-z0-9][a-z0-9._-]{0,79}$/iu.test(normalizedExperimentName)
+  ) {
+    throw new Error('experiment-name 只能包含字母、数字、点、下划线和连字符');
+  }
+  const outputDir = normalizedExperimentName
+    ? path.join(baseDir, 'experiments', normalizedExperimentName)
+    : baseDir;
   PATHS.base = baseDir;
   PATHS.samples = path.join(baseDir, 'samples.json');
   PATHS.labeling = path.join(baseDir, 'LABELING.md');
-  PATHS.report = path.join(baseDir, 'BASELINE-REPORT.md');
-  PATHS.partialReport = path.join(baseDir, 'BASELINE-PARTIAL.md');
-  PATHS.raw = path.join(baseDir, 'raw');
+  PATHS.report = path.join(outputDir, 'BASELINE-REPORT.md');
+  PATHS.partialReport = path.join(outputDir, 'BASELINE-PARTIAL.md');
+  PATHS.raw = path.join(outputDir, 'raw');
+  return { ...PATHS };
 }
 
 const VALID_SENTIMENTS = new Set(['positive', 'neutral', 'negative', 'none']);
 const VALID_ENTITY_RELATIONS = new Set(['target', 'competitor', 'non_competitor']);
 
-function parseArgs() {
-  const args = new Set(process.argv.slice(2));
+function parseArgs(argv = process.argv.slice(2)) {
+  const args = new Set(argv);
   const readValue = (flag) => {
-    const index = process.argv.indexOf(flag);
-    return index >= 0 ? process.argv[index + 1] : null;
+    const index = argv.indexOf(flag);
+    return index >= 0 ? argv[index + 1] : null;
   };
   return {
     allowPartial: args.has('--allow-partial'),
@@ -60,6 +75,7 @@ function parseArgs() {
     limit: readValue('--limit') ? Number(readValue('--limit')) : null,
     platform: readValue('--platform'),
     model: readValue('--model'),
+    experimentName: readValue('--experiment-name'),
     dir: readValue('--dir') ? path.resolve(readValue('--dir')) : DEFAULT_DIR
   };
 }
@@ -70,7 +86,16 @@ function parseArgs() {
  * 但不做启用状态校验、不修改任何库数据——用于测量“生产数据实际由哪个分析配置产生”。
  */
 async function buildAnalyzer(options) {
-  if (!options.platform) return { analyzer: AIResponseAnalysisService, via: 'production_config' };
+  const analysisLabel = [
+    `prompt=${CURRENT_PROMPT_REVISION}`,
+    `thinking=${CURRENT_PROMPT_DEFINITION.request_profile.deepseek_thinking}`
+  ].join(',');
+  if (!options.platform) {
+    return {
+      analyzer: AIResponseAnalysisService,
+      via: `production_config:${analysisLabel}`
+    };
+  }
   const platform = await AIPlatformConfigService.getPlatformByCode(options.platform);
   const plain = platform.get ? platform.get({ plain: true }) : { ...platform };
   let modelName = options.model;
@@ -85,7 +110,10 @@ async function buildAnalyzer(options) {
       getAnalysisPlatform: async () => ({ ...plain, default_model: modelName, enabled: true })
     }
   });
-  return { analyzer, via: `readonly_override:${options.platform}/${modelName}` };
+  return {
+    analyzer,
+    via: `readonly_override:${options.platform}/${modelName},${analysisLabel}`
+  };
 }
 
 // ---------- LABELING.md 解析 ----------
@@ -263,7 +291,9 @@ function readCache(sampleId) {
     const schema_version = cached?.result?.analysis_structure?.schema_version
       || cached.structure_version;
     if (
-      cached.analysis_method === CURRENT_ANALYSIS_CONTRACT
+      cached.ok === true
+      && cached.analysis_method === CURRENT_ANALYSIS_CONTRACT
+      && cached.analysis_prompt_revision === CURRENT_PROMPT_REVISION
       && schema_version === CURRENT_STRUCTURE_VERSION
       && cached.metric_semantics_version === CURRENT_METRIC_SEMANTICS
     ) return cached;
@@ -271,22 +301,50 @@ function readCache(sampleId) {
   return null;
 }
 
+function recalculateCachedResult(cached, analyzer, responseText = '') {
+  const structure = cached?.result?.analysis_structure;
+  if (!structure) return cached;
+  const calculated = typeof analyzer?.recalculateFromStructure === 'function'
+    ? analyzer.recalculateFromStructure(structure, responseText)
+    : analyzer?.calculate?.(structure);
+  if (!calculated) return cached;
+  return {
+    ...cached,
+    result: {
+      ...cached.result,
+      ...calculated
+    }
+  };
+}
+
 async function analyzeSample(sample, refresh, analyzer, via) {
   if (!refresh) {
     const cached = readCache(sample.sample_id);
-    if (cached) return { ...cached, from_cache: true };
+    if (cached) {
+      try {
+        const refreshed = recalculateCachedResult(
+          cached,
+          analyzer,
+          sample.response_text
+        );
+        fs.writeFileSync(cachePath(sample.sample_id), JSON.stringify(refreshed, null, 2));
+        return { ...refreshed, from_cache: true };
+      } catch (_) {
+        // 缓存结构无法由当前确定性计算器复算时，重新请求分析，不复用旧派生指标。
+      }
+    }
   }
   const startedAt = new Date().toISOString();
   try {
     const result = await analyzer.analyze({
       question: sample.question,
       responseText: sample.response_text,
-      brand: sample.brand,
-      competitorHints: sample.competitors
+      brand: sample.brand
     });
     const entry = {
       sample_id: sample.sample_id,
       analysis_method: result.analysis_method,
+      analysis_prompt_revision: result.analysis_prompt_revision,
       structure_version: result.analysis_structure?.schema_version,
       metric_semantics_version: result.metric_semantics_version,
       analysis_platform: result.analysis_platform,
@@ -303,6 +361,7 @@ async function analyzeSample(sample, refresh, analyzer, via) {
     const entry = {
       sample_id: sample.sample_id,
       analysis_method: CURRENT_ANALYSIS_CONTRACT,
+      analysis_prompt_revision: CURRENT_PROMPT_REVISION,
       structure_version: CURRENT_STRUCTURE_VERSION,
       metric_semantics_version: CURRENT_METRIC_SEMANTICS,
       analyzer_via: via,
@@ -816,7 +875,7 @@ ${multiEntityRows.map((row) => row.analysis_failed
 
 async function main() {
   const options = parseArgs();
-  initPaths(options.dir);
+  initPaths(options.dir, options.experimentName);
   if (!fs.existsSync(PATHS.samples)) {
     console.error('未找到 samples.json，请先运行 geoBaselineSample.js');
     process.exit(1);
@@ -983,9 +1042,13 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildAnalyzer,
   buildReport,
   buildFailedMultiEntityReview,
+  initPaths,
+  parseArgs,
   parseEntityLabels,
+  recalculateCachedResult,
   reviewMultiEntitySample,
   summarizeMultiEntityReviews,
   validateLabels,

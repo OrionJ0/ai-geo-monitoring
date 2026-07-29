@@ -303,7 +303,17 @@ router.get('/', async (req, res) => {
       ],
       order: [['updated_at', 'DESC']]
     });
-    res.json({ success: true, data: rows });
+    const latestExecutions = await SchedulerService.getLatestProjectMonitoringExecutions(
+      rows.map((row) => row.id)
+    );
+    const data = rows.map((row) => {
+      const item = row.toJSON();
+      return {
+        ...item,
+        latest_monitoring_execution: latestExecutions[item.id] || null
+      };
+    });
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: '获取品牌项目失败' });
   }
@@ -321,10 +331,13 @@ router.post('/', async (req, res) => {
       primary_keywords: req.body.primary_keywords
     });
     if (!projectFields.name) return res.status(400).json({ success: false, message: '品牌名称不能为空' });
-    const selectablePlatforms = await getSelectablePlatformCodes();
+    const {
+      selectablePlatforms,
+      defaultPlatforms
+    } = await AIPlatformService.getNewProjectPlatformOptions();
     const platformResult = PlatformSelectionService.validate(req.body.platforms, {
       availablePlatforms: selectablePlatforms,
-      defaultPlatforms: selectablePlatforms
+      defaultPlatforms
     });
     if (!platformResult.platforms.length && platformResult.ok) {
       return res.status(400).json({ success: false, message: '当前没有可选择的监测平台，请联系管理员配置。' });

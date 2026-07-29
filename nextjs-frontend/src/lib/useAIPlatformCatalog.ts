@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from '@/lib/axiosConfig';
 import { getUnavailablePlatformLabel } from '@/utils/platformSelectionStatus.cjs';
+import { getApiWebSearchStatusLabel } from '@/utils/apiWebSearchStatus.cjs';
 
 export type AIPlatformCapabilities = {
   monitoring: boolean;
@@ -23,6 +24,8 @@ export type AIPlatformCatalogItem = {
   enabled: boolean;
   configured: boolean;
   selectable: boolean;
+  default_for_new_project: boolean;
+  web_search_test_status: 'untested' | 'success' | 'failed' | 'inconclusive';
   unavailable_reason?: string | null;
   capabilities?: AIPlatformCapabilities;
 };
@@ -58,11 +61,20 @@ export function useAIPlatformCatalog() {
     () => platforms.filter((item) => item.selectable).map((item) => item.code),
     [platforms]
   );
+  const defaultCodes = useMemo(
+    () => platforms
+      .filter((item) => item.selectable && item.default_for_new_project)
+      .map((item) => item.code),
+    [platforms]
+  );
   const options = useMemo(
     () => platforms.map((item) => {
-      const suffix = item.selectable
-        ? ''
-        : `（${getUnavailablePlatformLabel(item.unavailable_reason)}）`;
+      const details = [];
+      if (!item.selectable) details.push(getUnavailablePlatformLabel(item.unavailable_reason));
+      if (item.capabilities?.api_web_search_test) {
+        details.push(getApiWebSearchStatusLabel(item.web_search_test_status));
+      }
+      const suffix = details.length ? `（${details.join('；')}）` : '';
       return {
         value: item.code,
         label: `${item.name || item.code}${suffix}`,
@@ -72,5 +84,5 @@ export function useAIPlatformCatalog() {
     [platforms]
   );
 
-  return { platforms, labels, selectableCodes, options, loading, error, refresh };
+  return { platforms, labels, selectableCodes, defaultCodes, options, loading, error, refresh };
 }

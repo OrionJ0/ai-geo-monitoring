@@ -6,6 +6,7 @@ const { validatePlatformUrl } = require('./PlatformUrlPolicyService');
 const ADAPTER_TYPES = new Set(['openai_responses', 'openai_chat_completions']);
 const RESERVED_PLATFORM_CODES = new Set(['deepseek-web', 'doubao-web']);
 const MANAGED_WEB_ADAPTER_TYPES = new Set(['deepseek_web', 'doubao_web']);
+const DEFAULT_PROJECT_PLATFORM_CODES = new Set(['doubao-web', 'deepseek-web']);
 const TEST_STATUSES = new Set(['untested', 'success', 'failed']);
 const WEB_SEARCH_TEST_STATUSES = new Set(['untested', 'success', 'failed', 'inconclusive']);
 const REQUEST_OPTIONS_MAX_BYTES = 16 * 1024;
@@ -68,7 +69,7 @@ const PRESET_PLATFORMS = Object.freeze([
     adapter_type: 'deepseek_web',
     base_url: 'https://chat.deepseek.com',
     default_model: 'deepseek-web-ui',
-    enabled: false,
+    enabled: true,
     builtin: true
   }),
   Object.freeze({
@@ -97,7 +98,10 @@ const PRESET_PLATFORMS = Object.freeze([
     name: '腾讯混元',
     adapter_type: 'openai_chat_completions',
     base_url: 'https://tokenhub.tencentmaas.com/v1',
-    default_model: 'hy3',
+    default_model: 'hy3-preview',
+    request_options: Object.freeze({
+      web_search_options: Object.freeze({ enable: true })
+    }),
     enabled: true,
     builtin: true
   })
@@ -243,7 +247,10 @@ function toCatalogView(row) {
     enabled: Boolean(value.enabled),
     configured: isConfigured(value),
     selectable: unavailableReason === null,
+    default_for_new_project: unavailableReason === null
+      && DEFAULT_PROJECT_PLATFORM_CODES.has(value.code),
     unavailable_reason: unavailableReason,
+    web_search_test_status: value.web_search_test_status || 'untested',
     capabilities: getPlatformCapabilities(value)
   };
 }
@@ -300,6 +307,20 @@ class AIPlatformConfigService {
       if (!row.builtin) {
         await row.update({ builtin: true });
       }
+      const requestOptions = row.request_options || {};
+      const isLegacyOfficialHunyuanPreset = preset.code === 'hunyuan'
+        && row.name === preset.name
+        && row.adapter_type === preset.adapter_type
+        && row.base_url === preset.base_url
+        && row.default_model === 'hy3'
+        && Object.keys(requestOptions).length === 0;
+      if (isLegacyOfficialHunyuanPreset) {
+        await row.update({
+          default_model: preset.default_model,
+          request_options: JSON.parse(JSON.stringify(preset.request_options)),
+          ...this.untestedState()
+        });
+      }
       const isLegacyOfficialDeepSeekPreset = preset.code === 'deepseek'
         && row.name === preset.name
         && row.adapter_type === preset.adapter_type
@@ -311,7 +332,6 @@ class AIPlatformConfigService {
           ...this.untestedState()
         });
       }
-      const requestOptions = row.request_options || {};
       const matchesPresetIdentity = row.name === preset.name
         && row.adapter_type === preset.adapter_type
         && row.base_url === preset.base_url
