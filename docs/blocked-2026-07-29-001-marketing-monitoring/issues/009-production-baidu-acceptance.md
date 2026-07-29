@@ -1,6 +1,6 @@
 ---
 title: "完成真实百度搜索生产验收"
-status: open
+status: blocked
 type: HITL
 blocked_by:
   - "008-release-readiness.md"
@@ -73,3 +73,9 @@ git diff --check
 
 - `008-release-readiness.md`
 - 正式 HTTPS 域名、获批百度应用、真实账户和生产部署权限。
+
+## 2026-07-29 阻塞记录
+
+- 用户当前未提供外部系统接口、获批百度应用、真实账户、稳定 HTTPS callback 或生产部署权限。
+- mock、单元测试、浏览器 fixture 和本地数据库不得替代本 issue 的真实生产证据。
+- 因此正式导航保持隐藏，模块默认关闭，Issue 009 不关闭。

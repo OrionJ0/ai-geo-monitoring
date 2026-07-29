@@ -1,6 +1,6 @@
 # 营销监控系统 PRD
 
-- 状态：Blocked（Issue 001 已完成，等待百度真实契约）
+- 状态：Blocked（可离线完成的工程底座已实现，等待百度真实契约与生产验收）
 - 日期：2026-07-29
 - 需求依据：`docs/ideas/marketing-monitoring-system.md`
 - 领域术语：`CONTEXT.md` 中的“营销监控语言”

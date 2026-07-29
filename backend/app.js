@@ -38,6 +38,19 @@ const scheduleLimiter = rateLimit({
   message: '定时任务接口请求过于频繁，请稍后再试'
 });
 
+const marketingAuthorizationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'MARKETING_AUTHORIZATION_RATE_LIMITED',
+      message: '营销授权请求过于频繁，请稍后再试'
+    }
+  }
+});
+
 app.use('/api/', limiter);
 
 app.use(express.json({ limit: '1mb' }));
@@ -90,6 +103,11 @@ app.use('/api/seo-audits', authRequired, seoAuditRoutes);
 app.use('/api/admin/ai-platforms', adminAIPlatformRoutes);
 app.use('/api/ai-platforms', aiPlatformRoutes);
 app.use('/api/marketing', authRequired, marketingModule.router);
+app.use(
+  '/api/admin/marketing/baidu',
+  marketingAuthorizationLimiter,
+  marketingModule.authorizationRouter
+);
 // 设置路由：内部已对管理接口使用 adminRequired；公开接口（如 /seo、/notice）无需统一鉴权
 app.use('/api/settings', settingsRoutes);
 
@@ -151,6 +169,7 @@ const shutdownApplication = createApplicationShutdown({
   schedulerService: SchedulerService,
   projectRunService: ProjectRunService,
   webPlatformRegistry: WebPlatformRegistry,
+  marketingModule,
   sequelize
 });
 
@@ -711,6 +730,10 @@ async function ensureDefaultSettings() {
       console.log('定时调度器已启动');
     } catch (e) {
       console.warn('启动调度器失败:', e.message);
+    }
+    const marketingStatus = await marketingModule.start();
+    if (marketingStatus.moduleState !== 'DISABLED') {
+      console.log(`营销模块状态: ${marketingStatus.moduleState}`);
     }
     server = app.listen(PORT, HOST, () => {
       console.log(`服务器运行在 http://${HOST}:${PORT}`);

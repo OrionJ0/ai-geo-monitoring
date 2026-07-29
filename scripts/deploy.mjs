@@ -30,6 +30,11 @@ const geoMetricMigrationScript = path.join(
   'scripts',
   'migrateGeoMetricSemantics.js'
 );
+const marketingMigrationScript = path.join(
+  backendDirectory,
+  'scripts',
+  'migrateMarketing.js'
+);
 
 function parseEnvFile(filename) {
   return Object.fromEntries(
@@ -172,7 +177,7 @@ async function deploy() {
   let databaseBackupReference = '';
 
   try {
-    console.log('1/9 拉取 origin/main');
+    console.log('1/10 拉取 origin/main');
     await run('git', ['pull', '--ff-only', 'origin', 'main'], {
       label: 'git pull',
     });
@@ -183,14 +188,14 @@ async function deploy() {
     }
     const checked = await checkPreconditions();
 
-    console.log('2/9 停止受管生产进程');
+    console.log('2/10 停止受管生产进程');
     await run(process.execPath, [productionScript, 'stop'], {
       label: '停止生产进程',
     });
     servicesStopped = true;
 
     if (checked.databaseType === 'sqlite') {
-      console.log('3/9 更新唯一的 SQLite 最新备份');
+      console.log('3/10 更新唯一的 SQLite 最新备份');
       const backupPath =
         process.env.AI_GEO_SQLITE_BACKUP_PATH ||
         path.join(
@@ -202,7 +207,7 @@ async function deploy() {
       });
       databaseBackupReference = backupPath;
     } else {
-      console.log('3/9 使用外部 Postgres，检查外部备份确认');
+      console.log('3/10 使用外部 Postgres，检查外部备份确认');
       databaseBackupReference = String(
         process.env.AI_GEO_DATABASE_BACKUP_REFERENCE || ''
       ).trim();
@@ -213,22 +218,34 @@ async function deploy() {
       }
     }
 
-    console.log('4/9 安装后端依赖');
+    console.log('4/10 安装后端依赖');
     await run('npm', ['ci'], { cwd: backendDirectory, label: '后端 npm ci' });
-    console.log('5/9 运行后端测试');
+    console.log('5/10 运行后端测试');
     await run('npm', ['test'], { cwd: backendDirectory, label: '后端测试' });
-    console.log('6/9 安装并检查前端依赖');
+    await run('npm', ['run', 'test:marketing'], {
+      cwd: backendDirectory,
+      label: '后端营销测试',
+    });
+    console.log('6/10 安装并检查前端依赖');
     await run('npm', ['ci'], { cwd: frontendDirectory, label: '前端 npm ci' });
+    await run('npm', ['test'], {
+      cwd: frontendDirectory,
+      label: '前端营销单元测试',
+    });
+    await run('npm', ['run', 'test:marketing:browser'], {
+      cwd: frontendDirectory,
+      label: '前端营销浏览器验收',
+    });
     await run('npm', ['run', 'lint'], {
       cwd: frontendDirectory,
       label: '前端 lint',
     });
-    console.log('7/9 构建前端生产产物');
+    console.log('7/10 构建前端生产产物');
     await run('npm', ['run', 'build'], {
       cwd: frontendDirectory,
       label: '前端生产构建',
     });
-    console.log('8/9 迁移并复审 GEO 指标语义');
+    console.log('8/10 迁移并复审 GEO 指标语义');
     const backendConfig = parseEnvFile(path.join(backendDirectory, '.env'));
     const migrationEnvironment = { ...backendConfig, ...process.env };
     await run(
@@ -250,7 +267,19 @@ async function deploy() {
       label: 'GEO 指标语义迁移复审',
     });
 
-    console.log('9/9 启动并检查前后端');
+    console.log('9/10 应用并复审营销模块迁移');
+    await run(process.execPath, [marketingMigrationScript, '--apply'], {
+      cwd: backendDirectory,
+      env: migrationEnvironment,
+      label: '营销模块迁移',
+    });
+    await run(process.execPath, [marketingMigrationScript], {
+      cwd: backendDirectory,
+      env: migrationEnvironment,
+      label: '营销模块迁移复审',
+    });
+
+    console.log('10/10 启动并检查前后端');
     await run(process.execPath, [productionScript, 'start'], {
       label: '启动生产进程',
     });

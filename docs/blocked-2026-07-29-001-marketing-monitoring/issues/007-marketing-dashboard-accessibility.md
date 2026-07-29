@@ -1,6 +1,6 @@
 ---
 title: "完成营销看板与自动化无障碍"
-status: open
+status: blocked
 type: AFK
 blocked_by:
   - "006-refresh-token-lifecycle.md"
@@ -69,3 +69,10 @@ git diff --check
 ## Blocked by
 
 - `006-refresh-token-lifecycle.md`
+
+## 2026-07-29 工程进展
+
+- 已完成营销看板、管理员连接/项目绑定设置和 queryless 授权结果页；未核验时只显示清晰边界，不展示假数据。
+- Chrome 浏览器验收已覆盖 fresh data、超长 ID/名称、大数值、键盘焦点、axe、320 CSS px、400% 缩放和截图。
+- 页面使用单一 polite live region、逐日图形的等价原生表格、明确离站链接和本地日期筛选。
+- 全状态 fixture、真实授权/绑定交互和 VoiceOver 人工路径仍依赖上游与 Issue 009，本 issue 不关闭。

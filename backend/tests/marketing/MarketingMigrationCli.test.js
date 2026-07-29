@@ -44,7 +44,7 @@ test('backend package exposes real marketing test, migration and audit commands'
   );
 });
 
-test('marketing migration CLI applies and audits an empty immutable ledger', () => {
+test('marketing migration CLI applies and audits all immutable migrations', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-cli-'));
   const databasePath = path.join(directory, 'marketing.sqlite');
 
@@ -66,7 +66,11 @@ test('marketing migration CLI applies and audits an empty immutable ledger', () 
       configState: 'DISABLED',
       ready: true,
       ledgerPresent: true,
-      appliedVersions: [],
+      appliedVersions: [
+        '001-authorization-connections',
+        '002-project-bindings',
+        '003-campaign-snapshots'
+      ],
       pendingVersions: []
     });
   } finally {
@@ -81,6 +85,7 @@ test('marketing audit rejects an unsafe callback without echoing config values',
     NODE_ENV: 'production',
     MARKETING_MONITORING_ENABLED: 'true',
     MARKETING_MONITORING_ALLOWED_PROJECT_IDS: 'project-1',
+    CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
     BAIDU_MARKETING_CLIENT_ID: 'client-id-canary',
     BAIDU_MARKETING_CLIENT_SECRET: secret,
     BAIDU_MARKETING_REDIRECT_URI: 'http://marketing.example.test/callback?code=canary',

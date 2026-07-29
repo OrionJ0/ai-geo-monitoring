@@ -88,6 +88,17 @@ npm run prod:start
 - `DATABASE_URL` Postgres 连接串；生产环境配置后会优先使用 Supabase/Postgres
 - 未配置 `DATABASE_URL` 时，后端继续使用 SQLite（默认 `database.sqlite`），已在 `.gitignore` 忽略
 
+## 营销监控（默认关闭）
+
+- `MARKETING_MONITORING_ENABLED`：只有真实百度搜索推广契约和生产门禁完成后才可设为 `true`。
+- `MARKETING_MONITORING_ALLOWED_PROJECT_IDS`：试点项目 ID 逗号列表；正式扩大范围需显式设为 `*`。
+- `BAIDU_MARKETING_CLIENT_ID` / `BAIDU_MARKETING_CLIENT_SECRET`：获批百度应用凭据，只能由部署环境注入。
+- `BAIDU_MARKETING_REDIRECT_URI`：百度登记的稳定 HTTPS callback，禁止 query、fragment 和 URL 凭据。
+- `BAIDU_MARKETING_CONTRACT_VERSION`：必须对应仓库内状态为 `VERIFIED`、无 blocker、声明真实适配器已实现且带生产出站 allowlist 的不可变契约目录。
+- `BAIDU_MARKETING_HTTP_TIMEOUT_MS`：百度只读请求超时，允许 100–60000 毫秒。
+
+当前 `baidu-marketing-pending-2026-07-29` 是阻塞清单，不可用于启用模块。配置不完整、未知版本或阻塞版本只会让营销路由 fail-closed，不影响 GEO/SEO 全局 `/api/ready`。
+
 ## SEO 设置（可选）
 - `SEO_TITLE` 网站 SEO 标题
 - `SEO_DESCRIPTION` 网站 SEO 描述

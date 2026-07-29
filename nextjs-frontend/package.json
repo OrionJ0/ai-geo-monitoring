@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3001",
     "test": "node --test tests/marketing/*.test.cjs",
+    "test:marketing:browser": "playwright test --config=playwright.marketing.config.ts",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3001",
     "lint": "eslint"
@@ -24,6 +25,8 @@
     "unist-util-visit": "^5.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.55.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

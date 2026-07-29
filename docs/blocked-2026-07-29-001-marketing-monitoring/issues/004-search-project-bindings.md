@@ -1,6 +1,6 @@
 ---
 title: "完成搜索账户级项目绑定"
-status: open
+status: blocked
 type: AFK
 blocked_by:
   - "003-baidu-oauth-and-disconnect.md"
@@ -59,3 +59,10 @@ git diff --check
 ## Blocked by
 
 - `003-baidu-oauth-and-disconnect.md`
+
+## 2026-07-29 工程进展
+
+- 已完成账户目录边界、管理员设置页绑定 CRUD、暂停/恢复、项目归档门禁、跨项目活动绑定冲突和不透明 Long ID 测试。
+- 服务端在创建与恢复时重新读取目录，拒绝伪造账户、未知 scope 和非 SEARCH 只读账户。
+- 试点项目 allowlist 会在任何目录出站前拒绝非试点项目。
+- 真实账户目录服务、字段和跨连接 canonical identity 尚未由 Issue 002 证明，本 issue 不关闭。

@@ -120,6 +120,17 @@ server {
 - AI 平台配置：管理员登录 `/admin/settings`，人工填写 API Key 和供应商明确支持的模型请求参数，再分别执行“测试连接”和“检测联网能力”。腾讯混元还需先在 TokenHub“工具管理”领取联网搜索免费资源包或开通后付费；普通对话成功但没有 `search_results` 时仍是“证据不足”
 - 登录验证：使用默认管理员登录并立即修改密码（见下方安全建议）
 
+### 营销模块发布顺序
+
+1. 先完成数据库备份。
+2. 执行 `cd backend && npm run migrate:marketing`。
+3. 执行 `cd backend && npm run audit:marketing`，确认 3 个版本均已应用且无 checksum 漂移。
+4. 保持 `MARKETING_MONITORING_ENABLED=false` 启动并回归 GEO/SEO。
+5. 只有真实百度契约、稳定 HTTPS callback、只读权限、试点项目白名单和秘密扫描完成后才启用模块。
+6. 生产验收未完成前不添加营销工作台导航；百度不可达不得影响全局 readiness 或旧快照读取。
+
+故障时先把模块开关恢复为 `false`。若 Token 或主密钥疑似泄露，先阻断连接并在百度控制台撤权，清除本地 Token，轮换应用 Secret 与 `CONFIG_ENCRYPTION_KEY`，然后逐连接重新授权；不得恢复任何旧营销实现或隐式 fallback。
+
 ## 安全与合规建议
 - ⚠️ **JWT_SECRET 必须设置为强随机值**（至少32字符），使用默认值会导致严重安全风险
 - ⚠️ **部署后立即修改默认管理员密码**

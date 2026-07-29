@@ -1,6 +1,6 @@
 ---
 title: "完成搜索同步与项目原子快照"
-status: open
+status: blocked
 type: AFK
 blocked_by:
   - "004-search-project-bindings.md"
@@ -69,3 +69,10 @@ git diff --check
 ## Blocked by
 
 - `004-search-project-bindings.md`
+
+## 2026-07-29 工程进展
+
+- 已完成固定上海 30 日窗口、项目单活动运行、严格行解析、BigInt 聚合、批量入库、提交栅栏和项目级全有或全无替换。
+- dashboard 在单一读事务中返回 revision、正交状态、覆盖范围、精确汇总、逐日趋势和完整计划明细。
+- SQLite 已验证失败零替换与数据库十进制 CHECK；PostgreSQL disposable runner 已覆盖方言专用 ledger、并发单活动 run、精确快照与失败保留旧 revision，并有拒绝生产 URL 的安全门，但本环境未提供 `POSTGRES_TEST_URL`。
+- 真实报表服务、分页、金额 scale、规模预算和 PostgreSQL 实例验收依赖 Issue 002/外部环境，本 issue 不关闭。

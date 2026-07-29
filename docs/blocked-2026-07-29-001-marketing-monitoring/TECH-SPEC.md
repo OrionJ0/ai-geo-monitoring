@@ -1,6 +1,6 @@
 # 营销监控系统第一期技术方案
 
-- 状态：Blocked（模块基础已完成，等待百度真实契约）
+- 状态：Blocked（可离线完成的工程底座已实现，等待百度真实契约与生产验收）
 - 日期：2026-07-29
 - 对应 PRD：`prd.md`
 - 实施 issues：`issues/`
@@ -30,7 +30,13 @@
 - 路由和导航已接入；
 - 真实百度账户已完成生产验收。
 
-在上述切换完成前，正式入口仍只运行现有 GEO/SEO 功能，营销模块不会生效。
+当前工程状态：
+
+- 后端正式应用已经挂载营销状态、授权、绑定、看板和刷新路由，启动/关停链路也已接入；
+- 默认 `MARKETING_MONITORING_ENABLED=false`，阻塞契约和未实现真实适配器都不能进入 `READY`；
+- 前端直达页面和管理员设置页已构建，但工作台导航保持隐藏；
+- 当前不会向百度发起任何网络请求，也不会在正式业务流程产生营销数据；
+- 真实契约、生产 PostgreSQL、稳定 HTTPS callback、真实账户和人工验收完成后，才可实现真实适配器并启用试点入口。
 
 ## 3. 关键决策
 
@@ -583,7 +589,7 @@ PostgreSQL 写事务使用项目行 `FOR UPDATE`；SQLite 从事务入口使用 
 - 归档和暂停状态明确禁用刷新并解释原因。
 - 验证 320 CSS px、400% 缩放、长账户/计划名和超长精确值；除带可访问名称的表格滚动容器外，页面不得整体横向滚动。
 
-前端当前没有 `test` script。Issue 001 先建立基于 `node --test` 的 `npm --prefix nextjs-frontend test`，后续 issue 不得引用不存在的命令。
+前端已经提供基于 `node --test` 的 `npm --prefix nextjs-frontend test`，并提供基于 Playwright + axe 的 `npm --prefix nextjs-frontend run test:marketing:browser`。
 
 ## 11. 配置、安全与日志
 

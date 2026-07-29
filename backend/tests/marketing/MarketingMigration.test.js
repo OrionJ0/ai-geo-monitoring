@@ -7,7 +7,8 @@ const test = require('node:test');
 const { Sequelize } = require('sequelize');
 
 const {
-  createMarketingMigrationRunner
+  createMarketingMigrationRunner,
+  ledgerChecksumConstraint
 } = require('../../modules/marketing/migrations/MarketingMigrationRunner');
 const {
   loadMarketingMigrations
@@ -58,11 +59,27 @@ test('root sequelize sync never registers or creates marketing domain tables', (
   }
 });
 
-test('foundation ships no placeholder domain migration', () => {
-  assert.deepEqual(loadMarketingMigrations(), []);
+test('marketing ships the three immutable domain migrations in order', () => {
+  assert.deepEqual(
+    loadMarketingMigrations().map((migration) => migration.version),
+    [
+      '001-authorization-connections',
+      '002-project-bindings',
+      '003-campaign-snapshots'
+    ]
+  );
 });
 
-test('marketing migration audit is read-only and apply creates only an idempotent ledger', async (t) => {
+test('migration ledger uses a checksum constraint supported by each dialect', () => {
+  assert.equal(
+    ledgerChecksumConstraint('postgres'),
+    "checksum ~ '^[0-9a-f]{64}$'"
+  );
+  assert.match(ledgerChecksumConstraint('sqlite'), /GLOB/u);
+  assert.doesNotMatch(ledgerChecksumConstraint('postgres'), /GLOB/u);
+});
+
+test('marketing migration audit is read-only and apply creates five domain tables idempotently', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-ledger-'));
   const database = createDatabase(path.join(directory, 'ledger.sqlite'));
   t.after(async () => {
@@ -75,7 +92,11 @@ test('marketing migration audit is read-only and apply creates only an idempoten
     ready: false,
     ledgerPresent: false,
     appliedVersions: [],
-    pendingVersions: []
+    pendingVersions: [
+      '001-authorization-connections',
+      '002-project-bindings',
+      '003-campaign-snapshots'
+    ]
   });
   assert.deepEqual(await database.getQueryInterface().showAllTables(), []);
 
@@ -85,7 +106,14 @@ test('marketing migration audit is read-only and apply creates only an idempoten
 
   assert.equal(first.ready, true);
   assert.deepEqual(second, first);
-  assert.deepEqual(tables, ['marketing_schema_migrations']);
+  assert.deepEqual([...tables].sort(), [
+    'baidu_authorization_attempts',
+    'baidu_campaign_daily_metrics',
+    'baidu_marketing_connections',
+    'baidu_marketing_refresh_runs',
+    'baidu_project_bindings',
+    'marketing_schema_migrations'
+  ]);
 });
 
 test('concurrent SQLite runners serialize and apply a migration once', async (t) => {

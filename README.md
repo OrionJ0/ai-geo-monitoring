@@ -37,6 +37,7 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 - 用户登录、权限、会员等级与额度管理
 - 管理后台：用户、任务、会员、系统配置与运行记录管理
 - 本地 SQLite 自动初始化，生产环境支持外部 Postgres 数据库
+- 百度搜索推广营销监控工程底座：显式迁移、OAuth/连接、账户级绑定、30 日原子快照、精确值看板与刷新生命周期均已实现；当前因真实百度业务契约和生产账户未提供而保持 fail-closed，未加入正式工作台导航
 
 ## 分析能力
 
@@ -146,6 +147,8 @@ npm run build        # 构建 Next.js 前端
 npm run lint         # 检查 Next.js 前端
 cd backend && npm run audit:geo-metric-semantics   # 只读审计 GEO 指标迁移状态
 cd backend && npm run migrate:geo-metric-semantics -- --backup-reference=/绝对路径/数据库备份
+cd backend && npm run migrate:marketing # 应用营销模块显式迁移
+cd backend && npm run audit:marketing   # 只读复审版本与 checksum
 ```
 
 后端测试：
@@ -165,6 +168,8 @@ npm run deploy
 ```
 
 该流程支持 macOS 和 Linux，允许部署期间停机。SQLite 部署会先生成并校验唯一最新快照，再执行 GEO 指标语义迁移和只读复审，全部通过后才启动服务；Postgres 部署必须通过 `AI_GEO_DATABASE_BACKUP_REFERENCE` 提供已完成外部备份的引用。服务器重启或进程崩溃后需要人工执行 `npm run prod:start`。首次接管、失败处理和运行限制见 [单机原地部署](docs/SINGLE_HOST_DEPLOYMENT.md)。
+
+部署流程也会在启动前应用并复审营销模块的 3 个不可变迁移。该步骤在模块关闭时同样执行，但不会启用百度网络调用。只有获批应用、真实契约、稳定 HTTPS callback、试点项目白名单和生产验收全部完成后，才能把 `MARKETING_MONITORING_ENABLED` 改为 `true`；当前仓库中的 `baidu-marketing-pending-2026-07-29` 清单明确为 `BLOCKED`，配置审计会拒绝启用。
 
 生产环境建议：
 

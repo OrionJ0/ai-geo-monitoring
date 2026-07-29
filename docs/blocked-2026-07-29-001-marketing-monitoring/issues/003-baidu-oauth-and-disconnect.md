@@ -1,6 +1,6 @@
 ---
 title: "完成百度 OAuth、连接与断开闭环"
-status: open
+status: blocked
 type: AFK
 blocked_by:
   - "001-module-foundation.md"
@@ -64,3 +64,10 @@ git diff --check
 
 - `001-module-foundation.md`
 - `002-baidu-contract-verification.md`
+
+## 2026-07-29 工程进展
+
+- 已完成一次性 launch/result Cookie、state 哈希、callback CAS、凭据加密、重授权代次、断开清密钥与绑定暂停。
+- 已用真实 Express 入口和竞态测试验证重放、重复参数、结果未知、错误主体及断开行为。
+- 生产路由已接入正式应用，但阻塞契约会统一返回 fail-closed，当前不会向百度发起请求。
+- 待 Issue 002 提供真实 Token/撤权契约后实现并验收生产适配器，因此本 issue 不关闭。

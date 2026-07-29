@@ -162,6 +162,14 @@ h1 {
   background: #f5f7fa;
 }
 
+.ant-menu-light .ant-menu-item-selected a {
+  color: #0f4fb8;
+}
+
+.ant-breadcrumb .ant-breadcrumb-link a {
+  color: #4b5563 !important;
+}
+
 .app-header {
   background: linear-gradient(135deg, #162b6f 0%, #1f4dd2 45%, #5b8cff 100%);
   color: #fff;

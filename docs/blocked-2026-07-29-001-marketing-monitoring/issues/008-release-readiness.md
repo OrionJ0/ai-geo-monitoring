@@ -1,6 +1,6 @@
 ---
 title: "补齐安全、迁移与发布准备"
-status: open
+status: blocked
 type: AFK
 blocked_by:
   - "007-marketing-dashboard-accessibility.md"
@@ -72,3 +72,10 @@ git diff --check
 ## Blocked by
 
 - `007-marketing-dashboard-accessibility.md`
+
+## 2026-07-29 工程进展
+
+- 已完成 5 张领域表与 ledger、SQLite 迁移/审计、PostgreSQL runner、安全配置审计、试点项目 allowlist 和独立授权限流。
+- 部署脚本已按备份后、启动前执行营销迁移与 checksum 审计，并运行营销后端/前端/浏览器测试。
+- 阻塞契约生产 allowlist 为空，适配器无网络请求实现；全局 readiness 不依赖百度。
+- 真实 PostgreSQL、生产 ingress/APM canary、日志扫描、部署 singleton 和正式入口验收需外部环境，本 issue 不关闭。

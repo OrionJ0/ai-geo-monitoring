@@ -1,6 +1,6 @@
 ---
 title: "完善自动刷新、Token 与运行生命周期"
-status: open
+status: blocked
 type: AFK
 blocked_by:
   - "005-search-sync-snapshot.md"
@@ -67,3 +67,10 @@ git diff --check
 ## Blocked by
 
 - `005-search-sync-snapshot.md`
+
+## 2026-07-29 工程进展
+
+- 已完成连接级条件 claim、auth/token generation CAS、Refresh Token 缺失/相同/旋转写回、结果未知转重新授权和绑定暂停；旧 refresh 失败不能误伤新授权代次。
+- 已完成 dashboard 纯读陈旧判断、单进程 FIFO executor、启动恢复、关停全部排队/运行任务失效及归档/迟到提交栅栏。
+- 自动化测试证明并发过期仅一次 refresh grant，项目归档先完成时晚到结果零写入。
+- 真实 refresh 轮换、丢响应重放语义和跨进程部署锁仍需 Issue 002 与生产环境验证，本 issue 不关闭。

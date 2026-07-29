@@ -6,6 +6,7 @@ import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import AIPlatformSettings from './AIPlatformSettings';
 import AIAnalysisSettings from './AIAnalysisSettings';
+import BaiduMarketingSettings from './BaiduMarketingSettings';
 
 type SettingsResponse = {
   seo_title?: string;
@@ -21,6 +22,7 @@ type SettingsResponse = {
 export default function AdminSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [refreshSignal, setRefreshSignal] = useState(0);
+  const [activeTab, setActiveTab] = useState('ai-platforms');
   const [seoForm] = Form.useForm();
   const [runtimeForm] = Form.useForm();
 
@@ -51,6 +53,19 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
+
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if ([
+      'ai-platforms',
+      'ai-analysis',
+      'marketing',
+      'runtime',
+      'seo',
+    ].includes(hash)) {
+      setActiveTab(hash);
+    }
+  }, []);
 
   const refreshAll = () => {
     fetchSettings();
@@ -156,10 +171,19 @@ export default function AdminSettingsPage() {
   return (
     <Card title="设置中心" extra={<Button onClick={refreshAll}>刷新全部设置</Button>}>
       <Tabs
-        defaultActiveKey="ai-platforms"
+        activeKey={activeTab}
+        onChange={(key) => {
+          setActiveTab(key);
+          window.history.replaceState(
+            null,
+            '',
+            `${window.location.pathname}${window.location.search}#${key}`
+          );
+        }}
         items={[
           { key: 'ai-platforms', label: 'AI 平台', children: <AIPlatformSettings refreshSignal={refreshSignal} />, destroyOnHidden: false },
           { key: 'ai-analysis', label: 'AI 分析 API', children: <AIAnalysisSettings />, destroyOnHidden: false },
+          { key: 'marketing', label: '营销监控', children: <BaiduMarketingSettings />, destroyOnHidden: false },
           { key: 'runtime', label: '运行设置', children: runtimeSettings, forceRender: true },
           { key: 'seo', label: '站点 SEO', children: seoSettings, forceRender: true },
         ]}

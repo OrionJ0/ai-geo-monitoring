@@ -148,6 +148,10 @@ test('deployment runs the metric migration and audit after backup but before sta
     path.join(directory, 'backend', 'scripts', 'migrateGeoMetricSemantics.js'),
     "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `migration:${process.argv.slice(2).join(' ')}\\n`);\n"
   );
+  fs.writeFileSync(
+    path.join(directory, 'backend', 'scripts', 'migrateMarketing.js'),
+    "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `marketing-migration:${process.argv.slice(2).join(' ')}\\n`);\n"
+  );
   const fakeNpm = path.join(binDirectory, 'npm');
   fs.writeFileSync(
     fakeNpm,
@@ -188,9 +192,13 @@ test('deployment runs the metric migration and audit after backup but before sta
   const backupIndex = trace.indexOf('backup');
   const applyIndex = trace.findIndex((line) => line.startsWith('migration:--apply '));
   const auditIndex = trace.indexOf('migration:');
+  const marketingApplyIndex = trace.indexOf('marketing-migration:--apply');
+  const marketingAuditIndex = trace.indexOf('marketing-migration:');
   const startIndex = trace.indexOf('production:start');
   assert.ok(backupIndex >= 0);
   assert.ok(applyIndex > backupIndex);
   assert.ok(auditIndex > applyIndex);
-  assert.ok(startIndex > auditIndex);
+  assert.ok(marketingApplyIndex > auditIndex);
+  assert.ok(marketingAuditIndex > marketingApplyIndex);
+  assert.ok(startIndex > marketingAuditIndex);
 });

@@ -12,6 +12,7 @@ function enabledConfig(overrides = {}) {
     NODE_ENV: 'production',
     MARKETING_MONITORING_ENABLED: 'true',
     MARKETING_MONITORING_ALLOWED_PROJECT_IDS: 'project-1',
+    CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
     BAIDU_MARKETING_CLIENT_ID: 'client-id-canary',
     BAIDU_MARKETING_CLIENT_SECRET: 'module-secret-canary',
     BAIDU_MARKETING_REDIRECT_URI: 'https://marketing.example.test/api/admin/marketing/baidu/oauth/callback',
@@ -21,10 +22,28 @@ function enabledConfig(overrides = {}) {
   };
 }
 
+const loadVerifiedContract = () => ({
+  status: 'VERIFIED',
+  productionAllowlist: ['GET https://provider.example.test/report'],
+  blockers: [],
+  runtime: { adapterImplemented: true },
+  money: { currencyCode: 'CNY', costScale: 6 }
+});
+
 async function callStatusRoute(module, role) {
-  const layer = module.router.stack.find((item) => (
-    item.route?.path === '/status' && item.route.methods?.get
-  ));
+  const layers = [...module.router.stack];
+  let layer = null;
+  while (layers.length && !layer) {
+    const candidate = layers.shift();
+    if (
+      candidate.route?.path === '/status'
+      && candidate.route.methods?.get
+    ) {
+      layer = candidate;
+    } else if (candidate.handle?.stack) {
+      layers.push(...candidate.handle.stack);
+    }
+  }
   assert.ok(layer, 'GET /status route should exist');
 
   const req = { user: { id: 1, role } };
@@ -93,6 +112,7 @@ test('status route reveals missing config key names only to administrators', asy
 test('enabled module distinguishes missing schema from a ready migration ledger', async () => {
   const missing = createMarketingModule({
     env: enabledConfig(),
+    contractLoader: loadVerifiedContract,
     migrationAuditor: {
       async audit() {
         return { ready: false };
@@ -101,6 +121,7 @@ test('enabled module distinguishes missing schema from a ready migration ledger'
   });
   const ready = createMarketingModule({
     env: enabledConfig(),
+    contractLoader: loadVerifiedContract,
     migrationAuditor: {
       async audit() {
         return { ready: true };
@@ -129,6 +150,11 @@ test('the application mounts marketing through its facade without changing globa
     appSource,
     /app\.use\('\/api\/marketing',\s*authRequired,\s*marketingModule\.router\)/
   );
+  assert.match(
+    appSource,
+    /marketingModule\.authorizationRouter/
+  );
+  assert.match(appSource, /await marketingModule\.start\(\)/);
   assert.match(
     appSource,
     /const ready = database\.status === 'ready' && scheduler\.started === true/

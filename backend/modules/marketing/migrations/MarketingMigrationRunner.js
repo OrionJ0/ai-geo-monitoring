@@ -42,6 +42,15 @@ function assertUniqueMigrations(migrations) {
   }
 }
 
+function ledgerChecksumConstraint(dialect) {
+  return dialect === 'postgres'
+    ? "checksum ~ '^[0-9a-f]{64}$'"
+    : (
+        "length(checksum) = 64 "
+        + "AND checksum NOT GLOB '*[^0-9a-f]*'"
+      );
+}
+
 function createMarketingMigrationRunner({
   sequelize,
   migrations = loadMarketingMigrations()
@@ -126,13 +135,13 @@ function createMarketingMigrationRunner({
   }
 
   async function applyWithinTransaction(transaction) {
+    const checksumConstraint = ledgerChecksumConstraint(
+      sequelize.getDialect()
+    );
     await sequelize.query(
       `CREATE TABLE IF NOT EXISTS ${LEDGER_TABLE} (
         version TEXT PRIMARY KEY NOT NULL,
-        checksum TEXT NOT NULL CHECK (
-          length(checksum) = 64
-          AND checksum NOT GLOB '*[^0-9a-f]*'
-        ),
+        checksum TEXT NOT NULL CHECK (${checksumConstraint}),
         applied_at TEXT NOT NULL
       )`,
       { transaction }
@@ -165,17 +174,28 @@ function createMarketingMigrationRunner({
 
   async function apply() {
     await sequelize.authenticate();
-    if (sequelize.getDialect() !== 'sqlite') {
+    const dialect = sequelize.getDialect();
+    if (!['sqlite', 'postgres'].includes(dialect)) {
       throw migrationError(
-        'PostgreSQL 营销迁移 runner 将在 Issue 005 验收',
-        'MARKETING_POSTGRES_MIGRATION_NOT_READY'
+        '营销迁移不支持当前数据库方言',
+        'MARKETING_DATABASE_DIALECT_UNSUPPORTED'
       );
     }
 
-    await sequelize.transaction(
-      { type: Transaction.TYPES.EXCLUSIVE },
-      applyWithinTransaction
-    );
+    if (dialect === 'sqlite') {
+      await sequelize.transaction(
+        { type: Transaction.TYPES.EXCLUSIVE },
+        applyWithinTransaction
+      );
+    } else {
+      await sequelize.transaction(async (transaction) => {
+        await sequelize.query(
+          "SELECT pg_advisory_xact_lock(hashtext('ai_geo_marketing_schema_migrations'))",
+          { transaction }
+        );
+        await applyWithinTransaction(transaction);
+      });
+    }
     return audit();
   }
 
@@ -187,5 +207,6 @@ function createMarketingMigrationRunner({
 
 module.exports = {
   LEDGER_TABLE,
-  createMarketingMigrationRunner
+  createMarketingMigrationRunner,
+  ledgerChecksumConstraint
 };

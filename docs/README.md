@@ -33,7 +33,7 @@
 - `active-2026-07-27-002-doubao-web-monitoring/`：豆包 Web 注册表、隔离运行时、可信采集、设置页账号管理、双平台状态、默认启用预置与正式任务链路已完成本地实现；本地真实单问题采集已通过，仍需目标虚拟机完成专用 Profile 登录、问题集、自动监测和双浏览器资源验收
 - `blocked-2026-07-28-001-geo-entity-share-metrics/`：回答内竞品提及占比（SOV）的版本边界、v3 完整输入分析、回答级等权聚合、分析失败隔离、平台视图、历史兼容和人工基线；Issue 008 人工基线已关闭，等待 Issue 009 的真实入口验收
 - `blocked-2026-07-29-002-ai-semantic-analysis-quality/`：v4 全实体语义抽取、竞品/排序/情绪原文证据、DeepSeek Pro 基线校准和全入口硬切已完成实现与技术验收，等待 SOV 波动口径和补充情绪人工基线确认
-- `blocked-2026-07-29-001-marketing-monitoring/`：轻量只读营销监控；Issue 001 模块、迁移 ledger、状态路由和页面骨架已完成，当前等待百度真实契约，尚未接入正式导航或真实百度数据
+- `blocked-2026-07-29-001-marketing-monitoring/`：轻量只读营销监控；OAuth/连接、账户级绑定、30 日原子快照、精确值看板、显式迁移和发布门禁的工程底座已完成，后端正式路由已接入但默认关闭且 fail-closed，工作台导航保持隐藏；当前等待百度真实业务契约、生产 PostgreSQL/部署环境与人工验收
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 

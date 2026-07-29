@@ -333,6 +333,19 @@ Authorization: Bearer <token>
     - 参数：`days` 可选，默认 30
     - **权限验证**：只能查看自己的统计
 
+## 营销监控
+
+营销模块默认关闭；未知或未核验契约会 fail-closed。所有外部 ID 和指标均以十进制或不透明字符串返回。
+
+- `GET /api/marketing/status`：读取模块状态，不探测百度网络。
+- `GET /api/marketing/projects/:projectId/dashboard`：纯读同一快照 revision；可同时传 `from`、`to` 筛选当前本地覆盖范围。
+- `POST /api/marketing/projects/:projectId/refresh-runs`：请求体只接受 `triggerType`；固定读取最近 30 个上海自然日。
+- `GET /api/marketing/projects/:projectId/refresh-runs/:runId`：读取同项目运行状态。
+- `/api/marketing/projects/:projectId/baidu-bindings*`：管理员创建、暂停、恢复或删除整个百度搜索账户绑定。
+- `/api/admin/marketing/baidu/*`：管理员授权、连接、账户目录和断开；OAuth callback 结束后只跳转到无查询参数结果页。
+
+当前不会向百度调用任何写接口，也不支持信息流、计划子集、落地页或销售数据。
+
 ## 响应状态码
 - `200 OK` - 请求成功
 - `400 Bad Request` - 请求参数错误

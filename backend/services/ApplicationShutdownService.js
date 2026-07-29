@@ -26,6 +26,7 @@ function createApplicationShutdown({
   schedulerService,
   projectRunService,
   webPlatformRegistry,
+  marketingModule,
   sequelize
 }) {
   let shutdownPromise = null;
@@ -37,7 +38,8 @@ function createApplicationShutdown({
       await Promise.all([
         schedulerService.stop(),
         webPlatformRegistry.shutdown(),
-        projectRunService.drain()
+        projectRunService.drain(),
+        marketingModule?.shutdown?.()
       ]);
       await sequelize.close();
     })();

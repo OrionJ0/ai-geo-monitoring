@@ -1,0 +1,113 @@
+{
+  "contractVersion": "baidu-marketing-pending-2026-07-29",
+  "status": "BLOCKED",
+  "evidenceDate": "2026-07-29",
+  "verifiedAccountType": null,
+  "sources": [
+    {
+      "title": "OAuth接入指南",
+      "url": "https://openauth.baidu.com/doc/doc.html",
+      "official": true,
+      "supports": [
+        "authorization_code",
+        "token_exchange",
+        "refresh_grant"
+      ]
+    },
+    {
+      "title": "百度营销商业开发者中心",
+      "url": "https://dev2.baidu.com/content",
+      "official": true,
+      "supports": [
+        "marketing_oauth2_capability",
+        "search_reporting_capability"
+      ]
+    },
+    {
+      "title": "搜索推广管理API申请表",
+      "url": "https://cloud.baidu.com/survey/fcapi.html",
+      "official": true,
+      "supports": [
+        "permission_application_required",
+        "account_permission_types"
+      ]
+    }
+  ],
+  "oauth": {
+    "authorization": {
+      "method": "GET",
+      "url": "https://openapi.baidu.com/oauth/2.0/authorize",
+      "responseType": "code",
+      "statePurpose": "csrf",
+      "codeSingleUse": true,
+      "codeTtlSeconds": 600
+    },
+    "token": {
+      "method": "GET",
+      "url": "https://openapi.baidu.com/oauth/2.0/token",
+      "grantType": "authorization_code",
+      "redirectUriMustMatch": true
+    },
+    "refresh": {
+      "method": "GET",
+      "url": "https://openapi.baidu.com/oauth/2.0/token",
+      "grantType": "refresh_token",
+      "documentedRefreshLifetime": "10 years",
+      "responseRotation": "UNVERIFIED_FOR_MARKETING"
+    }
+  },
+  "fixtures": {
+    "observedRealResponses": false,
+    "reason": "No approved Baidu Marketing application or test account was provided."
+  },
+  "runtime": {
+    "adapterImplemented": false
+  },
+  "productionAllowlist": [],
+  "blockers": [
+    {
+      "key": "approved_read_scopes",
+      "reason": "The approved SEARCH read-only scopes are application-specific and unobserved."
+    },
+    {
+      "key": "account_directory",
+      "reason": "The marketing account directory service, request and response are not verified."
+    },
+    {
+      "key": "search_report",
+      "reason": "The SEARCH report service, fields and business error envelope are not verified."
+    },
+    {
+      "key": "external_id_wire_types",
+      "reason": "Account and campaign identifier wire types and uniqueness scope are not verified."
+    },
+    {
+      "key": "money_currency_scale",
+      "reason": "Cost unit, currency and fixed precision are not verified."
+    },
+    {
+      "key": "timezone_latency_window",
+      "reason": "Reporting timezone, latency and supported date range are not verified."
+    },
+    {
+      "key": "pagination_rate_limits",
+      "reason": "Pagination, rate limits, retry hints and response budgets are not verified."
+    },
+    {
+      "key": "error_mapping_retry",
+      "reason": "Marketing HTTP and business errors cannot yet be mapped safely."
+    },
+    {
+      "key": "refresh_rotation_replay",
+      "reason": "Refresh rotation and lost-response replay semantics were not observed for Marketing."
+    },
+    {
+      "key": "provider_revocation",
+      "reason": "A provider-side revocation endpoint and semantics are not verified."
+    },
+    {
+      "key": "pilot_account_scale",
+      "reason": "Real account, campaign row and payload sizes are unknown."
+    }
+  ]
+}
