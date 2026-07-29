@@ -3,7 +3,7 @@
 - 状态：已确认
 - 确认日期：2026-07-29
 - 当前阶段：产品方向确认，尚未进入实现
-- 当前权威实现方案：`../draft-2026-07-29-001-marketing-monitoring/TECH-SPEC.md`
+- 当前权威实现方案：`../blocked-2026-07-29-001-marketing-monitoring/TECH-SPEC.md`
 
 ## 一句话定义
 

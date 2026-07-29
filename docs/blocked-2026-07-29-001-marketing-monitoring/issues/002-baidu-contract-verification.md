@@ -1,6 +1,6 @@
 ---
 title: "确认百度 OAuth 与搜索推广真实契约"
-status: open
+status: blocked
 type: HITL
 blocked_by: []
 ---
@@ -60,3 +60,4 @@ git diff --check
 
 - 获批百度应用或可用测试账户。
 - 百度官方调试能力。
+- 当前用户已明确暂不提供外部系统接口；2026-07-29 起等待真实契约证据。

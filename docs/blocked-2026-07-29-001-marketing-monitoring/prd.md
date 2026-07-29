@@ -1,6 +1,6 @@
 # 营销监控系统 PRD
 
-- 状态：Draft
+- 状态：Blocked（Issue 001 已完成，等待百度真实契约）
 - 日期：2026-07-29
 - 需求依据：`docs/ideas/marketing-monitoring-system.md`
 - 领域术语：`CONTEXT.md` 中的“营销监控语言”
@@ -226,5 +226,5 @@
 
 ## Handoff
 
-- PRD：`docs/draft-2026-07-29-001-marketing-monitoring/prd.md`
+- PRD：`docs/blocked-2026-07-29-001-marketing-monitoring/prd.md`
 - 下一步：先完成百度真实契约确认，再按 `TECH-SPEC.md` 和 `issues/` 进入实现。

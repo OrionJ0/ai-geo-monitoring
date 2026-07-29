@@ -1,6 +1,6 @@
 ---
 title: "建立营销模块、测试入口与迁移基础"
-status: open
+status: closed
 type: AFK
 blocked_by: []
 ---
@@ -29,17 +29,17 @@ blocked_by: []
 
 ## Acceptance Criteria
 
-- [ ] `MARKETING_MONITORING_ENABLED` 默认关闭；全空配置不改变现有启动、health 或 ready。
-- [ ] 启用但配置不完整时只返回 `MISCONFIGURED` 和缺失键名，不回显值。
-- [ ] 回调配置有 query、fragment 或非测试 HTTP 地址时审计失败。
-- [ ] 营销路由通过模块 facade 挂载，不继续扩张现有大型 GEO 路由。
-- [ ] 根 `sequelize.sync()` 不创建任何 `baidu_*` 表。
-- [ ] 营销迁移 ledger 记录不可变 checksum，SQLite 可幂等审计/应用；真实 PostgreSQL runner 与 DDL 验收在 Issue 005 完成。
-- [ ] 模块状态接口不泄露 Secret；普通用户不能读取管理员级配置详情。
-- [ ] 页面骨架无假咨询、假订单、信息流或完整漏斗。
-- [ ] `npm --prefix nextjs-frontend test` 确实执行测试，空测试或静默成功不可接受。
-- [ ] 故意失败的营销测试会让 `test:marketing` 非零退出，证明发布命令没有漏掉子目录。
-- [ ] 营销配置异常只使营销模块 fail-closed，不改变现有 GEO/SEO 全局 ready。
+- [x] `MARKETING_MONITORING_ENABLED` 默认关闭；全空配置不改变现有启动、health 或 ready。
+- [x] 启用但配置不完整时只返回 `MISCONFIGURED` 和缺失键名，不回显值。
+- [x] 回调配置有 query、fragment 或非测试 HTTP 地址时审计失败。
+- [x] 营销路由通过模块 facade 挂载，不继续扩张现有大型 GEO 路由。
+- [x] 根 `sequelize.sync()` 不创建任何 `baidu_*` 表。
+- [x] 营销迁移 ledger 记录不可变 checksum，SQLite 可幂等审计/应用；真实 PostgreSQL runner 与 DDL 验收在 Issue 005 完成。
+- [x] 模块状态接口不泄露 Secret；普通用户不能读取管理员级配置详情。
+- [x] 页面骨架无假咨询、假订单、信息流或完整漏斗。
+- [x] `npm --prefix nextjs-frontend test` 确实执行测试，空测试或静默成功不可接受。
+- [x] 故意失败的营销测试会让 `test:marketing` 非零退出，证明发布命令没有漏掉子目录。
+- [x] 营销配置异常只使营销模块 fail-closed，不改变现有 GEO/SEO 全局 ready。
 
 ## Verification
 
@@ -66,3 +66,10 @@ git diff --check
 ## Blocked by
 
 None.
+
+## Completion
+
+- 完成日期：2026-07-29
+- 正式状态：模块代码和状态路由已接入，默认关闭；营销页面骨架已构建，但尚未加入工作台导航。
+- 迁移状态：仅创建不可变技术 ledger，没有任何百度领域表或占位迁移。
+- 验收证据：营销测试 18 项、前端骨架测试 3 项、后端回归 880 项、前端 lint/build、临时 SQLite migrate/audit 和 `git diff --check` 均通过。
