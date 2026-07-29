@@ -113,6 +113,46 @@ test('does not report a successful refresh when the provider returns no model id
   assert.equal(result.error_code, 'invalid_provider_response');
 });
 
+test('normalizes a provider context-window rejection without exposing its message', async () => {
+  const row = {
+    id: 3,
+    code: 'example-ai',
+    name: 'Example AI',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'example-model',
+    enabled: true,
+    archived_at: null
+  };
+  let attempts = 0;
+  const service = createService({
+    row,
+    post: async () => {
+      attempts += 1;
+      throw Object.assign(new Error('provider details must stay private'), {
+        response: {
+          status: 400,
+          data: {
+            error: {
+              code: 'context_length_exceeded',
+              message: 'Maximum context length is 128k tokens'
+            }
+          }
+        }
+      });
+    }
+  });
+
+  const result = await service.queryPlatform('example-ai', '超长问题');
+
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'input_too_long');
+  assert.equal(result.error, '提交内容超出模型可处理范围。');
+  assert.equal(attempts, 1);
+  assert.doesNotMatch(JSON.stringify(result), /128k|provider details/);
+});
+
 test('calls an OpenAI compatible platform from the saved database configuration', async () => {
   let request;
   const row = {
@@ -288,6 +328,38 @@ test('allows an analysis call to override token and timeout limits without mutat
   assert.equal(request.options.timeout, 120000);
   assert.equal(row.max_tokens, 1024);
   assert.equal(row.request_timeout_seconds, 15);
+});
+
+test('allows analysis to omit token limits even when platform and runtime defaults define them', async () => {
+  let requestBody;
+  const row = {
+    id: 4,
+    code: 'deepseek',
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'deepseek-v4-pro',
+    max_tokens: 1024,
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (_url, body) => {
+      requestBody = body;
+      return { data: { choices: [{ message: { content: '{}' } }] }, headers: {} };
+    }
+  });
+
+  const result = await service.queryConfig(row, '结构化回答', {
+    requestOptions: {},
+    omitTokenLimit: true
+  });
+
+  assert.equal(result.success, true);
+  assert.equal('max_tokens' in requestBody, false);
+  assert.equal('max_output_tokens' in requestBody, false);
 });
 
 test('preserves model fields when overriding request options on a Sequelize-like config row', async () => {

@@ -60,9 +60,17 @@ router.get('/analysis-api', adminRequired, async (_req, res) => {
 
 router.get('/analysis-api/prompt', adminRequired, async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  let platform = null;
+  try {
+    platform = await AIAnalysisConfigService.getAnalysisPlatform();
+  } catch (error) {
+    if (!(error instanceof AIAnalysisConfigError)) {
+      return analysisError(res, error, '获取 AI 分析 API 请求参数失败');
+    }
+  }
   return res.json({
     success: true,
-    data: AIResponseAnalysisService.getPromptDefinition()
+    data: AIResponseAnalysisService.getPromptDefinition(platform)
   });
 });
 
@@ -79,6 +87,7 @@ router.put('/analysis-api', adminRequired, async (req, res) => {
 });
 
 router.post('/analysis-api/test', adminRequired, async (req, res) => {
+  const questionText = String(req.body?.question_text || '').trim();
   const brandName = String(req.body?.brand_name || '').trim();
   const responseText = String(req.body?.response_text || '').trim();
   const brandAliases = (Array.isArray(req.body?.brand_aliases) ? req.body.brand_aliases : [])
@@ -88,20 +97,25 @@ router.post('/analysis-api/test', adminRequired, async (req, res) => {
   if (!brandName || brandName.length > 100) {
     return res.status(400).json({ success: false, message: '品牌名称不能为空且不能超过 100 个字符' });
   }
-  if (!responseText || responseText.length > 12000) {
-    return res.status(400).json({ success: false, message: '测试回答不能为空且不能超过 12000 个字符' });
+  if (!questionText) {
+    return res.status(400).json({ success: false, message: '当前问题不能为空' });
+  }
+  if (!responseText) {
+    return res.status(400).json({ success: false, message: '测试回答不能为空' });
   }
   try {
     const output = await AIResponseAnalysisService.analyze({
+      question: questionText,
       responseText,
       brand: { name: brandName, aliases: brandAliases },
-      competitors: [],
+      competitorHints: [],
       includeRawOutput: true
     });
     return res.json({
       success: true,
       data: {
         input: {
+          question_text: questionText,
           brand_name: brandName,
           brand_aliases: brandAliases,
           response_text: responseText

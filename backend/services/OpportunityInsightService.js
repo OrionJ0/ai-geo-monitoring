@@ -56,7 +56,7 @@ class OpportunityInsightService {
     for (const prompt of promptRows) {
       if (!prompt || prompt.enabled === false) continue;
       const perf = performance[String(prompt.id)] || {};
-      const checks = Number(perf.checks || 0);
+      const checks = Number(perf.valid_answers ?? perf.checks ?? 0);
       const totalRuns = Number(perf.total_runs || 0);
       const failedRuns = Number(perf.failed_runs || 0);
       if (!checks) {
@@ -97,7 +97,12 @@ class OpportunityInsightService {
       }
 
       const mentionRate = Number(perf.brand_mention_rate || 0);
-      const sov = Number(perf.avg_share_of_voice || 0);
+      const sovValue = perf?.sov_summary?.average;
+      const hasSov = sovValue !== null
+        && sovValue !== undefined
+        && sovValue !== ''
+        && Number.isFinite(Number(sovValue));
+      const sov = hasSov ? Number(sovValue) : null;
       if (checks < 3) {
         add({
           type: '样本不足',
@@ -110,14 +115,18 @@ class OpportunityInsightService {
         });
       }
 
-      if (checks >= 3 && (mentionRate < 50 || sov < 30)) {
+      if (checks >= 3 && (mentionRate < 50 || (hasSov && sov < 30))) {
+        const evidence = [`提及率 ${this.formatPercent(mentionRate)}`];
+        if (hasSov) {
+          evidence.push(`回答内竞品提及占比（SOV）${this.formatPercent(sov)}`);
+        }
         add({
           type: '低品牌可见度',
           priority: mentionRate < 50 ? 'high' : 'medium',
           prompt_id: prompt.id,
           prompt: prompt.question,
           prompt_category: PromptCategoryService.derive(prompt),
-          evidence: `提及率 ${this.formatPercent(mentionRate)}，平均声量占比（SOV）${this.formatPercent(sov)}`,
+          evidence: evidence.join('，'),
           recommendation: '围绕该问题补充官网内容、第三方内容和产品证据，提升 AI 回答中的品牌出现概率'
         });
       }
@@ -140,13 +149,10 @@ class OpportunityInsightService {
       const rowPromptId = row?.prompt_id || row?.tracked_prompt_id || null;
       if (!isActionablePrompt(rowPromptId)) continue;
       const promptCategory = derivePromptCategory(row);
-      const competitors = Array.isArray(row?.competitor_mentions) ? row.competitor_mentions : [];
+      const competitors = Array.isArray(row?.competition_entities) ? row.competition_entities : [];
       const leading = competitors
-        .filter((item) => item?.mentioned || Number(item?.mentions || 0) > 0)
-        .sort((a, b) => (
-          Number(b?.visibility_score ?? b?.mentions ?? 0) - Number(a?.visibility_score ?? a?.mentions ?? 0)
-          || Number(b?.mentions || 0) - Number(a?.mentions || 0)
-        ))[0];
+        .filter((item) => item?.relation === 'competitor' && Number(item?.mentions || 0) > 0)
+        .sort((a, b) => Number(b?.mentions || 0) - Number(a?.mentions || 0))[0];
       if (!row?.brand_mentioned && leading) {
         add({
           type: '竞品压制',
@@ -160,9 +166,9 @@ class OpportunityInsightService {
         });
       }
       if (row?.brand_mentioned && leading) {
-        const brandScore = Number(row.visibility_score ?? row.brand_mentions ?? 0);
-        const competitorScore = Number(leading.visibility_score ?? leading.mentions ?? 0);
-        if (Number.isFinite(competitorScore) && Number.isFinite(brandScore) && competitorScore > brandScore) {
+        const brandMentions = Number(row.brand_mentions || 0);
+        const competitorMentions = Number(leading.mentions || 0);
+        if (competitorMentions > brandMentions) {
           add({
             type: '竞品压制',
             priority: 'high',
@@ -170,7 +176,7 @@ class OpportunityInsightService {
             platform: row.platform || null,
             prompt_category: promptCategory,
             competitor: leading.name || '竞品',
-            evidence: `${leading.name || '竞品'} 可见度得分 ${competitorScore}，高于品牌 ${brandScore}`,
+            evidence: `${leading.name || '竞品'} 提及 ${competitorMentions} 次，目标品牌 ${brandMentions} 次`,
             recommendation: '分析该竞品被推荐、排序靠前或反复出现的原因，补充对比页、差异化卖点和第三方证明'
           });
         }
@@ -182,7 +188,7 @@ class OpportunityInsightService {
           ? row.sentiment_risk_terms.map((item) => this.sanitizeSentimentRiskTerm(item)).filter(Boolean)
           : [];
         const evidence = [
-          reason ? `判定依据：${reason}` : 'AI 回答对品牌或相关场景判定为负向',
+          reason ? `AI 语义分析依据：${reason}` : 'AI 语义分析判定回答对品牌或相关场景为负向',
           riskTerms.length ? `风险词：${riskTerms.join('、')}` : ''
         ].filter(Boolean).join('；');
         add({

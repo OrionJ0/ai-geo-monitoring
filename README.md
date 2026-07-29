@@ -25,9 +25,10 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 - GEO 检测任务创建、调度与执行记录
 - 多平台 AI 回答结果监测，预置豆包、DeepSeek、千问和腾讯混元，并支持管理员新增 OpenAI Chat Completions 或 Responses 兼容平台
 - 受管真实网页监测：`deepseek-web` 与 `doubao-web` 分别使用后端所在机器上的专用 headed Chrome、人工登录、持久会话、FIFO 和证据目录，从问题库的单问题、问题集及项目自动监测入口采集页面最终回答、引用和截图；两者可跨平台并行，各自失败时都不会回退同品牌 API。新初始化的 `doubao-web` 是默认启用的内置预置平台；已有数据库保留管理员保存的启停状态
-- 平台级模型请求参数配置、连接测试与联网能力检测；千问 Responses 新预置默认强制搜索，DeepSeek API 新预置默认关闭
+- 平台级模型请求参数配置、连接测试与联网能力检测；千问 Responses 新预置默认强制搜索，DeepSeek API 新预置默认模型为 `deepseek-v4-pro` 且在未配置密钥时保持关闭
 - 管理员可在设置中心查看两个网页版平台的浏览器、Profile 和登录验证状态，打开各自专用 Chrome 人工登录或切换账号
-- 由独立 AI 分析 API 抽取全部品牌/公司、目标实体映射、提及、候选顺序与推荐关系，程序据此计算品牌提及、推荐和排名；分析调用使用独立的结构化参数并在设置中心展示，不会改写监测平台参数；来源证据区分平台引用、回答正文链接、平台检索候选和分析补充来源，只有平台引用进入引用率与引用次数 KPI
+- 由独立 AI 分析 API 使用 `ai_structured_v3` 读取当前问题与完整原回答，抽取全部品牌/公司、目标实体映射、提及、候选顺序、明确推荐及逐实体竞品关系；程序计算提及次数、排名和回答内竞品提及占比（SOV），分析失败不进入品牌表现指标，只降低分析覆盖率；本机正式分析配置使用 `deepseek/deepseek-v4-pro`，设置中心展示后端实际请求参数，分析请求不设置应用层 Token 上限
+- 项目看板与新项目报告默认合并周期内实际产生的全部平台数据，也可切换单个平台；新 SOV 按单回答等权平均，历史旧 SOV 保留原值、原名称和原口径，不与新值混算或拼成连续趋势
 - AI 回答情绪判断，支持正向、中性、负向标签与风险项沉淀
 - 问题库支持单条与文本批量新增、分类、平台选择与历史结果追踪
 - 问题运行与问题集管理：手动运行统一从问题库发起；单问题和问题集都通过幂等键原子创建 run、配额和任务，并生成独立运行报告，失败项可幂等重试；定时执行按持久时槽去重，任务终态受执行租约保护，已有完整原回答时只重做结构化分析；支持仅含终态数据的标准 CSV 导出和只读回导
@@ -38,6 +39,16 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 - 本地 SQLite 自动初始化，生产环境支持外部 Postgres 数据库
 
 ## 分析能力
+
+### 回答内竞品提及占比（SOV）
+
+单条回答的 SOV 为：
+
+`目标品牌实际提及次数 ÷（目标品牌实际提及次数 + 当前回答中竞品实际提及次数）`
+
+竞品由分析模型依据当前问题与回答语境逐实体判断，项目中人工配置的竞品只作为名称和业务背景提示。目标品牌与竞品都未提及时，该回答的 SOV 为 `N/A`；项目或问题集的平均 SOV 是所有可计算单回答 SOV 的等权平均，不把全部回答的提及次数合并后再除。
+
+新运行固定使用 `ai_structured_v3`、`geo_metric_input_v3` 和 `contextual_competitor_mentions_sov_v1`。完整原回答不会在应用层静默截断；上下文超限、输出截断、关系缺失或结构无效时整条分析失败，系统不会回退旧分析器或旧配置竞品 SOV。跨期比较应使用稳定的非品牌词问题集合；问题集合实质变化后，由运营侧从变更日建立新的人工比较基线。
 
 ### 情绪判断
 
@@ -131,6 +142,8 @@ npm run web:login -- deepseek-web # 人工登录或恢复 DeepSeek Web 会话
 npm run web:login -- doubao-web   # 人工登录或恢复豆包 Web 会话
 npm run build        # 构建 Next.js 前端
 npm run lint         # 检查 Next.js 前端
+cd backend && npm run audit:geo-metric-semantics   # 只读审计 GEO 指标迁移状态
+cd backend && npm run migrate:geo-metric-semantics -- --backup-reference=/绝对路径/数据库备份
 ```
 
 后端测试：
@@ -149,7 +162,7 @@ npm run deploy:check
 npm run deploy
 ```
 
-该流程支持 macOS 和 Linux，允许部署期间停机，只保留一份经过完整性检查的 SQLite 最新快照，并使用脱离终端的生产进程。服务器重启或进程崩溃后需要人工执行 `npm run prod:start`。首次接管、失败处理和运行限制见 [单机原地部署](docs/SINGLE_HOST_DEPLOYMENT.md)。
+该流程支持 macOS 和 Linux，允许部署期间停机。SQLite 部署会先生成并校验唯一最新快照，再执行 GEO 指标语义迁移和只读复审，全部通过后才启动服务；Postgres 部署必须通过 `AI_GEO_DATABASE_BACKUP_REFERENCE` 提供已完成外部备份的引用。服务器重启或进程崩溃后需要人工执行 `npm run prod:start`。首次接管、失败处理和运行限制见 [单机原地部署](docs/SINGLE_HOST_DEPLOYMENT.md)。
 
 生产环境建议：
 
@@ -178,6 +191,7 @@ npm run deploy
 - [接口文档](docs/API.md)
 - [环境变量](docs/ENVIRONMENT.md)
 - [部署与运维](docs/DEPLOYMENT.md)
+- [GEO 指标口径与回答内竞品提及占比技术方案](docs/blocked-2026-07-28-001-geo-entity-share-metrics/TECH-SPEC.md)
 - [安全加固说明](docs/SECURITY.md)
 - [历史：SEO 检测 MVP 方案与竞品调研](docs/solutions/2026-07-22-seo-audit-mvp.md)
 - [全站 SEO 审计实现与验证](docs/solutions/2026-07-23-seo-site-audit.md)

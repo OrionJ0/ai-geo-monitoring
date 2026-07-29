@@ -390,10 +390,10 @@ test('explains that invalid AI structure is excluded instead of falling back to 
     });
 
     assert.equal(result.ok, false);
-    assert.equal(result.error, 'AI 结构化分析失败，本条未计入有效样本');
+    assert.equal(result.error, 'AI 结构化结果无效，本条未计入品牌指标');
     assert.deepEqual(updates[0], {
       status: 'failed',
-      error_message: 'AI 结构化分析失败，本条未计入有效样本',
+      error_message: 'AI 结构化结果无效，本条未计入品牌指标',
       result_summary: {
         retry: {
           previous_record_id: 9,
@@ -423,10 +423,77 @@ test('explains that invalid AI structure is excluded instead of falling back to 
     assert.equal(persistedDetails.length, 1);
     assert.equal(persistedDetails[0].responseText, '原始回答仍然保留');
     assert.equal(persistedDetails[0].providerCitations.length, 1);
+    assert.equal(persistedDetails[0].citationAnalysis.evidence_status, 'explicit');
+    assert.equal(persistedDetails[0].citationAnalysis.citation_count, 1);
+    assert.equal(
+      persistedDetails[0].citationAnalysis.sources[0].url,
+      'https://example.com/source'
+    );
     assert.deepEqual(persistedDetails[0].transaction, { id: 'failure-transaction' });
   } finally {
     ProjectRunService.buildVisibilityMetricPayload = originalBuildPayload;
     ProjectRunService.persistResultDetail = originalPersistResultDetail;
+    ProjectRunService.runInTransaction = originalRunInTransaction;
+  }
+});
+
+test('preserves the full answer and citations when analysis input exceeds the model context', async () => {
+  const originalBuildPayload = ProjectRunService.buildVisibilityMetricPayload;
+  const originalPersistResultDetail = ProjectRunService.persistResultDetail;
+  const originalPersistMetric = ProjectRunService.persistVisibilityMetric;
+  const originalRunInTransaction = ProjectRunService.runInTransaction;
+  const updates = [];
+  const persistedDetails = [];
+  let metricWrites = 0;
+  ProjectRunService.buildVisibilityMetricPayload = async () => {
+    throw new AIResponseAnalysisError(
+      '提交内容超出模型可处理范围。',
+      'analysis_input_too_long',
+      {
+        stage: 'request',
+        platform: 'analysis-ai',
+        attempt_count: 1
+      }
+    );
+  };
+  ProjectRunService.persistResultDetail = async (payload) => persistedDetails.push(payload);
+  ProjectRunService.persistVisibilityMetric = async () => {
+    metricWrites += 1;
+  };
+  ProjectRunService.runInTransaction = async (work) => work({ id: 'failure-transaction' });
+
+  try {
+    const result = await ProjectRunService.finalizeSuccessfulRecord({
+      record: {
+        id: 14,
+        analysis_contract_version: 'ai_structured_v3',
+        metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+        update: async (payload) => updates.push(payload)
+      },
+      responseText: '必须原样保留的完整长回答',
+      aiResponse: {},
+      project: { id: 1, name: '广拓' },
+      competitors: [],
+      prompt: { id: 1, question: '示例问题' },
+      keywords: ['广拓'],
+      providerCitations: [{
+        url: 'https://example.com/source',
+        source_role: 'explicit_citation'
+      }],
+      persistResponseDetail: true
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, '回答超出分析模型范围，本条未计入品牌指标');
+    assert.equal(updates[0].result_summary.failure.stage, 'analysis_request');
+    assert.equal(updates[0].result_summary.failure.error_code, 'analysis_input_too_long');
+    assert.equal(persistedDetails[0].responseText, '必须原样保留的完整长回答');
+    assert.equal(persistedDetails[0].providerCitations.length, 1);
+    assert.equal(metricWrites, 0);
+  } finally {
+    ProjectRunService.buildVisibilityMetricPayload = originalBuildPayload;
+    ProjectRunService.persistResultDetail = originalPersistResultDetail;
+    ProjectRunService.persistVisibilityMetric = originalPersistMetric;
     ProjectRunService.runInTransaction = originalRunInTransaction;
   }
 });
@@ -708,6 +775,91 @@ test('uses the structured analysis result when the target brand is absent', asyn
   }
 });
 
+test('persists the v3 answer-level SOV contract from a single-question run', async () => {
+  const originalAnalyze = AIResponseAnalysisService.analyze;
+  let analysisInput;
+  AIResponseAnalysisService.analyze = async (input) => {
+    analysisInput = input;
+    return {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+      brand_mentioned: true,
+      brand_mentions: 2,
+      brand_position: null,
+      brand_rank: null,
+      brand_recommended: false,
+      visibility_score: 2,
+      answer_competitor_share: 50,
+      sov_numerator: 2,
+      sov_denominator: 4,
+      competition_entities: [{
+        name: '海康',
+        relation: 'competitor',
+        reason: '提供同类周界方案',
+        mentions: 2,
+        surface_forms: ['海康', '海康']
+      }],
+      sentiment: 'neutral',
+      sentiment_reason: '客观列举',
+      sentiment_risk_terms: [],
+      analysis_method: 'ai_structured_v3',
+      analysis_platform: 'analysis-ai',
+      analysis_model: 'analysis-model',
+      analysis_structure: {
+        schema_version: 'geo_metric_input_v3',
+        competitor_relations: [{
+          entity_name: '海康',
+          relation: 'competitor',
+          reason: '提供同类周界方案'
+        }]
+      }
+    };
+  };
+
+  try {
+    const payload = await ProjectRunService.buildVisibilityMetricPayload({
+      record: {
+        id: 11,
+        user_id: 1,
+        platform: 'deepseek',
+        tracked_prompt_id: 5,
+        question: '哪些厂商提供周界安防方案？'
+      },
+      responseText: '广拓与海康都提供周界方案。',
+      aiResponse: {},
+      project: {
+        id: 2,
+        name: '广拓',
+        aliases: ['GATO'],
+        industry: '周界安防',
+        primary_keywords: ['电子围栏']
+      },
+      competitors: [{ name: '海康', aliases: ['海康威视'] }],
+      prompt: {
+        id: 5,
+        question: '哪些厂商提供周界安防方案？',
+        tags: ['购买决策']
+      }
+    });
+
+    assert.equal(analysisInput.question, '哪些厂商提供周界安防方案？');
+    assert.deepEqual(analysisInput.competitorHints, [
+      { name: '海康', aliases: ['海康威视'] }
+    ]);
+    assert.equal(
+      payload.metric_semantics_version,
+      'contextual_competitor_mentions_sov_v1'
+    );
+    assert.equal(payload.answer_competitor_share, 50);
+    assert.equal(payload.sov_numerator, 2);
+    assert.equal(payload.sov_denominator, 4);
+    assert.equal(payload.share_of_voice, null);
+    assert.deepEqual(payload.competitor_mentions, []);
+    assert.equal(payload.competition_entities[0].reason, '提供同类周界方案');
+  } finally {
+    AIResponseAnalysisService.analyze = originalAnalyze;
+  }
+});
+
 test('marks a project run target failed when platform execution throws', async () => {
   const originalCreateRecord = QuestionRecord.create;
   const originalQueryPlatform = AIPlatformService.queryPlatform;
@@ -964,8 +1116,11 @@ test('project executor passes bounded owner context and persists Doubao Web text
     return {
       ok: true,
       metric: {
+        metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
         sentiment: 'neutral',
-        share_of_voice: 0,
+        answer_competitor_share: 0,
+        sov_numerator: 0,
+        sov_denominator: 2,
         brand_mentioned: false,
         citation_count: 1,
         brand_rank: null,
@@ -993,6 +1148,15 @@ test('project executor passes bounded owner context and persists Doubao Web text
     });
 
     assert.equal(result.status, 'completed');
+    assert.deepEqual(result.sov, {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+      kind: 'contextual_competitor_mentions',
+      status: 'calculated',
+      value: 0,
+      numerator: 0,
+      denominator: 2
+    });
+    assert.equal(Object.hasOwn(result, 'share_of_voice'), false);
     assert.equal(queryOptions.purpose, 'project_monitoring');
     assert.deepEqual(queryOptions.capture_owner, {
       record_id: 88,

@@ -203,6 +203,7 @@ test('a platform definition controls origin, launch target, selector identity an
   assert.equal(failed.platform, 'doubao-web');
   assert.equal(failed.web_capture.schema_version, 'doubao-web-capture-v1');
   assert.equal(failed.web_capture.failure.stage, 'session_ready_checked');
+  await service.shutdown();
 });
 
 test('preflight tolerates the initial blank target until the official composer is ready', async (t) => {

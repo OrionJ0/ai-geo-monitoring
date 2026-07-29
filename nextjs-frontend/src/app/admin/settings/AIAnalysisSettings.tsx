@@ -40,13 +40,23 @@ type PromptDefinition = {
   expected_output: Record<string, unknown>;
   request_profile: {
     temperature: number;
-    max_tokens: number;
     timeout_seconds: number;
     max_attempts: number;
     web_search: boolean;
+    token_limit: null;
     json_mode: string;
     deepseek_thinking: string;
   };
+  request_parameters: {
+    adapter_type: string;
+    request_body: Record<string, unknown>;
+    runtime_policy: {
+      timeout_seconds: number;
+      max_attempts: number;
+      web_search: boolean;
+      token_limit: null;
+    };
+  } | null;
 };
 
 type AnalysisConfig = {
@@ -63,6 +73,7 @@ type AnalysisConfig = {
 
 type AnalysisTestResult = {
   input: {
+    question_text: string;
     brand_name: string;
     brand_aliases: string[];
     response_text: string;
@@ -73,6 +84,7 @@ type AnalysisTestResult = {
 };
 
 type TestValues = {
+  question_text: string;
   brand_name: string;
   brand_aliases_text?: string;
   response_text: string;
@@ -83,6 +95,7 @@ type AnalysisConfigValues = {
   model_name: string;
 };
 
+const sampleQuestion = '教育行业周界安防厂商有哪些？';
 const sampleAnswer = [
   '1. 海康威视：综合安防能力强。',
   '2. 大华股份：教育行业项目覆盖广。',
@@ -192,6 +205,7 @@ export default function AIAnalysisSettings() {
   useEffect(() => {
     load();
     testForm.setFieldsValue({
+      question_text: sampleQuestion,
       brand_name: '上海广拓',
       brand_aliases_text: '广拓，GATO',
       response_text: sampleAnswer,
@@ -234,6 +248,7 @@ export default function AIAnalysisSettings() {
       const response = await axios.put('/api/settings/analysis-api', values);
       setConfig(response?.data?.data || null);
       setTestResult(null);
+      await load();
       message.success('AI 分析 API 已更新');
     } catch (error) {
       if (error && typeof error === 'object' && 'errorFields' in error) return;
@@ -249,6 +264,7 @@ export default function AIAnalysisSettings() {
       setTesting(true);
       setTestResult(null);
       const response = await axios.post('/api/settings/analysis-api/test', {
+        question_text: values.question_text,
         brand_name: values.brand_name,
         brand_aliases: String(values.brand_aliases_text || '')
           .split(/[,，、;；\n]/u)
@@ -372,8 +388,10 @@ export default function AIAnalysisSettings() {
             <Descriptions.Item label="温度">
               {promptDefinition?.request_profile?.temperature ?? '-'}
             </Descriptions.Item>
-            <Descriptions.Item label="最大输出 Token">
-              {promptDefinition?.request_profile?.max_tokens ?? '-'}
+            <Descriptions.Item label="Token 限制">
+              {promptDefinition?.request_profile?.token_limit === null
+                ? '不设置应用层 Token 上限'
+                : '-'}
             </Descriptions.Item>
             <Descriptions.Item label="请求超时">
               {promptDefinition?.request_profile?.timeout_seconds
@@ -395,6 +413,14 @@ export default function AIAnalysisSettings() {
               {thinkingModeLabel(selectedPlatform, promptDefinition?.request_profile)}
             </Descriptions.Item>
           </Descriptions>
+          <Title level={5}>实际请求参数</Title>
+          <Paragraph type="secondary">
+            以下内容由后端按当前已保存的分析平台和模型生成；消息正文使用占位符展示，
+            正式运行时会注入完整问题、品牌上下文和完整原回答，不设置应用层 Token 上限。
+          </Paragraph>
+          <pre style={{ margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(promptDefinition?.request_parameters || {}, null, 2)}
+          </pre>
           <Space>
             <Button type="primary" loading={saving} onClick={save}>保存分析 API</Button>
             <Button loading={loading} onClick={load}>恢复当前值</Button>
@@ -411,6 +437,13 @@ export default function AIAnalysisSettings() {
           用一段真实回答检查实体、目标品牌映射、提及、候选顺序、推荐关系和待核验事实声明。系统不会保存测试输入和输出，只返回本次请求结果；引用来源要在真实监测运行中从平台响应提取。
         </Paragraph>
         <Form form={testForm} layout="vertical" requiredMark={false}>
+          <Form.Item
+            name="question_text"
+            label="当前问题"
+            rules={[{ required: true, message: '请输入当前问题' }]}
+          >
+            <Input />
+          </Form.Item>
           <Space align="start" size="middle" style={{ width: '100%' }}>
             <Form.Item
               name="brand_name"
@@ -429,7 +462,7 @@ export default function AIAnalysisSettings() {
             label="待分析的 AI 回答"
             rules={[{ required: true, message: '请输入待分析回答' }]}
           >
-            <Input.TextArea rows={9} maxLength={12000} showCount />
+            <Input.TextArea rows={9} showCount />
           </Form.Item>
           <Button type="primary" loading={testing} disabled={!config?.configured} onClick={runTest}>
             测试结构化
@@ -442,6 +475,7 @@ export default function AIAnalysisSettings() {
           <Descriptions size="small" column={1} bordered>
             <Descriptions.Item label="测试输入">
               <Space orientation="vertical" size={2}>
+                <Text>问题：{testResult.input.question_text}</Text>
                 <Text>品牌：{testResult.input.brand_name}</Text>
                 <Text>别名：{testResult.input.brand_aliases.join('、') || '无'}</Text>
                 <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>

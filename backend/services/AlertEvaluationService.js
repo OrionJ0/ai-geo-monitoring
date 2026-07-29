@@ -2,7 +2,7 @@ const { Op } = require('sequelize');
 const { AlertRule, BrandCompetitor, BrandProject, QuestionRecord, VisibilityMetric } = require('../models');
 const ProjectMetricsService = require('./ProjectMetricsService');
 const SourceAnalysisService = require('./SourceAnalysisService');
-const PlatformSelectionService = require('./PlatformSelectionService');
+const { CURRENT_METRIC_SEMANTICS } = require('./GeoMetricSemanticsService');
 
 const PLATFORM_LABELS = {
   doubao: '豆包',
@@ -55,15 +55,15 @@ class AlertEvaluationService {
     const parsed = Number(value);
     const fallback = 10;
     const finite = Number.isFinite(parsed) ? parsed : fallback;
-    const countTypes = new Set(['task_failure', 'source_drop']);
+    const countTypes = new Set(['task_failure', 'source_drop', 'competitor_ahead']);
+    if (type === 'competitor_ahead') {
+      return Math.max(1, Math.min(1000, Math.ceil(finite)));
+    }
     if (countTypes.has(type)) {
       return Math.max(1, Math.ceil(finite));
     }
     if (type === 'negative_sentiment') {
       return Math.max(1, Math.min(100, finite));
-    }
-    if (type === 'competitor_ahead') {
-      return Math.max(0, Math.min(1000, finite));
     }
     return Math.max(0, Math.min(100, finite));
   }
@@ -72,56 +72,62 @@ class AlertEvaluationService {
     const activeRules = (Array.isArray(rules) ? rules : []).filter((rule) => rule?.enabled !== false);
     const decisions = [];
     const thresholdValue = (rule) => this.normalizeThreshold(rule.type, rule.threshold);
-    const hasEffectiveMetrics = Number(summary?.total_checks || 0) >= MIN_EFFECTIVE_METRIC_ALERT_CHECKS;
+    const hasEffectiveMetrics = Number(summary?.valid_answers ?? summary?.total_checks ?? 0)
+      >= MIN_EFFECTIVE_METRIC_ALERT_CHECKS;
 
     for (const rule of activeRules) {
       const threshold = thresholdValue(rule);
       if (rule.type === 'visibility_drop' && hasEffectiveMetrics) {
-        const mentionRate = Number(summary?.brand_mention_rate || 0);
-        const sov = Number(summary?.avg_share_of_voice || 0);
-        const value = Math.min(mentionRate, sov);
-        if (value < threshold) {
+        const candidates = [
+          {
+            label: '品牌提及率',
+            value: summary?.brand_mention_rate
+          },
+          {
+            label: '回答内竞品提及占比（SOV）',
+            value: summary?.sov_summary?.average
+          }
+        ].filter((item) => item.value !== null
+          && item.value !== undefined
+          && item.value !== ''
+          && Number.isFinite(Number(item.value)));
+        const below = candidates
+          .map((item) => ({ ...item, value: Number(item.value) }))
+          .filter((item) => item.value < threshold)
+          .sort((a, b) => a.value - b.value)[0];
+        if (below) {
           decisions.push({
             rule_id: rule.id,
             type: rule.type,
-            value,
-            message: `品牌提及率 ${mentionRate}% / 声量占比（SOV）${sov}% 低于阈值 ${threshold}%`
+            value: below.value,
+            message: `${below.label} ${below.value}% 低于阈值 ${threshold}%`
           });
         }
       }
 
       if (rule.type === 'competitor_ahead' && hasEffectiveMetrics) {
         const brandMentions = Number(context.brand_mentions || 0);
-        const brandVisibilityScore = Number(context.brand_visibility_score);
-        const competitor = (summary?.competitors || []).find((item) => {
-          const competitorVisibilityScore = Number(item.visibility_score);
-          if (
-            Number.isFinite(competitorVisibilityScore)
-            && competitorVisibilityScore > 0
-            && Number.isFinite(brandVisibilityScore)
-          ) {
-            return (competitorVisibilityScore - brandVisibilityScore) >= threshold;
-          }
-          return Number(item.mentions || 0) >= Math.max(threshold, brandMentions + 1);
-        });
+        const competitor = (summary?.competitors || [])
+          .map((item) => ({
+            ...item,
+            mention_gap: Number(item.mentions || 0) - brandMentions
+          }))
+          .filter((item) => item.mention_gap > 0 && item.mention_gap >= threshold)
+          .sort((a, b) => b.mention_gap - a.mention_gap || String(a.name).localeCompare(String(b.name), 'zh-Hans-CN'))[0];
         if (competitor) {
-          const competitorVisibilityScore = Number(competitor.visibility_score);
-          const useVisibilityScore = Number.isFinite(competitorVisibilityScore)
-            && competitorVisibilityScore > 0
-            && Number.isFinite(brandVisibilityScore);
           decisions.push({
             rule_id: rule.id,
             type: rule.type,
-            value: useVisibilityScore ? Number((competitorVisibilityScore - brandVisibilityScore).toFixed(2)) : Number(competitor.mentions || 0),
-            message: useVisibilityScore
-              ? `${competitor.name} 可见度得分 ${competitorVisibilityScore}，高于品牌 ${brandVisibilityScore}，领先 ${Number((competitorVisibilityScore - brandVisibilityScore).toFixed(2))} 分`
-              : `${competitor.name} 提及 ${competitor.mentions} 次，高于品牌提及 ${brandMentions} 次`
+            value: competitor.mention_gap,
+            message: `${competitor.name} 提及次数 ${Number(competitor.mentions || 0)}，目标品牌 ${brandMentions}，领先 ${competitor.mention_gap} 次`
           });
         }
       }
 
       if (rule.type === 'negative_sentiment' && hasEffectiveMetrics) {
-        const sentimentChecks = Number(summary?.brand_mentioned_checks || 0);
+        const sentimentChecks = Number(
+          summary?.brand_mentioned_answers ?? summary?.brand_mentioned_checks ?? 0
+        );
         if (sentimentChecks < MIN_EFFECTIVE_METRIC_ALERT_CHECKS) continue;
         const value = Number(summary?.negative_sentiment_rate || 0);
         if (value >= threshold) {
@@ -198,7 +204,7 @@ class AlertEvaluationService {
 
   calculatePlatformMentionGap(platforms) {
     const rows = (Array.isArray(platforms) ? platforms : [])
-      .filter((item) => Number(item?.checks || 0) >= 2)
+      .filter((item) => Number(item?.valid_answers ?? item?.checks ?? 0) >= 2)
       .map((item) => ({
         platform: item.platform || 'unknown',
         rate: Number(item.brand_mention_rate || 0)
@@ -228,13 +234,12 @@ class AlertEvaluationService {
     sourceSince.setHours(sourceSince.getHours() - (24 * sourceDays * 2));
     const project = await BrandProject.findByPk(projectId);
     const projectData = project ? project.toJSON() : {};
-    const projectPlatforms = PlatformSelectionService.normalize(projectData.platforms);
     const [rules, metrics, sourceMetrics, failedChecks, competitors] = await Promise.all([
       AlertRule.findAll({ where: { project_id: projectId, enabled: true }, order: [['id', 'ASC']] }),
       VisibilityMetric.findAll({
         where: {
           project_id: projectId,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           created_at: { [Op.between]: [since, now] }
         },
         order: [['created_at', 'ASC']]
@@ -242,7 +247,7 @@ class AlertEvaluationService {
       VisibilityMetric.findAll({
         where: {
           project_id: projectId,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           created_at: { [Op.between]: [sourceSince, now] }
         },
         order: [['created_at', 'ASC']]
@@ -250,7 +255,7 @@ class AlertEvaluationService {
       QuestionRecord.count({
         where: {
           project_id: projectId,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           status: 'failed',
           created_at: { [Op.between]: [since, now] }
         }
@@ -259,7 +264,7 @@ class AlertEvaluationService {
     ]);
     const rows = metrics.map((item) => item.toJSON());
     const sourceRows = sourceMetrics.map((item) => item.toJSON());
-    const summary = ProjectMetricsService.summarize(rows);
+    const summary = ProjectMetricsService.buildCurrentMetricView({ metrics: rows, records: [] });
     const sourceAnalysis = SourceAnalysisService.summarize(sourceRows, {
       brand: projectData,
       competitors: competitors.map((item) => item.toJSON()),
@@ -267,11 +272,9 @@ class AlertEvaluationService {
       referenceDate: now
     });
     const brandMentions = rows.reduce((sum, row) => sum + Number(row.brand_mentions || 0), 0);
-    const brandVisibilityScore = rows.reduce((sum, row) => sum + Number(row.visibility_score || 0), 0);
     const decisions = this.evaluateRules(rules.map((item) => item.toJSON()), summary, {
       failed_checks: failedChecks,
       brand_mentions: brandMentions,
-      brand_visibility_score: brandVisibilityScore,
       dropped_source_domains: sourceAnalysis.source_changes.dropped_domains.length,
       dropped_source_urls: sourceAnalysis.source_changes.dropped_urls.length
     });

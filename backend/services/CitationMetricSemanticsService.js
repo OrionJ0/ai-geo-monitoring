@@ -1,11 +1,26 @@
 const SEMANTICS_VERSION = 'explicit-citation-v2';
 
 function semanticsVersion(metric) {
-  return String(metric?.analysis_structure?.citations?.semantics_version || '').trim();
+  return String(
+    metric?.analysis_structure?.citations?.semantics_version
+    || metric?.citation_analysis?.semantics_version
+    || metric?.semantics_version
+    || ''
+  ).trim();
+}
+
+function evidenceStatus(metric) {
+  return String(
+    metric?.analysis_structure?.citations?.evidence_status
+    || metric?.citation_analysis?.evidence_status
+    || metric?.evidence_status
+    || ''
+  ).trim();
 }
 
 function isCoreKpiEligible(metric) {
-  return semanticsVersion(metric) === SEMANTICS_VERSION;
+  if (semanticsVersion(metric) !== SEMANTICS_VERSION) return false;
+  return evidenceStatus(metric) !== 'unavailable';
 }
 
 function citationCount(metric, field = 'citation_count') {
@@ -29,6 +44,19 @@ function normalizeForRead(metric) {
       citation_evidence_status: 'explicit'
     };
   }
+  if (
+    semanticsVersion(metric) === SEMANTICS_VERSION
+    && evidenceStatus(metric) === 'unavailable'
+  ) {
+    return {
+      ...metric,
+      citation_count: 0,
+      owned_citation_count: 0,
+      competitor_citation_count: 0,
+      citation_sources: [],
+      citation_evidence_status: 'unavailable'
+    };
+  }
   return {
     ...metric,
     citation_count: 0,
@@ -48,6 +76,7 @@ function normalizeForRead(metric) {
 module.exports = {
   SEMANTICS_VERSION,
   semanticsVersion,
+  evidenceStatus,
   isCoreKpiEligible,
   citationCount,
   normalizeForRead

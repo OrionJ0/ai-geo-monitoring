@@ -1,4 +1,8 @@
 const SCHEMA_VERSION = 'question_set_run_v1';
+const {
+  CURRENT_METRIC_SEMANTICS,
+  LEGACY_METRIC_SEMANTICS
+} = require('./GeoMetricSemanticsService');
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_ROWS = 5000;
 const MAX_JSON_CELL_CHARS = 100000;
@@ -53,11 +57,19 @@ const REVERSIBILITY_HEADERS = [
   'competitor_citation_count',
   'competitor_baseline_json'
 ];
+const METRIC_SEMANTICS_HEADERS = [
+  'metric_semantics_version',
+  'answer_competitor_share',
+  'sov_numerator',
+  'sov_denominator',
+  'competition_entities_json'
+];
 const HEADERS = [
   ...REQUIRED_HEADERS,
   ...ANALYSIS_HEADERS,
   ...DIAGNOSTIC_HEADERS,
-  ...REVERSIBILITY_HEADERS
+  ...REVERSIBILITY_HEADERS,
+  ...METRIC_SEMANTICS_HEADERS
 ];
 
 class CsvValidationError extends Error {
@@ -123,7 +135,7 @@ function buildCsv(report) {
     Number(row.brand_mentions || 0),
     row.brand_rank ?? '',
     Boolean(row.brand_recommended),
-    Number(row.share_of_voice || 0),
+    row.share_of_voice == null ? '' : Number(row.share_of_voice),
     Number(row.citation_count || 0),
     row.sentiment,
     row.sentiment_reason,
@@ -158,7 +170,14 @@ function buildCsv(report) {
     JSON.stringify(Array.isArray(row.legacy_citation_sources) ? row.legacy_citation_sources : []),
     row.owned_citation_count ?? '',
     row.competitor_citation_count ?? '',
-    JSON.stringify(Array.isArray(row.competitor_mentions) ? row.competitor_mentions : [])
+    JSON.stringify(Array.isArray(row.competitor_mentions) ? row.competitor_mentions : []),
+    row.metric_semantics_version
+      || report.metric_semantics_version
+      || LEGACY_METRIC_SEMANTICS,
+    row.answer_competitor_share == null ? '' : Number(row.answer_competitor_share),
+    row.sov_numerator == null ? '' : Number(row.sov_numerator),
+    row.sov_denominator == null ? '' : Number(row.sov_denominator),
+    JSON.stringify(Array.isArray(row.competition_entities) ? row.competition_entities : [])
   ]);
   return `\uFEFF${[HEADERS, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')}`;
 }
@@ -324,6 +343,44 @@ function parseCitationSources(value, column, line) {
   return sources;
 }
 
+function parseCompetitionEntities(value, column, line) {
+  const entities = parseObjectArray(value, column, line);
+  const seen = new Set();
+  entities.forEach((entity) => {
+    const name = String(entity.name || '').trim();
+    const relation = String(entity.relation || '').trim();
+    const reason = String(entity.reason || '').replace(/\s+/gu, ' ').trim();
+    const mentions = Number(entity.mentions);
+    const key = name.toLowerCase();
+    if (
+      !name
+      || name.length > 120
+      || seen.has(key)
+      || !['competitor', 'non_competitor'].includes(relation)
+      || !Number.isInteger(mentions)
+      || mentions < 1
+      || !reason
+      || reason.length > 160
+      || (
+        entity.surface_forms !== undefined
+        && (
+          !Array.isArray(entity.surface_forms)
+          || entity.surface_forms.some((item) => typeof item !== 'string' || !item.trim())
+        )
+      )
+    ) {
+      throw fieldError(
+        'INVALID_COMPETITION_ENTITY',
+        line,
+        column,
+        '包含无效、重复或缺少判断依据的竞争实体'
+      );
+    }
+    seen.add(key);
+  });
+  return entities;
+}
+
 function parseDate(value, column, line, { nullable = true } = {}) {
   if (!value && nullable) return null;
   const date = new Date(value);
@@ -348,6 +405,14 @@ function parseCsv(csv) {
     throw new CsvValidationError('MISSING_COLUMNS', `CSV 缺少必要列：${missing.join('、')}`);
   }
   const columnIndex = new Map(headers.map((header, index) => [header, index]));
+  const metricHeaderCount = METRIC_SEMANTICS_HEADERS.filter((header) => headers.includes(header)).length;
+  if (metricHeaderCount > 0 && metricHeaderCount !== METRIC_SEMANTICS_HEADERS.length) {
+    throw new CsvValidationError(
+      'MISSING_COLUMNS',
+      `CSV 新版指标列必须完整：${METRIC_SEMANTICS_HEADERS.join('、')}`
+    );
+  }
+  const hasMetricSemanticsHeaders = metricHeaderCount === METRIC_SEMANTICS_HEADERS.length;
   const valueAt = (row, column) => unprotectFormula(row[columnIndex.get(column)] ?? '');
   const allowedStatuses = new Set(['completed', 'failed']);
   let questionSetName = '';
@@ -355,6 +420,7 @@ function parseCsv(csv) {
   let startedAt = null;
   let completedAt = null;
   let analysisContractVersion = null;
+  let metricSemanticsVersion = null;
 
   const rows = table.slice(1).map((row, index) => {
     const line = index + 2;
@@ -421,6 +487,29 @@ function parseCsv(csv) {
       throw fieldError('MIXED_REPORTS', line, 'analysis_contract_version', '与前序行不一致');
     }
     analysisContractVersion = currentAnalysisContractVersion;
+    const currentMetricSemanticsVersion = hasMetricSemanticsHeaders
+      ? valueAt(row, 'metric_semantics_version').trim()
+      : LEGACY_METRIC_SEMANTICS;
+    if (![CURRENT_METRIC_SEMANTICS, LEGACY_METRIC_SEMANTICS].includes(currentMetricSemanticsVersion)) {
+      throw fieldError(
+        'UNSUPPORTED_METRIC_SEMANTICS',
+        line,
+        'metric_semantics_version',
+        '不受支持'
+      );
+    }
+    if (
+      metricSemanticsVersion !== null
+      && metricSemanticsVersion !== currentMetricSemanticsVersion
+    ) {
+      throw fieldError(
+        'MIXED_METRIC_SEMANTICS',
+        line,
+        'metric_semantics_version',
+        '同一报告不得混合指标语义版本'
+      );
+    }
+    metricSemanticsVersion = currentMetricSemanticsVersion;
     const recordCreatedAt = parseDate(valueAt(row, 'record_created_at'), 'record_created_at', line);
     const recordUpdatedAt = parseDate(valueAt(row, 'record_updated_at'), 'record_updated_at', line);
     if (recordCreatedAt && recordUpdatedAt && recordUpdatedAt < recordCreatedAt) {
@@ -440,6 +529,119 @@ function parseCsv(csv) {
     const competitorBaseline = competitorBaselineCell.trim()
       ? parseObjectArray(competitorBaselineCell, 'competitor_baseline_json', line)
       : competitorMentions;
+    const hasMetrics = parseBoolean(valueAt(row, 'has_metrics'), 'has_metrics', line);
+    const shareOfVoice = parsePercentage(valueAt(row, 'share_of_voice'), 'share_of_voice', line);
+    const answerCompetitorShare = hasMetricSemanticsHeaders
+      ? parsePercentage(
+          valueAt(row, 'answer_competitor_share'),
+          'answer_competitor_share',
+          line
+        )
+      : null;
+    const sovNumerator = hasMetricSemanticsHeaders
+      ? parseNonNegativeInteger(
+          valueAt(row, 'sov_numerator'),
+          'sov_numerator',
+          line,
+          { nullable: true }
+        )
+      : null;
+    const sovDenominator = hasMetricSemanticsHeaders
+      ? parseNonNegativeInteger(
+          valueAt(row, 'sov_denominator'),
+          'sov_denominator',
+          line,
+          { nullable: true }
+        )
+      : null;
+    const competitionEntities = hasMetricSemanticsHeaders
+      ? parseCompetitionEntities(
+          valueAt(row, 'competition_entities_json'),
+          'competition_entities_json',
+          line
+        )
+      : [];
+    if (currentMetricSemanticsVersion === CURRENT_METRIC_SEMANTICS) {
+      if (shareOfVoice !== null) {
+        throw fieldError(
+          'METRIC_SEMANTICS_MISMATCH',
+          line,
+          'share_of_voice',
+          '新版指标必须保持为空'
+        );
+      }
+      if (!hasMetrics || status === 'failed') {
+        if (
+          answerCompetitorShare !== null
+          || sovNumerator !== null
+          || sovDenominator !== null
+          || competitionEntities.length > 0
+        ) {
+          throw fieldError(
+            'METRIC_SEMANTICS_MISMATCH',
+            line,
+            'answer_competitor_share',
+            '失败或无指标行的新版指标单元格必须为空'
+          );
+        }
+      } else {
+        if (sovNumerator === null || sovDenominator === null || sovNumerator > sovDenominator) {
+          throw fieldError(
+            'INVALID_SOV_COUNTS',
+            line,
+            'sov_numerator',
+            '分子分母必须为有效非负整数且分子不得大于分母'
+          );
+        }
+        if (
+          (sovDenominator === 0 && (sovNumerator !== 0 || answerCompetitorShare !== null))
+          || (sovDenominator > 0 && answerCompetitorShare === null)
+        ) {
+          throw fieldError(
+            'INVALID_SOV_COUNTS',
+            line,
+            'answer_competitor_share',
+            '值与分子分母不一致'
+          );
+        }
+        const competitorMentions = competitionEntities
+          .filter((entity) => entity.relation === 'competitor')
+          .reduce((total, entity) => total + Number(entity.mentions), 0);
+        if (sovDenominator !== sovNumerator + competitorMentions) {
+          throw fieldError(
+            'INVALID_SOV_COUNTS',
+            line,
+            'sov_denominator',
+            '与竞争实体提及次数不一致'
+          );
+        }
+        if (
+          sovDenominator > 0
+          && Number(
+            ((sovNumerator / sovDenominator) * 100).toFixed(2)
+          ) !== answerCompetitorShare
+        ) {
+          throw fieldError(
+            'INVALID_SOV_COUNTS',
+            line,
+            'answer_competitor_share',
+            '与分子分母计算结果不一致'
+          );
+        }
+      }
+    } else if (
+      answerCompetitorShare !== null
+      || sovNumerator !== null
+      || sovDenominator !== null
+      || competitionEntities.length > 0
+    ) {
+      throw fieldError(
+        'METRIC_SEMANTICS_MISMATCH',
+        line,
+        'metric_semantics_version',
+        '历史口径不得携带新版指标字段'
+      );
+    }
     return {
       record_id: parsePositiveInteger(valueAt(row, 'record_id'), 'record_id', line, { nullable: true }),
       question_id: parsePositiveInteger(valueAt(row, 'question_id'), 'question_id', line, { nullable: true }),
@@ -451,12 +653,17 @@ function parseCsv(csv) {
       status,
       error_message: valueAt(row, 'error_message'),
       answer: valueAt(row, 'answer'),
-      has_metrics: parseBoolean(valueAt(row, 'has_metrics'), 'has_metrics', line),
+      has_metrics: hasMetrics,
       brand_mentioned: parseBoolean(valueAt(row, 'brand_mentioned'), 'brand_mentioned', line),
       brand_mentions: parseNonNegativeInteger(valueAt(row, 'brand_mentions'), 'brand_mentions', line),
       brand_rank: parsePositiveNumber(valueAt(row, 'brand_rank'), 'brand_rank', line, { nullable: true }),
       brand_recommended: parseBoolean(valueAt(row, 'brand_recommended'), 'brand_recommended', line),
-      share_of_voice: parsePercentage(valueAt(row, 'share_of_voice'), 'share_of_voice', line),
+      metric_semantics_version: currentMetricSemanticsVersion,
+      share_of_voice: shareOfVoice,
+      answer_competitor_share: answerCompetitorShare,
+      sov_numerator: sovNumerator,
+      sov_denominator: sovDenominator,
+      competition_entities: competitionEntities,
       citation_count: parseNonNegativeInteger(valueAt(row, 'citation_count'), 'citation_count', line),
       owned_citation_count: parseNonNegativeInteger(
         valueAt(row, 'owned_citation_count'),
@@ -514,6 +721,7 @@ function parseCsv(csv) {
     schemaVersion: SCHEMA_VERSION,
     questionSetName,
     analysisContractVersion,
+    metricSemanticsVersion,
     startedAt,
     completedAt,
     rows
@@ -525,6 +733,7 @@ module.exports = {
   HEADERS,
   REQUIRED_HEADERS,
   REVERSIBILITY_HEADERS,
+  METRIC_SEMANTICS_HEADERS,
   MAX_CSV_BYTES,
   MAX_CSV_ROWS,
   MAX_JSON_CELL_CHARS,

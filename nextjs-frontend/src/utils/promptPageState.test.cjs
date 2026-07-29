@@ -6,6 +6,17 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../app/geo/prompts/page.tsx'), 'utf8');
 
+test('问题库正式指标使用版本化回答级 SOV、样本数和 AI 语义标签', () => {
+  assert.match(source, /回答内竞品提及占比（SOV）/);
+  assert.match(source, /sov_summary/);
+  assert.match(source, /calculable_answers/);
+  assert.match(source, /valid_answers/);
+  assert.match(source, /ranked_answers/);
+  assert.match(source, /AI 语义分析/);
+  assert.match(source, /metricSemanticsLabel/);
+  assert.doesNotMatch(source, /performance\?\.avg_share_of_voice/);
+});
+
 test('prompt page guards async list, batch creation and history responses from stale project writes', () => {
   assert.match(source, /const promptsRequestRef = useRef\(0\)/);
   assert.match(source, /const batchRequestRef = useRef\(0\)/);

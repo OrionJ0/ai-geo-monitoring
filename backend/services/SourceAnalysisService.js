@@ -365,6 +365,7 @@ class SourceAnalysisService {
         if (
           isActionablePrompt(record.prompt_id)
           && source.competitor_owned
+          && typeof row.brand_mentioned === 'boolean'
           && (!row.brand_mentioned || !hasOwnedSource)
         ) {
           opportunities.push({ ...record, brand_mentioned: !!row.brand_mentioned });

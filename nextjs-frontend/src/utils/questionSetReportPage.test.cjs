@@ -29,22 +29,22 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   const primaryStart = source.indexOf(`className={styles.primaryMetrics}`);
   const primaryEnd = source.indexOf(`className={styles.metricsCollapse}`, primaryStart);
   const primaryMetrics = source.slice(primaryStart, primaryEnd);
-  const validIndex = primaryMetrics.indexOf('label="有效样本"');
+  const validIndex = primaryMetrics.indexOf(`? '分析覆盖率'`);
   const mentionIndex = primaryMetrics.indexOf('label="品牌提及率"');
-  const recommendationIndex = primaryMetrics.indexOf('label="推荐率"');
-  const rankIndex = primaryMetrics.indexOf('label="平均品牌排名"');
+  const recommendationIndex = primaryMetrics.indexOf('label="推荐率（AI 语义分析）"');
 
   assert.match(source, /核心指标/);
   assert.match(source, /品牌提及率/);
   assert.match(source, /推荐率/);
   assert.match(source, /平均 SOV/);
-  assert.match(source, /有效样本/);
+  assert.match(source, /分析覆盖率/);
   assert.ok(
-    validIndex >= 0 && validIndex < mentionIndex && mentionIndex < recommendationIndex && recommendationIndex < rankIndex,
-    '核心指标应按有效样本、品牌提及率、推荐率、平均品牌排名排序'
+    validIndex >= 0 && validIndex < mentionIndex && mentionIndex < recommendationIndex,
+    '核心指标应按分析覆盖率、品牌提及率、推荐率排序'
   );
+  assert.doesNotMatch(primaryMetrics, /平均排名/);
   assert.doesNotMatch(primaryMetrics, /平均 SOV/);
-  assert.match(source, /summary\.competitor_baseline_count/);
+  assert.match(source, /summary\.sov_summary/);
   assert.match(source, /hasCompetitorBaseline/);
   assert.match(source, /更多指标/);
   assert.match(source, /QuestionCircleOutlined/);
@@ -52,8 +52,8 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.match(source, /trigger=\{\['hover', 'focus'\]\}/);
   assert.match(source, /分析模型先把目标品牌显式映射.*程序计数.*分析模型不直接返回/);
   assert.match(source, /程序根据明确推荐关系计算/);
-  assert.match(source, /配置竞品.*结构化提及次数.*提及总次数/);
-  assert.match(source, /首个明确排序列表中的 entries 数组位置/);
+  assert.match(source, /目标品牌实际提及次数.*AI 判定竞品.*等权平均/);
+  assert.match(source, /至少包含 2 个不同实体、且回答明确给出顺序或名次/);
   assert.match(source, /短实体词.*原回答/);
   assert.match(source, /AI 结构化/);
   assert.match(source, /历史规则/);
@@ -79,6 +79,60 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.match(source, /历史混合来源.*不计入引用 KPI/);
   assert.match(source, /有效分析.*引用/);
   assert.doesNotMatch(source, /明确引用/);
+});
+
+test('新版单回答详情展示回答内竞品提及占比及逐实体判断依据', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /metric_semantics_version/);
+  assert.match(source, /kind\?: 'contextual_competitor_mentions'/);
+  assert.match(source, /status\?: 'calculated' \| 'not_applicable'/);
+  assert.match(source, /numerator\?: number \| null/);
+  assert.match(source, /denominator\?: number \| null/);
+  assert.match(source, /competition_entities/);
+  assert.match(source, /回答内竞品提及占比（SOV）/);
+  assert.match(source, /formatAnswerSov/);
+  assert.match(source, /AI 结构化 v3/);
+  assert.match(source, /竞品判断/);
+  assert.match(source, /entity\.relation === 'competitor'/);
+  assert.match(source, /entity\.mentions/);
+  assert.match(source, /entity\.reason/);
+});
+
+test('新口径运行用已采集回答计算并展示分析覆盖率', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /acquired_answers/);
+  assert.match(source, /analysis_coverage_rate/);
+  assert.match(source, /\? '分析覆盖率'/);
+  assert.match(source, /formatAnalysisCoverage/);
+  assert.match(source, /成功分析数.*已采集回答数/);
+  assert.doesNotMatch(source, /label="有效样本"/);
+});
+
+test('新版品牌率在没有有效分析时显示 N/A 而不是 0%', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /function formatCurrentRate/);
+  assert.match(source, /value == null \|\| safeDenominator === 0/);
+  assert.match(source, /formatCurrentRate\(\s*summary\.brand_mention_rate/);
+  assert.match(source, /formatCurrentRate\(\s*summary\.recommendation_rate/);
+});
+
+test('正式页面只通过版本化 SOV 契约展示新旧聚合', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /sov_summary/);
+  assert.match(source, /contextual_competitor_mentions/);
+  assert.match(source, /回答内竞品提及占比（SOV）/);
+  assert.match(source, /有效回答/);
+  assert.match(source, /历史竞品配置口径/);
+  assert.match(source, /brand_mentioned_answers/);
+  assert.match(source, /recommended_answers/);
+  assert.match(source, /ranked_answers/);
+  assert.doesNotMatch(source, /summary\.avg_share_of_voice/);
+  assert.match(source, /competitionEntityRow/);
+  assert.match(source, /data-pdf-breakpoint="true"/);
 });
 
 test('问题集运行历史从右侧抽屉打开，主页面只保留单次报告', () => {

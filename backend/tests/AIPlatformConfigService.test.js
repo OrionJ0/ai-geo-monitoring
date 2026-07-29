@@ -55,7 +55,7 @@ test('seeds API presets plus managed Web presets with Doubao Web enabled by defa
   assert.equal(rows.find((row) => row.code === 'qwen').enabled, true);
   assert.equal(rows.find((row) => row.code === 'hunyuan').enabled, true);
   assert.equal(rows.find((row) => row.code === 'deepseek').enabled, false);
-  assert.equal(rows.find((row) => row.code === 'deepseek').default_model, 'deepseek-v4-flash');
+  assert.equal(rows.find((row) => row.code === 'deepseek').default_model, 'deepseek-v4-pro');
   const deepseekWeb = rows.find((row) => row.code === 'deepseek-web');
   assert.equal(deepseekWeb.name, 'DeepSeek 网页版');
   assert.equal(deepseekWeb.adapter_type, 'deepseek_web');
@@ -223,7 +223,7 @@ test('upgrades an existing Qwen empty request configuration to the forced-search
   assert.deepEqual(qwen.request_options, { temperature: 0.2 });
 });
 
-test('disables an existing unconfigured DeepSeek API default without overriding an explicitly configured account', async () => {
+test('upgrades the retired DeepSeek Flash preset to Pro and keeps unconfigured accounts disabled', async () => {
   const service = createService();
   await AIPlatformConfig.create({
     code: 'deepseek',
@@ -238,15 +238,18 @@ test('disables an existing unconfigured DeepSeek API default without overriding 
   await service.ensurePresets();
   const deepseek = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
   assert.equal(deepseek.enabled, false);
+  assert.equal(deepseek.default_model, 'deepseek-v4-pro');
 
   await deepseek.update({
     encrypted_api_key: 'already-encrypted',
     api_key_last4: '1234',
-    enabled: true
+    enabled: true,
+    default_model: 'deepseek-v4-flash'
   });
   await service.ensurePresets();
   await deepseek.reload();
   assert.equal(deepseek.enabled, true);
+  assert.equal(deepseek.default_model, 'deepseek-v4-pro');
 });
 
 test('stores an encrypted API key and never exposes stored secret fields', async () => {

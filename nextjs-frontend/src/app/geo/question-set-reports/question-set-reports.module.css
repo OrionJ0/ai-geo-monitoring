@@ -207,6 +207,12 @@
   padding: 8px 18px 14px;
 }
 
+.competitionEntityRow {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .answerLabel {
   display: block;
   margin: 14px 0 6px;

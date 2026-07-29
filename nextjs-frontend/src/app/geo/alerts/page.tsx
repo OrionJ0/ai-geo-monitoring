@@ -11,9 +11,9 @@ import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 const { Text, Title } = Typography;
 
 const ruleTypes = [
-  { value: 'visibility_drop', label: '可见度下降', description: '品牌提及率或声量占比（SOV）低于阈值' },
-  { value: 'competitor_ahead', label: '竞品领先', description: '竞品可见度得分领先品牌达到阈值' },
-  { value: 'negative_sentiment', label: '负面情绪', description: '品牌被提及回答中的负向占比超过阈值' },
+  { value: 'visibility_drop', label: '可见度下降', description: '品牌提及率或可计算的回答内竞品提及占比（SOV）低于阈值' },
+  { value: 'competitor_ahead', label: '竞品领先', description: '竞品提及次数领先目标品牌达到阈值' },
+  { value: 'negative_sentiment', label: '负面情绪', description: 'AI 语义分析判定的品牌负向回答占比超过阈值' },
   { value: 'citation_gap', label: '引用率低', description: 'AI 回答引用率低于阈值' },
   { value: 'platform_gap', label: '平台差异', description: '不同监测平台的品牌提及率差距超过阈值' },
   { value: 'source_drop', label: '来源流失', description: '流失引用域名或 URL 数达到阈值' },
@@ -320,9 +320,9 @@ export default function GeoAlertsPage() {
             label="阈值"
             extra={
               isCountThreshold(selectedRuleType)
-                ? '任务失败表示失败任务条数，来源流失表示流失引用域名或 URL 数。'
-                : selectedRuleType === 'competitor_ahead'
-                  ? '竞品领先按可见度得分差值触发，例如竞品比品牌高 10 分时达到 10 分阈值。'
+                ? selectedRuleType === 'competitor_ahead'
+                  ? '竞品领先按实际提及次数差值触发，例如竞品比目标品牌多提及 10 次时达到 10 次阈值。'
+                  : '任务失败表示失败任务条数，来源流失表示流失引用域名或 URL 数。'
                   : selectedRuleType === 'negative_sentiment'
                     ? '负面情绪按品牌被提及的回答计算，至少 3 条品牌提及样本后触发。'
                     : '百分比类规则使用 0-100。'

@@ -41,12 +41,15 @@ test('question-set retry records persist execution leases, citation snapshots an
   const queryInterface = sequelize.getQueryInterface();
   const questionRecord = await queryInterface.describeTable('question_records');
   const resultDetail = await queryInterface.describeTable('result_details');
+  const visibilityMetric = await queryInterface.describeTable('visibility_metrics');
   const questionSetRun = await queryInterface.describeTable('question_set_runs');
   const retryBatch = await queryInterface.describeTable('question_set_retry_batches');
 
   assert.ok(questionRecord.execution_token);
   assert.ok(questionRecord.execution_started_at);
   assert.ok(resultDetail.provider_citations);
+  assert.ok(resultDetail.citation_analysis);
+  assert.match(visibilityMetric.sentiment_reason.type, /VARCHAR\(120\)/i);
   assert.ok(questionSetRun.revision);
   assert.ok(questionSetRun.paused_at);
   assert.ok(retryBatch.idempotency_key);
@@ -120,6 +123,25 @@ test('question-set runs persist idempotent launch plans with one key per user an
     && index.fields.map((field) => field.attribute).join(',')
       === 'user_id,project_id,idempotency_key_hash'
   )));
+});
+
+test('GEO records persist versioned answer-level competitor share fields', async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const visibilityMetric = await queryInterface.describeTable('visibility_metrics');
+  const questionRecord = await queryInterface.describeTable('question_records');
+  const questionSetRun = await queryInterface.describeTable('question_set_runs');
+  const reportSnapshot = await queryInterface.describeTable('report_snapshots');
+
+  assert.ok(visibilityMetric.metric_semantics_version);
+  assert.ok(visibilityMetric.answer_competitor_share);
+  assert.ok(visibilityMetric.sov_numerator);
+  assert.ok(visibilityMetric.sov_denominator);
+  assert.ok(visibilityMetric.competition_entities);
+  assert.equal(visibilityMetric.share_of_voice.allowNull, true);
+  assert.ok(questionRecord.analysis_contract_version);
+  assert.ok(questionRecord.metric_semantics_version);
+  assert.ok(questionSetRun.metric_semantics_version);
+  assert.ok(reportSnapshot.metric_semantics_version);
 });
 
 test('postgres startup migration detects Sequelize user-defined enum descriptions', () => {

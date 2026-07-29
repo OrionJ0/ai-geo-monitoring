@@ -43,6 +43,25 @@ function percent(value) {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : 0;
 }
 
+function nullablePercent(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+}
+
+function formatRate(value, numerator, denominator) {
+  const rate = nullablePercent(value);
+  const valid = Number(denominator || 0);
+  if (rate === null) return `N/A（有效回答 ${valid}）`;
+  return `${rate}%（${Number(numerator || 0)} / ${valid}）`;
+}
+
+function formatSov(summary) {
+  const value = nullablePercent(summary?.average);
+  const count = Number(summary?.calculable_answers || 0);
+  return value === null ? `N/A（有效回答 ${count}）` : `${value}%（有效回答 ${count}）`;
+}
+
 function formatDate(value) {
   if (!value) return '-';
   const d = new Date(value);
@@ -91,6 +110,7 @@ export default function GeoProjectDashboardPage() {
   const [projectLoading, setProjectLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [days, setDays] = useState(30);
+  const [platform, setPlatform] = useState('all');
   const dashboardRequestRef = useRef(0);
 
   const invalidateDashboardRequest = () => {
@@ -100,6 +120,7 @@ export default function GeoProjectDashboardPage() {
   const handleProjectChange = (value) => {
     invalidateDashboardRequest();
     setProjectId(value);
+    setPlatform('all');
     setDashboard(null);
     setDashboardLoading(false);
   };
@@ -107,6 +128,13 @@ export default function GeoProjectDashboardPage() {
   const handleDaysChange = (value) => {
     invalidateDashboardRequest();
     setDays(value);
+    setDashboard(null);
+    setDashboardLoading(false);
+  };
+
+  const handlePlatformChange = (value) => {
+    invalidateDashboardRequest();
+    setPlatform(value);
     setDashboard(null);
     setDashboardLoading(false);
   };
@@ -128,7 +156,7 @@ export default function GeoProjectDashboardPage() {
     }
   }, []);
 
-  const fetchDashboard = useCallback(async (id, targetDays) => {
+  const fetchDashboard = useCallback(async (id, targetDays, targetPlatform) => {
     const requestId = dashboardRequestRef.current + 1;
     dashboardRequestRef.current = requestId;
     if (!id) {
@@ -139,7 +167,9 @@ export default function GeoProjectDashboardPage() {
     setDashboard(null);
     setDashboardLoading(true);
     try {
-      const res = await axios.get(`/api/geo-projects/${id}/dashboard`, { params: { days: targetDays } });
+      const res = await axios.get(`/api/geo-projects/${id}/dashboard`, {
+        params: { days: targetDays, platform: targetPlatform }
+      });
       if (dashboardRequestRef.current === requestId) setDashboard(res?.data?.data || null);
     } catch (error) {
       if (dashboardRequestRef.current === requestId) {
@@ -151,7 +181,7 @@ export default function GeoProjectDashboardPage() {
   }, []);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
-  useEffect(() => { fetchDashboard(projectId, days); }, [fetchDashboard, projectId, days]);
+  useEffect(() => { fetchDashboard(projectId, days, platform); }, [fetchDashboard, projectId, days, platform]);
 
   const summary = useMemo(() => dashboard?.summary || {}, [dashboard]);
   const recentMetrics = useMemo(() => (
@@ -160,6 +190,9 @@ export default function GeoProjectDashboardPage() {
   const platforms = useMemo(() => (
     Array.isArray(summary.platforms) ? summary.platforms : []
   ), [summary]);
+  const availablePlatforms = useMemo(() => (
+    Array.isArray(dashboard?.available_platforms) ? dashboard.available_platforms : []
+  ), [dashboard]);
   const competitors = useMemo(() => (
     Array.isArray(summary.competitors) ? summary.competitors : []
   ), [summary]);
@@ -201,25 +234,34 @@ export default function GeoProjectDashboardPage() {
 
   const trendData = useMemo(() => {
     const rows = Array.isArray(dashboard?.trend) ? dashboard.trend : [];
-    return rows.flatMap((item) => [
-      { date: item.date, type: '品牌提及率', value: percent(item.brand_mention_rate) },
-      { date: item.date, type: '平均声量占比（SOV）', value: percent(item.avg_share_of_voice) },
-      ...(Number(item.citation_eligible_checks || 0) > 0
-        ? [{ date: item.date, type: '引用率', value: percent(item.citation_rate) }]
-        : []),
-      { date: item.date, type: '推荐率', value: percent(item.recommendation_rate) },
-    ]);
+    return rows.flatMap((item) => {
+      const values = [
+        ['品牌提及率', item.brand_mention_rate],
+        ['回答内竞品提及占比（SOV）', item.sov_summary?.average],
+        ['推荐率（AI 语义分析）', item.recommendation_rate],
+      ];
+      if (Number(item.citation_eligible_checks || 0) > 0) values.push(['引用率', item.citation_rate]);
+      return values.flatMap(([type, value]) => {
+        const normalized = nullablePercent(value);
+        return normalized === null ? [] : [{ date: item.date, type, value: normalized }];
+      });
+    });
   }, [dashboard]);
 
   const platformRateChartData = useMemo(() => (
-    platforms.flatMap((item) => [
-      { platform: platformLabel[item.platform] || item.platform || '未知', type: '提及率', value: percent(item.brand_mention_rate) },
-      { platform: platformLabel[item.platform] || item.platform || '未知', type: '平均声量占比（SOV）', value: percent(item.avg_share_of_voice) },
-      ...(Number(item.citation_eligible_checks || 0) > 0
-        ? [{ platform: platformLabel[item.platform] || item.platform || '未知', type: '引用率', value: percent(item.citation_rate) }]
-        : []),
-      { platform: platformLabel[item.platform] || item.platform || '未知', type: '推荐率', value: percent(item.recommendation_rate) },
-    ])
+    platforms.flatMap((item) => {
+      const label = platformLabel[item.platform] || item.platform || '未知';
+      const values = [
+        ['提及率', item.brand_mention_rate],
+        ['回答内竞品提及占比（SOV）', item.sov_summary?.average],
+        ['推荐率（AI 语义分析）', item.recommendation_rate],
+      ];
+      if (Number(item.citation_eligible_checks || 0) > 0) values.push(['引用率', item.citation_rate]);
+      return values.flatMap(([type, value]) => {
+        const normalized = nullablePercent(value);
+        return normalized === null ? [] : [{ platform: label, type, value: normalized }];
+      });
+    })
   ), [platforms, platformLabel]);
   const platformCheckChartData = useMemo(() => (
     platforms.map((item) => ({
@@ -267,10 +309,12 @@ export default function GeoProjectDashboardPage() {
       render: (value) => Number(value || 0),
     },
     {
-      title: '声量占比（SOV）',
-      dataIndex: 'share_of_voice',
-      width: 100,
-      render: (value) => `${percent(value)}%`,
+      title: '回答内竞品提及占比（SOV）',
+      dataIndex: 'sov',
+      width: 180,
+      render: (value) => value?.status === 'calculated'
+        ? `${nullablePercent(value.value)}%（${value.numerator} / ${value.denominator}）`
+        : 'N/A',
     },
     {
       title: '排名/推荐',
@@ -300,7 +344,7 @@ export default function GeoProjectDashboardPage() {
       render: (value) => value || '未分类',
     },
     {
-      title: '情绪',
+      title: '情绪（AI 语义分析）',
       dataIndex: 'sentiment',
       width: 100,
       render: (_, row) => {
@@ -310,9 +354,11 @@ export default function GeoProjectDashboardPage() {
     },
     {
       title: '竞品提及',
-      dataIndex: 'competitor_mentions',
+      dataIndex: 'competition_entities',
       render: (items) => {
-        const rows = Array.isArray(items) ? items.filter((item) => item?.mentioned || Number(item?.mentions || 0) > 0) : [];
+        const rows = Array.isArray(items)
+          ? items.filter((item) => item?.relation === 'competitor' && Number(item?.mentions || 0) > 0)
+          : [];
         if (!rows.length) return <Text type="secondary">无</Text>;
         return (
           <Space wrap size={[4, 4]}>
@@ -334,8 +380,7 @@ export default function GeoProjectDashboardPage() {
   const competitorColumns = [
     { title: '竞品', dataIndex: 'name' },
     { title: '提及次数', dataIndex: 'mentions', width: 120, render: (value) => Number(value || 0) },
-    { title: '出现检查数', dataIndex: 'appeared_checks', width: 130, render: (value) => Number(value || 0) },
-    { title: '可见度得分', dataIndex: 'visibility_score', width: 120, render: (value) => Number(value || 0) },
+    { title: '出现回答数', dataIndex: 'appeared_answers', width: 130, render: (value) => Number(value || 0) },
   ];
 
   const categoryColumns = [
@@ -345,16 +390,38 @@ export default function GeoProjectDashboardPage() {
     { title: '运行数', dataIndex: 'total_runs', width: 90, render: (value) => Number(value || 0) },
     { title: '失败数', dataIndex: 'failed_runs', width: 90, render: (value) => Number(value || 0) },
     { title: '失败率', dataIndex: 'failure_rate', width: 90, render: (value) => `${percent(value)}%` },
-    { title: '有效分析', dataIndex: 'checks', width: 100, render: (value) => Number(value || 0) },
-    { title: '提及率', dataIndex: 'brand_mention_rate', width: 100, render: (value) => `${percent(value)}%` },
-    { title: '声量占比（SOV）', dataIndex: 'avg_share_of_voice', width: 140, render: (value) => `${percent(value)}%` },
+    { title: '已获取回答', dataIndex: 'acquired_answers', width: 110, render: (value) => Number(value || 0) },
+    { title: '有效回答', dataIndex: 'valid_answers', width: 100, render: (value) => Number(value || 0) },
+    {
+      title: '分析覆盖率',
+      dataIndex: 'analysis_coverage_rate',
+      width: 130,
+      render: (value, row) => formatRate(value, row.valid_answers, row.acquired_answers)
+    },
+    {
+      title: '提及率',
+      dataIndex: 'brand_mention_rate',
+      width: 150,
+      render: (value, row) => formatRate(value, row.brand_mentioned_answers, row.valid_answers)
+    },
+    {
+      title: '回答内竞品提及占比（SOV）',
+      dataIndex: 'sov_summary',
+      width: 210,
+      render: formatSov
+    },
     {
       title: '引用率',
       dataIndex: 'citation_rate',
       width: 110,
       render: (value, row) => Number(row.citation_eligible_checks || 0) > 0 ? `${percent(value)}%` : '暂无可验证样本'
     },
-    { title: '推荐率', dataIndex: 'recommendation_rate', width: 100, render: (value) => `${percent(value)}%` },
+    {
+      title: '推荐率（AI 语义分析）',
+      dataIndex: 'recommendation_rate',
+      width: 150,
+      render: (value, row) => formatRate(value, row.recommended_answers, row.valid_answers)
+    },
   ];
 
   const sourceTypeColumns = [
@@ -469,6 +536,19 @@ export default function GeoProjectDashboardPage() {
                 options={periodOptions}
                 onChange={handleDaysChange}
               />
+              <Select
+                aria-label="平台范围"
+                style={{ width: 180 }}
+                value={dashboard?.selected_platform || platform}
+                onChange={handlePlatformChange}
+                options={[
+                  { label: '全部平台（合并）', value: 'all' },
+                  ...availablePlatforms.map((item) => ({
+                    label: platformLabel[item] || item,
+                    value: item
+                  }))
+                ]}
+              />
             </Space>
           </Col>
         </Row>
@@ -484,17 +564,14 @@ export default function GeoProjectDashboardPage() {
             <Text className={styles.sectionDescription}>优先查看品牌在 AI 回答中的整体可见度表现。</Text>
           </div>
           <Row gutter={[12, 12]}>
-            <Col xs={24} sm={12} lg={6}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('品牌提及率', '提及品牌的有效回答数 ÷ 有效分析数')} value={percent(summary.brand_mention_rate)} suffix="%" loading={dashboardLoading} /></Card>
+            <Col xs={24} sm={12} lg={8}>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('品牌提及率', '提及目标品牌的有效回答数 ÷ 有效回答数')} value={formatRate(summary.brand_mention_rate, summary.brand_mentioned_answers, summary.valid_answers)} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={24} sm={12} lg={6}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('平均声量占比（SOV）', '逐条回答的品牌可见度得分占比平均值；可见度得分由提及次数、首次出现位置和明确推荐表达共同计算')} value={percent(summary.avg_share_of_voice)} suffix="%" loading={dashboardLoading} /></Card>
+            <Col xs={24} sm={12} lg={8}>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('回答内竞品提及占比（SOV）', '每条回答内：目标品牌独立提及次数 ÷ 目标品牌与 AI 判定竞品的独立提及总次数；项目值为可计算回答的等权平均')} value={formatSov(summary.sov_summary)} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={24} sm={12} lg={6}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('推荐率', '品牌名称附近命中“推荐、首选、优先选择”等明确表达的有效回答数 ÷ 有效分析数')} value={percent(summary.recommendation_rate)} suffix="%" loading={dashboardLoading} /></Card>
-            </Col>
-            <Col xs={24} sm={12} lg={6}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('平均品牌排名', '品牌在回答中相对已配置竞品的首次出现位置平均值，仅统计品牌出现的回答')} value={formatRank(summary.avg_brand_rank)} loading={dashboardLoading} /></Card>
+            <Col xs={24} sm={12} lg={8}>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('推荐率（AI 语义分析）', 'AI 语义分析判定推荐目标品牌的有效回答数 ÷ 有效回答数')} value={formatRate(summary.recommendation_rate, summary.recommended_answers, summary.valid_answers)} loading={dashboardLoading} /></Card>
             </Col>
           </Row>
         </section>
@@ -506,13 +583,16 @@ export default function GeoProjectDashboardPage() {
             <Text className={styles.sectionDescription}>用于判断本周期数据是否拥有足够的有效运行基础。</Text>
           </div>
           <Row gutter={[12, 12]}>
-            <Col xs={24} sm={8}>
+            <Col xs={24} sm={6}>
               <Card size="small" className={styles.supportMetricCard}><Statistic title="总运行数" value={summary.total_runs ?? summary.total_checks ?? 0} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={24} sm={8}>
-              <Card size="small" className={styles.supportMetricCard}><Statistic title="有效分析数" value={summary.total_checks || 0} loading={dashboardLoading} /></Card>
+            <Col xs={24} sm={6}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="已获取回答" value={summary.acquired_answers || 0} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={24} sm={8}>
+            <Col xs={24} sm={6}>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="分析覆盖率" value={formatRate(summary.analysis_coverage_rate, summary.valid_answers, summary.acquired_answers)} loading={dashboardLoading} /></Card>
+            </Col>
+            <Col xs={24} sm={6}>
               <Card size="small" className={styles.supportMetricCard}><Statistic title="失败数" value={summary.failed_runs || 0} loading={dashboardLoading} /></Card>
             </Col>
           </Row>
@@ -529,7 +609,7 @@ export default function GeoProjectDashboardPage() {
               <Card size="small" className={styles.supportMetricCard}><Statistic title="引用率" value={Number(summary.citation_eligible_checks || 0) > 0 ? percent(summary.citation_rate) : '暂无可验证样本'} suffix={Number(summary.citation_eligible_checks || 0) > 0 ? '%' : undefined} loading={dashboardLoading} /></Card>
             </Col>
             <Col xs={24} sm={12} lg={6}>
-              <Card size="small" className={styles.supportMetricCard}><Statistic title="自有来源覆盖率" value={Number(summary.citation_eligible_checks || 0) > 0 ? percent(summary.owned_citation_rate) : '暂无可验证样本'} suffix={Number(summary.citation_eligible_checks || 0) > 0 ? '%' : undefined} loading={dashboardLoading} /></Card>
+              <Card size="small" className={styles.supportMetricCard}><Statistic title="官网引用率" value={dashboard?.project?.website ? (Number(summary.citation_eligible_checks || 0) > 0 ? percent(summary.owned_citation_rate) : '暂无可验证样本') : '未配置官网'} suffix={dashboard?.project?.website && Number(summary.citation_eligible_checks || 0) > 0 ? '%' : undefined} loading={dashboardLoading} /></Card>
             </Col>
             <Col xs={24} sm={12} lg={6}>
               <Card size="small" className={styles.supportMetricCard}><Statistic title="引用源总数" value={sourceSummary.total_citations || 0} loading={dashboardLoading} /></Card>
@@ -547,6 +627,9 @@ export default function GeoProjectDashboardPage() {
             <Text className={styles.sectionDescription}>结合来源变化、平台、问题分类和竞品明细解释核心表现。</Text>
           </div>
           <Row gutter={[12, 12]} className={styles.diagnosticRows}>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title={metricTitle('明确有序榜单平均排名', '只统计至少包含 2 个不同实体、且回答明确给出顺序或名次的榜单')} value={summary.avg_brand_rank === null || summary.avg_brand_rank === undefined ? `N/A（有效回答 ${Number(summary.ranked_answers || 0)}）` : `${formatRank(summary.avg_brand_rank)}（有效回答 ${Number(summary.ranked_answers || 0)}）`} loading={dashboardLoading} /></Card>
+            </Col>
             <Col xs={12} sm={8} lg={4}>
               <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="竞品提及次数" value={competitors.reduce((sum, item) => sum + Number(item.mentions || 0), 0)} loading={dashboardLoading} /></Card>
             </Col>

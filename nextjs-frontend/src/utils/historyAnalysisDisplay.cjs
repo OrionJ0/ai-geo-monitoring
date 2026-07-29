@@ -43,6 +43,8 @@ function getHistoryAnalysisDisplay(row = {}) {
   if (row.status !== 'completed') {
     return {
       sov: '-',
+      sovLabel: '回答内竞品提及占比（SOV）',
+      metricSemanticsLabel: '-',
       sentimentLabel: '-',
       sentimentColor: 'default',
       sentimentReason: '',
@@ -55,8 +57,26 @@ function getHistoryAnalysisDisplay(row = {}) {
   const metric = row.visibilityMetric || {};
   const sentimentDisplay = getBrandSentimentDisplay(metric);
   const mentioned = !!metric.brand_mentioned;
+  const isCurrent = metric.metric_semantics_version === 'contextual_competitor_mentions_sov_v1';
+  const denominator = Number(metric.sov_denominator);
+  const numerator = Number(metric.sov_numerator);
+  const currentValue = metric.answer_competitor_share;
+  const sov = isCurrent
+    ? (Number.isInteger(denominator) && denominator > 0
+        && Number.isInteger(numerator) && numerator >= 0
+        && currentValue !== null && currentValue !== undefined
+        && Number.isFinite(Number(currentValue))
+      ? `${Number(currentValue).toFixed(2)}%（${numerator} / ${denominator}）`
+      : 'N/A')
+    : (metric.share_of_voice !== null
+        && metric.share_of_voice !== undefined
+        && Number.isFinite(Number(metric.share_of_voice))
+      ? `${Number(metric.share_of_voice).toFixed(2)}%`
+      : 'N/A');
   return {
-    sov: `${Number(metric.share_of_voice || 0).toFixed(2)}%`,
+    sov,
+    sovLabel: isCurrent ? '回答内竞品提及占比（SOV）' : '声量占比（SOV）',
+    metricSemanticsLabel: isCurrent ? '当前回答级竞品提及口径' : '历史竞品配置口径',
     sentimentLabel: sentimentDisplay.sentimentLabel,
     sentimentColor: sentimentDisplay.sentimentColor,
     sentimentReason: sentimentDisplay.sentimentReason,

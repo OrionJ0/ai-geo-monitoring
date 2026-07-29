@@ -49,8 +49,10 @@ test('analysis API settings select a configured platform and an independent mode
   assert.match(analysisSource, /分析平台/);
   assert.match(analysisSource, /分析模型/);
   assert.match(analysisSource, /request_profile/);
+  assert.match(analysisSource, /request_parameters/);
   assert.match(analysisSource, /分析专用调用参数/);
-  assert.match(analysisSource, /最大输出 Token/);
+  assert.match(analysisSource, /实际请求参数/);
+  assert.match(analysisSource, /不设置应用层 Token 上限/);
   assert.match(analysisSource, /请求超时/);
   assert.match(analysisSource, /不会修改监测平台参数/);
   assert.match(analysisSource, /测试输入/);
@@ -65,6 +67,12 @@ test('analysis API settings select a configured platform and an independent mode
   assert.match(analysisSource, /目标品牌\/竞品实体映射/);
   assert.match(analysisSource, /引用数据不由分析模型生成/);
   assert.doesNotMatch(analysisSource, /逐字原文/);
+});
+
+test('analysis API test sends the current question required by the runtime contract', () => {
+  assert.match(analysisSource, /name="question_text"/);
+  assert.match(analysisSource, /question_text:\s*values\.question_text/);
+  assert.match(analysisSource, /当前问题/);
 });
 
 test('platform settings use the management API for every explicit operation', () => {

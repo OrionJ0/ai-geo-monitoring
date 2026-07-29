@@ -47,13 +47,13 @@ npm run deploy
 
 1. 要求当前分支为 `main`，且工作区没有未提交或未跟踪文件。
 2. 执行 `git pull --ff-only origin main`，并确认 `HEAD` 与 `origin/main` 完全一致；服务器上的本地提交即使工作区干净也不会被部署。
-3. 检查 `JWT_SECRET`、`CONFIG_ENCRYPTION_KEY` 和 SQLite 文件。
+3. 检查 `JWT_SECRET`、`CONFIG_ENCRYPTION_KEY` 和数据库配置。
 4. 停止由生产命令管理的前后端。
-5. 使用 SQLite Online Backup API 更新唯一的最新快照，并执行 `PRAGMA quick_check`。
+5. SQLite 使用 Online Backup API 更新唯一最新快照并执行 `PRAGMA quick_check`；Postgres 要求 `AI_GEO_DATABASE_BACKUP_REFERENCE` 已声明外部备份引用。
 6. 后端执行 `npm ci` 和完整测试。
 7. 前端执行 `npm ci`、lint 和生产构建。
-8. 以生产模式启动后端和 Next.js。
-9. 检查后端、前端页面和前端 `/api` 代理。
+8. 使用第 5 步的备份引用执行 GEO 指标语义迁移，再运行一次只读迁移审计；任一步失败都不启动服务。
+9. 以生产模式启动后端和 Next.js，并检查后端、前端页面和前端 `/api` 代理。
 
 任何步骤失败都会返回非零退出码并写入部署日志。服务停止后的步骤失败时，网站保持停止；修复问题后重新执行 `npm run deploy`。
 
@@ -74,6 +74,12 @@ AI_GEO_SQLITE_BACKUP_PATH=/实际备份路径/database.latest.sqlite npm run dep
 ```
 
 这份文件是部署前快照，不是异机灾备。服务器磁盘损坏、项目目录被整个删除或当前数据库在备份前已经逻辑损坏时，单份本地快照可能无法恢复。
+
+Postgres 的备份由外部数据库设施负责，部署命令不会创建数据库快照。执行部署前必须提供可追溯的备份引用：
+
+```bash
+AI_GEO_DATABASE_BACKUP_REFERENCE=<备份任务或快照标识> npm run deploy
+```
 
 ## 生产进程命令
 

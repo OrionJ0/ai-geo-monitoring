@@ -66,6 +66,7 @@ const { createApplicationShutdown } = require('./services/ApplicationShutdownSer
 const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
 const AIPlatformConfigService = require('./services/AIPlatformConfigService');
 const AIRuntimeSettingsService = require('./services/AIRuntimeSettingsService');
+const GeoMetricSemanticsMigrationService = require('./services/GeoMetricSemanticsMigrationService');
 const { authRequired } = require('./middleware/auth');
 
 // 用户登录与公开用户接口保持在 /api/users 下（登录无需鉴权）
@@ -221,6 +222,25 @@ async function ensureColumn(tableName, columnName, definition) {
   }
 }
 
+async function ensureStringColumnCapacity(tableName, columnName, minimumLength, definition = {}) {
+  const qi = sequelize.getQueryInterface();
+  try {
+    const desc = await qi.describeTable(tableName);
+    const currentLength = Number(String(desc[columnName]?.type || '').match(/\((\d+)\)/u)?.[1]);
+    if (Number.isFinite(currentLength) && currentLength < minimumLength) {
+      await qi.changeColumn(tableName, columnName, {
+        type: DataTypes.STRING(minimumLength),
+        ...definition
+      });
+      console.log(`已扩展 ${tableName}.${columnName} 至 ${minimumLength} 字符`);
+    }
+  } catch (e) {
+    if (!isMissingTableError(e)) {
+      console.warn(`检查/扩展 ${tableName}.${columnName} 失败:`, e.message);
+    }
+  }
+}
+
 async function ensureIndex(tableName, indexName, fields, options = {}) {
   const qi = sequelize.getQueryInterface();
   try {
@@ -259,7 +279,13 @@ async function ensureGeoMonitoringColumns() {
   await ensureColumn('visibility_metrics', 'competitor_citation_count', { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 });
   await ensureColumn('visibility_metrics', 'citation_sources', { type: DataTypes.JSON, allowNull: false, defaultValue: [] });
   await ensureColumn('visibility_metrics', 'prompt_category', { type: DataTypes.STRING(80), allowNull: true });
-  await ensureColumn('visibility_metrics', 'sentiment_reason', { type: DataTypes.STRING(80), allowNull: true });
+  await ensureColumn('visibility_metrics', 'sentiment_reason', { type: DataTypes.STRING(120), allowNull: true });
+  await ensureStringColumnCapacity(
+    'visibility_metrics',
+    'sentiment_reason',
+    120,
+    { allowNull: true }
+  );
   await ensureColumn('visibility_metrics', 'sentiment_risk_terms', { type: DataTypes.JSON, allowNull: false, defaultValue: [] });
   await ensureColumn('visibility_metrics', 'analysis_method', {
     type: DataTypes.STRING(40),
@@ -283,6 +309,11 @@ async function ensureGeoMonitoringColumns() {
     type: DataTypes.JSON,
     allowNull: false,
     defaultValue: []
+  });
+  await ensureColumn('result_details', 'citation_analysis', {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: {}
   });
   await ensureColumn('question_records', 'execution_token', {
     type: DataTypes.STRING(64),
@@ -579,6 +610,8 @@ async function ensureDefaultSettings() {
 (async () => {
   try {
     if (await hasExistingDatabaseTables()) {
+      // 指标版本迁移必须由备份保护的显式迁移入口完成，应用启动不得隐式改写历史口径。
+      await GeoMetricSemanticsMigrationService.assertRuntimeReady({ sequelize });
       await ensureExistingTableProjectColumns();
       // 旧库上的模型索引可能引用本版本新增列；必须先补列，再让 Sequelize 同步索引。
       await ensureGeoMonitoringColumns();

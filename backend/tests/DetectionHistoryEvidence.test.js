@@ -106,7 +106,8 @@ async function createRecord({
     project_id: project.id,
     question_record_id: record.id,
     user_id: user.id,
-    platform
+    platform,
+    metric_semantics_version: 'configured_competitor_sov_v1'
   });
   return record;
 }

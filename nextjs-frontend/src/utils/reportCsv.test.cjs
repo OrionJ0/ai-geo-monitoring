@@ -185,3 +185,56 @@ test('exports competitor visibility score for alert review', () => {
   assert.match(csv, /竞品,提及次数,出现分析数,可见度得分/);
   assert.match(csv, /马牌,5,3,12\.5/);
 });
+
+test('新版项目报告导出版本化回答级 SOV、样本数和实际竞品提及', () => {
+  const current = 'contextual_competitor_mentions_sov_v1';
+  const csv = buildReportCsv({
+    summary: {
+      metric_semantics_version: current,
+      valid_answers: 3,
+      acquired_answers: 4,
+      analysis_coverage_rate: 75,
+      brand_mentioned_answers: 2,
+      brand_mention_rate: 66.67,
+      recommended_answers: 1,
+      recommendation_rate: 33.33,
+      ranked_answers: 1,
+      avg_brand_rank: 2,
+      sov_summary: {
+        metric_semantics_version: current,
+        average: null,
+        calculable_answers: 0
+      },
+      platforms: [{
+        platform: 'deepseek',
+        valid_answers: 3,
+        brand_mentioned_answers: 2,
+        brand_mention_rate: 66.67,
+        recommended_answers: 1,
+        recommendation_rate: 33.33,
+        ranked_answers: 1,
+        avg_brand_rank: 2,
+        sov_summary: { average: 50, calculable_answers: 2 }
+      }],
+      categories: [],
+      competitors: [{ name: '海康', mentions: 9, appeared_answers: 1 }],
+      trend: [{
+        date: '2026-07-28',
+        valid_answers: 0,
+        brand_mention_rate: null,
+        recommendation_rate: null,
+        sov_summary: { average: null, calculable_answers: 0 }
+      }],
+      source_domains: [],
+      source_urls: [],
+      opportunities: []
+    }
+  });
+
+  assert.match(csv, /指标语义版本,contextual_competitor_mentions_sov_v1/);
+  assert.match(csv, /回答内竞品提及占比（SOV）,N\/A（有效回答 0）/);
+  assert.match(csv, /分析覆盖率,75%（3 \/ 4）/);
+  assert.match(csv, /DeepSeek,3,66\.67%（2 \/ 3）,50%（有效回答 2）/);
+  assert.match(csv, /海康,9,1/);
+  assert.doesNotMatch(csv, /平均声量占比|可见度得分|综合得分/);
+});

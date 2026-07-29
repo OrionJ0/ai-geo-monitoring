@@ -1,7 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { Op } = require('sequelize');
-
 const ReportSnapshotService = require('../services/ReportSnapshotService');
 
 test('finds the latest report snapshot without creating a new one', async () => {
@@ -142,6 +140,11 @@ test('stores top citation urls in generated report summaries', async () => {
       platform: 'deepseek',
       prompt_id: 7,
       prompt_category: '购买决策',
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+      answer_competitor_share: 100,
+      sov_numerator: 1,
+      sov_denominator: 1,
+      competition_entities: [],
       citation_sources: [{ url: 'https://example.com/guide?utm_source=ai' }],
       analysis_structure: {
         citations: { semantics_version: 'explicit-citation-v2' }
@@ -175,7 +178,7 @@ test('stores top citation urls in generated report summaries', async () => {
   ]);
 });
 
-test('report snapshots only query metrics from the project monitoring platforms', async () => {
+test('新版报告快照按当前指标版本查询全部实际历史平台', async () => {
   const visibilityQueries = [];
   const recordQueries = [];
   await ReportSnapshotService.buildSnapshotPayload({
@@ -202,8 +205,119 @@ test('report snapshots only query metrics from the project monitoring platforms'
   });
 
   assert.equal(visibilityQueries.length, 2);
-  assert.deepEqual(visibilityQueries[0].where.platform[Op.in], ['deepseek']);
-  assert.deepEqual(visibilityQueries[1].where.platform[Op.in], ['deepseek']);
+  assert.equal(visibilityQueries[0].where.platform, undefined);
+  assert.equal(visibilityQueries[1].where.platform, undefined);
+  assert.equal(visibilityQueries[0].where.metric_semantics_version, 'contextual_competitor_mentions_sov_v1');
+  assert.equal(visibilityQueries[1].where.metric_semantics_version, 'contextual_competitor_mentions_sov_v1');
   assert.equal(recordQueries.length, 1);
-  assert.deepEqual(recordQueries[0].where.platform[Op.in], ['deepseek']);
+  recordQueries.forEach((query) => {
+    assert.equal(query.where.platform, undefined);
+    assert.equal(query.where.metric_semantics_version, 'contextual_competitor_mentions_sov_v1');
+  });
+});
+
+test('新版报告一次固化全部平台和单平台视图且使用同一回答级 SOV reducer', async () => {
+  const current = 'contextual_competitor_mentions_sov_v1';
+  const metrics = [
+    {
+      id: 1,
+      question_record_id: 11,
+      project_id: 2,
+      platform: 'deepseek',
+      metric_semantics_version: current,
+      answer_competitor_share: 100,
+      sov_numerator: 1,
+      sov_denominator: 1,
+      brand_mentioned: true,
+      brand_recommended: true,
+      competition_entities: [],
+      created_at: '2026-05-14T00:00:00.000Z'
+    },
+    {
+      id: 2,
+      question_record_id: 12,
+      project_id: 2,
+      platform: 'removed-platform',
+      metric_semantics_version: current,
+      answer_competitor_share: 0,
+      sov_numerator: 0,
+      sov_denominator: 9,
+      brand_mentioned: false,
+      brand_recommended: false,
+      competition_entities: [{
+        name: '海康',
+        relation: 'competitor',
+        mentions: 9,
+        reason: '提供同类方案'
+      }],
+      created_at: '2026-05-14T01:00:00.000Z'
+    }
+  ];
+  const records = [11, 12].map((id, index) => ({
+    id,
+    status: 'completed',
+    tracked_prompt_id: 3,
+    platform: index === 0 ? 'deepseek' : 'removed-platform',
+    metric_semantics_version: current,
+    resultDetail: { ai_response_original: `完整回答 ${id}` },
+    created_at: `2026-05-14T0${index}:00:00.000Z`
+  }));
+  let metricQueries = 0;
+  let recordQueries = 0;
+
+  const payload = await ReportSnapshotService.buildSnapshotPayload({
+    project: {
+      id: 2,
+      user_id: 9,
+      platforms: ['deepseek'],
+      toJSON: () => ({ id: 2, user_id: 9, platforms: ['deepseek'] })
+    },
+    user: { id: 9, role: 'user' },
+    days: 7,
+    now: new Date('2026-05-15T00:00:00.000Z'),
+    repositories: {
+      VisibilityMetric: {
+        findAll: async () => {
+          metricQueries += 1;
+          return metrics;
+        }
+      },
+      QuestionRecord: {
+        findAll: async () => {
+          recordQueries += 1;
+          return records;
+        }
+      },
+      TrackedPrompt: {
+        findAll: async () => [{
+          id: 3,
+          question: '工业监控方案',
+          tags: ['购买决策'],
+          platforms: ['deepseek'],
+          enabled: true
+        }]
+      },
+      BrandCompetitor: { findAll: async () => [] }
+    }
+  });
+
+  assert.equal(metricQueries, 2);
+  assert.equal(recordQueries, 1);
+  assert.equal(payload.metric_semantics_version, current);
+  assert.deepEqual(payload.summary.available_platforms, ['deepseek', 'removed-platform']);
+  assert.equal(payload.summary.metric_views.all.summary.sov_summary.average, 50);
+  assert.equal(payload.summary.metric_views.all.summary.sov_summary.calculable_answers, 2);
+  assert.deepEqual(
+    payload.summary.metric_views.platforms.map((item) => [
+      item.platform,
+      item.summary.sov_summary.average,
+      item.summary.sov_summary.calculable_answers
+    ]),
+    [
+      ['deepseek', 100, 1],
+      ['removed-platform', 0, 1]
+    ]
+  );
+  assert.match(payload.summary.usage_guidance.monitoring_questions, /非品牌词问题/);
+  assert.match(payload.summary.usage_guidance.trend_comparison, /问题集合/);
 });

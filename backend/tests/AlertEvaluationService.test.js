@@ -2,8 +2,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { Op } = require('sequelize');
-
 const AlertEvaluationService = require('../services/AlertEvaluationService');
 
 const servicePath = path.resolve(__dirname, '..', 'services', 'AlertEvaluationService.js');
@@ -13,6 +11,8 @@ test('normalizes alert thresholds by rule type', () => {
   assert.equal(AlertEvaluationService.normalizeThreshold('visibility_drop', 150), 100);
   assert.equal(AlertEvaluationService.normalizeThreshold('citation_gap', -5), 0);
   assert.equal(AlertEvaluationService.normalizeThreshold('platform_gap', 101), 100);
+  assert.equal(AlertEvaluationService.normalizeThreshold('competitor_ahead', 2.2), 3);
+  assert.equal(AlertEvaluationService.normalizeThreshold('competitor_ahead', 0), 1);
   assert.equal(AlertEvaluationService.normalizeThreshold('competitor_ahead', 150), 150);
   assert.equal(AlertEvaluationService.normalizeThreshold('competitor_ahead', 1200), 1000);
   assert.equal(AlertEvaluationService.normalizeThreshold('negative_sentiment', 0), 1);
@@ -42,17 +42,17 @@ test('evaluates alert rules from recent metrics and failures', () => {
     { id: 6, type: 'source_drop', threshold: 1, enabled: true },
     { id: 7, type: 'platform_gap', threshold: 80, enabled: true }
   ], {
-    total_checks: 4,
+    valid_answers: 4,
     citation_eligible_checks: 4,
-    brand_mentioned_checks: 4,
+    brand_mentioned_answers: 4,
     brand_mention_rate: 50,
-    avg_share_of_voice: 35,
+    sov_summary: { average: 35, calculable_answers: 4 },
     citation_rate: 10,
     negative_sentiment_rate: 50,
-    competitors: [{ name: 'DeepSeek', mentions: 3, appeared_checks: 2 }],
+    competitors: [{ name: 'DeepSeek', mentions: 3, appeared_answers: 2 }],
     platforms: [
-      { platform: 'doubao', checks: 2, brand_mention_rate: 100 },
-      { platform: 'deepseek', checks: 2, brand_mention_rate: 0 }
+      { platform: 'doubao', valid_answers: 2, brand_mention_rate: 100 },
+      { platform: 'deepseek', valid_answers: 2, brand_mention_rate: 0 }
     ]
   }, {
     failed_checks: 2,
@@ -68,30 +68,42 @@ test('evaluates alert rules from recent metrics and failures', () => {
   assert.match(decisions[6].message, /平台提及率差距/);
 });
 
-test('project alert evaluation only reads data from the project monitoring platforms', () => {
+test('project alert evaluation only reads current semantics across actual historical platforms', () => {
   const source = fs.readFileSync(servicePath, 'utf8');
 
-  assert.match(source, /PlatformSelectionService/);
-  assert.match(source, /const projectPlatforms = PlatformSelectionService\.normalize\(projectData\.platforms\)/);
-  assert.equal((source.match(/platform: \{ \[Op\.in\]: projectPlatforms \}/g) || []).length, 3);
-  assert.match(source, /QuestionRecord\.count\(\{[\s\S]*platform: \{ \[Op\.in\]: projectPlatforms \}/);
+  assert.doesNotMatch(source, /PlatformSelectionService/);
+  assert.doesNotMatch(source, /platform:\s*\{\s*\[Op\.in\]/);
+  assert.equal((source.match(/metric_semantics_version:\s*CURRENT_METRIC_SEMANTICS/g) || []).length, 3);
+  assert.match(source, /ProjectMetricsService\.buildCurrentMetricView/);
   assert.match(source, /dropped_source_urls:\s*sourceAnalysis\.source_changes\.dropped_urls\.length/);
-  assert.equal(typeof Op.in, 'symbol');
 });
 
 test('triggers visibility drop when SOV is zero but mention rate is above threshold', () => {
   const decisions = AlertEvaluationService.evaluateRules([
     { id: 1, type: 'visibility_drop', threshold: 20, enabled: true }
   ], {
-    total_checks: 5,
+    valid_answers: 5,
     brand_mention_rate: 80,
-    avg_share_of_voice: 0,
+    sov_summary: { average: 0, calculable_answers: 5 },
     competitors: []
   });
 
   assert.equal(decisions.length, 1);
   assert.equal(decisions[0].value, 0);
-  assert.match(decisions[0].message, /声量占比（SOV）0%/);
+  assert.match(decisions[0].message, /回答内竞品提及占比（SOV） 0%/);
+});
+
+test('SOV 为 N/A 时不把它当作零触发可见度下降', () => {
+  const decisions = AlertEvaluationService.evaluateRules([
+    { id: 1, type: 'visibility_drop', threshold: 20, enabled: true }
+  ], {
+    valid_answers: 5,
+    brand_mention_rate: 80,
+    sov_summary: { average: null, calculable_answers: 0 },
+    competitors: []
+  });
+
+  assert.deepEqual(decisions, []);
 });
 
 test('does not trigger negative sentiment alerts when the normalized threshold is above zero and no negative answers exist', () => {
@@ -147,53 +159,49 @@ test('triggers source drop alerts from lost citation urls even when domains are 
   assert.match(decisions[0].message, /流失引用 URL/);
 });
 
-test('triggers competitor ahead from visibility score even when mentions are lower', () => {
+test('does not trigger competitor ahead when competitor mentions are lower', () => {
   const decisions = AlertEvaluationService.evaluateRules([
     { id: 1, type: 'competitor_ahead', threshold: 1, enabled: true }
   ], {
-    total_checks: 3,
+    valid_answers: 3,
     competitors: [
       { name: '马牌', mentions: 1, appeared_checks: 1, visibility_score: 6 }
     ]
   }, {
-    brand_mentions: 4,
-    brand_visibility_score: 3
+    brand_mentions: 4
   });
 
-  assert.equal(decisions.length, 1);
-  assert.equal(decisions[0].type, 'competitor_ahead');
-  assert.equal(decisions[0].value, 3);
-  assert.match(decisions[0].message, /可见度得分/);
+  assert.deepEqual(decisions, []);
 });
 
-test('uses competitor ahead threshold as the score gap over the brand', () => {
+test('uses competitor ahead threshold as the actual mention-count gap over the brand', () => {
   const belowGap = AlertEvaluationService.evaluateRules([
     { id: 1, type: 'competitor_ahead', threshold: 4, enabled: true }
   ], {
-    total_checks: 3,
+    valid_answers: 3,
     competitors: [
-      { name: '马牌', mentions: 1, appeared_checks: 1, visibility_score: 6 }
+      { name: '马牌', mentions: 7, appeared_answers: 2, visibility_score: 1 }
     ]
   }, {
-    brand_mentions: 4,
-    brand_visibility_score: 3
+    brand_mentions: 4
   });
   const atGap = AlertEvaluationService.evaluateRules([
     { id: 1, type: 'competitor_ahead', threshold: 3, enabled: true }
   ], {
-    total_checks: 3,
+    valid_answers: 3,
     competitors: [
-      { name: '马牌', mentions: 1, appeared_checks: 1, visibility_score: 6 }
+      { name: '马牌', mentions: 7, appeared_answers: 2, visibility_score: 1 }
     ]
   }, {
-    brand_mentions: 4,
-    brand_visibility_score: 3
+    brand_mentions: 4
   });
 
   assert.deepEqual(belowGap, []);
   assert.equal(atGap.length, 1);
   assert.equal(atGap[0].value, 3);
-  assert.match(atGap[0].message, /领先 3 分/);
+  assert.match(atGap[0].message, /提及次数/);
+  assert.match(atGap[0].message, /领先 3 次/);
+  assert.doesNotMatch(atGap[0].message, /得分|综合/);
 });
 
 test('does not trigger metric-based alerts without effective analysis data', () => {

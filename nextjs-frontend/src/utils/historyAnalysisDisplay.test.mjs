@@ -5,6 +5,8 @@ import { getBrandSentimentDisplay, getHistoryAnalysisDisplay } from './historyAn
 test('hides analysis metrics for failed prompt history records', () => {
   assert.deepEqual(getHistoryAnalysisDisplay({ status: 'failed' }), {
     sov: '-',
+    sovLabel: '回答内竞品提及占比（SOV）',
+    metricSemanticsLabel: '-',
     sentimentLabel: '-',
     sentimentColor: 'default',
     sentimentReason: '',
@@ -26,6 +28,8 @@ test('formats completed prompt history analysis metrics', () => {
     }
   }), {
     sov: '37.50%',
+    sovLabel: '声量占比（SOV）',
+    metricSemanticsLabel: '历史竞品配置口径',
     sentimentLabel: '负向',
     sentimentColor: 'red',
     sentimentReason: '价格和售后风险',
@@ -45,6 +49,8 @@ test('does not show sentiment when the brand was not mentioned', () => {
     }
   }), {
     sov: '0.00%',
+    sovLabel: '声量占比（SOV）',
+    metricSemanticsLabel: '历史竞品配置口径',
     sentimentLabel: '-',
     sentimentColor: 'default',
     sentimentReason: '',
@@ -52,6 +58,46 @@ test('does not show sentiment when the brand was not mentioned', () => {
     brandMentionLabel: '未提及',
     brandMentionColor: 'default'
   });
+});
+
+test('formats current prompt history with versioned numerator and denominator', () => {
+  assert.deepEqual(getHistoryAnalysisDisplay({
+    status: 'completed',
+    visibilityMetric: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+      answer_competitor_share: 50,
+      sov_numerator: 2,
+      sov_denominator: 4,
+      sentiment: 'positive',
+      brand_mentioned: true
+    }
+  }), {
+    sov: '50.00%（2 / 4）',
+    sovLabel: '回答内竞品提及占比（SOV）',
+    metricSemanticsLabel: '当前回答级竞品提及口径',
+    sentimentLabel: '正向',
+    sentimentColor: 'green',
+    sentimentReason: '',
+    sentimentRiskTerms: [],
+    brandMentionLabel: '已提及',
+    brandMentionColor: 'green'
+  });
+});
+
+test('formats current zero-over-zero SOV as N/A instead of zero', () => {
+  const display = getHistoryAnalysisDisplay({
+    status: 'completed',
+    visibilityMetric: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+      answer_competitor_share: null,
+      sov_numerator: 0,
+      sov_denominator: 0,
+      brand_mentioned: false
+    }
+  });
+
+  assert.equal(display.sov, 'N/A');
+  assert.equal(display.metricSemanticsLabel, '当前回答级竞品提及口径');
 });
 
 test('formats brand sentiment only for mentioned metrics', () => {

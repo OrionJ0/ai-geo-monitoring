@@ -22,9 +22,10 @@ test('source drop alert copy reflects domain and url level monitoring', () => {
   assert.match(pageSource, /来源流失表示流失引用域名或 URL 数。/);
 });
 
-test('competitor ahead alert copy describes score gap threshold', () => {
-  assert.match(pageSource, /竞品可见度得分领先品牌达到阈值/);
-  assert.match(pageSource, /竞品领先按可见度得分差值触发/);
+test('competitor ahead alert copy describes actual mention-count gap threshold', () => {
+  assert.match(pageSource, /竞品提及次数领先目标品牌达到阈值/);
+  assert.match(pageSource, /竞品领先按实际提及次数差值触发/);
+  assert.doesNotMatch(pageSource, /可见度得分|综合得分/);
 });
 
 test('alert rule save normalizes thresholds before sending them to the backend', () => {

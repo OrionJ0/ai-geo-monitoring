@@ -26,6 +26,12 @@ const ResultDetail = sequelize.define('ResultDetail', {
     defaultValue: [],
     comment: '监测平台响应中的引用元数据快照，用于分析重试'
   },
+  citation_analysis: {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: {},
+    comment: '独立于品牌结构化分析的显式引用证据结果'
+  },
   parsing_status: {
     type: DataTypes.ENUM('pending', 'completed', 'failed'),
     defaultValue: 'pending'

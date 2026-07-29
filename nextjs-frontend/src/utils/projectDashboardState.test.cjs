@@ -13,14 +13,31 @@ test('project dashboard ignores stale async dashboard responses after project or
   assert.match(source, /dashboardRequestRef\.current \+= 1/);
   assert.match(source, /const handleProjectChange = \(value\) =>/);
   assert.match(source, /const handleDaysChange = \(value\) =>/);
+  assert.match(source, /const \[platform, setPlatform\] = useState\('all'\)/);
+  assert.match(source, /const handlePlatformChange = \(value\) =>/);
   assert.match(source, /onChange=\{handleProjectChange\}/);
   assert.match(source, /onChange=\{handleDaysChange\}/);
+  assert.match(source, /onChange=\{handlePlatformChange\}/);
   assert.match(source, /const requestId = dashboardRequestRef\.current \+ 1/);
   assert.match(source, /dashboardRequestRef\.current = requestId/);
   assert.match(source, /if \(!id\) \{[\s\S]*setDashboard\(null\);[\s\S]*setDashboardLoading\(false\);[\s\S]*return;/);
   assert.match(source, /setDashboard\(null\)[\s\S]*setDashboardLoading\(true\)/);
+  assert.match(source, /params:\s*\{\s*days:\s*targetDays,\s*platform:\s*targetPlatform\s*\}/);
   assert.match(source, /if \(dashboardRequestRef\.current === requestId\) setDashboard\(res\?\.data\?\.data \|\| null\)/);
   assert.match(source, /if \(dashboardRequestRef\.current === requestId\) setDashboardLoading\(false\)/);
+});
+
+test('project dashboard defaults to merged platforms and renders versioned answer-level SOV without pseudo zero', () => {
+  assert.match(source, /available_platforms/);
+  assert.match(source, /selected_platform/);
+  assert.match(source, /全部平台（合并）/);
+  assert.match(source, /回答内竞品提及占比（SOV）/);
+  assert.match(source, /sov_summary/);
+  assert.match(source, /analysis_coverage_rate/);
+  assert.match(source, /有效回答/);
+  assert.match(source, /N\/A/);
+  assert.doesNotMatch(source, /summary\.avg_share_of_voice/);
+  assert.doesNotMatch(source, /dataIndex:\s*'share_of_voice'/);
 });
 
 test('project dashboard uses shared active-project selection rules', () => {
@@ -34,9 +51,11 @@ test('project dashboard recent metrics expose prompt question context', () => {
   assert.match(source, /row\?\.prompt\?\.question\s*\|\|\s*row\?\.questionRecord\?\.question/);
 });
 
-test('project dashboard competitor table shows visibility score context', () => {
-  assert.match(source, /title:\s*'可见度得分'/);
-  assert.match(source, /dataIndex:\s*'visibility_score'/);
+test('project dashboard competitor table shows contextual mention evidence', () => {
+  assert.match(source, /title:\s*'提及次数'/);
+  assert.match(source, /title:\s*'出现回答数'/);
+  assert.match(source, /dataIndex:\s*'appeared_answers'/);
+  assert.doesNotMatch(source, /dataIndex:\s*'visibility_score'/);
 });
 
 test('project dashboard presents existing metrics in a clear decision hierarchy', () => {
@@ -54,17 +73,18 @@ test('project dashboard presents existing metrics in a clear decision hierarchy'
 
   const coreSection = source.slice(coreIndex, runIndex);
   assert.match(coreSection, /品牌提及率/);
-  assert.match(coreSection, /平均声量占比（SOV）/);
+  assert.match(coreSection, /回答内竞品提及占比（SOV）/);
   assert.match(coreSection, /推荐率/);
-  assert.match(coreSection, /平均品牌排名/);
+  assert.doesNotMatch(coreSection, /平均排名/);
   assert.doesNotMatch(coreSection, /title="(?:总运行数|有效分析数|失败数|新增引用域名)"/);
 });
 
 test('project dashboard explains how each core metric is currently calculated', () => {
-  assert.match(source, /提及品牌的有效回答数 ÷ 有效分析数/);
-  assert.match(source, /提及次数、首次出现位置和明确推荐表达共同计算/);
-  assert.match(source, /品牌名称附近命中“推荐、首选、优先选择”等明确表达/);
-  assert.match(source, /相对已配置竞品的首次出现位置平均值/);
+  assert.match(source, /提及目标品牌的有效回答数 ÷ 有效回答数/);
+  assert.match(source, /目标品牌独立提及次数 ÷ 目标品牌与 AI 判定竞品的独立提及总次数/);
+  assert.match(source, /项目值为可计算回答的等权平均/);
+  assert.match(source, /AI 语义分析判定推荐目标品牌的有效回答数 ÷ 有效回答数/);
+  assert.match(source, /至少包含 2 个不同实体、且回答明确给出顺序或名次/);
 });
 
 test('project dashboard keeps diagnostic indicators before the final action section', () => {
@@ -74,6 +94,7 @@ test('project dashboard keeps diagnostic indicators before the final action sect
   const diagnosisSection = source.slice(diagnosisIndex, actionIndex);
 
   assert.match(diagnosisSection, /title="竞品提及次数"/);
+  assert.match(diagnosisSection, /明确有序榜单平均排名/);
   assert.ok(recentMetricsIndex >= 0, '最近指标明细应保留');
   assert.ok(recentMetricsIndex < actionIndex, '行动建议应位于诊断明细之后');
   assert.match(source.slice(actionIndex), /dataSource=\{opportunities\}/);

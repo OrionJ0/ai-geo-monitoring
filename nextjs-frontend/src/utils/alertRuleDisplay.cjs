@@ -1,19 +1,19 @@
 function thresholdUnit(type) {
   if (type === 'task_failure') return '条';
   if (type === 'source_drop') return '个';
-  if (type === 'competitor_ahead') return '分';
+  if (type === 'competitor_ahead') return '次';
   return '%';
 }
 
 function isCountThreshold(type) {
-  return type === 'task_failure' || type === 'source_drop';
+  return type === 'task_failure' || type === 'source_drop' || type === 'competitor_ahead';
 }
 
 function normalizeThresholdInput(type, value) {
   const numeric = Number(value || 0);
+  if (type === 'competitor_ahead') return Math.max(1, Math.min(1000, Math.ceil(numeric)));
   if (isCountThreshold(type)) return Math.max(1, Math.ceil(numeric));
   if (type === 'negative_sentiment') return Math.max(1, Math.min(100, numeric));
-  if (type === 'competitor_ahead') return Math.max(0, Math.min(1000, numeric));
   return Math.max(0, Math.min(100, numeric));
 }
 

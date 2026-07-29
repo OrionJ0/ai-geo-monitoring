@@ -71,6 +71,7 @@ function metricPayload(record) {
     sentiment_reason: null,
     sentiment_risk_terms: [],
     analysis_method: 'ai_structured_v2',
+    metric_semantics_version: 'configured_competitor_sov_v1',
     analysis_platform: 'deepseek',
     analysis_model: 'deepseek-model',
     analysis_structure: {},

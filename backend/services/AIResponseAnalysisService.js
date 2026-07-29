@@ -1,17 +1,23 @@
 const AIPlatformRequestService = require('./AIPlatformRequestService');
 const AIAnalysisConfigService = require('./AIAnalysisConfigService');
+const {
+  CURRENT_ANALYSIS_CONTRACT,
+  CURRENT_STRUCTURE_VERSION,
+  CURRENT_METRIC_SEMANTICS
+} = require('./GeoMetricSemanticsService');
 
-const ANALYSIS_METHOD = 'ai_structured_v2';
-const STRUCTURE_VERSION = 'geo_metric_input_v2';
+const ANALYSIS_METHOD = CURRENT_ANALYSIS_CONTRACT;
+const STRUCTURE_VERSION = CURRENT_STRUCTURE_VERSION;
 const VALID_ENTITY_TYPES = new Set(['brand', 'company']);
+const VALID_COMPETITOR_RELATIONS = new Set(['competitor', 'non_competitor']);
 const VALID_RECOMMENDATION_KINDS = new Set(['explicit']);
 const VALID_SENTIMENTS = new Set(['positive', 'neutral', 'negative']);
 const ANALYSIS_REQUEST_PROFILE = Object.freeze({
   temperature: 0,
-  max_tokens: 8192,
   timeout_seconds: 120,
   max_attempts: 2,
   web_search: false,
+  token_limit: null,
   json_mode: 'chat_completions_only',
   deepseek_thinking: 'disabled'
 });
@@ -23,9 +29,12 @@ const RETRYABLE_REQUEST_ERROR_CODES = new Set([
   'timeout'
 ]);
 const PROMPT_RUNTIME_FIELDS = Object.freeze([
+  '当前问题',
   '目标品牌',
   '品牌别名',
-  '已配置竞品',
+  '目标品牌行业',
+  '目标品牌关键词',
+  '竞品提示',
   '待分析的 AI 回答'
 ]);
 const EXPECTED_OUTPUT = Object.freeze({
@@ -38,9 +47,10 @@ const EXPECTED_OUTPUT = Object.freeze({
     surface_forms: ['原回答中实际出现的品牌/公司短名称或别名；程序据此计算次数和顺序']
   }],
   target_entity_name: '目标品牌对应的 entities.name；回答未提及则为 null',
-  competitor_matches: [{
-    configured_name: '必须精确引用已配置竞品名称',
-    entity_name: '对应的 entities.name；回答未提及则为 null'
+  competitor_relations: [{
+    entity_name: '必须精确引用非目标 entities.name',
+    relation: 'competitor | non_competitor',
+    reason: '当前问题和回答场景中的替代关系判断理由'
   }],
   candidate_lists: [{
     ordered: true,
@@ -66,7 +76,7 @@ const JSON_OUTPUT_SKELETON = Object.freeze({
   entities: [],
   mentions: [],
   target_entity_name: null,
-  competitor_matches: [],
+  competitor_relations: [],
   candidate_lists: [],
   recommendations: [],
   claims: [],
@@ -97,10 +107,17 @@ function compact(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/gu, '');
 }
 
-function boundedString(value, field, maxLength, { required = true } = {}) {
+function boundedString(
+  value,
+  field,
+  maxLength,
+  { required = true, code = 'invalid_analysis_output' } = {}
+) {
   const text = String(value || '').replace(/\s+/gu, ' ').trim();
-  if (required && !text) throw new AIResponseAnalysisError(`${field} 不能为空`);
-  if (text.length > maxLength) throw new AIResponseAnalysisError(`${field} 超出长度限制`);
+  if (required && !text) throw new AIResponseAnalysisError(`${field} 不能为空`, code);
+  if (text.length > maxLength) {
+    throw new AIResponseAnalysisError(`${field} 超出长度限制`, code);
+  }
   return text;
 }
 
@@ -158,8 +175,8 @@ function normalizeMentions(value, responseText, entityMap) {
 
   value.forEach((item, index) => {
     const entity = requireEntity(entityMap, item?.entity_name, `mentions[${index}].entity_name`);
-    if (!Array.isArray(item?.surface_forms) || !item.surface_forms.length || item.surface_forms.length > 8) {
-      throw new AIResponseAnalysisError(`mentions[${index}].surface_forms 必须包含 1 至 8 个短实体词`);
+    if (!Array.isArray(item?.surface_forms) || !item.surface_forms.length) {
+      throw new AIResponseAnalysisError(`mentions[${index}].surface_forms 至少包含 1 个短实体词`);
     }
     const entityKey = compact(entity.name);
     const entityForms = formsByEntity.get(entityKey) || {
@@ -258,42 +275,71 @@ function normalizeTargetEntityName(value, entityMap) {
   return requireEntity(entityMap, value, 'target_entity_name').name;
 }
 
-function normalizeCompetitorMatches(value, competitors, entityMap, mentionedEntityKeys) {
-  if (!Array.isArray(value)) throw new AIResponseAnalysisError('competitor_matches 必须是数组');
-  const expected = (Array.isArray(competitors) ? competitors : [])
-    .map((item) => String(item?.name || '').trim())
-    .filter(Boolean);
-  if (value.length !== expected.length) {
-    throw new AIResponseAnalysisError('competitor_matches 必须逐一覆盖已配置竞品');
+function normalizeCompetitorRelations(
+  value,
+  entities,
+  targetEntityName,
+  entityMap,
+  mentionedEntityKeys
+) {
+  if (!Array.isArray(value)) {
+    throw new AIResponseAnalysisError(
+      'competitor_relations 必须是数组',
+      'analysis_relation_incomplete'
+    );
   }
-  const expectedMap = new Map(expected.map((name) => [compact(name), name]));
+  const targetKey = compact(targetEntityName);
+  const expected = entities.filter((entity) => compact(entity.name) !== targetKey);
+  if (value.length !== expected.length) {
+    throw new AIResponseAnalysisError(
+      'competitor_relations 必须逐一覆盖全部非目标实体',
+      'analysis_relation_incomplete'
+    );
+  }
+  const expectedMap = new Map(
+    expected.map((entity) => [compact(entity.name), entity])
+  );
   const seen = new Set();
   const normalized = value.map((item, index) => {
-    const configuredKey = compact(item?.configured_name);
-    const configuredName = expectedMap.get(configuredKey);
-    if (!configuredName || seen.has(configuredKey)) {
+    const entityKey = compact(item?.entity_name);
+    const entity = expectedMap.get(entityKey);
+    if (!entity || seen.has(entityKey)) {
       throw new AIResponseAnalysisError(
-        `competitor_matches[${index}].configured_name 必须精确引用且不得重复`
+        `competitor_relations[${index}].entity_name 必须引用非目标实体且不得重复`
       );
     }
-    seen.add(configuredKey);
-    if (item?.entity_name === null) {
-      return { configured_name: configuredName, entity_name: null };
+    if (!mentionedEntityKeys.has(entityKey)) {
+      throw new AIResponseAnalysisError(
+        `competitor_relations[${index}].entity_name 没有对应提及`
+      );
     }
-    const entity = requireEntity(
+    requireEntity(
       entityMap,
-      item?.entity_name,
-      `competitor_matches[${index}].entity_name`
+      entity.name,
+      `competitor_relations[${index}].entity_name`
     );
-    if (!mentionedEntityKeys.has(compact(entity.name))) {
-      throw new AIResponseAnalysisError(`competitor_matches[${index}] 没有对应提及`);
+    const relation = String(item?.relation || '').trim().toLowerCase();
+    if (!VALID_COMPETITOR_RELATIONS.has(relation)) {
+      throw new AIResponseAnalysisError(
+        `competitor_relations[${index}].relation 不受支持`
+      );
     }
-    return { configured_name: configuredName, entity_name: entity.name };
+    seen.add(entityKey);
+    return {
+      entity_name: entity.name,
+      relation,
+      reason: boundedString(
+        item?.reason,
+        `competitor_relations[${index}].reason`,
+        160,
+        { code: 'analysis_relation_reason_invalid' }
+      )
+    };
   });
-  const byConfiguredName = new Map(
-    normalized.map((item) => [compact(item.configured_name), item])
+  const byEntityName = new Map(
+    normalized.map((item) => [compact(item.entity_name), item])
   );
-  return expected.map((name) => byConfiguredName.get(compact(name)));
+  return expected.map((entity) => byEntityName.get(compact(entity.name)));
 }
 
 function normalizeCandidateLists(value, entityMap, mentionedEntityKeys) {
@@ -319,6 +365,16 @@ function normalizeCandidateLists(value, entityMap, mentionedEntityKeys) {
       }
       return entity.name;
     });
+    if (new Set(entries.map(compact)).size !== entries.length) {
+      throw new AIResponseAnalysisError(
+        `candidate_lists[${index}].entries 不能包含重复实体`
+      );
+    }
+    if (item.ordered && entries.length < 2) {
+      throw new AIResponseAnalysisError(
+        `candidate_lists[${index}] 有序榜单至少需要 2 个不同实体`
+      );
+    }
     return { ordered: item.ordered, entries };
   });
 }
@@ -390,48 +446,97 @@ class AIResponseAnalysisService {
     this.requestService = options.requestService || AIPlatformRequestService;
   }
 
-  buildPrompt({ responseText, brand, competitors }) {
-    const competitorNames = (Array.isArray(competitors) ? competitors : [])
-      .map((item) => String(item?.name || '').trim())
-      .filter(Boolean);
+  buildPrompt({ question, responseText, brand, competitorHints }) {
+    const hints = (Array.isArray(competitorHints) ? competitorHints : [])
+      .map((item) => ({
+        name: String(item?.name || '').trim(),
+        aliases: Array.isArray(item?.aliases)
+          ? item.aliases.map((alias) => String(alias || '').trim()).filter(Boolean)
+          : []
+      }))
+      .filter((item) => item.name);
     return [
       '你是 GEO 回答结构化器，只把原回答转换为结构化原料，不计算任何指标。',
+      `当前问题：${String(question || '').trim()}`,
       `目标品牌：${String(brand?.name || '').trim()}`,
       `品牌别名：${(Array.isArray(brand?.aliases) ? brand.aliases : []).join('、') || '无'}`,
-      `已配置竞品：${competitorNames.join('、') || '无'}`,
+      `目标品牌行业：${String(brand?.industry || '').trim() || '未提供'}`,
+      `目标品牌关键词：${(Array.isArray(brand?.primary_keywords) ? brand.primary_keywords : []).join('、') || '无'}`,
+      `竞品提示：${hints.length ? JSON.stringify(hints) : '无'}`,
+      '竞品提示只提供名称、别名和业务背景：已配置不等于本回答竞品，未配置也可以是本回答竞品。',
       '只返回一个 JSON 对象，不要 Markdown。',
       `JSON 输出骨架（按需填充数组）：${JSON.stringify(JSON_OUTPUT_SKELETON)}`,
       'entities：列出回答中出现的全部品牌或公司实体，不限于目标品牌和已配置竞品；每项只含 name、type(brand|company)。',
       'mentions：为每个实体列出原回答实际出现过的不同短名称或别名；每项只含 entity_name 和 surface_forms。',
+      '每个 entities 项都必须至少有一个 mentions 项；不要返回无法用原回答短实体词定位的 entity。',
       '相同 surface form 不必按出现次数重复返回，也不必负责提及顺序；程序会用 surface_forms 扫描原回答并计算次数和顺序。',
-      'surface_forms 只能放原回答实际出现的短实体词，不要复制完整句子。',
+      'surface_forms 只能放原回答实际出现的短实体词，不要复制完整句子；不要人为限制 surface_forms 数量。',
       'target_entity_name：判断 entities 中哪一项对应目标品牌；必须精确引用 entities.name，目标品牌未出现时返回 null。不要让程序再按名称相似度猜测。',
-      'competitor_matches：对每个已配置竞品返回一项 configured_name 和 entity_name；configured_name 必须精确照抄已配置竞品名称，对应实体必须引用 entities.name，未出现则为 null；无竞品时返回空数组。',
-      'candidate_lists：抽取同一候选列表，entries 按回答顺序引用 entities.name；只有回答有明确序号或名次时 ordered=true，普通项目符号或正文顺序为 false。',
+      'competitor_relations：目标实体之外的每个 entities 项都必须恰好返回一项；entity_name 精确引用 entities.name，relation 只能是 competitor 或 non_competitor，并提供非空 reason。',
+      '即使 target_entity_name 为 null，也必须判断全部 entities：此时 competitor_relations 长度必须等于 entities 长度，不得返回空数组；目标实体非 null 时，长度必须等于 entities 长度减 1。',
+      'competitor 表示该实体在当前问题和回答场景中能满足与目标品牌相同需求、可作为替代选择；客户、合作方、平台和机构等不可替代实体必须是 non_competitor。',
+      'candidate_lists：抽取同一候选列表，entries 按回答顺序引用 entities.name 且不能重复；只有回答有明确序号或名次、并至少包含 2 个不同实体时 ordered=true，普通项目符号、单项列表或正文顺序为 false；无法精确引用 entities.name 时就省略该项。',
       'recommendations：只抽取明确建议、首选、优先或明确认可的品牌/公司；每项只含 entity_name、kind，kind 固定为 explicit；普通列举不算推荐。',
-      'claims：抽取回答对品牌/公司的事实性声称，每项只含 subject_name、predicate、value、qualifier；这只是待核验声明，不代表事实正确。',
+      'claims：抽取回答对品牌/公司的事实性声称，每项只含 subject_name、predicate、value、qualifier；无法精确引用 entities.name 时就省略该项；这只是待核验声明，不代表事实正确。',
       'sentiment：只判断目标品牌，返回 label(positive|neutral|negative)、reason、risk_terms。',
       '所有 entity_name、subject_name 和 entries 都必须精确引用 entities.name。',
       '不要返回 mention_count、recommended、rank、比例、分数、SOV 或任何汇总指标；程序会根据原回答扫描结果、数组关系和候选顺序统一计算。',
       '不要返回引用数量、来源 URL 或官网判断；引用由系统直接解析监测平台原始响应，避免模型猜测。',
-      `原回答：\n${String(responseText || '').slice(0, 12000)}`
+      `原回答：\n${String(responseText || '')}`
     ].join('\n');
   }
 
-  getPromptDefinition() {
+  buildRequestParameters(platform = {}) {
+    const requestBody = platform.adapter_type === 'openai_responses'
+      ? {
+        model: String(platform.default_model || ''),
+        input: [{
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: '<运行时注入完整结构化提示词>'
+          }]
+        }],
+        ...this.buildAnalysisRequestOptions(platform)
+      }
+      : {
+        model: String(platform.default_model || ''),
+        messages: [{
+          role: 'user',
+          content: '<运行时注入完整结构化提示词>'
+        }],
+        ...this.buildAnalysisRequestOptions(platform)
+      };
+    return {
+      adapter_type: String(platform.adapter_type || ''),
+      request_body: requestBody,
+      runtime_policy: {
+        timeout_seconds: ANALYSIS_REQUEST_PROFILE.timeout_seconds,
+        max_attempts: ANALYSIS_REQUEST_PROFILE.max_attempts,
+        web_search: ANALYSIS_REQUEST_PROFILE.web_search,
+        token_limit: ANALYSIS_REQUEST_PROFILE.token_limit
+      }
+    };
+  }
+
+  getPromptDefinition(platform = null) {
     return {
       version: ANALYSIS_METHOD,
       template: this.buildPrompt({
+        question: '{{当前问题}}',
         responseText: '{{待分析的 AI 回答}}',
         brand: {
           name: '{{目标品牌}}',
-          aliases: ['{{品牌别名}}']
+          aliases: ['{{品牌别名}}'],
+          industry: '{{目标品牌行业}}',
+          primary_keywords: ['{{目标品牌关键词}}']
         },
-        competitors: [{ name: '{{已配置竞品}}' }]
+        competitorHints: [{ name: '{{竞品提示}}' }]
       }),
       runtime_fields: [...PROMPT_RUNTIME_FIELDS],
       expected_output: EXPECTED_OUTPUT,
-      request_profile: { ...ANALYSIS_REQUEST_PROFILE }
+      request_profile: { ...ANALYSIS_REQUEST_PROFILE },
+      request_parameters: platform ? this.buildRequestParameters(platform) : null
     };
   }
 
@@ -457,17 +562,25 @@ class AIResponseAnalysisService {
     if (!Object.prototype.hasOwnProperty.call(parsed, 'target_entity_name')) {
       throw new AIResponseAnalysisError('target_entity_name 不能为空');
     }
-    if (!Object.prototype.hasOwnProperty.call(parsed, 'competitor_matches')) {
-      throw new AIResponseAnalysisError('competitor_matches 不能为空');
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'competitor_relations')) {
+      throw new AIResponseAnalysisError(
+        'competitor_relations 不能为空',
+        'analysis_relation_incomplete'
+      );
     }
+    const targetEntityName = normalizeTargetEntityName(
+      parsed.target_entity_name,
+      entityMap
+    );
     const structured = {
       schema_version: STRUCTURE_VERSION,
       entities,
       mentions,
-      target_entity_name: normalizeTargetEntityName(parsed.target_entity_name, entityMap),
-      competitor_matches: normalizeCompetitorMatches(
-        parsed.competitor_matches,
-        context.competitors,
+      target_entity_name: targetEntityName,
+      competitor_relations: normalizeCompetitorRelations(
+        parsed.competitor_relations,
+        entities,
+        targetEntityName,
         entityMap,
         mentionedEntityKeys
       ),
@@ -487,44 +600,48 @@ class AIResponseAnalysisService {
     return structured;
   }
 
-  calculate(structured, brand, competitors) {
+  calculate(structured) {
     const targetEntity = structured.entities.find(
       (entity) => entity.name === structured.target_entity_name
     ) || null;
     const target = entityObservations(targetEntity, structured);
-    const competitorMatchMap = new Map(
-      structured.competitor_matches.map((item) => [compact(item.configured_name), item.entity_name])
+    const relationMap = new Map(
+      structured.competitor_relations.map((item) => [
+        compact(item.entity_name),
+        item
+      ])
     );
-    const competitorRows = (Array.isArray(competitors) ? competitors : []).map((competitor) => {
-      const matchedEntityName = competitorMatchMap.get(compact(competitor?.name));
-      const entity = structured.entities.find(
-        (item) => item.name === matchedEntityName
-      ) || null;
+    const competitionEntities = structured.entities
+      .filter((entity) => compact(entity.name) !== compact(targetEntity?.name))
+      .map((entity) => {
+      const relation = relationMap.get(compact(entity.name));
       const observation = entityObservations(entity, structured);
       return {
-        id: competitor?.id ?? null,
-        name: String(competitor?.name || '').trim(),
-        mentioned: observation.mentioned,
+        name: entity.name,
+        relation: relation.relation,
+        reason: relation.reason,
         mentions: observation.mentions,
-        recommended: observation.recommended,
-        position: observation.list_rank,
-        rank: observation.list_rank,
         surface_forms: observation.surface_forms
       };
     });
-    const competitorMentionTotal = competitorRows.reduce((total, item) => total + item.mentions, 0);
+    const competitorMentionTotal = competitionEntities
+      .filter((item) => item.relation === 'competitor')
+      .reduce((total, item) => total + item.mentions, 0);
     const mentionTotal = target.mentions + competitorMentionTotal;
     return {
+      metric_semantics_version: CURRENT_METRIC_SEMANTICS,
       brand_mentioned: target.mentioned,
       brand_mentions: target.mentions,
       brand_position: target.list_rank,
       brand_rank: target.list_rank,
       brand_recommended: target.recommended,
       visibility_score: target.mentions,
-      competitor_mentions: competitorRows,
-      share_of_voice: competitorRows.length > 0 && mentionTotal > 0
+      answer_competitor_share: mentionTotal > 0
         ? Number(((target.mentions / mentionTotal) * 100).toFixed(2))
-        : 0,
+        : null,
+      sov_numerator: target.mentions,
+      sov_denominator: mentionTotal,
+      competition_entities: competitionEntities,
       sentiment: structured.sentiment.label,
       sentiment_reason: structured.sentiment.reason || null,
       sentiment_risk_terms: structured.sentiment.risk_terms,
@@ -536,6 +653,9 @@ class AIResponseAnalysisService {
     const options = { temperature: ANALYSIS_REQUEST_PROFILE.temperature };
     if (platform?.adapter_type === 'openai_chat_completions') {
       options.response_format = { type: 'json_object' };
+    }
+    if (platform?.adapter_type === 'openai_responses') {
+      options.reasoning = { effort: 'none' };
     }
     if (platform?.code === 'deepseek') {
       options.thinking = { type: 'disabled' };
@@ -584,16 +704,44 @@ class AIResponseAnalysisService {
     return finishReason;
   }
 
-  async analyze({ responseText, brand, competitors, includeRawOutput = false }) {
+  async analyze({
+    question,
+    responseText,
+    brand,
+    competitorHints,
+    includeRawOutput = false
+  }) {
+    const normalizedQuestion = String(question || '').trim();
+    const normalizedResponseText = String(responseText || '');
+    if (!normalizedQuestion || !normalizedResponseText.trim()) {
+      throw new AIResponseAnalysisError(
+        '当前问题和原回答不能为空',
+        'analysis_context_missing'
+      );
+    }
     const platform = await this.configService.getAnalysisPlatform();
-    const competitorRows = Array.isArray(competitors) ? competitors : [];
-    const basePrompt = this.buildPrompt({ responseText, brand, competitors });
+    const hints = Array.isArray(competitorHints) ? competitorHints : [];
+    const basePrompt = this.buildPrompt({
+      question: normalizedQuestion,
+      responseText: normalizedResponseText,
+      brand,
+      competitorHints: hints
+    });
     let lastError = null;
+    let lastInvalidOutput = '';
 
     for (let attempt = 1; attempt <= ANALYSIS_REQUEST_PROFILE.max_attempts; attempt += 1) {
-      const prompt = attempt === 1
+      const prompt = attempt === 1 || !lastInvalidOutput
         ? basePrompt
-        : `${basePrompt}\n\n上一次输出未通过结构校验。请重新输出一份完整、合法且严格符合约束的 JSON 对象，不要输出解释或 Markdown。`;
+        : [
+          basePrompt,
+          '',
+          '上一次输出未通过结构校验。',
+          `具体错误：${lastError?.message || '结构无效'}`,
+          '上一次无效输出：',
+          lastInvalidOutput,
+          '请只修正结构问题，不改变对原回答的语义判断；重新输出一份完整、合法且严格符合约束的 JSON 对象，不要输出解释或 Markdown。'
+        ].join('\n');
       const connection = await this.requestService.queryConfig(
         platform,
         prompt,
@@ -601,14 +749,17 @@ class AIResponseAnalysisService {
           retryCount: 0,
           requestOptions: this.buildAnalysisRequestOptions(platform),
           disableWebSearch: true,
-          maxTokens: ANALYSIS_REQUEST_PROFILE.max_tokens,
+          omitTokenLimit: true,
           timeoutSeconds: ANALYSIS_REQUEST_PROFILE.timeout_seconds
         }
       );
       if (!connection?.success) {
+        const requestErrorCode = connection?.error_code === 'input_too_long'
+          ? 'analysis_input_too_long'
+          : (connection?.error_code || 'analysis_api_failed');
         lastError = new AIResponseAnalysisError(
           connection?.error || 'AI 分析 API 调用失败',
-          connection?.error_code || 'analysis_api_failed',
+          requestErrorCode,
           this.buildDiagnostics(connection, platform, attempt, 'request')
         );
         if (
@@ -621,12 +772,11 @@ class AIResponseAnalysisService {
       try {
         this.assertCompleteResponse(connection);
         const structured = this.parseOutput(connection.text, {
-          responseText: String(responseText || ''),
-          brand,
-          competitors: competitorRows
+          responseText: normalizedResponseText,
+          brand
         });
         const result = {
-          ...this.calculate(structured, brand, competitorRows),
+          ...this.calculate(structured),
           analysis_method: ANALYSIS_METHOD,
           analysis_platform: platform.code,
           analysis_model: platform.default_model,
@@ -637,6 +787,7 @@ class AIResponseAnalysisService {
       } catch (error) {
         lastError = error;
         if (!(error instanceof AIResponseAnalysisError)) throw error;
+        lastInvalidOutput = String(connection.text || '');
         error.details = {
           ...this.buildDiagnostics(
             connection,

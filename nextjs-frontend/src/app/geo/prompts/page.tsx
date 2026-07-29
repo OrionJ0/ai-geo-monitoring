@@ -71,6 +71,21 @@ const formatRank = (value) => {
   return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '-';
 };
 
+const formatPerformanceRate = (value, numerator, denominator) => {
+  if (value === null || value === undefined || value === '') {
+    return `N/A（有效回答 ${Number(denominator || 0)}）`;
+  }
+  return `${percent(value)}（${Number(numerator || 0)} / ${Number(denominator || 0)}）`;
+};
+
+const formatSovSummary = (summary) => {
+  const value = summary?.average;
+  const count = Number(summary?.calculable_answers || 0);
+  return value === null || value === undefined
+    ? `N/A（有效回答 ${count}）`
+    : `${percent(value)}（有效回答 ${count}）`;
+};
+
 export default function GeoPromptsPage() {
   const router = useRouter();
   const {
@@ -277,10 +292,13 @@ export default function GeoPromptsPage() {
             <Tag color="processing">{row.platform_name || platformLabels[row.platform] || String(row.platform || '-')}</Tag>
           </Descriptions.Item>
           <Descriptions.Item label="实际模型" span={1}>{row.model_name || '-'}</Descriptions.Item>
-          <Descriptions.Item label="声量占比（SOV）" span={1}>
+          <Descriptions.Item label={analysisDisplay.sovLabel} span={1}>
             {analysisDisplay.sov}
           </Descriptions.Item>
-          <Descriptions.Item label="情绪" span={1}>
+          <Descriptions.Item label="指标口径" span={1}>
+            <Tag>{analysisDisplay.metricSemanticsLabel}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="情绪（AI 语义分析）" span={1}>
             <Tag color={analysisDisplay.sentimentColor}>{analysisDisplay.sentimentLabel}</Tag>
           </Descriptions.Item>
           {analysisDisplay.sentimentReason ? (
@@ -929,34 +947,41 @@ export default function GeoPromptsPage() {
     },
     {
       title: `近 ${days} 天`,
-      dataIndex: ['performance', 'checks'],
-      key: 'checks',
+      dataIndex: ['performance', 'valid_answers'],
+      key: 'valid_answers',
       width: 90,
-      render: (value) => `${Number(value || 0)} 次`,
-      sorter: (a, b) => Number(a.performance?.checks || 0) - Number(b.performance?.checks || 0),
+      render: (value) => `${Number(value || 0)} 条`,
+      sorter: (a, b) => Number(a.performance?.valid_answers || 0) - Number(b.performance?.valid_answers || 0),
     },
     {
       title: '提及率',
       dataIndex: ['performance', 'brand_mention_rate'],
       key: 'brand_mention_rate',
-      width: 100,
-      render: percent,
+      width: 150,
+      render: (value, row) => formatPerformanceRate(
+        value,
+        row.performance?.brand_mentioned_answers,
+        row.performance?.valid_answers
+      ),
       sorter: (a, b) => Number(a.performance?.brand_mention_rate || 0) - Number(b.performance?.brand_mention_rate || 0),
     },
     {
-      title: '声量占比（SOV）',
-      dataIndex: ['performance', 'avg_share_of_voice'],
-      key: 'avg_share_of_voice',
-      width: 90,
-      render: percent,
-      sorter: (a, b) => Number(a.performance?.avg_share_of_voice || 0) - Number(b.performance?.avg_share_of_voice || 0),
+      title: '回答内竞品提及占比（SOV）',
+      dataIndex: ['performance', 'sov_summary'],
+      key: 'sov_summary',
+      width: 190,
+      render: formatSovSummary,
+      sorter: (a, b) => Number(a.performance?.sov_summary?.average ?? -1)
+        - Number(b.performance?.sov_summary?.average ?? -1),
     },
     {
-      title: '排名',
+      title: '明确有序榜单平均排名',
       dataIndex: ['performance', 'avg_brand_rank'],
       key: 'avg_brand_rank',
       width: 90,
-      render: formatRank,
+      render: (value, row) => value === null || value === undefined
+        ? `N/A（有效回答 ${Number(row.performance?.ranked_answers || 0)}）`
+        : `${formatRank(value)}（有效回答 ${Number(row.performance?.ranked_answers || 0)}）`,
       sorter: (a, b) => Number(a.performance?.avg_brand_rank || 0) - Number(b.performance?.avg_brand_rank || 0),
     },
     {
@@ -970,7 +995,7 @@ export default function GeoPromptsPage() {
       sorter: (a, b) => Number(a.performance?.citation_rate || 0) - Number(b.performance?.citation_rate || 0),
     },
     {
-      title: '情绪',
+      title: '情绪（AI 语义分析）',
       key: 'sentiment',
       width: 150,
       render: (_, row) => {
@@ -1454,12 +1479,20 @@ export default function GeoPromptsPage() {
               }
             },
             {
-              title: '声量占比（SOV）',
-              width: 100,
-              render: (_, row) => getHistoryAnalysisDisplay(row).sov
+              title: '回答内竞品提及占比（SOV）',
+              width: 220,
+              render: (_, row) => {
+                const display = getHistoryAnalysisDisplay(row);
+                return (
+                  <Space orientation="vertical" size={0}>
+                    <Text>{display.sov}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{display.metricSemanticsLabel}</Text>
+                  </Space>
+                );
+              }
             },
             {
-              title: '情绪',
+              title: '情绪（AI 语义分析）',
               width: 100,
               render: (_, row) => {
                 const display = getHistoryAnalysisDisplay(row);

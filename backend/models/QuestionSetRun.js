@@ -15,6 +15,7 @@ const QuestionSetRun = sequelize.define('QuestionSetRun', {
   skipped_platforms: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
   competitor_snapshot: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
   analysis_contract_version: { type: DataTypes.STRING(40), allowNull: true },
+  metric_semantics_version: { type: DataTypes.STRING(50), allowNull: true },
   planned_record_count: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   integrity_status: { type: DataTypes.STRING(32), allowNull: false, defaultValue: 'complete' },
   integrity_missing_record_count: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },

@@ -1,7 +1,19 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const OpportunityInsightService = require('../services/OpportunityInsightService');
+
+test('机会洞察不再读取旧 SOV、旧竞品列表或可见度得分', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../services/OpportunityInsightService.js'),
+    'utf8'
+  );
+  assert.doesNotMatch(source, /avg_share_of_voice|competitor_mentions|visibility_score/);
+  assert.match(source, /sov_summary/);
+  assert.match(source, /competition_entities/);
+});
 
 test('builds prioritized optimization opportunities from prompt, metric and source signals', () => {
   const opportunities = OpportunityInsightService.build({
@@ -11,18 +23,18 @@ test('builds prioritized optimization opportunities from prompt, metric and sour
     ],
     promptPerformance: {
       1: {
-        checks: 3,
+        valid_answers: 3,
         brand_mention_rate: 33.33,
-        avg_share_of_voice: 20,
+        sov_summary: { average: 20, calculable_answers: 3 },
         citation_rate: 0,
         recommendation_rate: 0,
         negative_sentiment_count: 1,
         last_run_at: '2026-05-02T00:00:00.000Z'
       },
       2: {
-        checks: 0,
+        valid_answers: 0,
         brand_mention_rate: 0,
-        avg_share_of_voice: 0,
+        sov_summary: { average: null, calculable_answers: 0 },
         citation_rate: 0,
         recommendation_rate: 0,
         negative_sentiment_count: 0,
@@ -36,7 +48,12 @@ test('builds prioritized optimization opportunities from prompt, metric and sour
         prompt_category: '购买决策',
         brand_mentioned: false,
         sentiment: 'negative',
-        competitor_mentions: [{ name: '马牌', mentioned: true, mentions: 4 }],
+        competition_entities: [{
+          name: '马牌',
+          relation: 'competitor',
+          mentions: 4,
+          reason: '提供同类产品'
+        }],
         created_at: '2026-05-02T00:00:00.000Z'
       },
       {
@@ -181,9 +198,15 @@ test('normalizes stored metric and source categories in opportunity rows', () =>
         platform: 'deepseek',
         prompt_category: '历史脏分类',
         brand_mentioned: true,
+        brand_mentions: 2,
         sentiment: 'negative',
         visibility_score: 2,
-        competitor_mentions: [{ name: '马牌', mentioned: true, mentions: 2, visibility_score: 5 }]
+        competition_entities: [{
+          name: '马牌',
+          relation: 'competitor',
+          mentions: 5,
+          reason: '提供同类产品'
+        }]
       },
       { prompt_id: 2, platform: 'doubao', prompt_category: '旧分类', brand_mentioned: true },
       { prompt_id: 2, platform: 'doubao', prompt_category: '旧分类', brand_mentioned: true },
@@ -394,7 +417,7 @@ test('does not assume missing platform samples when project platforms are unavai
   assert.equal(opportunities.some((item) => item.type === '平台样本缺失'), false);
 });
 
-test('surfaces competitor suppression when a competitor outranks a mentioned brand', () => {
+test('surfaces competitor suppression when contextual competitor mentions exceed the brand', () => {
   const opportunities = OpportunityInsightService.build({
     prompts: [],
     promptPerformance: {},
@@ -405,9 +428,9 @@ test('surfaces competitor suppression when a competitor outranks a mentioned bra
         prompt_category: '竞品对比',
         brand_mentioned: true,
         brand_mentions: 1,
-        visibility_score: 2,
-        competitor_mentions: [
-          { name: '马牌', mentioned: true, mentions: 3, visibility_score: 5 }
+        visibility_score: 99,
+        competition_entities: [
+          { name: '马牌', relation: 'competitor', mentions: 3, reason: '提供同类产品' }
         ]
       }
     ]
@@ -416,10 +439,11 @@ test('surfaces competitor suppression when a competitor outranks a mentioned bra
   const suppression = opportunities.find((item) => item.type === '竞品压制');
   assert.ok(suppression);
   assert.equal(suppression.competitor, '马牌');
-  assert.match(suppression.evidence, /高于品牌/);
+  assert.match(suppression.evidence, /提及 3 次/);
+  assert.match(suppression.evidence, /品牌 1 次/);
 });
 
-test('uses competitor visibility score before mention count for suppression evidence', () => {
+test('uses actual contextual mention counts instead of stored visibility scores', () => {
   const opportunities = OpportunityInsightService.build({
     prompts: [],
     promptPerformance: {},
@@ -429,10 +453,11 @@ test('uses competitor visibility score before mention count for suppression evid
         platform: 'doubao',
         prompt_category: '竞品对比',
         brand_mentioned: true,
-        visibility_score: 3,
-        competitor_mentions: [
-          { name: '提及多竞品', mentioned: true, mentions: 5, visibility_score: 2 },
-          { name: '推荐强竞品', mentioned: true, mentions: 1, visibility_score: 6 }
+        brand_mentions: 3,
+        visibility_score: 1,
+        competition_entities: [
+          { name: '提及多竞品', relation: 'competitor', mentions: 5, visibility_score: 1, reason: '同类' },
+          { name: '旧得分高竞品', relation: 'competitor', mentions: 1, visibility_score: 100, reason: '同类' }
         ]
       }
     ]
@@ -440,7 +465,25 @@ test('uses competitor visibility score before mention count for suppression evid
 
   const suppression = opportunities.find((item) => item.type === '竞品压制');
   assert.ok(suppression);
-  assert.equal(suppression.competitor, '推荐强竞品');
+  assert.equal(suppression.competitor, '提及多竞品');
+  assert.doesNotMatch(suppression.evidence, /得分|综合/);
+});
+
+test('SOV 为 N/A 时不会被当作零生成低品牌可见度机会', () => {
+  const opportunities = OpportunityInsightService.build({
+    prompts: [{ id: 1, question: '工业监控方案', enabled: true }],
+    promptPerformance: {
+      1: {
+        valid_answers: 3,
+        brand_mention_rate: 100,
+        sov_summary: { average: null, calculable_answers: 0 },
+        citation_eligible_checks: 0
+      }
+    },
+    metrics: []
+  });
+
+  assert.equal(opportunities.some((item) => item.type === '低品牌可见度'), false);
 });
 
 test('describes competitor source gaps differently when the brand is mentioned', () => {

@@ -22,6 +22,11 @@ const AIAnalysisConfigService = require('./AIAnalysisConfigService');
 const { AIAnalysisConfigError } = require('./AIAnalysisConfigService');
 const CitationAnalysisService = require('./CitationAnalysisService');
 const { SEMANTICS_VERSION: CITATION_SEMANTICS_VERSION } = require('./CitationMetricSemanticsService');
+const GeoMetricSemanticsService = require('./GeoMetricSemanticsService');
+const {
+  CURRENT_ANALYSIS_CONTRACT,
+  CURRENT_METRIC_SEMANTICS
+} = require('./GeoMetricSemanticsService');
 const AlertEvaluationService = require('./AlertEvaluationService');
 const PromptCategoryService = require('./PromptCategoryService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
@@ -80,6 +85,17 @@ function runtimePlatformFailureMessage(result) {
 function metricFailureMessage(error) {
   if (error instanceof AIAnalysisConfigError && error.code === 'analysis_api_not_configured') {
     return 'AI 分析 API 未配置，本条未计入有效样本';
+  }
+  const messages = {
+    analysis_context_missing: '分析所需问题或原回答缺失，本条未计入品牌指标',
+    analysis_input_too_long: '回答超出分析模型范围，本条未计入品牌指标',
+    analysis_output_truncated: '分析输出被截断，本条未计入品牌指标',
+    analysis_relation_incomplete: '竞品关系识别不完整，本条未计入品牌指标',
+    analysis_relation_reason_invalid: '竞品判断理由无效，本条未计入品牌指标',
+    invalid_analysis_output: 'AI 结构化结果无效，本条未计入品牌指标'
+  };
+  if (error instanceof AIResponseAnalysisError && messages[error.code]) {
+    return messages[error.code];
   }
   if (error instanceof AIAnalysisConfigError || error instanceof AIResponseAnalysisError) {
     return 'AI 结构化分析失败，本条未计入有效样本';
@@ -406,11 +422,36 @@ class ProjectRunService {
     return normalizeProviderCitations(CitationAnalysisService.collectMetadataSources(aiResponse));
   }
 
+  buildCitationAnalysis({
+    responseText,
+    aiResponse,
+    providerCitations,
+    project,
+    competitors,
+    citationObservationStatus = 'observed'
+  }) {
+    const citationAnalysis = CitationAnalysisService.extractSources({
+      responseText,
+      aiResponse: Array.isArray(providerCitations) ? providerCitations : aiResponse,
+      brand: project,
+      competitors
+    });
+    return {
+      semantics_version: CITATION_SEMANTICS_VERSION,
+      evidence_status: citationAnalysis.citation_count > 0
+        || citationObservationStatus === 'observed'
+        ? 'explicit'
+        : 'unavailable',
+      ...citationAnalysis
+    };
+  }
+
   async buildVisibilityMetricPayload({
     record,
     responseText,
     aiResponse,
     providerCitations,
+    citationAnalysis: providedCitationAnalysis,
     project,
     competitors,
     prompt
@@ -420,14 +461,16 @@ class ProjectRunService {
       ? competitors.map((item) => (item.toJSON ? item.toJSON() : item))
       : [];
     const analysis = await AIResponseAnalysisService.analyze({
+      question: String(prompt?.question || record?.question || '').trim(),
       responseText,
       brand: projectData,
-      competitors: competitorData
+      competitorHints: competitorData
     });
-    const citationAnalysis = CitationAnalysisService.extractSources({
+    const citationAnalysis = providedCitationAnalysis || this.buildCitationAnalysis({
       responseText,
-      aiResponse: Array.isArray(providerCitations) ? providerCitations : aiResponse,
-      brand: projectData,
+      aiResponse,
+      providerCitations,
+      project: projectData,
       competitors: competitorData
     });
     const analysisStructure = analysis.analysis_structure
@@ -436,7 +479,8 @@ class ProjectRunService {
       ? {
         ...analysis.analysis_structure,
         citations: {
-          semantics_version: CITATION_SEMANTICS_VERSION,
+          semantics_version: citationAnalysis.semantics_version,
+          evidence_status: citationAnalysis.evidence_status,
           count: citationAnalysis.citation_count,
           official_count: citationAnalysis.owned_citation_count,
           competitor_count: citationAnalysis.competitor_citation_count,
@@ -457,8 +501,12 @@ class ProjectRunService {
       brand_rank: analysis.brand_rank,
       brand_recommended: analysis.brand_recommended,
       visibility_score: analysis.visibility_score,
-      competitor_mentions: analysis.competitor_mentions,
-      share_of_voice: analysis.share_of_voice,
+      competitor_mentions: [],
+      share_of_voice: null,
+      answer_competitor_share: analysis.answer_competitor_share,
+      sov_numerator: analysis.sov_numerator,
+      sov_denominator: analysis.sov_denominator,
+      competition_entities: analysis.competition_entities,
       citation_count: citationAnalysis.citation_count,
       owned_citation_count: citationAnalysis.owned_citation_count,
       competitor_citation_count: citationAnalysis.competitor_citation_count,
@@ -468,6 +516,8 @@ class ProjectRunService {
       sentiment_reason: analysis.sentiment_reason || null,
       sentiment_risk_terms: Array.isArray(analysis.sentiment_risk_terms) ? analysis.sentiment_risk_terms : [],
       analysis_method: analysis.analysis_method,
+      metric_semantics_version: analysis.metric_semantics_version
+        || CURRENT_METRIC_SEMANTICS,
       analysis_platform: analysis.analysis_platform,
       analysis_model: analysis.analysis_model,
       analysis_structure: analysisStructure,
@@ -495,11 +545,15 @@ class ProjectRunService {
     record,
     responseText,
     providerCitations,
+    citationAnalysis,
     transaction
   }) {
     const payload = {
       ai_response_original: responseText,
       provider_citations: normalizeProviderCitations(providerCitations),
+      citation_analysis: citationAnalysis && typeof citationAnalysis === 'object'
+        ? citationAnalysis
+        : {},
       parsing_status: 'completed',
       parsing_error: null
     };
@@ -606,15 +660,30 @@ class ProjectRunService {
     competitors,
     prompt,
     keywords,
+    citationObservationStatus,
     resultSummaryPatch = {}
   }) {
     const keywordCounts = countKeywordOccurrences(responseText, keywords, true);
+    const projectData = project?.toJSON ? project.toJSON() : project;
+    const competitorData = Array.isArray(competitors)
+      ? competitors.map((item) => (item?.toJSON ? item.toJSON() : item))
+      : [];
+    const citationAnalysis = this.buildCitationAnalysis({
+      responseText,
+      aiResponse,
+      providerCitations,
+      project: projectData,
+      competitors: competitorData,
+      citationObservationStatus: citationObservationStatus
+        || ((Array.isArray(providerCitations) && providerCitations.length) ? 'observed' : 'unavailable')
+    });
     try {
       const payload = await this.buildVisibilityMetricPayload({
         record,
         responseText,
         aiResponse,
         providerCitations,
+        citationAnalysis,
         project,
         competitors,
         prompt
@@ -625,6 +694,7 @@ class ProjectRunService {
             record,
             responseText,
             providerCitations,
+            citationAnalysis,
             transaction
           });
         }
@@ -686,7 +756,11 @@ class ProjectRunService {
       if (diagnostics) {
         console.warn('AI 结构化分析失败:', {
           record_id: record.id,
-          ...diagnostics
+          platform: diagnostics.platform || record.platform || '',
+          analysis_contract_version: record.analysis_contract_version || CURRENT_ANALYSIS_CONTRACT,
+          metric_semantics_version: record.metric_semantics_version || CURRENT_METRIC_SEMANTICS,
+          stage: diagnostics.stage || failure.stage,
+          error_code: diagnostics.error_code
         });
       }
       const failed = await this.failRecord(
@@ -698,7 +772,8 @@ class ProjectRunService {
           resultSummary: updatePayload.result_summary,
           persistResponseDetail,
           responseText,
-          providerCitations
+          providerCitations,
+          citationAnalysis
         }
       );
       if (executionToken && !failed) {
@@ -742,6 +817,7 @@ class ProjectRunService {
             record,
             responseText: options.responseText,
             providerCitations: options.providerCitations,
+            citationAnalysis: options.citationAnalysis,
             transaction
           });
         }
@@ -799,6 +875,8 @@ class ProjectRunService {
       question: prompt.question,
       brand: projectData.name,
       brand_keywords: keywords.join(','),
+      analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
+      metric_semantics_version: CURRENT_METRIC_SEMANTICS,
       status: 'pending'
     }, transaction ? { transaction } : undefined);
   }
@@ -1104,6 +1182,7 @@ class ProjectRunService {
             retryMode: entry.retryMode,
             responseText: entry.responseText,
             providerCitations: entry.providerCitations,
+            citationObservationStatus: entry.citationObservationStatus,
             runUser,
             projectData,
             competitors,
@@ -1374,7 +1453,8 @@ class ProjectRunService {
           planned_platforms: plan.plannedPlatforms,
           skipped_platforms: plan.skippedPlatforms,
           competitor_snapshot: competitorSnapshot,
-          analysis_contract_version: AIResponseAnalysisService.ANALYSIS_METHOD || 'ai_structured_v2',
+          analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           planned_record_count: plan.targets.length,
           integrity_status: 'complete',
           integrity_missing_record_count: 0,
@@ -1518,6 +1598,9 @@ class ProjectRunService {
         providerCitations: retryMode === 'analysis_only'
           ? normalizeProviderCitations(responseDetail?.provider_citations)
           : [],
+        citationObservationStatus: responseDetail?.citation_analysis?.evidence_status === 'explicit'
+          ? 'observed'
+          : 'unavailable',
         target: {
           prompt: {
             ...prompt,
@@ -1982,6 +2065,8 @@ class ProjectRunService {
           question: previousRecord.question,
           brand: previousRecord.brand || projectData.name,
           brand_keywords: previousRecord.brand_keywords || keywords.join(','),
+          analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           status: 'pending',
           result_summary: {
             retry: {
@@ -2001,6 +2086,10 @@ class ProjectRunService {
             question_record_id: retryRecord.id,
             ai_response_original: responseText,
             provider_citations: normalizeProviderCitations(previousDetail?.provider_citations),
+            citation_analysis: previousDetail?.citation_analysis
+              && typeof previousDetail.citation_analysis === 'object'
+              ? previousDetail.citation_analysis
+              : {},
             parsing_status: 'completed'
           }, { transaction });
         }
@@ -2027,7 +2116,10 @@ class ProjectRunService {
           previousRecordId: previousRecord.id,
           retryMode,
           responseText,
-          providerCitations: normalizeProviderCitations(previousDetail?.provider_citations)
+          providerCitations: normalizeProviderCitations(previousDetail?.provider_citations),
+          citationObservationStatus: previousDetail?.citation_analysis?.evidence_status === 'explicit'
+            ? 'observed'
+            : 'unavailable'
         });
       }
 
@@ -2165,6 +2257,7 @@ class ProjectRunService {
     retryMode = 'full_monitoring',
     responseText: reusedResponseText = '',
     providerCitations: reusedProviderCitations = [],
+    citationObservationStatus: reusedCitationObservationStatus = 'unavailable',
     runUser,
     projectData,
     competitors,
@@ -2183,6 +2276,7 @@ class ProjectRunService {
       let aiResult = { data: {} };
       let originalText = String(reusedResponseText || '');
       let providerCitations = normalizeProviderCitations(reusedProviderCitations);
+      let citationObservationStatus = reusedCitationObservationStatus;
       let resultSummaryPatch = {};
       if (retryMode === 'analysis_only' && !originalText.trim()) {
         const message = '结构化分析重试所需原回答缺失';
@@ -2258,6 +2352,11 @@ class ProjectRunService {
         providerCitations = Array.isArray(aiResult.provider_citations)
           ? normalizeProviderCitations(aiResult.provider_citations)
           : this.snapshotProviderCitations(aiResult.data);
+        citationObservationStatus = (
+          aiResult.citation_observation_status === 'observed'
+          || aiResult.web_capture?.status === 'completed'
+          || providerCitations.length > 0
+        ) ? 'observed' : 'unavailable';
       }
       if (!String(originalText || '').trim()) {
         const message = '监测平台返回内容为空';
@@ -2285,6 +2384,7 @@ class ProjectRunService {
         responseText: originalText,
         aiResponse: aiResult.data,
         providerCitations,
+        citationObservationStatus,
         project: projectData,
         competitors,
         prompt,
@@ -2317,7 +2417,7 @@ class ProjectRunService {
         platform: target.platform,
         status: 'completed',
         sentiment: metric.sentiment,
-        share_of_voice: metric.share_of_voice,
+        sov: GeoMetricSemanticsService.presentSov(metric),
         brand_mentioned: metric.brand_mentioned,
         citation_count: metric.citation_count,
         brand_rank: metric.brand_rank,

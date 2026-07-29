@@ -62,6 +62,116 @@ function parseReport(overrides = {}, rowOverrides = {}) {
   );
 }
 
+function currentReport(rowOverrides = {}) {
+  return reportWith({
+    analysis_contract_version: 'ai_structured_v3',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
+  }, {
+    analysis_method: 'ai_structured_v3',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    share_of_voice: null,
+    answer_competitor_share: 50,
+    sov_numerator: 1,
+    sov_denominator: 2,
+    competition_entities: [{
+      name: '海康',
+      relation: 'competitor',
+      mentions: 1,
+      reason: '提供同类周界方案',
+      surface_forms: ['海康']
+    }],
+    ...rowOverrides
+  });
+}
+
+test('新版 CSV 在旧列尾部追加可判定语义并保持旧 SOV 列为空', () => {
+  const csv = QuestionSetRunCsvService.buildCsv(currentReport());
+  const parsed = QuestionSetRunCsvService.parseCsv(csv);
+
+  assert.deepEqual(QuestionSetRunCsvService.HEADERS.slice(-5), [
+    'metric_semantics_version',
+    'answer_competitor_share',
+    'sov_numerator',
+    'sov_denominator',
+    'competition_entities_json'
+  ]);
+  assert.equal(parsed.metricSemanticsVersion, 'contextual_competitor_mentions_sov_v1');
+  assert.equal(parsed.rows[0].share_of_voice, null);
+  assert.equal(parsed.rows[0].answer_competitor_share, 50);
+  assert.equal(parsed.rows[0].sov_numerator, 1);
+  assert.equal(parsed.rows[0].sov_denominator, 2);
+  assert.equal(parsed.rows[0].competition_entities[0].reason, '提供同类周界方案');
+});
+
+test('新版 CSV 拒绝旧列值、混合语义、非法分母和非法竞争实体证据', () => {
+  assert.throws(
+    () => QuestionSetRunCsvService.parseCsv(
+      QuestionSetRunCsvService.buildCsv(currentReport({ share_of_voice: 50 }))
+    ),
+    (error) => error.code === 'METRIC_SEMANTICS_MISMATCH' && error.column === 'share_of_voice'
+  );
+  assert.throws(
+    () => QuestionSetRunCsvService.parseCsv(
+      QuestionSetRunCsvService.buildCsv(currentReport({
+        sov_numerator: 3,
+        sov_denominator: 2
+      }))
+    ),
+    (error) => error.code === 'INVALID_SOV_COUNTS'
+  );
+  assert.throws(
+    () => QuestionSetRunCsvService.parseCsv(
+      QuestionSetRunCsvService.buildCsv(currentReport({
+        competition_entities: [{
+          name: '海康',
+          relation: 'uncertain',
+          mentions: 1,
+          reason: ''
+        }]
+      }))
+    ),
+    (error) => error.code === 'INVALID_COMPETITION_ENTITY'
+  );
+
+  const mixed = currentReport();
+  mixed.rows.push({
+    ...mixed.rows[0],
+    record_id: 12,
+    metric_semantics_version: 'configured_competitor_sov_v1',
+    share_of_voice: 50,
+    answer_competitor_share: null,
+    sov_numerator: null,
+    sov_denominator: null,
+    competition_entities: []
+  });
+  assert.throws(
+    () => QuestionSetRunCsvService.parseCsv(QuestionSetRunCsvService.buildCsv(mixed)),
+    (error) => error.code === 'MIXED_METRIC_SEMANTICS'
+  );
+});
+
+test('新版失败行保持所有指标单元格为空', () => {
+  const failed = currentReport({
+    status: 'failed',
+    has_metrics: false,
+    brand_mentioned: false,
+    brand_mentions: 0,
+    brand_rank: null,
+    brand_recommended: false,
+    answer_competitor_share: null,
+    sov_numerator: null,
+    sov_denominator: null,
+    competition_entities: []
+  });
+  const parsed = QuestionSetRunCsvService.parseCsv(
+    QuestionSetRunCsvService.buildCsv(failed)
+  );
+
+  assert.equal(parsed.rows[0].answer_competitor_share, null);
+  assert.equal(parsed.rows[0].sov_numerator, null);
+  assert.equal(parsed.rows[0].sov_denominator, null);
+});
+
 test('拒绝 pending 行并返回稳定行列错误', () => {
   assert.throws(
     () => parseReport({}, { status: 'pending' }),
@@ -194,6 +304,11 @@ test('合法旧版 v1 必需列文件仍可导入', () => {
   assert.equal(parsed.rows[0].status, 'completed');
   assert.equal(parsed.rows[0].analysis_method, 'legacy_rules_v1');
   assert.equal(parsed.analysisContractVersion, null);
+  assert.equal(parsed.metricSemanticsVersion, 'configured_competitor_sov_v1');
+  assert.equal(
+    parsed.rows[0].metric_semantics_version,
+    'configured_competitor_sov_v1'
+  );
 });
 
 test('兼容追加列保留分析版本和引用解释字段', () => {

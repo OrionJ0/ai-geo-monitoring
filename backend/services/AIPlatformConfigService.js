@@ -58,7 +58,7 @@ const PRESET_PLATFORMS = Object.freeze([
     name: 'DeepSeek',
     adapter_type: 'openai_chat_completions',
     base_url: 'https://api.deepseek.com/v1/chat/completions',
-    default_model: 'deepseek-v4-flash',
+    default_model: 'deepseek-v4-pro',
     enabled: false,
     builtin: true
   }),
@@ -299,6 +299,17 @@ class AIPlatformConfigService {
       }
       if (!row.builtin) {
         await row.update({ builtin: true });
+      }
+      const isLegacyOfficialDeepSeekPreset = preset.code === 'deepseek'
+        && row.name === preset.name
+        && row.adapter_type === preset.adapter_type
+        && row.base_url === preset.base_url
+        && row.default_model === 'deepseek-v4-flash';
+      if (isLegacyOfficialDeepSeekPreset) {
+        await row.update({
+          default_model: preset.default_model,
+          ...this.untestedState()
+        });
       }
       const requestOptions = row.request_options || {};
       const matchesPresetIdentity = row.name === preset.name

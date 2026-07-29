@@ -102,6 +102,14 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
   },
   error_message: {
     type: DataTypes.TEXT
+  },
+  analysis_contract_version: {
+    type: DataTypes.STRING(40),
+    allowNull: true
+  },
+  metric_semantics_version: {
+    type: DataTypes.STRING(50),
+    allowNull: true
   }
 }, {
   tableName: 'question_records',
@@ -143,6 +151,10 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
     },
     {
       fields: ['detection_time']
+    },
+    {
+      name: 'question_records_project_semantics_created_platform',
+      fields: ['project_id', 'metric_semantics_version', 'created_at', 'platform']
     }
   ]
 });

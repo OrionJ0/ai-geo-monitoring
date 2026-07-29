@@ -170,25 +170,28 @@ test('prompt list returns derived prompt categories for filtering', () => {
   assert.match(block, /category:\s*ProjectRunService\.derivePromptCategory\((row|prompt)\)/);
 });
 
-test('prompt list and prompt history only read records from the project monitoring platforms', () => {
+test('prompt list and prompt history preserve actual historical platforms after project configuration changes', () => {
   const promptListBlock = routeBlock('get', '/:projectId/prompts');
   const promptHistoryBlock = routeBlock('get', '/:projectId/prompts/:promptId/history');
 
-  assert.match(promptListBlock, /const projectPlatforms = cleanPlatforms\(req\.brandProject\.platforms\)/);
-  assert.equal((promptListBlock.match(/platform:\s*\{\s*\[Op\.in\]:\s*projectPlatforms\s*\}/g) || []).length, 2);
-  assert.match(promptHistoryBlock, /const projectPlatforms = cleanPlatforms\(req\.brandProject\.platforms\)/);
-  assert.match(promptHistoryBlock, /platform:\s*\{\s*\[Op\.in\]:\s*projectPlatforms\s*\}/);
+  assert.doesNotMatch(promptListBlock, /const projectPlatforms = cleanPlatforms\(req\.brandProject\.platforms\)/);
+  assert.doesNotMatch(promptListBlock, /platform:\s*\{\s*\[Op\.in\]/);
+  assert.doesNotMatch(promptHistoryBlock, /const projectPlatforms = cleanPlatforms\(req\.brandProject\.platforms\)/);
+  assert.doesNotMatch(promptHistoryBlock, /platform:\s*\{\s*\[Op\.in\]/);
 });
 
-test('dashboard and source analytics only read metrics from the project monitoring platforms', () => {
+test('dashboard and source analytics read current semantics across actual historical platforms', () => {
   const dashboardBlock = routeBlock('get', '/:projectId/dashboard');
   const sourcesBlock = routeBlock('get', '/:projectId/sources');
 
-  assert.match(dashboardBlock, /const projectPlatforms = cleanPlatforms\(req\.brandProject\.platforms\)/);
-  assert.match(dashboardBlock, /platform:\s*\{\s*\[Op\.in\]:\s*projectPlatforms\s*\}/);
-  assert.equal((dashboardBlock.match(/platform:\s*\{\s*\[Op\.in\]:\s*projectPlatforms\s*\}/g) || []).length, 3);
-  assert.match(sourcesBlock, /const projectPlatforms = cleanPlatforms\(req\.brandProject\.platforms\)/);
-  assert.match(sourcesBlock, /platform:\s*\{\s*\[Op\.in\]:\s*projectPlatforms\s*\}/);
+  assert.doesNotMatch(dashboardBlock, /const projectPlatforms = cleanPlatforms\(req\.brandProject\.platforms\)/);
+  assert.doesNotMatch(dashboardBlock, /platform:\s*\{\s*\[Op\.in\]/);
+  assert.match(dashboardBlock, /metric_semantics_version:\s*CURRENT_METRIC_SEMANTICS/);
+  assert.match(dashboardBlock, /selected_platform/);
+  assert.match(dashboardBlock, /available_platforms/);
+  assert.match(dashboardBlock, /INVALID_PLATFORM_FILTER/);
+  assert.doesNotMatch(sourcesBlock, /const projectPlatforms = cleanPlatforms\(req\.brandProject\.platforms\)/);
+  assert.doesNotMatch(sourcesBlock, /platform:\s*\{\s*\[Op\.in\]/);
 });
 
 test('dashboard recent metrics include prompt question context for review', () => {

@@ -36,6 +36,7 @@ const ProjectLifecycleService = require('../services/ProjectLifecycleService');
 const ProjectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
 const QuestionSetRunService = require('../services/QuestionSetRunService');
 const CitationMetricSemanticsService = require('../services/CitationMetricSemanticsService');
+const { CURRENT_METRIC_SEMANTICS } = require('../services/GeoMetricSemanticsService');
 const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
 const { CsvValidationError } = require('../services/QuestionSetRunCsvService');
 
@@ -1007,7 +1008,6 @@ router.post('/:projectId/question-set-runs/:runId/resume', loadProject, async (r
 router.get('/:projectId/prompts', loadProject, async (req, res) => {
   try {
     const { periodStart, periodEnd } = ProjectMetricsService.buildPeriodWindow(req.query.days);
-    const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
     const [prompts, metrics, records] = await Promise.all([
       TrackedPrompt.findAll({
         where: { project_id: req.brandProject.id },
@@ -1017,7 +1017,7 @@ router.get('/:projectId/prompts', loadProject, async (req, res) => {
       VisibilityMetric.findAll({
         where: {
           project_id: req.brandProject.id,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           created_at: { [Op.between]: [periodStart, periodEnd] }
         },
         order: [['created_at', 'ASC']]
@@ -1025,11 +1025,28 @@ router.get('/:projectId/prompts', loadProject, async (req, res) => {
       QuestionRecord.findAll({
         where: {
           project_id: req.brandProject.id,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           tracked_prompt_id: { [Op.ne]: null },
           created_at: { [Op.between]: [periodStart, periodEnd] }
         },
-        attributes: ['id', 'status', 'tracked_prompt_id', 'created_at'],
+        attributes: [
+          'id',
+          'status',
+          'tracked_prompt_id',
+          'question_set_run_id',
+          'run_slot_index',
+          'platform',
+          'metric_semantics_version',
+          'created_at'
+        ],
+        include: [
+          {
+            model: ResultDetail,
+            as: 'resultDetail',
+            attributes: ['ai_response_original', 'citation_analysis'],
+            required: false
+          }
+        ],
         order: [['created_at', 'ASC']]
       })
     ]);
@@ -1046,7 +1063,7 @@ router.get('/:projectId/prompts', loadProject, async (req, res) => {
         category: ProjectRunService.derivePromptCategory(row)
       };
     });
-    const performance = ProjectMetricsService.buildPromptPerformance(
+    const performance = ProjectMetricsService.buildCurrentPromptPerformance(
       promptRows,
       metrics.map((metric) => metric.toJSON()),
       records.map((record) => record.toJSON())
@@ -1373,11 +1390,9 @@ router.get('/:projectId/prompts/:promptId/history', loadProject, async (req, res
     const prompt = await TrackedPrompt.findOne({ where: { id: req.params.promptId, project_id: req.brandProject.id } });
     if (!prompt) return res.status(404).json({ success: false, message: '问题不存在' });
     const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
-    const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
     const rows = await QuestionRecord.findAll({
       where: {
         project_id: req.brandProject.id,
-        platform: { [Op.in]: projectPlatforms },
         tracked_prompt_id: prompt.id
       },
       include: [
@@ -1403,12 +1418,12 @@ router.get('/:projectId/prompts/:promptId/history', loadProject, async (req, res
 router.get('/:projectId/dashboard', loadProject, async (req, res) => {
   try {
     const { days, periodStart, periodEnd, changePeriodStart } = ProjectMetricsService.buildPeriodWindow(req.query.days);
-    const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
-    const [metrics, sourceChangeMetrics, records, prompts, competitors] = await Promise.all([
+    const selectedPlatform = ProjectMetricsService.normalizePlatformFilter(req.query.platform);
+    const [metrics, sourceChangeMetrics, sourceChangeRecords, prompts, competitors] = await Promise.all([
       VisibilityMetric.findAll({
         where: {
           project_id: req.brandProject.id,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           created_at: { [Op.between]: [periodStart, periodEnd] }
         },
         include: [
@@ -1420,7 +1435,7 @@ router.get('/:projectId/dashboard', loadProject, async (req, res) => {
       VisibilityMetric.findAll({
         where: {
           project_id: req.brandProject.id,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           created_at: { [Op.between]: [changePeriodStart, periodEnd] }
         },
         order: [['created_at', 'ASC']]
@@ -1428,11 +1443,25 @@ router.get('/:projectId/dashboard', loadProject, async (req, res) => {
       QuestionRecord.findAll({
         where: {
           project_id: req.brandProject.id,
-          platform: { [Op.in]: projectPlatforms },
-          created_at: { [Op.between]: [periodStart, periodEnd] }
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
+          created_at: { [Op.between]: [changePeriodStart, periodEnd] }
         },
-        attributes: ['id', 'status', 'tracked_prompt_id', 'created_at'],
-        raw: true
+        attributes: [
+          'id',
+          'status',
+          'tracked_prompt_id',
+          'question_set_run_id',
+          'run_slot_index',
+          'platform',
+          'metric_semantics_version',
+          'created_at'
+        ],
+        include: [{
+          model: ResultDetail,
+          as: 'resultDetail',
+          attributes: ['ai_response_original', 'citation_analysis'],
+          required: false
+        }]
       }),
       TrackedPrompt.findAll({
         where: { project_id: req.brandProject.id },
@@ -1444,32 +1473,55 @@ router.get('/:projectId/dashboard', loadProject, async (req, res) => {
         order: [['id', 'ASC']]
       })
     ]);
-    const plain = metrics.map((row) => row.toJSON());
-    const sourceChangeRows = sourceChangeMetrics.map((row) => row.toJSON());
+    const allMetricRows = metrics.map((row) => row.toJSON());
+    const allSourceChangeRecordRows = sourceChangeRecords.map((row) => row.toJSON());
+    const allRecordRows = allSourceChangeRecordRows.filter((row) => {
+      const createdAt = new Date(row.created_at || row.createdAt || 0);
+      return !Number.isNaN(createdAt.getTime()) && createdAt >= periodStart;
+    });
+    const availablePlatforms = ProjectMetricsService.listActualPlatforms(allMetricRows, allRecordRows);
+    const plain = ProjectMetricsService.filterByPlatform(allMetricRows, selectedPlatform);
+    const recordRows = ProjectMetricsService.filterByPlatform(allRecordRows, selectedPlatform);
+    const sourceChangeRows = ProjectMetricsService.filterByPlatform(
+      sourceChangeMetrics.map((row) => row.toJSON()),
+      selectedPlatform
+    );
+    const sourceChangeRecordRows = ProjectMetricsService.filterByPlatform(
+      allSourceChangeRecordRows,
+      selectedPlatform
+    );
     const promptRows = prompts.map((prompt) => ({
       ...prompt,
       category: ProjectRunService.derivePromptCategory(prompt)
     }));
-    const promptPerformance = ProjectMetricsService.buildPromptPerformance(promptRows, plain, records);
-    const sourceAnalysis = SourceAnalysisService.summarize(plain, {
+    const promptPerformance = ProjectMetricsService.buildCurrentPromptPerformance(promptRows, plain, recordRows);
+    const citationEvidenceRows = ProjectMetricsService.buildCurrentCitationEvidenceRows({
+      metrics: plain,
+      records: recordRows
+    });
+    const sourceChangeCitationEvidenceRows = ProjectMetricsService.buildCurrentCitationEvidenceRows({
+      metrics: sourceChangeRows,
+      records: sourceChangeRecordRows
+    });
+    const sourceAnalysis = SourceAnalysisService.summarize(citationEvidenceRows, {
       brand: req.brandProject.toJSON(),
       competitors: competitors.map((row) => row.toJSON()),
       prompts: promptRows,
       days,
       referenceDate: periodEnd,
-      changeMetrics: sourceChangeRows
+      changeMetrics: sourceChangeCitationEvidenceRows
     });
     const opportunities = OpportunityInsightService.build({
       prompts: promptRows,
       promptPerformance,
       metrics: plain,
       sourceOpportunities: sourceAnalysis.opportunities,
-      projectPlatforms,
+      projectPlatforms: selectedPlatform === 'all' ? availablePlatforms : [selectedPlatform],
       days
     });
-    const summary = ProjectMetricsService.buildDashboardSummary({
+    const summary = ProjectMetricsService.buildCurrentDashboardSummary({
       metrics: plain,
-      records,
+      records: recordRows,
       prompts: promptRows,
       sourceAnalysis
     });
@@ -1477,16 +1529,28 @@ router.get('/:projectId/dashboard', loadProject, async (req, res) => {
       success: true,
       data: {
         project: req.brandProject,
+        metric_semantics_version: CURRENT_METRIC_SEMANTICS,
+        selected_platform: selectedPlatform,
+        available_platforms: availablePlatforms,
         summary,
-        trend: ProjectMetricsService.buildTrend(plain, days, { referenceDate: periodEnd }),
+        trend: ProjectMetricsService.buildCurrentTrend(plain, recordRows, days, { referenceDate: periodEnd }),
         opportunities,
         recent_metrics: plain
           .slice(-20)
           .reverse()
-          .map((metric) => CitationMetricSemanticsService.normalizeForRead(metric))
+          .map((metric) => ProjectMetricsService.presentCurrentMetric(
+            CitationMetricSemanticsService.normalizeForRead(metric)
+          ))
       }
     });
   } catch (error) {
+    if (error?.code === 'INVALID_PLATFORM_FILTER') {
+      return res.status(400).json({
+        success: false,
+        error_code: 'INVALID_PLATFORM_FILTER',
+        message: error.message
+      });
+    }
     res.status(500).json({ success: false, message: '获取项目看板失败' });
   }
 });
@@ -1494,12 +1558,11 @@ router.get('/:projectId/dashboard', loadProject, async (req, res) => {
 router.get('/:projectId/sources', loadProject, async (req, res) => {
   try {
     const { days, periodStart, periodEnd, changePeriodStart } = ProjectMetricsService.buildPeriodWindow(req.query.days);
-    const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
-    const [metrics, changeMetrics, competitors, prompts] = await Promise.all([
+    const [metrics, changeMetrics, changeRecords, competitors, prompts] = await Promise.all([
       VisibilityMetric.findAll({
         where: {
           project_id: req.brandProject.id,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           created_at: { [Op.between]: [periodStart, periodEnd] }
         },
         order: [['created_at', 'ASC']]
@@ -1507,10 +1570,32 @@ router.get('/:projectId/sources', loadProject, async (req, res) => {
       VisibilityMetric.findAll({
         where: {
           project_id: req.brandProject.id,
-          platform: { [Op.in]: projectPlatforms },
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           created_at: { [Op.between]: [changePeriodStart, periodEnd] }
         },
         order: [['created_at', 'ASC']]
+      }),
+      QuestionRecord.findAll({
+        where: {
+          project_id: req.brandProject.id,
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
+          created_at: { [Op.between]: [changePeriodStart, periodEnd] }
+        },
+        attributes: [
+          'id',
+          'tracked_prompt_id',
+          'question_set_run_id',
+          'run_slot_index',
+          'platform',
+          'metric_semantics_version',
+          'created_at'
+        ],
+        include: [{
+          model: ResultDetail,
+          as: 'resultDetail',
+          attributes: ['ai_response_original', 'citation_analysis'],
+          required: false
+        }]
       }),
       BrandCompetitor.findAll({
         where: { project_id: req.brandProject.id },
@@ -1522,16 +1607,29 @@ router.get('/:projectId/sources', loadProject, async (req, res) => {
         raw: true
       })
     ]);
-    const plain = metrics.map((row) => row.toJSON());
-    const changeRows = changeMetrics.map((row) => row.toJSON());
+    const metricRows = metrics.map((row) => row.toJSON());
+    const changeMetricRows = changeMetrics.map((row) => row.toJSON());
+    const changeRecordRows = changeRecords.map((row) => row.toJSON());
+    const recordRows = changeRecordRows.filter((row) => {
+      const createdAt = new Date(row.created_at || row.createdAt || 0);
+      return !Number.isNaN(createdAt.getTime()) && createdAt >= periodStart;
+    });
+    const citationRows = ProjectMetricsService.buildCurrentCitationEvidenceRows({
+      metrics: metricRows,
+      records: recordRows
+    });
+    const changeCitationRows = ProjectMetricsService.buildCurrentCitationEvidenceRows({
+      metrics: changeMetricRows,
+      records: changeRecordRows
+    });
     const competitorRows = competitors.map((row) => row.toJSON());
-    const analysis = SourceAnalysisService.summarize(plain, {
+    const analysis = SourceAnalysisService.summarize(citationRows, {
       brand: req.brandProject.toJSON(),
       competitors: competitorRows,
       prompts,
       days,
       referenceDate: periodEnd,
-      changeMetrics: changeRows
+      changeMetrics: changeCitationRows
     });
 
     res.json({

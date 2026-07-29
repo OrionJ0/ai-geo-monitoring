@@ -19,6 +19,7 @@ const ERROR_MESSAGES = Object.freeze({
   timeout: '平台请求超时，请稍后重试或调整超时设置。',
   network_error: '无法连接监测平台，请检查网络或代理设置。',
   provider_error: '平台服务暂时异常，请稍后重试。',
+  input_too_long: '提交内容超出模型可处理范围。',
   invalid_provider_response: '平台返回格式异常，请管理员检查平台配置。',
   config_unavailable: '监测平台配置暂不可用，请联系管理员。',
   disabled: '监测平台已被管理员停用。',
@@ -35,6 +36,21 @@ const PROVIDER_QUOTA_ERROR_CODES = new Set([
   'insufficient_quota',
   'quota_exceeded',
   'quota_exhausted'
+]);
+const PROVIDER_INPUT_TOO_LONG_CODES = new Set([
+  'context_length_exceeded',
+  'context_window_exceeded',
+  'input_too_long',
+  'max_context_length_exceeded',
+  'prompt_too_long',
+  'request_too_large',
+  'too_many_tokens'
+]);
+const PROVIDER_INPUT_TOO_LONG_PATTERNS = Object.freeze([
+  /context (?:length|window).*(?:exceed|limit|maximum)/iu,
+  /maximum context (?:length|window)/iu,
+  /(?:input|prompt).*(?:too long|exceed.*(?:token|context|length))/iu,
+  /too many (?:input )?tokens/iu
 ]);
 
 const PROTECTED_REQUEST_OPTION_KEYS = new Set([
@@ -59,6 +75,7 @@ function isResponsesAdapter(adapterType) {
 
 function buildRequestBody(config, question, maxTokens) {
   const requestOptions = safeRequestOptions(config.request_options);
+  const hasTokenLimit = Number.isFinite(Number(maxTokens)) && Number(maxTokens) > 0;
   if (isResponsesAdapter(config.adapter_type)) {
     return {
       tools: [{ type: 'web_search' }],
@@ -69,7 +86,7 @@ function buildRequestBody(config, question, maxTokens) {
         role: 'user',
         content: [{ type: 'input_text', text: question }]
       }],
-      max_output_tokens: maxTokens
+      ...(hasTokenLimit ? { max_output_tokens: Number(maxTokens) } : {})
     };
   }
   return {
@@ -77,7 +94,7 @@ function buildRequestBody(config, question, maxTokens) {
     ...requestOptions,
     model: config.default_model,
     messages: [{ role: 'user', content: question }],
-    max_tokens: maxTokens
+    ...(hasTokenLimit ? { max_tokens: Number(maxTokens) } : {})
   };
 }
 
@@ -115,8 +132,16 @@ function extractResponseText(adapterType, data) {
 function normalizeRequestError(error) {
   const status = Number(error?.response?.status || 0);
   const code = String(error?.code || '').toUpperCase();
-  const providerCode = String(providerErrorDetails(error).code || '').trim().toLowerCase();
+  const providerError = providerErrorDetails(error);
+  const providerCode = String(providerError.code || '').trim().toLowerCase();
   if (PROVIDER_QUOTA_ERROR_CODES.has(providerCode)) return 'provider_quota_exhausted';
+  if (
+    status === 413
+    || PROVIDER_INPUT_TOO_LONG_CODES.has(providerCode)
+    || PROVIDER_INPUT_TOO_LONG_PATTERNS.some((pattern) => pattern.test(providerError.message || ''))
+  ) {
+    return 'input_too_long';
+  }
   if (status === 401 || status === 403) return 'authentication_failed';
   if (status === 429) return 'rate_limited';
   if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') return 'timeout';
@@ -224,9 +249,13 @@ class AIPlatformRequestService {
     const timeoutSeconds = Number.isFinite(timeoutOverride) && timeoutOverride > 0
       ? Math.floor(timeoutOverride)
       : (config.request_timeout_seconds || settings.ai_default_timeout_seconds);
-    const maxTokens = Number.isFinite(maxTokensOverride) && maxTokensOverride > 0
-      ? Math.floor(maxTokensOverride)
-      : (config.max_tokens || settings.ai_default_max_tokens);
+    const maxTokens = options.omitTokenLimit === true
+      ? null
+      : (
+        Number.isFinite(maxTokensOverride) && maxTokensOverride > 0
+          ? Math.floor(maxTokensOverride)
+          : (config.max_tokens || settings.ai_default_max_tokens)
+      );
     const retryCount = options.retryCount ?? settings.ai_retry_count;
     const requestConfig = options.requestOptions === undefined
       ? config
@@ -258,6 +287,9 @@ class AIPlatformRequestService {
           text,
           platform,
           model_name: config.default_model,
+          citation_observation_status: isResponsesAdapter(config.adapter_type)
+            ? 'observed'
+            : 'unavailable',
           responseTime: Number.isFinite(headerTime) && headerTime >= 0
             ? headerTime
             : Math.max(0, this.now() - startedAt)

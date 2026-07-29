@@ -39,6 +39,28 @@ function percent(value) {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : 0;
 }
 
+function nullablePercent(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+}
+
+function formatRate(value, numerator, denominator) {
+  const rate = nullablePercent(value);
+  const valid = Number(denominator || 0);
+  return rate === null
+    ? `N/A（有效回答 ${valid}）`
+    : `${rate}%（${Number(numerator || 0)} / ${valid}）`;
+}
+
+function formatSov(summary) {
+  const value = nullablePercent(summary?.average);
+  const count = Number(summary?.calculable_answers || 0);
+  return value === null
+    ? `N/A（有效回答 ${count}）`
+    : `${value}%（有效回答 ${count}）`;
+}
+
 function formatCitationRate(value, row) {
   return Number(row?.citation_eligible_checks || 0) > 0 ? `${percent(value)}%` : '暂无可验证样本';
 }
@@ -84,6 +106,7 @@ export default function GeoReportsPage() {
   const [projectId, setProjectId] = useState();
   const [report, setReport] = useState(null);
   const [days, setDays] = useState(30);
+  const [platform, setPlatform] = useState('all');
   const [projectLoading, setProjectLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const reportRequestRef = useRef(0);
@@ -95,6 +118,7 @@ export default function GeoReportsPage() {
   const handleProjectChange = (value) => {
     invalidateReportRequest();
     setProjectId(value);
+    setPlatform('all');
     setReport(null);
     setReportLoading(false);
   };
@@ -102,8 +126,13 @@ export default function GeoReportsPage() {
   const handleDaysChange = (value) => {
     invalidateReportRequest();
     setDays(value);
+    setPlatform('all');
     setReport(null);
     setReportLoading(false);
+  };
+
+  const handlePlatformChange = (value) => {
+    setPlatform(value);
   };
 
   const fetchProjects = useCallback(async () => {
@@ -136,7 +165,10 @@ export default function GeoReportsPage() {
       const res = await axios.get(`/api/geo-projects/${targetProjectId}/reports/latest`, {
         params: { days: targetDays },
       });
-      if (reportRequestRef.current === requestId) setReport(res?.data?.data || null);
+      if (reportRequestRef.current === requestId) {
+        setPlatform('all');
+        setReport(res?.data?.data || null);
+      }
     } catch (error) {
       if (reportRequestRef.current === requestId) {
         setReport(null);
@@ -153,10 +185,23 @@ export default function GeoReportsPage() {
 
   const selectedProject = useMemo(() => projects.find((item) => item.id === projectId), [projects, projectId]);
   const summary = report?.summary || {};
+  const isCurrentReport = report?.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
+    && summary?.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
+    && summary?.metric_views;
+  const availablePlatforms = Array.isArray(summary.available_platforms) ? summary.available_platforms : [];
+  const metricViews = summary.metric_views || {};
+  const selectedPlatformView = platform === 'all'
+    ? metricViews.all
+    : (Array.isArray(metricViews.platforms)
+        ? metricViews.platforms.find((item) => item.platform === platform)
+        : null);
+  const metricSummary = isCurrentReport ? (selectedPlatformView?.summary || {}) : summary;
   const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];
   const competitors = Array.isArray(summary.competitors) ? summary.competitors : [];
   const categories = Array.isArray(summary.categories) ? summary.categories : [];
-  const trend = Array.isArray(summary.trend) ? summary.trend : [];
+  const trend = isCurrentReport
+    ? (Array.isArray(selectedPlatformView?.trend) ? selectedPlatformView.trend : [])
+    : (Array.isArray(summary.trend) ? summary.trend : []);
   const sourceSummary = summary.source_summary || {};
   const sourceTypes = Array.isArray(summary.source_types) ? summary.source_types : [];
   const sourceDomains = Array.isArray(summary.source_domains) ? summary.source_domains : [];
@@ -178,6 +223,7 @@ export default function GeoReportsPage() {
     try {
       const res = await axios.post(`/api/geo-projects/${projectId}/reports/generate`, { days });
       if (reportRequestRef.current === requestId) {
+        setPlatform('all');
         setReport(res?.data?.data || null);
         message.success(`${days} 天报告快照已生成`);
       }
@@ -192,7 +238,11 @@ export default function GeoReportsPage() {
 
   const exportCsv = () => {
     if (!report) return;
-    const csv = buildReportCsv({ summary, platformLabel });
+    const csv = buildReportCsv({
+      summary,
+      platformLabel,
+      websiteConfigured: Boolean(selectedProject?.website || report?.project?.website)
+    });
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -204,15 +254,43 @@ export default function GeoReportsPage() {
 
   const platformColumns = [
     { title: '平台', dataIndex: 'platform', render: (value) => platformLabel[value] || value || '未知' },
-    { title: '检查数', dataIndex: 'checks', width: 100, render: (value) => Number(value || 0) },
-    { title: '品牌提及率', dataIndex: 'brand_mention_rate', width: 120, render: (value) => `${percent(value)}%` },
-    { title: '平均声量占比（SOV）', dataIndex: 'avg_share_of_voice', width: 160, render: (value) => `${percent(value)}%` },
+    { title: isCurrentReport ? '有效回答' : '检查数', dataIndex: isCurrentReport ? 'valid_answers' : 'checks', width: 100, render: (value) => Number(value || 0) },
+    {
+      title: '品牌提及率',
+      dataIndex: 'brand_mention_rate',
+      width: 160,
+      render: (value, row) => isCurrentReport
+        ? formatRate(value, row.brand_mentioned_answers, row.valid_answers)
+        : `${percent(value)}%`
+    },
+    {
+      title: isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）',
+      dataIndex: isCurrentReport ? 'sov_summary' : 'avg_share_of_voice',
+      width: 210,
+      render: (value) => isCurrentReport ? formatSov(value) : `${percent(value)}%`
+    },
     { title: '引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
-    { title: '推荐率', dataIndex: 'recommendation_rate', width: 100, render: (value) => `${percent(value)}%` },
-    { title: '平均排名', dataIndex: 'avg_brand_rank', width: 100, render: formatRank },
+    {
+      title: isCurrentReport ? '推荐率（AI 语义分析）' : '推荐率',
+      dataIndex: 'recommendation_rate',
+      width: 150,
+      render: (value, row) => isCurrentReport
+        ? formatRate(value, row.recommended_answers, row.valid_answers)
+        : `${percent(value)}%`
+    },
+    {
+      title: isCurrentReport ? '明确有序榜单平均排名' : '平均排名',
+      dataIndex: 'avg_brand_rank',
+      width: 160,
+      render: formatRank
+    },
   ];
 
-  const competitorColumns = [
+  const competitorColumns = isCurrentReport ? [
+    { title: '竞品', dataIndex: 'name' },
+    { title: '提及次数', dataIndex: 'mentions', width: 120, render: (value) => Number(value || 0) },
+    { title: '出现回答数', dataIndex: 'appeared_answers', width: 130, render: (value) => Number(value || 0) },
+  ] : [
     { title: '竞品', dataIndex: 'name' },
     { title: '提及次数', dataIndex: 'mentions', width: 120, render: (value) => Number(value || 0) },
     { title: '出现检查数', dataIndex: 'appeared_checks', width: 130, render: (value) => Number(value || 0) },
@@ -221,11 +299,30 @@ export default function GeoReportsPage() {
 
   const trendColumns = [
     { title: '日期', dataIndex: 'date', width: 140 },
-    { title: '检查数', dataIndex: 'checks', width: 100, render: (value) => Number(value || 0) },
-    { title: '品牌提及率', dataIndex: 'brand_mention_rate', width: 120, render: (value) => `${percent(value)}%` },
-    { title: '平均声量占比（SOV）', dataIndex: 'avg_share_of_voice', width: 160, render: (value) => `${percent(value)}%` },
+    { title: isCurrentReport ? '有效回答' : '检查数', dataIndex: isCurrentReport ? 'valid_answers' : 'checks', width: 100, render: (value) => Number(value || 0) },
+    {
+      title: '品牌提及率',
+      dataIndex: 'brand_mention_rate',
+      width: 160,
+      render: (value, row) => isCurrentReport
+        ? formatRate(value, row.brand_mentioned_answers, row.valid_answers)
+        : `${percent(value)}%`
+    },
+    {
+      title: isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）',
+      dataIndex: isCurrentReport ? 'sov_summary' : 'avg_share_of_voice',
+      width: 210,
+      render: (value) => isCurrentReport ? formatSov(value) : `${percent(value)}%`
+    },
     { title: '引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
-    { title: '推荐率', dataIndex: 'recommendation_rate', width: 100, render: (value) => `${percent(value)}%` },
+    {
+      title: isCurrentReport ? '推荐率（AI 语义分析）' : '推荐率',
+      dataIndex: 'recommendation_rate',
+      width: 150,
+      render: (value, row) => isCurrentReport
+        ? formatRate(value, row.recommended_answers, row.valid_answers)
+        : `${percent(value)}%`
+    },
   ];
 
   const categoryColumns = [
@@ -235,11 +332,30 @@ export default function GeoReportsPage() {
     { title: '运行数', dataIndex: 'total_runs', width: 90, render: (value) => Number(value || 0) },
     { title: '失败数', dataIndex: 'failed_runs', width: 90, render: (value) => Number(value || 0) },
     { title: '失败率', dataIndex: 'failure_rate', width: 90, render: (value) => `${percent(value)}%` },
-    { title: '有效分析', dataIndex: 'checks', width: 100, render: (value) => Number(value || 0) },
-    { title: '品牌提及率', dataIndex: 'brand_mention_rate', width: 120, render: (value) => `${percent(value)}%` },
-    { title: '平均声量占比（SOV）', dataIndex: 'avg_share_of_voice', width: 160, render: (value) => `${percent(value)}%` },
+    { title: isCurrentReport ? '有效回答' : '有效分析', dataIndex: isCurrentReport ? 'valid_answers' : 'checks', width: 100, render: (value) => Number(value || 0) },
+    {
+      title: '品牌提及率',
+      dataIndex: 'brand_mention_rate',
+      width: 160,
+      render: (value, row) => isCurrentReport
+        ? formatRate(value, row.brand_mentioned_answers, row.valid_answers)
+        : `${percent(value)}%`
+    },
+    {
+      title: isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）',
+      dataIndex: isCurrentReport ? 'sov_summary' : 'avg_share_of_voice',
+      width: 210,
+      render: (value) => isCurrentReport ? formatSov(value) : `${percent(value)}%`
+    },
     { title: '引用率', dataIndex: 'citation_rate', width: 110, render: formatCitationRate },
-    { title: '推荐率', dataIndex: 'recommendation_rate', width: 100, render: (value) => `${percent(value)}%` },
+    {
+      title: isCurrentReport ? '推荐率（AI 语义分析）' : '推荐率',
+      dataIndex: 'recommendation_rate',
+      width: 150,
+      render: (value, row) => isCurrentReport
+        ? formatRate(value, row.recommended_answers, row.valid_answers)
+        : `${percent(value)}%`
+    },
   ];
 
   const sourceTypeColumns = [
@@ -372,6 +488,21 @@ export default function GeoReportsPage() {
                 options={periodOptions}
                 onChange={handleDaysChange}
               />
+              {isCurrentReport ? (
+                <Select
+                  aria-label="报告核心指标平台范围"
+                  style={{ width: 180 }}
+                  value={platform}
+                  onChange={handlePlatformChange}
+                  options={[
+                    { label: '全部平台（合并）', value: 'all' },
+                    ...availablePlatforms.map((item) => ({
+                      label: platformLabel[item] || item,
+                      value: item
+                    }))
+                  ]}
+                />
+              ) : null}
               <Button type="primary" loading={reportLoading} disabled={!projectId} onClick={generateReport}>生成 {days} 天报告</Button>
               <Button disabled={!report} onClick={() => window.print()}>打印</Button>
               <Button disabled={!report} onClick={exportCsv}>导出 CSV</Button>
@@ -395,21 +526,34 @@ export default function GeoReportsPage() {
                       <Descriptions.Item label="周期结束">{formatDate(report.period_end)}</Descriptions.Item>
                       <Descriptions.Item label="生成时间">{formatDate(report.created_at)}</Descriptions.Item>
                     </Descriptions>
+                    <Space orientation="vertical" size={4} style={{ marginTop: 12 }}>
+                      <Tag color={isCurrentReport ? 'blue' : 'default'}>
+                        {isCurrentReport ? '当前回答级竞品提及口径' : '历史竞品配置口径'}
+                      </Tag>
+                      {isCurrentReport ? (
+                        <>
+                          <Text type="secondary">{summary.usage_guidance?.monitoring_questions || 'SOV 监测问题应使用非品牌词问题。'}</Text>
+                          <Text type="secondary">{summary.usage_guidance?.trend_comparison || '趋势只在稳定的问题集合内比较；问题变更后建立新的比较基线。'}</Text>
+                          <Text type="secondary">平台选择只切换快照内的核心品牌指标和趋势；来源与机会仍为全部平台口径。</Text>
+                        </>
+                      ) : null}
+                    </Space>
                   </Col>
                 </Row>
               </Card>
 
               <Row gutter={[12, 12]}>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="总运行数" value={summary.total_runs ?? summary.total_checks ?? 0} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="有效分析数" value={summary.total_checks || 0} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="品牌提及率" value={percent(summary.brand_mention_rate)} suffix="%" /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="平均声量占比（SOV）" value={percent(summary.avg_share_of_voice)} suffix="%" /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="失败数" value={summary.failed_runs || 0} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="竞品提及次数" value={competitors.reduce((sum, item) => sum + Number(item.mentions || 0), 0)} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用率" value={Number(summary.citation_eligible_checks || 0) > 0 ? percent(summary.citation_rate) : '暂无可验证样本'} suffix={Number(summary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="自有来源覆盖率" value={Number(summary.citation_eligible_checks || 0) > 0 ? percent(summary.owned_citation_rate) : '暂无可验证样本'} suffix={Number(summary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="推荐率" value={percent(summary.recommendation_rate)} suffix="%" /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="平均品牌排名" value={formatRank(summary.avg_brand_rank)} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="总运行数" value={metricSummary.total_runs ?? metricSummary.total_checks ?? 0} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '有效回答' : '有效分析数'} value={metricSummary.valid_answers ?? metricSummary.total_checks ?? 0} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="品牌提及率" value={isCurrentReport ? formatRate(metricSummary.brand_mention_rate, metricSummary.brand_mentioned_answers, metricSummary.valid_answers) : `${percent(metricSummary.brand_mention_rate)}%`} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）'} value={isCurrentReport ? formatSov(metricSummary.sov_summary) : `${percent(metricSummary.avg_share_of_voice)}%`} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="分析覆盖率" value={isCurrentReport ? formatRate(metricSummary.analysis_coverage_rate, metricSummary.valid_answers, metricSummary.acquired_answers) : '历史报告未记录'} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="失败数" value={metricSummary.failed_runs || 0} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="竞品提及次数" value={(isCurrentReport ? metricSummary.competitors || [] : competitors).reduce((sum, item) => sum + Number(item.mentions || 0), 0)} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用率" value={Number(metricSummary.citation_eligible_checks || 0) > 0 ? percent(metricSummary.citation_rate) : '暂无可验证样本'} suffix={Number(metricSummary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '官网引用率' : '自有来源覆盖率'} value={isCurrentReport && !(selectedProject?.website || report?.project?.website) ? '未配置官网' : (Number(metricSummary.citation_eligible_checks || 0) > 0 ? percent(metricSummary.owned_citation_rate) : '暂无可验证样本')} suffix={(!isCurrentReport || Boolean(selectedProject?.website || report?.project?.website)) && Number(metricSummary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '推荐率（AI 语义分析）' : '推荐率'} value={isCurrentReport ? formatRate(metricSummary.recommendation_rate, metricSummary.recommended_answers, metricSummary.valid_answers) : `${percent(metricSummary.recommendation_rate)}%`} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '明确有序榜单平均排名' : '平均品牌排名'} value={isCurrentReport ? (metricSummary.avg_brand_rank === null || metricSummary.avg_brand_rank === undefined ? `N/A（有效回答 ${Number(metricSummary.ranked_answers || 0)}）` : `${formatRank(metricSummary.avg_brand_rank)}（有效回答 ${Number(metricSummary.ranked_answers || 0)}）`) : formatRank(metricSummary.avg_brand_rank)} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用源总数" value={sourceSummary.total_citations || 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="来源域名数" value={sourceSummary.source_domain_count || 0} /></Card></Col>
               </Row>

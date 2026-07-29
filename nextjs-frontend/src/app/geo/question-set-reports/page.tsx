@@ -74,12 +74,25 @@ type ReportSummary = {
   failed?: number;
   pending?: number;
   valid_analyses?: number;
+  valid_answers?: number | null;
+  acquired_answers?: number | null;
+  analysis_coverage_rate?: number | null;
+  brand_mentioned_answers?: number | null;
+  recommended_answers?: number | null;
+  ranked_answers?: number | null;
+  sov_calculable_answers?: number | null;
+  avg_answer_competitor_share?: number | null;
   citation_valid_analyses?: number;
   citation_unverified_analyses?: number;
   competitor_baseline_count?: number;
-  brand_mention_rate?: number;
-  recommendation_rate?: number;
-  avg_share_of_voice?: number;
+  brand_mention_rate?: number | null;
+  recommendation_rate?: number | null;
+  sov_summary?: {
+    metric_semantics_version?: string;
+    kind?: 'contextual_competitor_mentions' | 'legacy_configured_competitors';
+    average?: number | null;
+    calculable_answers?: number;
+  } | null;
   citation_rate?: number;
   owned_citation_rate?: number;
   avg_brand_rank?: number | null;
@@ -112,6 +125,21 @@ type SkippedPlatform = {
   reason_code?: string;
   reason?: string;
   message?: string;
+};
+type AnswerSov = {
+  metric_semantics_version?: string;
+  kind?: 'contextual_competitor_mentions' | 'legacy_configured_competitors';
+  status?: 'calculated' | 'not_applicable';
+  value?: number | null;
+  numerator?: number | null;
+  denominator?: number | null;
+};
+type CompetitionEntity = {
+  name?: string;
+  relation?: 'competitor' | 'non_competitor';
+  mentions?: number;
+  reason?: string;
+  surface_forms?: string[];
 };
 type ReportRow = {
   record_id?: number | null;
@@ -169,8 +197,15 @@ type ReportRow = {
   } | null;
   has_metrics?: boolean;
   brand_mentioned?: boolean;
+  brand_mentions?: number;
   brand_recommended?: boolean;
-  share_of_voice?: number;
+  analysis_contract_version?: string | null;
+  metric_semantics_version?: string;
+  sov?: AnswerSov | null;
+  answer_competitor_share?: number | null;
+  sov_numerator?: number | null;
+  sov_denominator?: number | null;
+  competition_entities?: CompetitionEntity[];
   brand_rank?: number | null;
   citation_count?: number;
   owned_citation_count?: number;
@@ -187,6 +222,11 @@ type ReportRow = {
     entities?: Array<{ name?: string; type?: 'brand' | 'company' }>;
     mentions?: Array<{ entity_name?: string; surface_forms?: string[] }>;
     competitor_matches?: Array<{ configured_name?: string; entity_name?: string | null }>;
+    competitor_relations?: Array<{
+      entity_name?: string;
+      relation?: 'competitor' | 'non_competitor';
+      reason?: string;
+    }>;
     candidate_lists?: Array<{ ordered?: boolean; entries?: string[] }>;
     recommendations?: Array<{ entity_name?: string; kind?: string }>;
     claims?: Array<{
@@ -217,6 +257,7 @@ type ReportRow = {
 type RunReport = {
   id: number;
   project_id: number;
+  metric_semantics_version?: string | null;
   question_set_id?: number | null;
   question_set_name: string;
   source: 'native' | 'imported';
@@ -267,7 +308,7 @@ function formatDate(value?: string | null) {
   return date.toLocaleString('zh-CN', { hour12: false });
 }
 
-function percent(value?: number) {
+function percent(value?: number | null) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? Number(number.toFixed(2)) : 0;
 }
@@ -275,6 +316,43 @@ function percent(value?: number) {
 function formatRank(value?: number | null) {
   const number = Number(value || 0);
   return Number.isFinite(number) && number > 0 ? Number(number.toFixed(2)) : '-';
+}
+
+function formatAnswerSov(row: ReportRow) {
+  if (row.sov?.kind === 'contextual_competitor_mentions') {
+    if (row.sov.status === 'not_applicable') return 'N/A';
+    return `${percent(row.sov.value ?? undefined)}%（${row.sov.numerator ?? 0}/${row.sov.denominator ?? 0}）`;
+  }
+  return row.sov?.value == null ? '-' : `${percent(row.sov.value)}%`;
+}
+
+function formatSovSummary(summary: ReportSummary) {
+  const sovSummary = summary.sov_summary;
+  const sampleText = `有效回答 ${sovSummary?.calculable_answers || 0}`;
+  if (!sovSummary || sovSummary.average == null) return `N/A（${sampleText}）`;
+  return `${percent(sovSummary.average)}%（${sampleText}）`;
+}
+
+function formatAnalysisCoverage(summary: ReportSummary) {
+  const validAnswers = Number(summary.valid_answers || 0);
+  const acquiredAnswers = Number(summary.acquired_answers || 0);
+  if (summary.analysis_coverage_rate == null || acquiredAnswers === 0) {
+    return `N/A（${validAnswers} / ${acquiredAnswers}）`;
+  }
+  return `${percent(summary.analysis_coverage_rate)}%（${validAnswers} / ${acquiredAnswers}）`;
+}
+
+function formatCurrentRate(
+  value: number | null | undefined,
+  numerator: number | null | undefined,
+  denominator: number | null | undefined,
+) {
+  const safeNumerator = Number(numerator || 0);
+  const safeDenominator = Number(denominator || 0);
+  if (value == null || safeDenominator === 0) {
+    return `N/A（${safeNumerator} / ${safeDenominator}）`;
+  }
+  return `${percent(value)}%（${safeNumerator} / ${safeDenominator}）`;
 }
 
 function safeFilename(value: string) {
@@ -580,9 +658,11 @@ export default function QuestionSetReportsPage() {
     return reportScope.length ? reportScope : selectedProject?.platforms || [];
   }, [report, selectedProject]);
   const summary = report?.summary || {};
-  const hasCompetitorBaseline = Number(summary.competitor_baseline_count || 0) > 0;
+  const hasCompetitorBaseline = summary.sov_summary?.kind === 'legacy_configured_competitors';
+  const hasCurrentSov = summary.sov_summary?.kind === 'contextual_competitor_mentions';
   const hasLegacyAnalysis = Boolean(report?.rows?.some(
-    (row) => row.has_metrics && !['ai_structured_v1', 'ai_structured_v2'].includes(row.analysis_method || ''),
+    (row) => row.has_metrics
+      && !['ai_structured_v1', 'ai_structured_v2', 'ai_structured_v3'].includes(row.analysis_method || ''),
   ));
   const executionSummary: ExecutionSummary = report?.execution_summary || {
     total: summary.total,
@@ -771,10 +851,18 @@ export default function QuestionSetReportsPage() {
       key: 'brand',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.brand : 180,
       render: (_: unknown, row: ReportRow) => row.has_metrics ? (
-        <Space wrap size={[4, 4]}>
-          <Tag color={row.brand_mentioned ? 'blue' : 'default'}>{row.brand_mentioned ? '已提及' : '未提及'}</Tag>
-          {row.brand_recommended ? <Tag color="green">明确推荐</Tag> : null}
-          {hasCompetitorBaseline ? <Text type="secondary">SOV {percent(row.share_of_voice)}%</Text> : null}
+        <Space orientation="vertical" size={2}>
+          <Space wrap size={[4, 4]}>
+            <Tag color={row.brand_mentioned ? 'blue' : 'default'}>{row.brand_mentioned ? '已提及' : '未提及'}</Tag>
+            {row.brand_recommended ? <Tag color="green">明确推荐</Tag> : null}
+          </Space>
+          {row.sov?.kind === 'contextual_competitor_mentions' ? (
+            <Text type="secondary">
+              回答内竞品提及占比（SOV） {formatAnswerSov(row)}
+            </Text>
+          ) : hasCompetitorBaseline ? (
+            <Text type="secondary">SOV {formatAnswerSov(row)}</Text>
+          ) : null}
         </Space>
       ) : '-',
     },
@@ -791,7 +879,7 @@ export default function QuestionSetReportsPage() {
       render: (value: number) => Number(value || 0),
     },
     {
-      title: '情绪',
+      title: '情绪（AI 语义分析）',
       dataIndex: 'sentiment',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.sentiment : 80,
       render: (value: string) => sentimentLabel[value] || '-',
@@ -973,28 +1061,41 @@ export default function QuestionSetReportsPage() {
                       <Text className={styles.panelKicker}>OUTCOME METRICS</Text>
                       <Title level={4}>核心指标</Title>
                     </div>
-                    <Text type="secondary">先确认样本是否充足，再看品牌有没有被提及、推荐和排在前面</Text>
+                    <Text type="secondary">先确认样本是否充足，再看品牌有没有被提及和推荐</Text>
                   </div>
                   <div className={styles.primaryMetrics}>
                     <MetricItem
-                      label="有效样本"
-                      value={`${summary.valid_analyses || 0} / ${summary.total || 0}`}
-                      help="通过 JSON 结构校验、实体关系校验和短实体词原回答定位校验的已完成分析数 ÷ 本次计划任务数。调用失败、结构无效或仍在进行中的任务不进入各项比率计算。"
+                      label={report.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
+                        ? '分析覆盖率'
+                        : '有效样本'}
+                      value={report.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
+                        ? formatAnalysisCoverage(summary)
+                        : `${summary.valid_analyses || 0} / ${summary.total || 0}`}
+                      help={report.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
+                        ? '成功分析数 ÷ 已采集回答数。已保存完整原回答但结构化分析失败的样本只降低覆盖率，不会按品牌未提及、未推荐或 SOV 为 0 计入品牌指标。采集失败且没有原回答的任务不属于分析覆盖率分母。'
+                        : '生成当时可用的有效指标样本数 ÷ 本次计划任务数。历史报告保持原有统计口径。'}
                     />
                     <MetricItem
                       label="品牌提及率"
-                      value={`${percent(summary.brand_mention_rate)}%`}
+                      value={hasCurrentSov
+                        ? formatCurrentRate(
+                          summary.brand_mention_rate,
+                          summary.brand_mentioned_answers,
+                          summary.valid_answers,
+                        )
+                        : `${percent(summary.brand_mention_rate)}%`}
                       help="至少存在 1 条目标品牌结构化提及记录的有效分析数 ÷ 有效分析数。分析模型先把目标品牌显式映射到回答实体；每条提及只保留品牌名或别名等短实体词，并须能按顺序在原回答中定位。是否提及和百分比由程序计数，分析模型不直接返回。"
                     />
                     <MetricItem
-                      label="推荐率"
-                      value={`${percent(summary.recommendation_rate)}%`}
+                      label="推荐率（AI 语义分析）"
+                      value={hasCurrentSov
+                        ? formatCurrentRate(
+                          summary.recommendation_rate,
+                          summary.recommended_answers,
+                          summary.valid_answers,
+                        )
+                        : `${percent(summary.recommendation_rate)}%`}
                       help="至少存在 1 条目标品牌明确推荐关系的有效分析数 ÷ 有效分析数。仅客观列举不算推荐，程序根据明确推荐关系计算是否推荐和推荐率，分析模型不直接返回布尔值或比例。"
-                    />
-                    <MetricItem
-                      label="平均品牌排名"
-                      value={formatRank(summary.avg_brand_rank)}
-                      help="程序读取分析模型显式映射的目标实体，并根据首个明确排序列表中的 entries 数组位置求平均。普通项目符号或正文首次出现位置不是排名；没有明确排序时显示“-”，是否配置竞品不影响目标品牌自身排名。"
                     />
                   </div>
 
@@ -1009,16 +1110,29 @@ export default function QuestionSetReportsPage() {
                       label: (
                         <span className={styles.moreMetricsLabel}>
                           <Text strong>更多指标</Text>
-                          <Text type="secondary">{hasCompetitorBaseline ? '竞品声量、引用和执行情况' : '引用和执行情况'}</Text>
+                          <Text type="secondary">
+                            {summary.sov_summary ? '竞品提及占比、引用和执行情况' : '引用和执行情况'}
+                          </Text>
                         </span>
                       ),
                       children: (
                         <div className={styles.secondaryMetrics}>
-                          {hasCompetitorBaseline ? (
+                          <MetricItem
+                            label={hasCurrentSov ? '明确有序榜单平均排名' : '平均品牌排名'}
+                            value={hasCurrentSov
+                              ? `${formatRank(summary.avg_brand_rank)}（有效排名回答 ${summary.ranked_answers || 0}）`
+                              : formatRank(summary.avg_brand_rank)}
+                            help="程序只读取至少包含 2 个不同实体、且回答明确给出顺序或名次的首个榜单；普通项目符号、正文首次出现位置和单项列表都不是排名。"
+                          />
+                          {summary.sov_summary ? (
                             <MetricItem
-                              label="平均 SOV"
-                              value={`${percent(summary.avg_share_of_voice)}%`}
-                              help="仅在项目配置竞品时展示。每条有效回答按结构化提及次数计数：品牌提及次数 ÷ 品牌与已配置竞品提及总次数；再对有效回答取平均。排名、推荐和未配置的其他品牌不加分。"
+                              label={hasCurrentSov
+                                ? '回答内竞品提及占比（SOV）'
+                                : '平均 SOV（历史竞品配置口径）'}
+                              value={formatSovSummary(summary)}
+                              help={hasCurrentSov
+                                ? '先对每条可计算回答计算：目标品牌实际提及次数 ÷ 目标品牌与本回答 AI 判定竞品的实际提及次数之和；再对这些单条结果等权平均。N/A 回答和分析失败回答不进入平均。'
+                                : '历史报告沿用生成当时的已配置竞品统计值，不反推分子分母，也不与新版回答级口径混合。'}
                             />
                           ) : null}
                           <MetricItem
@@ -1150,8 +1264,10 @@ export default function QuestionSetReportsPage() {
                           {row.has_metrics ? (
                             <Space wrap size={6}>
                               <Text className={styles.answerLabel}>分析方式</Text>
-                              {row.analysis_method === 'ai_structured_v2'
-                                ? <Tag color="blue">AI 结构化 v2</Tag>
+                              {row.analysis_method === 'ai_structured_v3'
+                                ? <Tag color="blue">AI 结构化 v3</Tag>
+                                : row.analysis_method === 'ai_structured_v2'
+                                  ? <Tag>AI 结构化 v2（历史）</Tag>
                                 : row.analysis_method === 'ai_structured_v1'
                                   ? <Tag>AI 结构化 v1（历史）</Tag>
                                   : <Tag>历史规则</Tag>}
@@ -1159,6 +1275,14 @@ export default function QuestionSetReportsPage() {
                                 <Text type="secondary">
                                   {row.analysis_platform}{row.analysis_model ? ` · ${row.analysis_model}` : ''}
                                 </Text>
+                              ) : null}
+                              {row.analysis_method === 'ai_structured_v3' ? (
+                                <Text type="secondary">
+                                  契约 {row.analysis_contract_version || row.analysis_method}
+                                </Text>
+                              ) : null}
+                              {row.sov?.kind === 'contextual_competitor_mentions' ? (
+                                <Text>目标品牌提及 {row.brand_mentions ?? 0} 次</Text>
                               ) : null}
                             </Space>
                           ) : null}
@@ -1182,6 +1306,30 @@ export default function QuestionSetReportsPage() {
                                   {row.analysis_structure.target_entity_name || '回答中未识别到'}
                                 </Text>
                               </div>
+                            </div>
+                          ) : null}
+                          {Array.isArray(row.competition_entities)
+                            && row.competition_entities.length ? (
+                            <div>
+                              <Text className={styles.answerLabel}>竞品判断</Text>
+                              <Space orientation="vertical" size={4}>
+                                {row.competition_entities.map((entity, index) => (
+                                  <Space
+                                    key={`${entity.name || 'entity'}-${index}`}
+                                    className={styles.competitionEntityRow}
+                                    wrap
+                                    size={6}
+                                    data-pdf-breakpoint="true"
+                                  >
+                                    <Tag color={entity.relation === 'competitor' ? 'orange' : 'default'}>
+                                      {entity.relation === 'competitor' ? '竞品' : '非竞品'}
+                                    </Tag>
+                                    <Text strong>{entity.name || '-'}</Text>
+                                    <Text>提及 {entity.mentions ?? 0} 次</Text>
+                                    <Text type="secondary">{entity.reason || '-'}</Text>
+                                  </Space>
+                                ))}
+                              </Space>
                             </div>
                           ) : null}
                           {Array.isArray(row.analysis_structure?.candidate_lists)

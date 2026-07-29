@@ -38,7 +38,206 @@ function formatOpportunityScope(item, platformLabel = defaultPlatformLabel) {
   return platform || domain || item?.competitor || '';
 }
 
-function buildReportCsvRows({ summary = {}, platformLabel = defaultPlatformLabel } = {}) {
+function formatCurrentRate(value, numerator, denominator) {
+  const valid = Number(denominator || 0);
+  if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) {
+    return `N/A（有效回答 ${valid}）`;
+  }
+  return `${percent(value)}%（${Number(numerator || 0)} / ${valid}）`;
+}
+
+function formatCurrentSov(summary) {
+  const count = Number(summary?.calculable_answers || 0);
+  const value = summary?.average;
+  if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) {
+    return `N/A（有效回答 ${count}）`;
+  }
+  return `${percent(value)}%（有效回答 ${count}）`;
+}
+
+function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }) {
+  const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];
+  const competitors = Array.isArray(summary.competitors) ? summary.competitors : [];
+  const categories = Array.isArray(summary.categories) ? summary.categories : [];
+  const trend = Array.isArray(summary.trend) ? summary.trend : [];
+  const sourceTypes = Array.isArray(summary.source_types) ? summary.source_types : [];
+  const sourceDomains = Array.isArray(summary.source_domains) ? summary.source_domains : [];
+  const sourceUrls = Array.isArray(summary.source_urls) ? summary.source_urls : [];
+  const sourceChanges = summary.source_changes || {};
+  const sourceSummary = summary.source_summary || {};
+  const opportunities = Array.isArray(summary.opportunities) ? summary.opportunities : [];
+
+  return [
+    ['整体概览'],
+    ['指标', '值'],
+    ['指标语义版本', summary.metric_semantics_version],
+    ['总运行数', summary.total_runs || 0],
+    ['已获取回答', summary.acquired_answers || 0],
+    ['有效回答', summary.valid_answers || 0],
+    ['分析覆盖率', formatCurrentRate(
+      summary.analysis_coverage_rate,
+      summary.valid_answers,
+      summary.acquired_answers
+    )],
+    ['品牌提及率', formatCurrentRate(
+      summary.brand_mention_rate,
+      summary.brand_mentioned_answers,
+      summary.valid_answers
+    )],
+    ['回答内竞品提及占比（SOV）', formatCurrentSov(summary.sov_summary)],
+    ['推荐率（AI 语义分析）', formatCurrentRate(
+      summary.recommendation_rate,
+      summary.recommended_answers,
+      summary.valid_answers
+    )],
+    ['负向情绪率（AI 语义分析）', formatCurrentRate(
+      summary.negative_sentiment_rate,
+      summary.negative_sentiment_answers,
+      summary.brand_mentioned_answers
+    )],
+    ['明确有序榜单平均排名', summary.avg_brand_rank == null
+      ? `N/A（有效回答 ${Number(summary.ranked_answers || 0)}）`
+      : `${formatRank(summary.avg_brand_rank)}（有效回答 ${Number(summary.ranked_answers || 0)}）`],
+    ['引用率', formatCitationRate(summary.citation_rate, summary)],
+    ['官网引用率', websiteConfigured === false
+      ? '未配置官网'
+      : formatCitationRate(summary.owned_citation_rate, summary)],
+    ['引用源总数', sourceSummary.total_citations || 0],
+    ['来源域名数', sourceSummary.source_domain_count || 0],
+    [],
+    ['平台表现'],
+    ['平台', '有效回答', '品牌提及率', '回答内竞品提及占比（SOV）', '引用率', '推荐率（AI 语义分析）', '明确有序榜单平均排名'],
+    ...platforms.map((item) => [
+      platformLabel[item.platform] || item.platform || '未知',
+      item.valid_answers || 0,
+      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.valid_answers),
+      formatCurrentSov(item.sov_summary),
+      formatCitationRate(item.citation_rate, item),
+      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.valid_answers),
+      item.avg_brand_rank == null
+        ? `N/A（有效回答 ${Number(item.ranked_answers || 0)}）`
+        : `${formatRank(item.avg_brand_rank)}（有效回答 ${Number(item.ranked_answers || 0)}）`
+    ]),
+    [],
+    ['分类覆盖'],
+    ['分类', '问题数', '启用问题数', '运行数', '失败数', '有效回答', '品牌提及率', '回答内竞品提及占比（SOV）', '引用率', '推荐率（AI 语义分析）'],
+    ...categories.map((item) => [
+      item.category || '未分类',
+      item.prompt_count || 0,
+      item.enabled_prompt_count || 0,
+      item.total_runs || 0,
+      item.failed_runs || 0,
+      item.valid_answers || 0,
+      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.valid_answers),
+      formatCurrentSov(item.sov_summary),
+      formatCitationRate(item.citation_rate, item),
+      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.valid_answers)
+    ]),
+    [],
+    ['竞品提及'],
+    ['竞品', '实际提及次数', '出现回答数'],
+    ...competitors.map((item) => [
+      item.name || '未知竞品',
+      item.mentions || 0,
+      item.appeared_answers || 0
+    ]),
+    [],
+    ['趋势'],
+    ['日期', '有效回答', '品牌提及率', '回答内竞品提及占比（SOV）', '引用率', '推荐率（AI 语义分析）'],
+    ...trend.map((item) => [
+      item.date,
+      item.valid_answers || 0,
+      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.valid_answers),
+      formatCurrentSov(item.sov_summary),
+      formatCitationRate(item.citation_rate, item),
+      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.valid_answers)
+    ]),
+    [],
+    ['来源类型'],
+    ['类型', '引用次数', '覆盖回答', '域名数'],
+    ...sourceTypes.map((item) => [
+      item.type || '未知来源',
+      item.citation_count || 0,
+      item.response_count || 0,
+      item.domain_count || 0
+    ]),
+    [],
+    ['Top 引用域名'],
+    ['域名', '来源类型', '覆盖回答', '引用次数', '平台', '问题分类'],
+    ...sourceDomains.map((item) => [
+      item.domain || '',
+      item.source_type || '未知来源',
+      item.response_count || 0,
+      item.citation_count || 0,
+      joinLabels(item.platforms, platformLabel),
+      joinLabels(item.categories)
+    ]),
+    [],
+    ['Top 引用 URL'],
+    ['URL', '域名', '来源类型', '覆盖回答', '引用次数', '平台', '问题分类'],
+    ...sourceUrls.map((item) => [
+      item.url || '',
+      item.domain || '',
+      item.source_type || '未知来源',
+      item.response_count || 0,
+      item.citation_count || 0,
+      joinLabels(item.platforms, platformLabel),
+      joinLabels(item.categories)
+    ]),
+    ...['new', 'dropped', 'retained'].flatMap((kind) => {
+      const label = kind === 'new' ? '新增' : kind === 'dropped' ? '流失' : '保留';
+      const domainRows = Array.isArray(sourceChanges[`${kind}_domains`])
+        ? sourceChanges[`${kind}_domains`]
+        : [];
+      const urlRows = Array.isArray(sourceChanges[`${kind}_urls`])
+        ? sourceChanges[`${kind}_urls`]
+        : [];
+      return [
+        [],
+        [`${label}引用域名`],
+        ['域名', '来源类型', '引用次数', '平台', '问题分类'],
+        ...domainRows.map((item) => [
+          item.domain || '',
+          item.source_type || '未知来源',
+          item.citation_count || 0,
+          joinLabels(item.platforms, platformLabel),
+          joinLabels(item.categories)
+        ]),
+        [],
+        [`${label}引用 URL`],
+        ['URL', '域名', '来源类型', '引用次数', '平台', '问题分类'],
+        ...urlRows.map((item) => [
+          item.url || '',
+          item.domain || '',
+          item.source_type || '未知来源',
+          item.citation_count || 0,
+          joinLabels(item.platforms, platformLabel),
+          joinLabels(item.categories)
+        ])
+      ];
+    }),
+    [],
+    ['优化机会'],
+    ['类型', '优先级', '平台/来源', '对象', '证据', '建议动作'],
+    ...opportunities.map((item) => [
+      item.type || '',
+      item.priority || '',
+      formatOpportunityScope(item, platformLabel),
+      item.prompt || item.domain || item.competitor || item.prompt_category || '',
+      item.evidence || '',
+      item.recommendation || ''
+    ])
+  ];
+}
+
+function buildReportCsvRows({
+  summary = {},
+  platformLabel = defaultPlatformLabel,
+  websiteConfigured
+} = {}) {
+  if (summary.metric_semantics_version === 'contextual_competitor_mentions_sov_v1') {
+    return buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured });
+  }
   const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];
   const competitors = Array.isArray(summary.competitors) ? summary.competitors : [];
   const categories = Array.isArray(summary.categories) ? summary.categories : [];

@@ -8,6 +8,7 @@ const ReportSnapshot = sequelize.define('ReportSnapshot', {
   period_start: { type: DataTypes.DATE, allowNull: false },
   period_end: { type: DataTypes.DATE, allowNull: false },
   summary: { type: DataTypes.JSON, allowNull: false, defaultValue: {} },
+  metric_semantics_version: { type: DataTypes.STRING(50), allowNull: true },
   status: { type: DataTypes.ENUM('generated'), allowNull: false, defaultValue: 'generated' }
 }, {
   tableName: 'report_snapshots',

@@ -87,46 +87,88 @@ test('lets an administrator select and read the dedicated analysis API', async (
 });
 
 test('returns the versioned runtime analysis prompt template to administrators', async () => {
+  const originalGetAnalysisPlatform = AIAnalysisConfigService.getAnalysisPlatform;
+  AIAnalysisConfigService.getAnalysisPlatform = async () => ({
+    code: 'deepseek',
+    adapter_type: 'openai_chat_completions',
+    default_model: 'deepseek-v4-pro'
+  });
   assert.equal((await api('GET', '/analysis-api/prompt', { role: 'user' })).status, 403);
 
-  const response = await api('GET', '/analysis-api/prompt', { role: 'admin' });
+  try {
+    const response = await api('GET', '/analysis-api/prompt', { role: 'admin' });
 
-  assert.equal(response.status, 200);
-  assert.equal(response.headers['cache-control'], 'no-store');
-  assert.equal(response.json.data.version, 'ai_structured_v2');
-  assert.match(response.json.data.template, /\{\{目标品牌\}\}/);
-  assert.match(response.json.data.template, /全部品牌或公司实体/);
-  assert.equal(response.json.data.request_profile.max_tokens, 8192);
-  assert.equal(response.json.data.request_profile.timeout_seconds, 120);
-  assert.equal(response.json.data.request_profile.max_attempts, 2);
-  assert.equal(response.json.data.request_profile.web_search, false);
-  assert.doesNotMatch(response.json.data.template, /逐字原文/);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers['cache-control'], 'no-store');
+    assert.equal(response.json.data.version, 'ai_structured_v3');
+    assert.match(response.json.data.template, /\{\{目标品牌\}\}/);
+    assert.match(response.json.data.template, /\{\{当前问题\}\}/);
+    assert.match(response.json.data.template, /全部品牌或公司实体/);
+    assert.match(response.json.data.template, /competitor_relations/);
+    assert.equal(response.json.data.request_profile.token_limit, null);
+    assert.equal(response.json.data.request_profile.timeout_seconds, 120);
+    assert.equal(response.json.data.request_profile.max_attempts, 2);
+    assert.equal(response.json.data.request_profile.web_search, false);
+    assert.deepEqual(response.json.data.request_parameters, {
+      adapter_type: 'openai_chat_completions',
+      request_body: {
+        model: 'deepseek-v4-pro',
+        messages: [{
+          role: 'user',
+          content: '<运行时注入完整结构化提示词>'
+        }],
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        thinking: { type: 'disabled' }
+      },
+      runtime_policy: {
+        timeout_seconds: 120,
+        max_attempts: 2,
+        web_search: false,
+        token_limit: null
+      }
+    });
+    assert.doesNotMatch(response.json.data.template, /逐字原文/);
+  } finally {
+    AIAnalysisConfigService.getAnalysisPlatform = originalGetAnalysisPlatform;
+  }
 });
 
 test('returns temporary analysis test input and output without a persistence contract', async () => {
   const originalAnalyze = AIResponseAnalysisService.analyze;
-  AIResponseAnalysisService.analyze = async () => ({
+  let analysisInput;
+  AIResponseAnalysisService.analyze = async (input) => {
+    analysisInput = input;
+    return {
     brand_mentioned: true,
     brand_mentions: 1,
     brand_recommended: false,
     brand_rank: 3,
     analysis_structure: {
-      schema_version: 'geo_metric_input_v2',
+      schema_version: 'geo_metric_input_v3',
       entities: [{ name: '广拓', type: 'brand' }]
     },
     raw_output: '{"entities":[{"name":"广拓","type":"brand"}]}'
-  });
+    };
+  };
 
   try {
     const response = await api('POST', '/analysis-api/test', {
       role: 'admin',
       body: {
+        question_text: '周界安防厂商有哪些？',
         brand_name: '广拓',
         brand_aliases: ['GATO'],
         response_text: '3. 上海广拓（GATO）'
       }
     });
     assert.equal(response.status, 200);
+    assert.equal(analysisInput.question, '周界安防厂商有哪些？');
+    assert.deepEqual(analysisInput.competitorHints, []);
+    assert.equal(
+      response.json.data.input.question_text,
+      '周界安防厂商有哪些？'
+    );
     assert.equal(response.json.data.input.brand_name, '广拓');
     assert.equal(response.json.data.input.response_text, '3. 上海广拓（GATO）');
     assert.equal(

@@ -8,9 +8,18 @@ const {
 } = require('../models');
 const QuestionSetRunCsvService = require('./QuestionSetRunCsvService');
 const CitationMetricSemanticsService = require('./CitationMetricSemanticsService');
+const GeoMetricSemanticsService = require('./GeoMetricSemanticsService');
+const {
+  CURRENT_METRIC_SEMANTICS,
+  LEGACY_METRIC_SEMANTICS
+} = require('./GeoMetricSemanticsService');
 
 const SCHEMA_VERSION = 'question_set_run_v1';
-const STRUCTURED_ANALYSIS_METHODS = new Set(['ai_structured_v1', 'ai_structured_v2']);
+const STRUCTURED_ANALYSIS_METHODS = new Set([
+  'ai_structured_v1',
+  'ai_structured_v2',
+  'ai_structured_v3'
+]);
 
 function plain(row) {
   return row && typeof row.toJSON === 'function' ? row.toJSON() : row;
@@ -24,6 +33,10 @@ function finiteNumber(value, fallback = 0) {
 function percent(count, total) {
   if (!total) return 0;
   return Number(((count / total) * 100).toFixed(2));
+}
+
+function nullablePercent(count, total) {
+  return total > 0 ? percent(count, total) : null;
 }
 
 function ownedCitationCount(row) {
@@ -67,16 +80,6 @@ function normalizeFailure(value) {
 }
 
 function normalizeCitationSemantics(row) {
-  if (row?.has_metrics === false) {
-    return {
-      ...row,
-      citation_count: 0,
-      owned_citation_count: 0,
-      competitor_citation_count: 0,
-      citation_sources: [],
-      citation_evidence_status: 'none'
-    };
-  }
   const eligible = CitationMetricSemanticsService.isCoreKpiEligible(row);
   const rawSources = Array.isArray(row?.citation_sources) ? row.citation_sources : [];
   const rawCount = finiteNumber(row?.citation_count);
@@ -94,6 +97,32 @@ function normalizeCitationSemantics(row) {
       competitor_citation_count: competitorCount,
       citation_sources: rawSources,
       citation_evidence_status: 'explicit'
+    };
+  }
+  if (row?.has_metrics === false) {
+    return {
+      ...row,
+      citation_count: 0,
+      owned_citation_count: 0,
+      competitor_citation_count: 0,
+      citation_sources: [],
+      citation_evidence_status: CitationMetricSemanticsService.evidenceStatus(row) === 'unavailable'
+        ? 'unavailable'
+        : 'none'
+    };
+  }
+  if (
+    CitationMetricSemanticsService.semanticsVersion(row)
+      === CitationMetricSemanticsService.SEMANTICS_VERSION
+    && CitationMetricSemanticsService.evidenceStatus(row) === 'unavailable'
+  ) {
+    return {
+      ...row,
+      citation_count: 0,
+      owned_citation_count: 0,
+      competitor_citation_count: 0,
+      citation_sources: [],
+      citation_evidence_status: 'unavailable'
     };
   }
   return {
@@ -166,33 +195,103 @@ function deriveCapabilities({ source, status, summary, integrityStatus }) {
 
 function summarize(rows) {
   const completedRows = rows.filter((row) => row.status === 'completed');
-  const metricRows = completedRows.filter((row) => row.has_metrics);
-  const citationRows = metricRows.filter((row) => row.citation_evidence_status === 'explicit');
+  const currentScopeRows = rows.filter(
+    (row) => row.metric_semantics_version === CURRENT_METRIC_SEMANTICS
+  );
+  const usesCurrentSemantics = currentScopeRows.length > 0;
+  const metricRows = completedRows.filter((row) => (
+    row.has_metrics
+    && (
+      !usesCurrentSemantics
+      || row.metric_semantics_version === CURRENT_METRIC_SEMANTICS
+    )
+  ));
+  const acquiredRows = usesCurrentSemantics
+    ? currentScopeRows.filter((row) => String(row.answer || '').trim())
+    : [];
+  const citationRows = usesCurrentSemantics
+    ? acquiredRows.filter((row) => row.citation_evidence_status === 'explicit')
+    : metricRows.filter((row) => row.citation_evidence_status === 'explicit');
   const rankedRows = metricRows.filter((row) => finiteNumber(row.brand_rank) > 0);
+  const sovCalculableRows = usesCurrentSemantics
+    ? metricRows.filter((row) => row.answer_competitor_share !== null
+      && row.answer_competitor_share !== undefined
+      && Number.isFinite(Number(row.answer_competitor_share)))
+    : [];
+  const legacySovRows = usesCurrentSemantics
+    ? []
+    : metricRows.filter((row) => row.share_of_voice !== null
+      && row.share_of_voice !== undefined
+      && Number.isFinite(Number(row.share_of_voice)));
   const competitorBaselineCount = metricRows.reduce(
     (maximum, row) => Math.max(maximum, Array.isArray(row.competitor_mentions) ? row.competitor_mentions.length : 0),
     0
   );
   const sum = (key, list = metricRows) => list.reduce((total, row) => total + finiteNumber(row[key]), 0);
   const totalOwnedCitations = citationRows.reduce((total, row) => total + ownedCitationCount(row), 0);
+  const brandMentionedAnswers = metricRows.filter((row) => row.brand_mentioned).length;
+  const recommendedAnswers = metricRows.filter((row) => row.brand_recommended).length;
 
-  return {
+  const common = {
     total: rows.length,
     completed: completedRows.length,
     failed: rows.filter((row) => row.status === 'failed').length,
     pending: rows.filter((row) => row.status === 'pending').length,
     valid_analyses: metricRows.length,
+    valid_answers: usesCurrentSemantics ? metricRows.length : null,
+    acquired_answers: usesCurrentSemantics ? acquiredRows.length : null,
+    analysis_coverage_rate: usesCurrentSemantics
+      ? nullablePercent(metricRows.length, acquiredRows.length)
+      : null,
+    brand_mentioned_answers: usesCurrentSemantics ? brandMentionedAnswers : null,
+    recommended_answers: usesCurrentSemantics ? recommendedAnswers : null,
+    ranked_answers: usesCurrentSemantics ? rankedRows.length : null,
+    sov_calculable_answers: usesCurrentSemantics ? sovCalculableRows.length : null,
+    avg_answer_competitor_share: usesCurrentSemantics
+      ? (sovCalculableRows.length
+          ? Number((sum('answer_competitor_share', sovCalculableRows) / sovCalculableRows.length).toFixed(2))
+          : null)
+      : null,
     citation_valid_analyses: citationRows.length,
-    citation_unverified_analyses: metricRows.length - citationRows.length,
+    citation_unverified_analyses: usesCurrentSemantics
+      ? acquiredRows.length - citationRows.length
+      : metricRows.length - citationRows.length,
     competitor_baseline_count: competitorBaselineCount,
-    brand_mention_rate: percent(metricRows.filter((row) => row.brand_mentioned).length, metricRows.length),
-    recommendation_rate: percent(metricRows.filter((row) => row.brand_recommended).length, metricRows.length),
-    avg_share_of_voice: metricRows.length ? Number((sum('share_of_voice') / metricRows.length).toFixed(2)) : 0,
+    brand_mention_rate: usesCurrentSemantics
+      ? nullablePercent(brandMentionedAnswers, metricRows.length)
+      : percent(brandMentionedAnswers, metricRows.length),
+    recommendation_rate: usesCurrentSemantics
+      ? nullablePercent(recommendedAnswers, metricRows.length)
+      : percent(recommendedAnswers, metricRows.length),
     citation_rate: percent(citationRows.filter((row) => finiteNumber(row.citation_count) > 0).length, citationRows.length),
     owned_citation_rate: percent(citationRows.filter((row) => ownedCitationCount(row) > 0).length, citationRows.length),
     avg_brand_rank: rankedRows.length ? Number((sum('brand_rank', rankedRows) / rankedRows.length).toFixed(2)) : null,
     total_citations: sum('citation_count', citationRows),
     total_owned_citations: totalOwnedCitations
+  };
+  if (usesCurrentSemantics) {
+    return {
+      ...common,
+      sov_summary: {
+        metric_semantics_version: CURRENT_METRIC_SEMANTICS,
+        kind: 'contextual_competitor_mentions',
+        average: common.avg_answer_competitor_share,
+        calculable_answers: sovCalculableRows.length
+      }
+    };
+  }
+  const legacyAverage = metricRows.length
+    ? Number((sum('share_of_voice') / metricRows.length).toFixed(2))
+    : 0;
+  return {
+    ...common,
+    avg_share_of_voice: legacyAverage,
+    sov_summary: {
+      metric_semantics_version: LEGACY_METRIC_SEMANTICS,
+      kind: 'legacy_configured_competitors',
+      average: legacySovRows.length ? legacyAverage : null,
+      calculable_answers: legacySovRows.length
+    }
   };
 }
 
@@ -306,6 +405,16 @@ function normalizeNativeRow(record) {
   const row = plain(record);
   const detail = plain(row.resultDetail) || {};
   const metric = plain(row.visibilityMetric) || null;
+  const citationAnalysis = detail.citation_analysis
+    && typeof detail.citation_analysis === 'object'
+    && !Array.isArray(detail.citation_analysis)
+    && detail.citation_analysis.semantics_version
+    ? detail.citation_analysis
+    : null;
+  const metricSemanticsVersion = metric?.metric_semantics_version
+    || row.metric_semantics_version
+    || null;
+  const sov = metric ? GeoMetricSemanticsService.presentSov(metric) : null;
   const analysisDiagnostics = normalizeAnalysisDiagnostics(row.result_summary?.analysis);
   const failure = normalizeFailure(row.result_summary?.failure);
   const retry = row.result_summary?.retry && typeof row.result_summary.retry === 'object'
@@ -332,6 +441,7 @@ function normalizeNativeRow(record) {
     provider_citations: normalizeProviderCitations(detail.provider_citations),
     web_capture: normalizeWebCapture(row.result_summary?.web_capture, row.id),
     has_metrics: Boolean(metric),
+    analysis_contract_version: row.analysis_contract_version || null,
     brand_mentioned: Boolean(metric?.brand_mentioned),
     brand_mentions: finiteNumber(metric?.brand_mentions),
     brand_rank: STRUCTURED_ANALYSIS_METHODS.has(metric?.analysis_method)
@@ -339,26 +449,83 @@ function normalizeNativeRow(record) {
       ? (metric?.brand_rank == null ? null : finiteNumber(metric.brand_rank))
       : null,
     brand_recommended: Boolean(metric?.brand_recommended),
-    share_of_voice: finiteNumber(metric?.share_of_voice),
-    citation_count: finiteNumber(metric?.citation_count),
-    owned_citation_count: finiteNumber(metric?.owned_citation_count),
-    competitor_citation_count: finiteNumber(metric?.competitor_citation_count),
+    metric_semantics_version: metricSemanticsVersion,
+    sov,
+    ...(metricSemanticsVersion === LEGACY_METRIC_SEMANTICS
+      ? { share_of_voice: metric?.share_of_voice == null ? null : finiteNumber(metric.share_of_voice) }
+      : {}),
+    answer_competitor_share: metric
+      && metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+      ? metric?.answer_competitor_share ?? null
+      : null,
+    sov_numerator: metric
+      && metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+      ? finiteNumber(metric?.sov_numerator)
+      : null,
+    sov_denominator: metric
+      && metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+      ? finiteNumber(metric?.sov_denominator)
+      : null,
+    competition_entities: metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+      && Array.isArray(metric?.competition_entities)
+      ? metric.competition_entities
+      : [],
+    citation_count: citationAnalysis
+      ? finiteNumber(citationAnalysis.citation_count)
+      : finiteNumber(metric?.citation_count),
+    owned_citation_count: citationAnalysis
+      ? finiteNumber(citationAnalysis.owned_citation_count)
+      : finiteNumber(metric?.owned_citation_count),
+    competitor_citation_count: citationAnalysis
+      ? finiteNumber(citationAnalysis.competitor_citation_count)
+      : finiteNumber(metric?.competitor_citation_count),
     sentiment: metric?.sentiment || '',
     sentiment_reason: metric?.sentiment_reason || '',
     analysis_method: metric?.analysis_method || 'legacy_rules_v1',
     analysis_platform: metric?.analysis_platform || '',
     analysis_model: metric?.analysis_model || '',
-    analysis_structure: metric?.analysis_structure && typeof metric.analysis_structure === 'object'
-      ? metric.analysis_structure
-      : {},
+    analysis_structure: {
+      ...(metric?.analysis_structure && typeof metric.analysis_structure === 'object'
+        ? metric.analysis_structure
+        : {}),
+      ...(citationAnalysis?.semantics_version
+        ? {
+            citations: {
+              semantics_version: citationAnalysis.semantics_version,
+              evidence_status: citationAnalysis.evidence_status
+            }
+          }
+        : {})
+    },
     analysis_evidence: metric?.analysis_evidence && typeof metric.analysis_evidence === 'object'
       ? metric.analysis_evidence
       : {},
     competitor_mentions: Array.isArray(metric?.competitor_mentions) ? metric.competitor_mentions : [],
-    citation_sources: Array.isArray(metric?.citation_sources) ? metric.citation_sources : [],
+    citation_sources: citationAnalysis && Array.isArray(citationAnalysis.sources)
+      ? citationAnalysis.sources
+      : (Array.isArray(metric?.citation_sources) ? metric.citation_sources : []),
     created_at: row.created_at || null,
     updated_at: row.updated_at || null
   });
+}
+
+function normalizeRowMetricSemantics(row, fallbackVersion) {
+  const version = row?.metric_semantics_version
+    || fallbackVersion
+    || LEGACY_METRIC_SEMANTICS;
+  const normalized = {
+    ...row,
+    metric_semantics_version: version
+  };
+  if (!normalized.has_metrics) {
+    normalized.sov = null;
+  } else if (!normalized.sov) {
+    normalized.sov = GeoMetricSemanticsService.presentSov(normalized);
+  }
+  if (version === CURRENT_METRIC_SEMANTICS) {
+    delete normalized.share_of_voice;
+  }
+  return normalized;
 }
 
 class QuestionSetRunService {
@@ -397,11 +564,17 @@ class QuestionSetRunService {
     const sourceRows = run.source === 'imported' || cachedRows.length
       ? cachedRows
       : await this.getNativeRows(run, repositories);
-    const rows = sourceRows.map(normalizeCitationSemantics).map((row) => {
+    const fallbackMetricSemanticsVersion = run.metric_semantics_version
+      || sourceRows.find((row) => row?.metric_semantics_version)?.metric_semantics_version
+      || LEGACY_METRIC_SEMANTICS;
+    const rows = sourceRows
+      .map((row) => normalizeRowMetricSemantics(row, fallbackMetricSemanticsVersion))
+      .map(normalizeCitationSemantics)
+      .map((row) => {
       if (STRUCTURED_ANALYSIS_METHODS.has(row?.analysis_method)) return row;
       const hasCompetitorBaseline = Array.isArray(row?.competitor_mentions) && row.competitor_mentions.length > 0;
       return hasCompetitorBaseline ? row : { ...row, brand_rank: null };
-    });
+      });
     const pausedAt = run.paused_at || null;
     const integrityStatus = run.integrity_status || 'complete';
     const status = integrityStatus === 'missing_records'
@@ -416,6 +589,7 @@ class QuestionSetRunService {
       source: run.source,
       schema_version: run.schema_version,
       analysis_contract_version: run.analysis_contract_version || null,
+      metric_semantics_version: fallbackMetricSemanticsVersion,
       planned_platforms: Array.isArray(run.planned_platforms) ? run.planned_platforms : [],
       skipped_platforms: Array.isArray(run.skipped_platforms) ? run.skipped_platforms : [],
       status,
@@ -702,6 +876,7 @@ class QuestionSetRunService {
       source: 'imported',
       schema_version: parsed.schemaVersion,
       analysis_contract_version: parsed.analysisContractVersion,
+      metric_semantics_version: parsed.metricSemanticsVersion,
       planned_record_count: 0,
       integrity_status: 'complete',
       integrity_missing_record_count: 0,

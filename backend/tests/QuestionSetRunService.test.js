@@ -146,6 +146,7 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     prompt_category: '购买决策',
     sentiment: 'positive',
     analysis_method: 'ai_structured_v1',
+    metric_semantics_version: 'configured_competitor_sov_v1',
     analysis_platform: 'analysis-ai',
     analysis_model: 'analysis-model',
     analysis_structure: {
@@ -242,6 +243,183 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   const durableReport = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
   assert.equal(durableReport.rows.length, 2);
   assert.equal(durableReport.rows[0].answer, '广拓可以作为周界报警方案的候选。');
+});
+
+test('单问题报告返回新版 SOV 分子分母和逐实体竞争关系', async () => {
+  const run = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: null,
+    question_set_name: '单问题运行',
+    source: 'native',
+    schema_version: 'question_set_run_v1',
+    analysis_contract_version: 'ai_structured_v3',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    planned_record_count: 2,
+    started_at: new Date()
+  });
+  const record = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    question_set_run_id: run.id,
+    run_slot_index: 0,
+    platform: 'deepseek',
+    question: prompt.question,
+    brand: project.name,
+    brand_keywords: project.name,
+    analysis_contract_version: 'ai_structured_v3',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    status: 'completed'
+  });
+  await ResultDetail.create({
+    question_record_id: record.id,
+    ai_response_original: '广拓与海康都提供周界方案。',
+    parsing_status: 'completed'
+  });
+  await VisibilityMetric.create({
+    project_id: project.id,
+    prompt_id: prompt.id,
+    question_record_id: record.id,
+    user_id: user.id,
+    platform: 'deepseek',
+    brand_mentioned: true,
+    brand_mentions: 1,
+    visibility_score: 1,
+    competitor_mentions: [],
+    share_of_voice: null,
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    answer_competitor_share: 50,
+    sov_numerator: 1,
+    sov_denominator: 2,
+    competition_entities: [{
+      name: '海康',
+      relation: 'competitor',
+      reason: '提供同类周界方案',
+      mentions: 1,
+      surface_forms: ['海康']
+    }],
+    analysis_method: 'ai_structured_v3',
+    analysis_structure: {
+      schema_version: 'geo_metric_input_v3',
+      competitor_relations: [{
+        entity_name: '海康',
+        relation: 'competitor',
+        reason: '提供同类周界方案'
+      }]
+    }
+  });
+  const failedRecord = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    question_set_run_id: run.id,
+    run_slot_index: 1,
+    platform: 'deepseek',
+    question: '另一条周界问题',
+    brand: project.name,
+    brand_keywords: project.name,
+    analysis_contract_version: 'ai_structured_v3',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    status: 'failed',
+    error_message: '回答超出分析模型范围，本条未计入品牌指标',
+    result_summary: {
+      failure: {
+        stage: 'analysis_request',
+        error_code: 'analysis_input_too_long'
+      }
+    }
+  });
+  await ResultDetail.create({
+    question_record_id: failedRecord.id,
+    ai_response_original: '这条完整原回答已经采集，但结构化分析失败。',
+    provider_citations: [{
+      url: 'https://example.com/source',
+      source_role: 'explicit_citation'
+    }],
+    parsing_status: 'completed'
+  });
+
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+
+  assert.equal(
+    report.metric_semantics_version,
+    'contextual_competitor_mentions_sov_v1'
+  );
+  assert.deepEqual(report.rows[0].sov, {
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    kind: 'contextual_competitor_mentions',
+    status: 'calculated',
+    value: 50,
+    numerator: 1,
+    denominator: 2
+  });
+  assert.deepEqual(report.summary.sov_summary, {
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    kind: 'contextual_competitor_mentions',
+    average: 50,
+    calculable_answers: 1
+  });
+  assert.equal(Object.hasOwn(report.summary, 'avg_share_of_voice'), false);
+  assert.equal(Object.hasOwn(report.rows[0], 'share_of_voice'), false);
+  assert.equal(report.rows[0].answer_competitor_share, 50);
+  assert.equal(report.rows[0].competition_entities[0].relation, 'competitor');
+  assert.equal(report.rows[0].competition_entities[0].reason, '提供同类周界方案');
+  assert.equal(report.rows[1].has_metrics, false);
+  assert.equal(
+    report.rows[1].analysis_contract_version,
+    'ai_structured_v3'
+  );
+  assert.equal(
+    report.rows[1].metric_semantics_version,
+    'contextual_competitor_mentions_sov_v1'
+  );
+  assert.deepEqual({
+    valid_answers: report.summary.valid_answers,
+    acquired_answers: report.summary.acquired_answers,
+    analysis_coverage_rate: report.summary.analysis_coverage_rate,
+    brand_mentioned_answers: report.summary.brand_mentioned_answers,
+    brand_mention_rate: report.summary.brand_mention_rate
+  }, {
+    valid_answers: 1,
+    acquired_answers: 2,
+    analysis_coverage_rate: 50,
+    brand_mentioned_answers: 1,
+    brand_mention_rate: 100
+  });
+
+  const csv = await QuestionSetRunService.exportCsv({
+    projectId: project.id,
+    runId: run.id
+  });
+  const imported = await QuestionSetRunService.importCsv({ project, user, csv });
+  const restored = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: imported.id
+  });
+  assert.equal(
+    restored.metric_semantics_version,
+    'contextual_competitor_mentions_sov_v1'
+  );
+  assert.deepEqual(restored.summary.sov_summary, report.summary.sov_summary);
+  assert.deepEqual(restored.rows[0].sov, report.rows[0].sov);
+  assert.deepEqual(
+    restored.rows[0].competition_entities,
+    report.rows[0].competition_entities
+  );
+  assert.equal(Object.hasOwn(restored.rows[0], 'share_of_voice'), false);
+  await imported.destroy();
+
+  await VisibilityMetric.destroy({ where: { question_record_id: record.id } });
+  await ResultDetail.destroy({
+    where: { question_record_id: [record.id, failedRecord.id] }
+  });
+  await failedRecord.destroy();
+  await record.destroy();
+  await run.destroy();
 });
 
 test('单问题失败运行不依赖持久化问题集也能生成可重试报告', async () => {
@@ -399,6 +577,7 @@ test('历史混合引用不进入问题集核心 KPI，但保留可解释的旧�
     question_record_id: record.id,
     user_id: user.id,
     platform: 'qwen',
+    metric_semantics_version: 'configured_competitor_sov_v1',
     citation_count: 56,
     owned_citation_count: 4,
     citation_sources: [{ url: 'https://legacy.example.com/a', domain: 'legacy.example.com' }],
@@ -420,6 +599,59 @@ test('历史混合引用不进入问题集核心 KPI，但保留可解释的旧�
   assert.equal(report.rows[0].legacy_citation_count, 56);
   assert.deepEqual(report.rows[0].citation_sources, []);
   assert.equal(report.rows[0].legacy_citation_sources.length, 1);
+
+  await run.destroy();
+  await record.destroy();
+});
+
+test('问题集报告在品牌分析失败时仍统计独立保存的显式引用证据', async () => {
+  const record = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    platform: 'doubao',
+    question: '引用证据独立统计',
+    brand: project.name,
+    brand_keywords: project.name,
+    analysis_contract_version: 'ai_structured_v3',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    status: 'failed'
+  });
+  await ResultDetail.create({
+    question_record_id: record.id,
+    ai_response_original: '回答已抓取，但品牌分析失败。',
+    citation_analysis: {
+      semantics_version: 'explicit-citation-v2',
+      evidence_status: 'explicit',
+      citation_count: 1,
+      owned_citation_count: 1,
+      competitor_citation_count: 0,
+      sources: [{
+        url: 'https://gato.example/report',
+        domain: 'gato.example',
+        owned: true,
+        competitor_owned: false
+      }]
+    },
+    parsing_status: 'completed'
+  });
+  const run = await createNativeRun(1);
+  await record.update({ question_set_run_id: run.id, run_slot_index: 0 });
+
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+
+  assert.equal(report.summary.valid_answers, 0);
+  assert.equal(report.summary.acquired_answers, 1);
+  assert.equal(report.summary.analysis_coverage_rate, 0);
+  assert.equal(report.summary.citation_valid_analyses, 1);
+  assert.equal(report.summary.citation_unverified_analyses, 0);
+  assert.equal(report.summary.citation_rate, 100);
+  assert.equal(report.summary.owned_citation_rate, 100);
+  assert.equal(report.rows[0].citation_evidence_status, 'explicit');
+  assert.equal(report.rows[0].citation_count, 1);
 
   await run.destroy();
   await record.destroy();
@@ -657,6 +889,24 @@ test('报告汇总能够识别已配置的竞品基线', () => {
   }]);
 
   assert.equal(summary.competitor_baseline_count, 1);
+});
+
+test('新口径没有已采集回答时覆盖率和平均 SOV 保持 N/A', () => {
+  const summary = QuestionSetRunService.summarize([{
+    status: 'failed',
+    answer: '',
+    has_metrics: false,
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
+  }]);
+
+  assert.equal(summary.valid_answers, 0);
+  assert.equal(summary.acquired_answers, 0);
+  assert.equal(summary.analysis_coverage_rate, null);
+  assert.equal(summary.brand_mention_rate, null);
+  assert.equal(summary.recommendation_rate, null);
+  assert.equal(summary.sov_calculable_answers, 0);
+  assert.equal(summary.avg_answer_competitor_share, null);
+  assert.equal(Object.hasOwn(summary, 'avg_share_of_voice'), false);
 });
 
 test('执行能力由服务端状态机统一给出暂停和继续条件', () => {
