@@ -47,7 +47,9 @@ Authorization: Bearer <token>
   - `GET /api/users` 用户列表（分页与搜索）
   - `POST /api/users` 创建用户
   - `PUT /api/users/:id` 更新用户状态/角色/会员
-  - `DELETE /api/users/:id` 删除用户
+    - `status=inactive` 停用用户：立即禁止登录并使已有令牌失效，保留历史项目、报告、监测、配额和审计数据
+    - `status=active` 重新启用用户
+  - 当前不提供永久删除用户接口
   - `PUT /api/users/:id/password` 重置用户密码
 
 ## AI 检测（需认证）
@@ -75,6 +77,13 @@ Authorization: Bearer <token>
   - **权限验证**：只能删除自己的记录，管理员可删除所有
 
 ## 问题库与问题集（需认证）
+
+### 当前 GEO 指标契约
+
+- 新运行的 `analysis_contract_version` 固定为 `ai_structured_v3`，结构版本为 `geo_metric_input_v3`，`metric_semantics_version` 固定为 `contextual_competitor_mentions_sov_v1`。
+- 单条 `sov` 是判别联合：`status=calculated` 时提供 `value`、`numerator` 和 `denominator`；目标品牌与竞品均未提及时返回 `status=not_applicable`、`value=null` 和 `0/0`。
+- 聚合 `sov_summary.average` 是可计算单回答 SOV 的等权平均，`calculable_answers` 是参与平均的回答数。分析失败不进入品牌指标，只进入 `analysis_coverage_rate`。
+- 当前接口不会为新记录返回无版本含义的旧 SOV 标量。历史运行和历史快照继续按已存版本展示原值与“历史竞品配置口径”，不参与新版聚合。
 
 - `GET /api/geo-projects/:projectId/prompts` 查询项目问题列表及近期表现
 - `POST /api/geo-projects/:projectId/prompts` 新建单问题
@@ -121,6 +130,19 @@ Authorization: Bearer <token>
   - 校验：schema 版本、必要列、终态 `status`、正整数 ID、非负计数、0–100 百分比、正数排名、时间顺序、JSON 结构和引用链接协议；仅允许 HTTP/HTTPS 引用链接
   - 校验失败返回 `422`，并给出稳定 `code`、`row` 和 `column`；整份文件原子拒绝，不写入部分报告
   - 返回：`201 Created` 和只读导入报告；不会创建或覆盖问题、问题集，也不会计入项目汇总指标
+
+### 项目看板与项目报告
+
+- `GET /api/geo-projects/:projectId/dashboard` 获取当前项目的新版指标看板
+  - Query 参数：`days` 为 1–365 天；`platform` 默认为 `all`，也可指定周期内实际出现的平台代码
+  - 平台列表来自查询周期内实际历史记录，不受项目当前平台配置删减影响
+  - 只聚合 `contextual_competitor_mentions_sov_v1`，返回分析覆盖率、品牌提及率、推荐率、有效排名回答数、`sov_summary`、实际竞品提及次数和趋势
+- `POST /api/geo-projects/:projectId/reports/generate` 生成不可变项目报告快照
+  - 请求体：`days` 为 1–365 天
+  - 同一批查询结果一次固化 `all` 与各实际平台的 `metric_views`；切换平台不重新查询或修改快照
+- `GET /api/geo-projects/:projectId/reports/latest` 获取最新项目报告快照
+  - 新快照返回顶层 `metric_semantics_version` 及 `metric_views`
+  - 历史旧快照保持生成时的原字段、原数值和旧口径标签，不用当前公式重算
 
 ## SEO 检测（需认证）
 
@@ -289,10 +311,10 @@ Authorization: Bearer <token>
   - `GET /api/settings` 获取允许的系统设置项
   - `PUT /api/settings` 更新设置
   - `GET /api/settings/analysis-api` 获取当前 AI 结构化分析平台与独立模型
-  - `GET /api/settings/analysis-api/prompt` 获取正式运行使用的版本化分析提示词模板、期望 JSON 结构与独立调用参数 `request_profile`
+  - `GET /api/settings/analysis-api/prompt` 获取正式运行使用的版本化分析提示词模板、期望 JSON 结构、独立调用策略 `request_profile`，以及按当前已保存平台和模型生成的脱敏实际请求预览 `request_parameters`
   - `PUT /api/settings/analysis-api` 通过 `{ "platform_code": "deepseek", "model_name": "deepseek-v4-pro" }` 分别选择已启用且配置完整的平台和分析模型
-  - `POST /api/settings/analysis-api/test` 提交品牌、别名和一段原回答，临时返回测试输入、证据结构、程序派生结果和 API 原始输出；测试内容不落库
-  - 分析调用固定关闭联网，使用独立的温度、输出 Token、超时和尝试次数；这些值不继承或修改监测平台的同名参数
+  - `POST /api/settings/analysis-api/test` 提交当前问题、品牌、别名和一段完整原回答，临时返回测试输入、证据结构、程序派生结果和 API 原始输出；测试内容不落库
+  - 分析调用固定关闭联网，使用独立的温度、超时和尝试次数，不设置应用层输入或输出 Token 上限；这些值不继承或修改监测平台的同名参数
 - 公开接口（无需认证）：
   - `GET /api/settings/seo` 获取公共 SEO 设置
   - `GET /api/settings/notice` 获取系统通知

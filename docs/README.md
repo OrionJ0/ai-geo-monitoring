@@ -31,6 +31,7 @@
 - `closed-2026-07-26-002-deepseek-web-monitoring/`：已完成的 DeepSeek 真实网页串行采集、人工登录会话、引用/截图证据、API/Web 样本隔离，以及问题库单问题/问题集和自动监测入口验收
 - `blocked-2026-07-27-001-market-team-vm-web-queue/`：市场部共享 admin、虚拟机单实例、DeepSeek Web 公共排队状态；实现和自动化验收完成，等待目标虚拟机多浏览器发布验收
 - `active-2026-07-27-002-doubao-web-monitoring/`：豆包 Web 注册表、隔离运行时、可信采集、设置页账号管理、双平台状态、默认启用预置与正式任务链路已完成本地实现；本地真实单问题采集已通过，仍需目标虚拟机完成专用 Profile 登录、问题集、自动监测和双浏览器资源验收
+- `blocked-2026-07-28-001-geo-entity-share-metrics/`：回答内竞品提及占比（SOV）的版本边界、v3 完整输入分析、回答级等权聚合、分析失败隔离、平台视图、历史兼容和人工基线；Issue 008 人工基线已关闭，等待 Issue 009 的真实入口验收
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 
