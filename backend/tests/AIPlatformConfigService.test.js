@@ -35,7 +35,7 @@ test.after(async () => {
   await sequelize.close();
 });
 
-test('seeds API presets plus disabled non-sensitive managed Web presets', async () => {
+test('seeds API presets plus managed Web presets with Doubao Web enabled by default', async () => {
   const service = createService();
   await service.ensurePresets();
 
@@ -67,7 +67,7 @@ test('seeds API presets plus disabled non-sensitive managed Web presets', async 
   assert.equal(doubaoWeb.adapter_type, 'doubao_web');
   assert.equal(doubaoWeb.base_url, 'https://www.doubao.com');
   assert.equal(doubaoWeb.default_model, 'doubao-web-ui');
-  assert.equal(doubaoWeb.enabled, false);
+  assert.equal(doubaoWeb.enabled, true);
   const doubao = rows.find((row) => row.code === 'doubao');
   assert.equal(doubao.adapter_type, 'openai_responses');
   assert.equal(doubao.base_url, 'https://ark.cn-beijing.volces.com/api/v3');
@@ -86,6 +86,25 @@ test('seeds API presets plus disabled non-sensitive managed Web presets', async 
   assert.equal(hunyuan.default_model, 'hy3');
   assert.equal(hunyuan.base_url, 'https://tokenhub.tencentmaas.com/v1');
   assert.equal(PRESET_PLATFORMS.length, 6);
+});
+
+test('keeps an existing administrator-disabled Doubao Web preset disabled', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'doubao-web',
+    name: '豆包网页版',
+    adapter_type: 'doubao_web',
+    base_url: 'https://www.doubao.com',
+    default_model: 'doubao-web-ui',
+    enabled: false,
+    builtin: true
+  });
+
+  await service.ensurePresets();
+
+  const doubaoWeb = await AIPlatformConfig.findOne({ where: { code: 'doubao-web' } });
+  assert.equal(doubaoWeb.builtin, true);
+  assert.equal(doubaoWeb.enabled, false);
 });
 
 test('treats both managed Web presets as configured without API keys and derives capabilities', async () => {

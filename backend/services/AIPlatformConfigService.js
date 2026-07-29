@@ -77,7 +77,7 @@ const PRESET_PLATFORMS = Object.freeze([
     adapter_type: 'doubao_web',
     base_url: 'https://www.doubao.com',
     default_model: 'doubao-web-ui',
-    enabled: false,
+    enabled: true,
     builtin: true
   }),
   Object.freeze({

@@ -21,7 +21,7 @@ blocked_by:
 
 管理员应能在 `/admin/settings` 查看每个网页版平台的浏览器配置、专用 Profile 初始化和本次进程登录验证状态；可以从页面打开专用 Chrome，人工登录或切换账号，并在完成后主动验证。系统不得收集账号密码、Cookie、Authorization 或账号身份信息。
 
-平台预置默认值同步调整：千问 Responses 请求默认强制搜索，DeepSeek API 新预置默认关闭。默认值不能覆盖管理员后续明确保存的自定义配置。
+平台预置默认值同步调整：千问 Responses 请求默认强制搜索，DeepSeek API 新预置默认关闭，豆包 Web 新预置默认启用。默认值不能覆盖管理员后续明确保存的自定义配置或启停状态。
 
 ## Acceptance criteria
 
@@ -34,6 +34,7 @@ blocked_by:
 - [x] 接口和页面不读取或返回账号密码、Cookie、Authorization、Profile 路径或账号身份。
 - [x] 千问新预置默认包含 `search_options.forced_search = true`，正式 Responses 请求仍由请求层添加 `web_search` 工具。
 - [x] DeepSeek API 新预置默认关闭；DeepSeek 网页版与 DeepSeek API 仍为独立平台。
+- [x] 豆包 Web 新初始化时作为内置预置平台默认启用；已有管理员停用状态在预置同步后保持不变。
 - [x] 从设置页和正式调用入口验证豆包网页版不进入豆包 API Adapter。
 
 ## Blocked by
