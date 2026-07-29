@@ -207,10 +207,10 @@ router.get('/platform-comparison/:userId', authRequired, async (req, res) => {
       where: whereClause,
       attributes: [
         'platform',
-        [sequelize.fn('COUNT', sequelize.col('question_records.id')), 'total_records']
+        [sequelize.fn('COUNT', sequelize.col('id')), 'total_records']
       ],
       group: ['platform'],
-      order: [[sequelize.fn('COUNT', sequelize.col('question_records.id')), 'DESC']]
+      order: [[sequelize.fn('COUNT', sequelize.col('id')), 'DESC']]
     });
 
     res.json({
@@ -242,12 +242,12 @@ router.get('/trends/:userId', authRequired, async (req, res) => {
         }
       },
       attributes: [
-        [sequelize.fn('DATE', sequelize.col('question_records.created_at')), 'date'],
-        [sequelize.fn('COUNT', sequelize.col('question_records.id')), 'total_detections']
+        [sequelize.fn('DATE', sequelize.col('created_at')), 'date'],
+        [sequelize.fn('COUNT', sequelize.col('id')), 'total_detections']
       ],
       include: [],
-      group: [sequelize.fn('DATE', sequelize.col('question_records.created_at'))],
-      order: [[sequelize.fn('DATE', sequelize.col('question_records.created_at')), 'ASC']]
+      group: [sequelize.fn('DATE', sequelize.col('created_at'))],
+      order: [[sequelize.fn('DATE', sequelize.col('created_at')), 'ASC']]
     });
 
     res.json({

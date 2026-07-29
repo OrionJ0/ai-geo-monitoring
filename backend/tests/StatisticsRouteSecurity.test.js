@@ -18,3 +18,9 @@ test('statistics routes aggregate historical records for dynamic platforms', () 
   assert.match(routeSource, /where:\s*whereClause/);
   assert.match(routeSource, /where:\s*metricWhereClause/);
 });
+
+test('statistics aggregate columns use the Sequelize model alias instead of the physical table name', () => {
+  assert.doesNotMatch(routeSource, /sequelize\.col\('question_records\.(?:id|created_at)'\)/);
+  assert.match(routeSource, /sequelize\.fn\('COUNT', sequelize\.col\('id'\)\)/);
+  assert.match(routeSource, /sequelize\.fn\('DATE', sequelize\.col\('created_at'\)\)/);
+});
