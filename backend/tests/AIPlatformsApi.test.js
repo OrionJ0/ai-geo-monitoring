@@ -6,7 +6,7 @@ process.env.DB_STORAGE = ':memory:';
 process.env.JWT_SECRET = 'ai-platform-api-test-secret';
 process.env.CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 8).toString('base64');
 
-const { sequelize, AIPlatformConfig } = require('../models');
+const { sequelize, AIPlatformConfig, User } = require('../models');
 const AIPlatformConfigService = require('../services/AIPlatformConfigService');
 const AIPlatformRequestService = require('../services/AIPlatformRequestService');
 const WebPlatformRuntimeStatusService = require('../services/WebPlatformRuntimeStatusService');
@@ -58,6 +58,24 @@ async function api(router, method, routePath, { role, body = {}, params = {} } =
 
 test.before(async () => {
   await sequelize.sync({ force: true });
+  await User.bulkCreate([
+    {
+      id: 1,
+      username: 'admin',
+      email: 'admin@example.com',
+      password: 'not-used-in-route-tests',
+      role: 'admin',
+      status: 'active'
+    },
+    {
+      id: 2,
+      username: 'user',
+      email: 'user@example.com',
+      password: 'not-used-in-route-tests',
+      role: 'user',
+      status: 'active'
+    }
+  ]);
   await AIPlatformConfigService.ensurePresets();
 });
 

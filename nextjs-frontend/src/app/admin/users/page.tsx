@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Card, Table, Space, Button, Tag, Input, Select, Modal, Form, Popconfirm, message } from 'antd';
 import axios from 'axios';
 
-const statusColors = { active: 'green', disabled: 'red' };
+const statusColors = { active: 'green', inactive: 'red' };
 
 export default function AdminUsersPage() {
   const [loading, setLoading] = useState(false);
@@ -71,24 +71,12 @@ export default function AdminUsersPage() {
     try {
       const res = await axios.put(`/api/users/${id}`, payload);
       if (res?.data?.success) {
-        message.success('更新成功');
+        message.success(res?.data?.message || '更新成功');
         fetchUsers({ page, limit, q });
       } else {
         message.error(res?.data?.message || '更新失败');
       }
     } catch { message.error('更新失败'); }
-  };
-
-  const handleDelete = async (id) => {
-    try {
-      const res = await axios.delete(`/api/users/${id}`);
-      if (res?.data?.success) {
-        message.success('已删除');
-        fetchUsers({ page, limit, q });
-      } else {
-        message.error(res?.data?.message || '删除失败');
-      }
-    } catch { message.error('删除失败'); }
   };
 
   const openResetPwd = (id) => { setCurrentUserId(id); setResetOpen(true); };
@@ -186,7 +174,7 @@ export default function AdminUsersPage() {
     },
     { title: '状态', dataIndex: 'status', width: 80, render: (status) => (
         <Tag color={statusColors[status] || 'default'}>
-          {status === 'active' ? '启用' : '禁用'}
+          {status === 'active' ? '启用' : '停用'}
         </Tag>
       )
     },
@@ -194,11 +182,18 @@ export default function AdminUsersPage() {
     { title: '操作', key: 'actions', render: (_, record) => (
         <Space>
           <Button size="small" onClick={() => openResetPwd(record.id)}>重置密码</Button>
-          <Button size="small" onClick={() => handleUpdate(record.id, { status: record.status === 'active' ? 'disabled' : 'active' })}>
-            {record.status === 'active' ? '禁用' : '启用'}
-          </Button>
-          <Popconfirm title="确认删除该用户？" onConfirm={() => handleDelete(record.id)}>
-            <Button danger size="small">删除</Button>
+          <Popconfirm
+            title={record.status === 'active' ? '确认停用该用户？' : '确认重新启用该用户？'}
+            description={record.status === 'active'
+              ? '停用后该用户不能继续登录，历史项目和报告保持不变'
+              : '启用后该用户可以重新登录和使用系统'}
+            onConfirm={() => handleUpdate(record.id, {
+              status: record.status === 'active' ? 'inactive' : 'active'
+            })}
+          >
+            <Button danger={record.status === 'active'} size="small">
+              {record.status === 'active' ? '停用' : '启用'}
+            </Button>
           </Popconfirm>
         </Space>
       )

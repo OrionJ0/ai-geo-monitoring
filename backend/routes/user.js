@@ -131,7 +131,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     if (user.status !== 'active') {
       return res.status(401).json({
         success: false,
-        message: '账户已被禁用，请联系管理员'
+        message: '账户已停用，请联系管理员'
       });
     }
 
@@ -436,7 +436,15 @@ router.put('/:id', adminRequired, async (req, res) => {
     const user = await User.findByPk(id);
     if (!user) return res.status(404).json({ success: false, message: '用户不存在' });
     const payload = {};
-    if (status) payload.status = status;
+    if (status) {
+      if (!['active', 'inactive'].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: '用户状态只允许 active 或 inactive'
+        });
+      }
+      payload.status = status;
+    }
     if (role) payload.role = role;
     if (membership_level) payload.membership_level = membership_level;
     // 计算最终等级（若本次未传则沿用当前用户等级）
@@ -456,22 +464,12 @@ router.put('/:id', adminRequired, async (req, res) => {
       }
     }
     await user.update(payload);
-    res.json({ success: true, message: '用户更新成功' });
+    const message = status === 'inactive'
+      ? '用户已停用'
+      : (status === 'active' ? '用户已启用' : '用户更新成功');
+    res.json({ success: true, message });
   } catch (error) {
     res.status(500).json({ success: false, message: '更新用户失败' });
-  }
-});
-
-// 管理员：删除用户
-router.delete('/:id', adminRequired, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = await User.findByPk(id);
-    if (!user) return res.status(404).json({ success: false, message: '用户不存在' });
-    await user.destroy();
-    res.json({ success: true, message: '用户已删除' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: '删除用户失败' });
   }
 });
 

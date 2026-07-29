@@ -18,7 +18,7 @@ test('login error distinguishes invalid credentials from proxy and server failur
     '服务器暂时不可用，请稍后重试'
   );
   assert.equal(
-    getLoginErrorMessage({ response: { status: 403, data: { message: '账户已被禁用' } } }),
-    '被禁止登录：请联系管理员'
+    getLoginErrorMessage({ response: { status: 401, data: { message: '账户已停用，请联系管理员' } } }),
+    '账户已停用，请联系管理员'
   );
 });

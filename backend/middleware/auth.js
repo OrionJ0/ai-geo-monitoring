@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
 function extractToken(req) {
   const authHeader = req.headers['authorization'] || '';
@@ -16,9 +17,44 @@ function extractToken(req) {
   return null;
 }
 
+async function loadActiveUser(payload, res) {
+  let user;
+  try {
+    user = await User.findByPk(payload.userId, {
+      attributes: [
+        'id',
+        'username',
+        'role',
+        'status',
+        'membership_level',
+        'membership_expires_at'
+      ]
+    });
+  } catch (error) {
+    console.error('验证账户状态失败:', error?.message || error);
+    res.status(503).json({ success: false, message: '暂时无法验证账户状态' });
+    return null;
+  }
+  if (!user || user.status !== 'active') {
+    res.status(401).json({ success: false, message: '账户已停用，请联系管理员' });
+    return null;
+  }
+  return user;
+}
+
+function assignRequestUser(req, user) {
+  req.user = {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    level: user.membership_level || 'free',
+    membershipExpiresAt: user.membership_expires_at || null,
+  };
+}
+
 module.exports = {
   // 普通鉴权：要求有效 JWT
-  authRequired: (req, res, next) => {
+  authRequired: async (req, res, next) => {
     try {
       const token = extractToken(req);
       if (!token) {
@@ -30,13 +66,9 @@ module.exports = {
         return res.status(500).json({ success: false, message: '服务器配置错误' });
       }
       const payload = jwt.verify(token, secret);
-      req.user = {
-        id: payload.userId,
-        username: payload.username,
-        role: payload.role,
-        level: payload.level || 'free',
-        membershipExpiresAt: payload.membershipExpiresAt || null,
-      };
+      const user = await loadActiveUser(payload, res);
+      if (!user) return;
+      assignRequestUser(req, user);
       return next();
     } catch (error) {
       return res.status(401).json({ success: false, message: '未授权：令牌无效或已过期' });
@@ -44,7 +76,7 @@ module.exports = {
   },
 
   // 管理员鉴权：要求 role === 'admin'
-  adminRequired: (req, res, next) => {
+  adminRequired: async (req, res, next) => {
     try {
       const token = extractToken(req);
       if (!token) {
@@ -56,13 +88,9 @@ module.exports = {
         return res.status(500).json({ success: false, message: '服务器配置错误' });
       }
       const payload = jwt.verify(token, secret);
-      req.user = {
-        id: payload.userId,
-        username: payload.username,
-        role: payload.role,
-        level: payload.level || 'free',
-        membershipExpiresAt: payload.membershipExpiresAt || null,
-      };
+      const user = await loadActiveUser(payload, res);
+      if (!user) return;
+      assignRequestUser(req, user);
       if (req.user.role !== 'admin') {
         return res.status(403).json({ success: false, message: '禁止访问：需要管理员权限' });
       }
