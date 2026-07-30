@@ -4,6 +4,7 @@ const http = require('node:http');
 const https = require('node:https');
 const net = require('node:net');
 const { privateTargetsEnabled } = require('../config/seoAuditNetworkPolicy');
+const { createSeoAuditCrawlerPolicy } = require('./SeoAuditCrawlerPolicy');
 
 const PAGE_TIMEOUT_MS = 10000;
 const PAGE_LIMIT_BYTES = 2 * 1024 * 1024;
@@ -213,12 +214,170 @@ function responseHeaders(headers) {
   return { ...headers };
 }
 
+function headerValue(headers, name) {
+  const expected = String(name).toLowerCase();
+  const entry = Object.entries(headers || {}).find(([key]) => String(key).toLowerCase() === expected);
+  return entry ? String(entry[1] || '') : '';
+}
+
+function numericRetryAfterMs(headers) {
+  const raw = headerValue(headers, 'retry-after').trim();
+  if (!/^\d+$/.test(raw)) return null;
+  return Number(raw) * 1000;
+}
+
+function retryAfterDate(headers) {
+  const raw = headerValue(headers, 'retry-after').trim();
+  if (!raw || /^\d+$/.test(raw)) return null;
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function classification(outcome, expectedKind, {
+  provider = null,
+  signals = [],
+  retryAfterMs = null,
+  retryAt = null
+} = {}) {
+  return {
+    outcome,
+    expectedKind,
+    provider,
+    signals,
+    retryAfterMs,
+    retryAt
+  };
+}
+
+function classifyResponse(response, expectedKind = 'link_probe') {
+  const statusCode = Number(response?.statusCode || response?.status || 0);
+  const headers = response?.headers || {};
+  const body = String(response?.body ?? response?.html ?? response?.data ?? '');
+  const contentType = headerValue(headers, 'content-type').toLowerCase();
+
+  if (statusCode === 429) {
+    return classification('rate_limited', expectedKind, {
+      signals: ['http_429'],
+      retryAfterMs: numericRetryAfterMs(headers),
+      retryAt: retryAfterDate(headers)
+    });
+  }
+
+  const edgeOneSignals = [
+    /<meta\b[^>]*(?:name|id)\s*=\s*["']EO-Bot-Js-Token["']/i,
+    /(?:document\.cookie\s*=|["'])[^;\n]*EO_BOT_TOKEN\s*=/i,
+    /(?:solveChallenge\s*\(|__EDGEONE_TEST_CHALLENGE__\s*=)/i
+  ].filter((pattern) => pattern.test(body));
+  if (edgeOneSignals.length >= 2) {
+    return classification('waf_blocked', expectedKind, {
+      provider: 'edgeone',
+      signals: ['edgeone_token']
+    });
+  }
+
+  if (
+    /cf-chl-|challenge-platform/i.test(body)
+    && (headerValue(headers, 'cf-ray') || /cdn-cgi\/challenge-platform/i.test(body))
+  ) {
+    return classification('waf_blocked', expectedKind, {
+      provider: 'cloudflare',
+      signals: ['cloudflare_challenge']
+    });
+  }
+
+  if (statusCode < 200 || statusCode >= 300) {
+    return classification('http_error', expectedKind, {
+      signals: statusCode ? [`http_${statusCode}`] : ['missing_status']
+    });
+  }
+
+  if (expectedKind === 'page' && !body.trim()) {
+    return classification('invalid_response', expectedKind, {
+      signals: ['empty_body']
+    });
+  }
+
+  const htmlBody = /<(?:!doctype\s+html|html|head|body|script)\b/i.test(body);
+  if (
+    (expectedKind === 'robots' || expectedKind === 'sitemap')
+    && htmlBody
+  ) {
+    return classification('invalid_response', expectedKind, {
+      signals: ['unexpected_html']
+    });
+  }
+
+  if (
+    expectedKind === 'page'
+    && contentType
+    && !contentType.includes('text/html')
+    && !contentType.includes('application/xhtml+xml')
+  ) {
+    return classification('invalid_response', expectedKind, {
+      signals: ['unexpected_content_type']
+    });
+  }
+
+  return classification('normal', expectedKind);
+}
+
+function assertNormalResponse(response, expectedKind = 'page') {
+  const result = response?.classification || classifyResponse(response, expectedKind);
+  if (result.outcome === 'normal') return result;
+
+  const statusCode = Number(response?.statusCode || response?.status || 0);
+  let error;
+  if (result.outcome === 'waf_blocked') {
+    error = new SeoAuditRequestError(
+      '当前 GoodieAI 审计身份或出口被目标站点安全策略拦截，无法完成检测；不能据此判断搜索引擎是否也被阻止。',
+      'SEO_AUDIT_BLOCKED_BY_WAF',
+      502
+    );
+    error.stopReason = 'waf_blocked';
+  } else if (result.outcome === 'rate_limited') {
+    error = new SeoAuditRequestError(
+      '目标站点已限制当前 GoodieAI 审计请求，请根据 Retry-After 稍后重试。',
+      'SEO_AUDIT_RATE_LIMITED',
+      502
+    );
+    error.stopReason = 'rate_limited';
+    error.retryAfterMs = result.retryAfterMs;
+    error.retryAt = result.retryAt || null;
+  } else if (result.outcome === 'invalid_response') {
+    error = new SeoAuditRequestError(
+      expectedKind === 'page' ? '目标地址没有返回可分析的 HTML 页面' : '目标资源返回了无法分析的内容',
+      'SEO_AUDIT_INVALID_RESPONSE',
+      422
+    );
+    error.stopReason = expectedKind === 'page' ? 'entry_invalid_response' : 'resource_invalid';
+  } else {
+    error = new SeoAuditRequestError(
+      statusCode ? `目标站点返回 HTTP ${statusCode}` : '目标站点没有返回可用响应',
+      'UPSTREAM_HTTP_ERROR',
+      502
+    );
+    error.stopReason = 'entry_http_error';
+  }
+  error.classification = result;
+  error.statusCode = statusCode;
+  throw error;
+}
+
 function createSeoSiteClient({
   resolveHostname = defaultResolveHostname,
   request = axios.request,
-  allowedPrivateOrigin = ''
+  allowedPrivateOrigin = '',
+  policy,
+  minOriginIntervalMs = 500,
+  now = Date.now,
+  wait
 } = {}) {
   const privateOrigin = normalizedPrivateOrigin(allowedPrivateOrigin);
+  const crawlerPolicy = policy || createSeoAuditCrawlerPolicy({
+    minOriginIntervalMs,
+    now,
+    ...(wait ? { wait } : {})
+  });
 
   async function resolvePublicTarget(parsed) {
     const hostname = normalizedHostname(parsed.hostname);
@@ -243,8 +402,13 @@ function createSeoSiteClient({
     return records;
   }
 
-  async function requestWithRedirects(inputUrl, { maxBytes, accept }) {
-    const startedAt = Date.now();
+  async function requestWithRedirects(inputUrl, {
+    maxBytes,
+    accept,
+    expectedKind,
+    requestKind
+  }) {
+    const startedAt = now();
     let currentUrl = assertAllowedUrl(inputUrl, { allowedPrivateOrigin: privateOrigin });
     const redirectChain = [];
     const visitedUrls = new Set([currentUrl.toString()]);
@@ -252,6 +416,11 @@ function createSeoSiteClient({
     for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
       const addresses = await resolvePublicTarget(currentUrl);
       const lookup = createPinnedLookup(addresses);
+      await crawlerPolicy.beforeRequest({
+        url: currentUrl.toString(),
+        requestKind,
+        redirectHop: redirectCount > 0
+      });
       let response;
       try {
         response = await request({
@@ -324,14 +493,30 @@ function createSeoSiteClient({
         continue;
       }
 
-      return {
+      const normalizedResponse = {
         finalUrl: currentUrl.toString(),
         redirectChain,
         statusCode: response.status,
-        durationMs: Date.now() - startedAt,
+        durationMs: now() - startedAt,
         headers,
         body: typeof response.data === 'string' ? response.data : String(response.data || '')
       };
+      normalizedResponse.classification = classifyResponse(normalizedResponse, expectedKind);
+      if (
+        normalizedResponse.classification.outcome === 'rate_limited'
+        && !normalizedResponse.classification.retryAt
+        && Number.isFinite(normalizedResponse.classification.retryAfterMs)
+      ) {
+        normalizedResponse.classification = {
+          ...normalizedResponse.classification,
+          retryAt: new Date(now() + normalizedResponse.classification.retryAfterMs).toISOString()
+        };
+      }
+      crawlerPolicy.observeResponse({
+        url: currentUrl.toString(),
+        classification: normalizedResponse.classification
+      });
+      return normalizedResponse;
     }
     throw new SeoAuditRequestError('网站重定向次数过多', 'TOO_MANY_REDIRECTS', 422);
   }
@@ -343,15 +528,13 @@ function createSeoSiteClient({
       return parsed.toString();
     },
 
-    async fetchPage(url) {
+    async fetchPage(url, { requestKind = 'page' } = {}) {
       const response = await requestWithRedirects(url, {
         maxBytes: PAGE_LIMIT_BYTES,
-        accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5'
+        accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
+        expectedKind: 'page',
+        requestKind
       });
-      const contentType = String(response.headers['content-type'] || '').toLowerCase();
-      if (contentType && !contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
-        throw new SeoAuditRequestError('目标地址不是 HTML 页面', 'UNSUPPORTED_CONTENT_TYPE', 422);
-      }
       return {
         requestedUrl: url,
         finalUrl: response.finalUrl,
@@ -359,15 +542,33 @@ function createSeoSiteClient({
         durationMs: response.durationMs,
         headers: response.headers,
         redirectChain: response.redirectChain,
-        html: response.body
+        html: response.body,
+        classification: response.classification
       };
     },
 
-    async probe(url) {
+    async probe(url, {
+      expectedKind = 'link_probe',
+      requestKind = 'link_probe'
+    } = {}) {
       return requestWithRedirects(url, {
         maxBytes: PROBE_LIMIT_BYTES,
-        accept: 'text/plain,application/xml,text/xml,*/*;q=0.5'
+        accept: 'text/plain,application/xml,text/xml,*/*;q=0.5',
+        expectedKind,
+        requestKind
       });
+    },
+
+    getRequestDiagnostics() {
+      return crawlerPolicy.snapshot();
+    },
+
+    recordRenderAttempts(count) {
+      crawlerPolicy.recordRenderAttempts(count);
+    },
+
+    setStopReason(stopReason) {
+      crawlerPolicy.setStopReason(stopReason);
     }
   };
 }
@@ -376,6 +577,8 @@ const defaultClient = createSeoSiteClient();
 
 module.exports = {
   ...defaultClient,
+  classifyResponse,
+  assertNormalResponse,
   createSeoSiteClient,
   SeoAuditRequestError,
   assertAllowedUrl,

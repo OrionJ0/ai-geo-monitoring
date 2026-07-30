@@ -36,6 +36,69 @@ function createSiteClient() {
   };
 }
 
+test('rejects a WAF challenge before probes or SEO scoring', async () => {
+  let probeCount = 0;
+  const siteClient = {
+    async fetchPage(url) {
+      return {
+        requestedUrl: url,
+        finalUrl: url,
+        statusCode: 200,
+        durationMs: 10,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        html: '<html><head><meta name="EO-Bot-Js-Token" content="REDACTED_TEST_VALUE"></head><body><script>window.__EDGEONE_TEST_CHALLENGE__ = true;</script></body></html>'
+      };
+    },
+    async probe() {
+      probeCount += 1;
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  await assert.rejects(
+    () => createSeoAuditService({ siteClient }).audit('https://example.com/'),
+    (error) => (
+      error?.code === 'SEO_AUDIT_BLOCKED_BY_WAF'
+      && /GoodieAI/.test(error.message)
+      && /搜索引擎/.test(error.message)
+    )
+  );
+  assert.equal(probeCount, 0);
+});
+
+test('stops a subpage audit when the required homepage fetch is a WAF challenge', async () => {
+  let probeCount = 0;
+  const siteClient = {
+    async fetchPage(url) {
+      if (url === 'https://example.com/products/one') {
+        return {
+          ...await createSiteClient().fetchPage(url),
+          requestedUrl: url,
+          finalUrl: url
+        };
+      }
+      return {
+        requestedUrl: url,
+        finalUrl: url,
+        statusCode: 403,
+        durationMs: 10,
+        headers: { 'content-type': 'text/html' },
+        html: '<html><meta name="EO-Bot-Js-Token" content="REDACTED_TEST_VALUE"><script>window.__EDGEONE_TEST_CHALLENGE__ = true;</script></html>'
+      };
+    },
+    async probe() {
+      probeCount += 1;
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  await assert.rejects(
+    () => createSeoAuditService({ siteClient }).audit('https://example.com/products/one'),
+    { code: 'SEO_AUDIT_BLOCKED_BY_WAF' }
+  );
+  assert.equal(probeCount, 0);
+});
+
 test('returns a prioritized, categorized SEO report for a public page', async () => {
   const service = createSeoAuditService({ siteClient: createSiteClient() });
 
@@ -129,7 +192,44 @@ test('does not treat empty robots and sitemap responses as healthy', async () =>
   assert.equal(sitemap.severity, 'high');
   assert.equal(sitemap.weight, 7);
   assert.equal(report.scoreVersion, '2026-07-23-v4');
-  assert.equal(report.ruleVersion, '2026-07-23-v3');
+  assert.equal(report.ruleVersion, '2026-07-30-v4');
+});
+
+test('does not parse HTML error pages as robots or sitemap resources', async () => {
+  const probeKinds = [];
+  const siteClient = createSiteClient();
+  siteClient.probe = async (url, options) => {
+    probeKinds.push([new URL(url).pathname, options]);
+    if (url.endsWith('/robots.txt')) {
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'text/html' },
+        body: '<html><body><pre>User-agent: *\nAllow: /</pre></body></html>'
+      };
+    }
+    return {
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      body: '<html><body><urlset><url><loc>https://example.com/</loc></url></urlset></body></html>'
+    };
+  };
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
+  const checks = report.categories.flatMap((category) => category.checks);
+
+  assert.equal(checks.find((check) => check.id === 'robots-txt').status, 'failed');
+  assert.equal(checks.find((check) => check.id === 'sitemap').status, 'failed');
+  assert.deepEqual(probeKinds, [
+    ['/robots.txt', { expectedKind: 'robots', requestKind: 'robots' }],
+    ['/sitemap.xml', { expectedKind: 'sitemap', requestKind: 'sitemap' }]
+  ]);
+});
+
+test('uses the polite crawl defaults for task-local request control', () => {
+  const { defaultSeoAuditRules } = require('../config/seoAuditRules');
+
+  assert.equal(defaultSeoAuditRules.crawl.concurrency, 2);
+  assert.equal(defaultSeoAuditRules.crawl.minOriginIntervalMs, 500);
 });
 
 test('explains that a successful sitemap response contains no valid page addresses', async () => {

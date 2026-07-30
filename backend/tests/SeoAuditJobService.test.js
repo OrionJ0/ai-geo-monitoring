@@ -121,7 +121,23 @@ test('marks failed jobs safely and does not create a false history report', asyn
     },
     siteAuditService: {
       async audit() {
-        throw Object.assign(new Error('网站响应超时，请稍后重试'), { code: 'UPSTREAM_TIMEOUT', status: 504 });
+        throw Object.assign(new Error('网站响应超时，请稍后重试'), {
+          code: 'UPSTREAM_TIMEOUT',
+          status: 504,
+          stopReason: 'entry_http_error',
+          retryAt: '2026-07-30T10:00:00.000Z',
+          crawlDiagnostics: {
+            networkRequests: {
+              total: 3,
+              byKind: { page: 1, robots: 1, sitemap: 1, link_probe: 0, secret: 99 },
+              redirectHops: 0
+            },
+            renderAttempts: 0,
+            stopReason: 'entry_http_error',
+            rawBody: 'SECRET_DIAGNOSTIC_BODY'
+          },
+          responseBody: 'SECRET_RESPONSE_MUST_NOT_BE_PERSISTED'
+        });
       }
     },
     historyService: { async save() { saveCalls += 1; } },
@@ -135,7 +151,19 @@ test('marks failed jobs safely and does not create a false history report', asyn
   assert.equal(row.error_code, 'UPSTREAM_TIMEOUT');
   assert.equal(row.error_message, '网站响应超时，请稍后重试');
   assert.equal(row.progress.phase, 'failed');
+  assert.equal(row.progress.stopReason, 'entry_http_error');
+  assert.equal(row.progress.retryAt, '2026-07-30T10:00:00.000Z');
+  assert.equal(row.progress.crawlDiagnostics.networkRequests.total, 3);
+  assert.equal(Object.hasOwn(row.progress.crawlDiagnostics, 'rawBody'), false);
+  assert.equal(Object.hasOwn(row.progress.crawlDiagnostics.networkRequests.byKind, 'secret'), false);
+  assert.equal(JSON.stringify(row.progress).includes('SECRET_RESPONSE'), false);
+  assert.equal(JSON.stringify(row.progress).includes('SECRET_DIAGNOSTIC_BODY'), false);
   assert.equal(saveCalls, 0);
+
+  const refreshed = await service.get(7, row.id);
+  assert.equal(refreshed.error.code, 'UPSTREAM_TIMEOUT');
+  assert.equal(refreshed.progress.stopReason, 'entry_http_error');
+  assert.equal(refreshed.progress.crawlDiagnostics.networkRequests.total, 3);
 });
 
 test('requeues interrupted jobs after a service restart', async () => {

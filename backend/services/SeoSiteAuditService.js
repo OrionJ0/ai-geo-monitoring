@@ -15,6 +15,10 @@ const {
   compareAuditIssues
 } = require('./SeoSitewideAnalysisService');
 const { createSeoRenderService } = require('./SeoRenderService');
+const {
+  assertNormalResponse,
+  classifyResponse
+} = require('./SeoSiteClient');
 
 function isLocalhostHostname(hostname) {
   const h = String(hostname || '').toLowerCase();
@@ -137,13 +141,33 @@ function navigationIssues($, finalUrl) {
 function createCachedClient(siteClient) {
   const pageCache = new Map();
   const probeCache = new Map();
-  const cached = (cache, method, url) => {
-    if (!cache.has(url)) cache.set(url, Promise.resolve().then(() => siteClient[method](url)));
-    return cache.get(url);
+  const cached = (cache, method, url, options = {}) => {
+    const key = JSON.stringify([url, options.expectedKind || '', options.requestKind || '']);
+    if (!cache.has(key)) {
+      let pending;
+      pending = Promise.resolve()
+        .then(() => siteClient[method](url, options))
+        .then((response) => {
+          if (method === 'fetchPage' && response?.finalUrl) {
+            const finalKey = JSON.stringify([
+              response.finalUrl,
+              options.expectedKind || '',
+              options.requestKind || ''
+            ]);
+            if (!cache.has(finalKey)) cache.set(finalKey, pending);
+          }
+          return response;
+        });
+      cache.set(key, pending);
+    }
+    return cache.get(key);
   };
   return {
-    fetchPage: (url) => cached(pageCache, 'fetchPage', url),
-    probe: (url) => cached(probeCache, 'probe', url)
+    fetchPage: (url, options) => cached(pageCache, 'fetchPage', url, options),
+    probe: (url, options) => cached(probeCache, 'probe', url, options),
+    getRequestDiagnostics: () => siteClient.getRequestDiagnostics?.(),
+    recordRenderAttempts: (count) => siteClient.recordRenderAttempts?.(count),
+    setStopReason: (stopReason) => siteClient.setStopReason?.(stopReason)
   };
 }
 
@@ -179,6 +203,44 @@ function compactIssue(check) {
     value: check.value,
     recommendation: check.recommendation
   };
+}
+
+function isAuditStopError(error) {
+  return ['SEO_AUDIT_BLOCKED_BY_WAF', 'SEO_AUDIT_RATE_LIMITED'].includes(error?.code);
+}
+
+function attachCrawlDiagnostics(error, client) {
+  if (error?.stopReason) client.setStopReason?.(error.stopReason);
+  if (error && !error.crawlDiagnostics) {
+    error.crawlDiagnostics = client.getRequestDiagnostics?.() || null;
+  }
+  return error;
+}
+
+async function probeTrustedResource(client, url, expectedKind) {
+  let result;
+  try {
+    result = await client.probe(url, {
+      expectedKind,
+      requestKind: expectedKind
+    });
+  } catch (error) {
+    if (isAuditStopError(error)) throw attachCrawlDiagnostics(error, client);
+    return { statusCode: 0, body: '', classification: null };
+  }
+
+  const responseClassification = result.classification || classifyResponse(result, expectedKind);
+  if (['waf_blocked', 'rate_limited'].includes(responseClassification.outcome)) {
+    try {
+      assertNormalResponse({ ...result, classification: responseClassification }, expectedKind);
+    } catch (error) {
+      throw attachCrawlDiagnostics(error, client);
+    }
+  }
+  if (responseClassification.outcome !== 'normal') {
+    return { ...result, body: '', classification: responseClassification };
+  }
+  return { ...result, classification: responseClassification };
 }
 
 function createSeoSiteAuditService({
@@ -237,10 +299,35 @@ function createSeoSiteAuditService({
       const startedAt = Date.now();
       const requestedUrl = normalizeWebsiteUrl(inputUrl);
       const entryResponse = await client.fetchPage(requestedUrl);
+      try {
+        assertNormalResponse(entryResponse, 'page');
+      } catch (error) {
+        throw attachCrawlDiagnostics(error, client);
+      }
       const entryFinalUrl = normalizeHttpUrl(entryResponse.finalUrl || requestedUrl, requestedUrl) || requestedUrl;
       const origin = new URL(entryFinalUrl).origin;
       const discovered = [];
       const discoveredSet = new Set();
+      const aliasesByResolved = new Map();
+      const resolvedByRequested = new Map();
+      const redirectAliases = new Map();
+      const recordAlias = (requested, resolved, redirectChain = []) => {
+        const normalizedRequested = normalizeHttpUrl(requested, requested) || requested;
+        const normalizedResolved = normalizeHttpUrl(resolved, requested) || resolved;
+        resolvedByRequested.set(normalizedRequested, normalizedResolved);
+        if (!aliasesByResolved.has(normalizedResolved)) {
+          aliasesByResolved.set(normalizedResolved, new Set());
+        }
+        if (normalizedRequested !== normalizedResolved) {
+          aliasesByResolved.get(normalizedResolved).add(normalizedRequested);
+          redirectAliases.set(normalizedRequested, {
+            requestedUrl: normalizedRequested,
+            resolvedUrl: normalizedResolved,
+            redirectChain: Array.isArray(redirectChain) ? redirectChain : []
+          });
+        }
+      };
+      recordAlias(requestedUrl, entryFinalUrl, entryResponse.redirectChain);
       const sitemapLocalhostRewrites = [];
       const trackRewrite = (meta) => sitemapLocalhostRewrites.push(meta);
       const normalizeOpts = {
@@ -254,15 +341,16 @@ function createSeoSiteAuditService({
         discovered.push(normalized);
         return true;
       };
-      discoveredSet.add(requestedUrl);
-      discovered.push(requestedUrl);
+      discoveredSet.add(entryFinalUrl);
+      discovered.push(entryFinalUrl);
       if (new URL(entryFinalUrl).pathname !== '/') addPage(`${origin}/`);
 
       await emit(onProgress, { phase: 'discovering', discoveredPages: discovered.length, auditedPages: 0, failedPages: 0 });
 
       const robotsUrl = `${origin}/robots.txt`;
       const defaultSitemapUrl = `${origin}/sitemap.xml`;
-      const robots = await client.probe(robotsUrl).catch(() => ({ statusCode: 0, body: '' }));
+      const robots = await probeTrustedResource(client, robotsUrl, 'robots');
+      await probeTrustedResource(client, defaultSitemapUrl, 'sitemap');
       const declaredSitemaps = [...String(robots.body || '').matchAll(/^sitemap\s*:\s*(\S+)/gim)].map((match) => match[1]);
       const sitemapQueue = [defaultSitemapUrl, ...declaredSitemaps]
         .map((url) => ({ url: normalizeSameOriginUrl(url, origin, origin, normalizeOpts), depth: 0 }))
@@ -275,7 +363,7 @@ function createSeoSiteAuditService({
         const current = sitemapQueue.shift();
         if (visitedSitemaps.has(current.url)) continue;
         visitedSitemaps.add(current.url);
-        const result = await client.probe(current.url).catch(() => ({ statusCode: 0, body: '' }));
+        const result = await probeTrustedResource(client, current.url, 'sitemap');
         if (result.statusCode < 200 || result.statusCode >= 300 || !String(result.body || '').trim()) continue;
         const parsed = sitemapLocations(result.body);
         if (parsed.type === 'urlset') {
@@ -317,12 +405,32 @@ function createSeoSiteAuditService({
       const checkInstances = [];
       const siteChecksSeen = new Set();
       const errors = [];
+      const resolvedClaims = new Set();
       let cursor = 0;
 
       const auditPage = async (url) => {
+        let resolvedUrl = url;
         try {
           const response = await client.fetchPage(url);
-          const finalUrl = response.finalUrl || url;
+          resolvedUrl = normalizeHttpUrl(response.finalUrl || url, url) || url;
+          recordAlias(url, resolvedUrl, response.redirectChain);
+          if (new URL(resolvedUrl).origin !== origin) {
+            pages.push({
+              url,
+              finalUrl: resolvedUrl,
+              aliases: [],
+              status: 'redirected_external',
+              statusCode: response.statusCode,
+              durationMs: response.durationMs,
+              redirectChain: Array.isArray(response.redirectChain) ? response.redirectChain : [],
+              issues: []
+            });
+            return;
+          }
+          if (resolvedClaims.has(resolvedUrl)) return;
+          resolvedClaims.add(resolvedUrl);
+          assertNormalResponse(response, 'page');
+          const finalUrl = resolvedUrl;
           const $ = cheerio.load(response.html || '');
           const links = [];
           $('a[href]').each((_, element) => {
@@ -353,17 +461,18 @@ function createSeoSiteAuditService({
 
           const report = await pageAudit.audit(url);
           const checks = pageChecks(report);
-          const isHomepage = new URL(report.finalUrl).pathname === '/';
+          const isHomepage = new URL(resolvedUrl).pathname === '/';
           checks.forEach((check) => {
             if (siteScopedChecks.has(check.id)) {
               if (siteChecksSeen.has(check.id)) return;
               siteChecksSeen.add(check.id);
             }
-            checkInstances.push({ url, isHomepage, check });
+            checkInstances.push({ url: resolvedUrl, isHomepage, check });
           });
           pages.push({
-            url,
-            finalUrl: report.finalUrl,
+            url: resolvedUrl,
+            finalUrl: resolvedUrl,
+            aliases: [],
             status: 'completed',
             statusCode: report.statusCode,
             durationMs: report.durationMs,
@@ -384,6 +493,7 @@ function createSeoSiteAuditService({
             crawlerAccess: report.crawlerAccess
           });
         } catch (error) {
+          if (isAuditStopError(error)) throw attachCrawlDiagnostics(error, client);
           errors.push(error);
           const configured = rules.checks['http-status'];
           const failedCheck = {
@@ -397,10 +507,12 @@ function createSeoSiteAuditService({
             value: error.message,
             recommendation: '修复页面访问错误，确保目标 URL 可稳定返回 2xx。'
           };
-          const isHomepage = new URL(url).pathname === '/';
-          checkInstances.push({ url, isHomepage, check: failedCheck });
+          const isHomepage = new URL(resolvedUrl).pathname === '/';
+          checkInstances.push({ url: resolvedUrl, isHomepage, check: failedCheck });
           pages.push({
-            url,
+            url: resolvedUrl,
+            finalUrl: resolvedUrl,
+            aliases: [],
             isHomepage,
             status: 'failed',
             statusCode: 0,
@@ -432,12 +544,18 @@ function createSeoSiteAuditService({
         });
       }
 
-      const discoveredOrder = new Map(
-        discovered.slice(0, maxPages).map((url, index) => [url, index])
-      );
+      pages.forEach((page) => {
+        if (page.status === 'redirected_external') return;
+        page.aliases = Array.from(aliasesByResolved.get(page.finalUrl || page.url) || []).sort();
+      });
+      const discoveredOrder = new Map();
+      discovered.slice(0, maxPages).forEach((url, index) => {
+        const identity = resolvedByRequested.get(url) || url;
+        if (!discoveredOrder.has(identity)) discoveredOrder.set(identity, index);
+      });
       pages.sort((left, right) => (
-        (discoveredOrder.get(left.url) ?? Number.MAX_SAFE_INTEGER)
-        - (discoveredOrder.get(right.url) ?? Number.MAX_SAFE_INTEGER)
+        (discoveredOrder.get(left.finalUrl || left.url) ?? Number.MAX_SAFE_INTEGER)
+        - (discoveredOrder.get(right.finalUrl || right.url) ?? Number.MAX_SAFE_INTEGER)
       ));
       checkInstances.sort((left, right) => (
         (discoveredOrder.get(left.url) ?? Number.MAX_SAFE_INTEGER)
@@ -452,6 +570,7 @@ function createSeoSiteAuditService({
       pages.forEach((page) => {
         pageByUrl.set(page.url, page);
         if (page.finalUrl) pageByUrl.set(page.finalUrl, page);
+        (page.aliases || []).forEach((alias) => pageByUrl.set(alias, page));
       });
       const linkTargets = new Map();
       successfulPages.forEach((page) => {
@@ -489,7 +608,15 @@ function createSeoSiteAuditService({
           }
         }
         try {
-          const response = await client.probe(entry.url);
+          const response = await client.probe(entry.url, {
+            expectedKind: 'link_probe',
+            requestKind: 'link_probe'
+          });
+          const responseClassification = response.classification
+            || classifyResponse(response, 'link_probe');
+          if (['waf_blocked', 'rate_limited'].includes(responseClassification.outcome)) {
+            assertNormalResponse({ ...response, classification: responseClassification }, 'link_probe');
+          }
           linkChecks.push({
             ...entry,
             statusCode: response.statusCode,
@@ -497,6 +624,9 @@ function createSeoSiteAuditService({
             redirectChain: response.redirectChain || []
           });
         } catch (error) {
+          if (isAuditStopError(error) && new URL(entry.url).origin === origin) {
+            throw attachCrawlDiagnostics(error, client);
+          }
           linkChecks.push({
             ...entry,
             statusCode: 0,
@@ -518,6 +648,7 @@ function createSeoSiteAuditService({
             linkCount: Array.isArray(page.links) ? page.links.length : 0
           }
         }));
+      client.recordRenderAttempts?.(renderEntries.length);
       const renderAnalysis = await renderer.sample(renderEntries).catch((error) => ({
         status: 'unavailable',
         reason: error.code || 'renderer_failed',
@@ -538,15 +669,17 @@ function createSeoSiteAuditService({
       });
 
       const totalWeight = checkInstances.reduce((sum, { check }) => sum + check.weight, 0);
-      const failedPages = pages.length - successfulPages.length;
+      const failedPages = pages.filter((page) => page.status === 'failed').length;
       const firstPage = successfulPages.find((page) => page.isHomepage) || successfulPages[0];
-      const healthPages = pages.map((page) => ({
-        url: page.finalUrl || page.url,
-        isHomepage: page.isHomepage,
-        statusCode: page.statusCode,
-        indexable: page.status === 'completed' ? page.indexable : null,
-        contentCharacters: page.status === 'completed' ? page.contentCharacters : null
-      }));
+      const healthPages = pages
+        .filter((page) => page.status !== 'redirected_external')
+        .map((page) => ({
+          url: page.finalUrl || page.url,
+          isHomepage: page.isHomepage,
+          statusCode: page.statusCode,
+          indexable: page.status === 'completed' ? page.indexable : null,
+          contentCharacters: page.status === 'completed' ? page.contentCharacters : null
+        }));
       const blockers = detectTechnicalHealthBlockers({
         pages: healthPages,
         crawlerAccess: firstPage.crawlerAccess,
@@ -570,7 +703,9 @@ function createSeoSiteAuditService({
         rules,
         scoreConfig: scoring
       });
-      const scopeUrls = pages.map((page) => page.finalUrl || page.url);
+      const scopeUrls = pages
+        .filter((page) => page.status !== 'redirected_external')
+        .map((page) => page.finalUrl || page.url);
       const expandSiteScope = (issue) => siteScopedChecks.has(issue.id) ? {
         ...issue,
         count: scopeUrls.length,
@@ -590,6 +725,8 @@ function createSeoSiteAuditService({
         navigationIssues: _navigationIssues,
         ...page
       }) => page);
+      client.setStopReason?.(truncated ? 'page_limit' : 'completed');
+      const crawlDiagnostics = client.getRequestDiagnostics?.() || null;
 
       const report = {
         mode: 'site',
@@ -597,7 +734,7 @@ function createSeoSiteAuditService({
         scoreModel: 'technical-health-v4',
         ruleVersion: rules.version,
         requestedUrl,
-        finalUrl: `${origin}/`,
+        finalUrl: entryFinalUrl,
         checkedAt: new Date().toISOString(),
         statusCode: firstPage.statusCode,
         durationMs: Date.now() - startedAt,
@@ -623,7 +760,10 @@ function createSeoSiteAuditService({
           failedPages,
           limit: maxPages,
           truncated,
-          sitemapLocalhostRewrites
+          sitemapLocalhostRewrites,
+          redirectAliases: Array.from(redirectAliases.values())
+            .sort((left, right) => left.requestedUrl.localeCompare(right.requestedUrl)),
+          ...(crawlDiagnostics ? { crawlDiagnostics } : {})
         },
         platforms: firstPage.platforms,
         crawlerAccess: firstPage.crawlerAccess,

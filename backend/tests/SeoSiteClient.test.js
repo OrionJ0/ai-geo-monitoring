@@ -1,10 +1,109 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
+  classifyResponse,
   createSeoSiteClient,
   createSeoAuditTargetPolicy
 } = require('../services/SeoSiteClient');
+
+function responseFixture(name) {
+  return fs.readFileSync(path.join(__dirname, 'fixtures', 'seo-responses', name), 'utf8');
+}
+
+test('classifies responses by expected resource kind without mistaking a legitimate SPA for WAF', () => {
+  const normal = {
+    statusCode: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body: responseFixture('normal.html')
+  };
+  const spa = {
+    statusCode: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body: responseFixture('spa.html')
+  };
+  const edgeone = {
+    statusCode: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body: responseFixture('edgeone-challenge.html')
+  };
+  const business403 = {
+    statusCode: 403,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body: responseFixture('business-403.html')
+  };
+
+  assert.equal(classifyResponse(normal, 'page').outcome, 'normal');
+  assert.equal(classifyResponse(spa, 'page').outcome, 'normal');
+  assert.equal(classifyResponse({
+    statusCode: 200,
+    headers: { 'content-type': 'text/html' },
+    body: '<html><body><p>This article explains the EO-Bot-Js-Token field.</p></body></html>'
+  }, 'page').outcome, 'normal');
+  assert.equal(classifyResponse({
+    statusCode: 200,
+    headers: { 'content-type': 'text/html' },
+    body: ''
+  }, 'page').outcome, 'invalid_response');
+  assert.deepEqual(classifyResponse(edgeone, 'page'), {
+    outcome: 'waf_blocked',
+    expectedKind: 'page',
+    provider: 'edgeone',
+    signals: ['edgeone_token'],
+    retryAfterMs: null,
+    retryAt: null
+  });
+  assert.equal(
+    classifyResponse({ ...edgeone, statusCode: 403 }, 'page').outcome,
+    'waf_blocked'
+  );
+  assert.equal(classifyResponse(business403, 'page').outcome, 'http_error');
+
+  assert.deepEqual(classifyResponse({
+    statusCode: 429,
+    headers: { 'content-type': 'text/plain', 'retry-after': '120' },
+    body: 'Too many requests'
+  }, 'page'), {
+    outcome: 'rate_limited',
+    expectedKind: 'page',
+    provider: null,
+    signals: ['http_429'],
+    retryAfterMs: 120000,
+    retryAt: null
+  });
+
+  assert.deepEqual(classifyResponse({
+    statusCode: 403,
+    headers: {
+      'content-type': 'text/html',
+      'cf-ray': 'TEST-RAY-ID'
+    },
+    body: responseFixture('cloudflare-challenge.html')
+  }, 'page'), {
+    outcome: 'waf_blocked',
+    expectedKind: 'page',
+    provider: 'cloudflare',
+    signals: ['cloudflare_challenge'],
+    retryAfterMs: null,
+    retryAt: null
+  });
+
+  assert.equal(classifyResponse({
+    statusCode: 429,
+    headers: { 'retry-after': 'Wed, 30 Jul 2026 10:00:00 GMT' },
+    body: 'Too many requests'
+  }, 'page').retryAt, '2026-07-30T10:00:00.000Z');
+
+  for (const expectedKind of ['robots', 'sitemap']) {
+    assert.equal(classifyResponse({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+      body: responseFixture('html-error.html')
+    }, expectedKind).outcome, 'invalid_response');
+  }
+});
 
 test('rejects loopback and credential-bearing URLs before making a request', async () => {
   let requestCount = 0;
@@ -292,6 +391,86 @@ test('returns every redirect hop for sitewide chain analysis', async () => {
       to: 'https://example.com/final'
     }
   ]);
+});
+
+test('paces and counts every real request in a redirect chain', async () => {
+  let currentTime = 1000;
+  const requestStartedAt = [];
+  const responses = [
+    { status: 301, headers: { location: '/hop-1' }, data: '' },
+    { status: 302, headers: { location: '/hop-2' }, data: '' },
+    { status: 307, headers: { location: '/hop-3' }, data: '' },
+    { status: 308, headers: { location: '/hop-4' }, data: '' },
+    { status: 301, headers: { location: '/final' }, data: '' },
+    { status: 200, headers: { 'content-type': 'text/html' }, data: '<html></html>' }
+  ];
+  const client = createSeoSiteClient({
+    minOriginIntervalMs: 500,
+    now: () => currentTime,
+    wait: async (delayMs) => {
+      currentTime += delayMs;
+    },
+    resolveHostname: async () => [{ address: '93.184.216.34', family: 4 }],
+    request: async () => {
+      requestStartedAt.push(currentTime);
+      return responses.shift();
+    }
+  });
+
+  await client.fetchPage('https://example.com/old');
+
+  assert.deepEqual(requestStartedAt, [1000, 1500, 2000, 2500, 3000, 3500]);
+  assert.deepEqual(client.getRequestDiagnostics(), {
+    networkRequests: {
+      total: 6,
+      byKind: {
+        page: 6,
+        robots: 0,
+        sitemap: 0,
+        link_probe: 0
+      },
+      redirectHops: 5
+    },
+    renderAttempts: 0,
+    stopReason: null
+  });
+});
+
+test('opens a task-local circuit after rate limiting and blocks later requests before Axios', async () => {
+  let requestCount = 0;
+  const client = createSeoSiteClient({
+    minOriginIntervalMs: 0,
+    resolveHostname: async () => [{ address: '93.184.216.34', family: 4 }],
+    request: async () => {
+      requestCount += 1;
+      return {
+        status: 429,
+        headers: { 'content-type': 'text/plain', 'retry-after': '60' },
+        data: 'Too many requests'
+      };
+    }
+  });
+
+  const first = await client.probe('https://example.com/robots.txt', {
+    expectedKind: 'robots',
+    requestKind: 'robots'
+  });
+  assert.equal(first.classification.outcome, 'rate_limited');
+
+  await assert.rejects(
+    () => client.fetchPage('https://example.com/'),
+    {
+      code: 'SEO_AUDIT_RATE_LIMITED',
+      stopReason: 'rate_limited'
+    }
+  );
+  assert.equal(requestCount, 1);
+  assert.deepEqual(client.getRequestDiagnostics().networkRequests.byKind, {
+    page: 0,
+    robots: 1,
+    sitemap: 0,
+    link_probe: 0
+  });
 });
 
 test('stops redirect loops with a dedicated error and preserves observed hops', async () => {

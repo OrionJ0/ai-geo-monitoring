@@ -137,6 +137,45 @@ test('POST handler exposes safe SEO audit errors without leaking internals', asy
   });
 });
 
+test('POST handler returns a WAF stop reason without saving a false success history', async () => {
+  let saveCalls = 0;
+  const handler = createAuditHandler({
+    runtimeFactory(url) {
+      return {
+        requestedUrl: url,
+        policy: { networkScope: 'public' },
+        service: {
+          async audit() {
+            throw Object.assign(new Error(
+              '当前 GoodieAI 审计身份或出口被目标站点安全策略拦截，无法完成检测；不能据此判断搜索引擎是否也被阻止。'
+            ), {
+              code: 'SEO_AUDIT_BLOCKED_BY_WAF',
+              status: 502
+            });
+          }
+        }
+      };
+    },
+    historyService: {
+      async save() {
+        saveCalls += 1;
+      }
+    }
+  });
+  const response = createResponse();
+
+  await handler({
+    body: { url: 'https://example.com/' },
+    user: { id: 7 }
+  }, response);
+
+  assert.equal(response.statusCode, 502);
+  assert.equal(response.payload.code, 'SEO_AUDIT_BLOCKED_BY_WAF');
+  assert.match(response.payload.message, /GoodieAI/);
+  assert.match(response.payload.message, /不能据此判断搜索引擎/);
+  assert.equal(saveCalls, 0);
+});
+
 test('GET collection handler returns the current user paginated history', async () => {
   const received = [];
   const historyService = {

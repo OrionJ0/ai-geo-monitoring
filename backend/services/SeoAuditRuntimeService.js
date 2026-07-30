@@ -4,6 +4,8 @@ const {
   createSeoSiteClient,
   createSeoAuditTargetPolicy
 } = require('./SeoSiteClient');
+const { createSeoRenderService } = require('./SeoRenderService');
+const { defaultSeoAuditRules } = require('../config/seoAuditRules');
 
 function resolveSeoAuditTarget(inputUrl, options = {}) {
   const requestedUrl = normalizeWebsiteUrl(inputUrl);
@@ -13,25 +15,38 @@ function resolveSeoAuditTarget(inputUrl, options = {}) {
 
 function createPageAuditRuntime(inputUrl, options = {}) {
   const target = resolveSeoAuditTarget(inputUrl, options);
-  const siteClient = target.policy.networkScope === 'private'
-    ? createSeoSiteClient({ allowedPrivateOrigin: target.policy.allowedPrivateOrigin })
-    : undefined;
+  const clientOptions = options.clientOptions || {};
+  const siteClient = createSeoSiteClient({
+    ...clientOptions,
+    allowedPrivateOrigin: target.policy.allowedPrivateOrigin,
+    minOriginIntervalMs: clientOptions.minOriginIntervalMs
+      ?? defaultSeoAuditRules.crawl.minOriginIntervalMs
+  });
   return {
     ...target,
+    siteClient,
     service: createSeoAuditService({ siteClient })
   };
 }
 
 function createSiteAuditRuntime(inputUrl, options = {}) {
   const target = resolveSeoAuditTarget(inputUrl, options);
-  const siteClient = target.policy.networkScope === 'private'
-    ? createSeoSiteClient({ allowedPrivateOrigin: target.policy.allowedPrivateOrigin })
-    : undefined;
+  const clientOptions = options.clientOptions || {};
+  const siteClient = createSeoSiteClient({
+    ...clientOptions,
+    allowedPrivateOrigin: target.policy.allowedPrivateOrigin,
+    minOriginIntervalMs: clientOptions.minOriginIntervalMs
+      ?? defaultSeoAuditRules.crawl.minOriginIntervalMs
+  });
   return {
     ...target,
+    siteClient,
     service: createSeoSiteAuditService({
       siteClient,
-      networkScope: target.policy.networkScope
+      networkScope: target.policy.networkScope,
+      renderService: options.renderService || (target.policy.networkScope === 'private'
+        ? undefined
+        : createSeoRenderService())
     })
   };
 }

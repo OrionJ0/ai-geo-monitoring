@@ -153,15 +153,18 @@ Authorization: Bearer <token>
   - 内容有效性：`robots.txt` 和 Sitemap 必须含有效内容；Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 与图片 Alt 不会因空标签而通过；`robots.txt` 中声明的自定义 Sitemap 会被实际抓取并校验
   - 爬虫权限：响应的 `crawlerAccess` 按当前页面路径分别展示 Google、Bing、百度和重要 AI 爬虫在 `robots.txt` 中的允许、禁止或无法判断状态；搜索与 AI 搜索爬虫纳入评分，用户触发访问及 AI 训练/数据使用策略不计分
   - 判定边界：`robots.txt` 返回普通 4xx 或内容为空表示“未声明抓取限制”，但独立的 `robots-txt` 有效性检查仍会报缺失/空内容；429、5xx、网络失败或非空但无法解析的文件返回“无法判断”。允许状态不能证明真实 UA 已成功访问、收录或引用
+  - 响应闸门：页面、robots 和 Sitemap 在解析前按预期类型分类；WAF、429、普通 HTTP 错误或不可分析入口不会生成成功报告。GoodieAI 出口被 WAF 拦截不能据此推断搜索引擎也被拦截
   - 搜索平台标签：固定从站点首页分别检查 Google、Bing、百度 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不识别 DNS 或验证文件方式
-  - 评分配置：响应包含 `scoreVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前 `2026-07-23-v3` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7
+  - 评分配置：响应包含 `scoreVersion`、`ruleVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前规则版本 `2026-07-30-v4` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：默认拒绝本机和私网目标。内部部署设置 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=true` 后，允许所有已登录用户检测后端 `localhost`、loopback 和 RFC1918 IPv4 字面地址；单次任务只能访问提交 URL 的精确来源。带用户名/密码的网址、链路本地/云元数据等特殊地址始终拒绝
 - `POST /api/seo-audits/site` 创建全站异步检测任务
   - 请求体：`url` 必填；以该 URL 为入口，只发现同源 HTTP/HTTPS 页面
   - 返回：`202 Accepted`，`data.id` 为任务编号，初始 `status` 为 `queued`，`progress.phase` 为 `queued`
-  - 发现来源：提交 URL、页面内链、根目录 `/sitemap.xml`、robots 声明的 Sitemap；支持 Sitemap index、URL 去重和片段移除
-  - 抓取限制：默认上限 200 页、并发 3、最多读取 20 个 Sitemap、递归深度 3；达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
+  - 发现来源：真实入口 URL、页面内链、根目录 `/sitemap.xml`、robots 声明的 Sitemap；支持 Sitemap index、片段移除，并按重定向后的 resolved URL 合并页面；报告保留 requested URL、final URL 和重定向别名
+  - 抓取限制：默认上限 200 页、页面并发 2、同一 origin 请求启动间隔至少 500ms、最多读取 20 个 Sitemap、递归深度 3；达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
+  - 有界预检：递归 Sitemap 与页面循环前依次请求入口、robots 和一个默认 Sitemap；确认 WAF 或 429 后停止本任务对该 origin 的后续请求
+  - 请求诊断：成功报告的 `site.crawlDiagnostics` 固定记录页面、robots、Sitemap、链接探活请求数、重定向跳数、逻辑渲染尝试数和完成原因
   - 专项报告：`report.sitewide.version` 当前为 `sitewide-audit-v4`；`sitemap-coverage` 独立比较有效 Sitemap 页面清单与已知可索引页面，没有有效页面地址时返回 `unknown`，疑似孤儿页与内链来源质量也不会误报为通过
   - 导航证据：`navigation_crawlability` 返回无有效 `href` 的 `<a>`、有明确页面跳转证据的非语义化控件及交互后才创建的链接；只有点击样式、`cursor-pointer` 或通用点击事件的 `span`/`div` 不判定为 SEO 链接错误
   - 证据边界：浏览器导航抽样只触发 Header/Nav 控件的 hover/focus，不点击链接或业务按钮；渲染器不可用且静态 HTML 没有确定问题时，导航检查返回 `unknown`，不会伪装为通过
@@ -171,7 +174,7 @@ Authorization: Bearer <token>
   - `privateTargetsEnabled` 表示后端是否开启本机和局域网检测
 - `GET /api/seo-audits/jobs/:jobId` 查询当前用户的全站任务
   - 运行中返回 `status` 与 `progress`（发现、检测和失败页数）
-  - 完成后返回 `auditId` 与完整 `report`；失败时返回安全的 `error.code`、`error.message`
+  - 完成后返回 `auditId` 与完整 `report`；失败时返回安全的 `error.code`、`error.message`，`progress` 可包含 `stopReason`、`retryAt` 和固定结构 `crawlDiagnostics`
   - 权限验证：只能读取当前用户自己的任务；任务不存在或不属于当前用户时统一返回 404
 - `GET /api/seo-audits` 分页获取当前用户的检测历史摘要
   - Query 参数：`page` 默认 1；`pageSize` 默认 10，最大 50
@@ -257,10 +260,13 @@ Authorization: Bearer <token>
 - `DNS_LOOKUP_FAILED`：域名无法解析
 - `UPSTREAM_TIMEOUT`：目标网站响应超时
 - `UPSTREAM_UNAVAILABLE`：无法连接目标网站
+- `UPSTREAM_HTTP_ERROR`：入口返回普通不可用 HTTP 状态
+- `SEO_AUDIT_BLOCKED_BY_WAF`：当前 GoodieAI 审计身份或出口被目标站点安全策略拦截
+- `SEO_AUDIT_RATE_LIMITED`：目标站点返回 429，当前任务停止后续同源请求
+- `SEO_AUDIT_INVALID_RESPONSE`：入口成功响应不包含可分析的 HTML
 - `TARGET_CONNECTION_REFUSED`：私网目标主机可达，但对应端口没有服务监听
 - `TARGET_NETWORK_UNREACHABLE`：私网检测时，后端服务器没有到目标局域网的可用网络路径
 - `PAGE_TOO_LARGE`：页面内容超过限制
-- `UNSUPPORTED_CONTENT_TYPE`：目标不是 HTML 页面
 
 ## 定时任务（需认证）
 - `POST /api/schedules` 创建每日定时任务

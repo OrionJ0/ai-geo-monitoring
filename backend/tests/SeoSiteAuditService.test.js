@@ -5,6 +5,7 @@ const {
   createSeoSiteAuditService,
   normalizeSameOriginUrl
 } = require('../services/SeoSiteAuditService');
+const { createSeoSiteClient } = require('../services/SeoSiteClient');
 const { defaultSeoAuditRules } = require('../config/seoAuditRules');
 
 function htmlPage(url, links = []) {
@@ -59,6 +60,92 @@ test('rewrites localhost Sitemap declarations only for a private audit origin', 
     originalHost: 'localhost:3003',
     rewritten: 'http://192.168.9.206:3003/sitemap.xml'
   }]);
+});
+
+test('runs a bounded entry, robots and default sitemap preflight before discovery work', async () => {
+  const calls = [];
+  const siteClient = {
+    async fetchPage(url) {
+      calls.push(['page', url]);
+      return htmlPage(url);
+    },
+    async probe(url, options) {
+      calls.push(['probe', url, options]);
+      if (url.endsWith('/robots.txt')) {
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'text/plain' },
+          body: 'User-agent: *\nAllow: /\nSitemap: https://example.com/custom.xml'
+        };
+      }
+      return {
+        statusCode: 429,
+        headers: { 'content-type': 'text/plain', 'retry-after': '60' },
+        body: 'Too many requests'
+      };
+    }
+  };
+
+  await assert.rejects(
+    () => createSeoSiteAuditService({ siteClient }).audit('https://example.com/'),
+    {
+      code: 'SEO_AUDIT_RATE_LIMITED',
+      stopReason: 'rate_limited'
+    }
+  );
+  assert.deepEqual(calls, [
+    ['page', 'https://example.com/'],
+    ['probe', 'https://example.com/robots.txt', {
+      expectedKind: 'robots',
+      requestKind: 'robots'
+    }],
+    ['probe', 'https://example.com/sitemap.xml', {
+      expectedKind: 'sitemap',
+      requestKind: 'sitemap'
+    }]
+  ]);
+});
+
+test('fails an unavailable entry but keeps ordinary child HTTP failures as page evidence', async () => {
+  const entryClient = {
+    async fetchPage(url) {
+      return {
+        requestedUrl: url,
+        finalUrl: url,
+        statusCode: 403,
+        headers: { 'content-type': 'text/html' },
+        html: '<html><body>Forbidden</body></html>'
+      };
+    },
+    async probe() {
+      throw new Error('preflight must not continue');
+    }
+  };
+  await assert.rejects(
+    () => createSeoSiteAuditService({ siteClient: entryClient }).audit('https://example.com/'),
+    { code: 'UPSTREAM_HTTP_ERROR' }
+  );
+
+  const pages = new Map([
+    ['https://example.com/', htmlPage('https://example.com/', ['/forbidden'])],
+    ['https://example.com/forbidden', {
+      ...htmlPage('https://example.com/forbidden'),
+      statusCode: 403
+    }]
+  ]);
+  const siteClient = {
+    async fetchPage(url) {
+      return pages.get(url);
+    },
+    async probe() {
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+  const child = report.pages.find((page) => page.url.endsWith('/forbidden'));
+  assert.equal(child.status, 'failed');
+  assert.equal(child.errorCode, 'UPSTREAM_HTTP_ERROR');
 });
 
 test('discovers and audits unique same-origin pages from links and recursive sitemaps', async () => {
@@ -222,6 +309,99 @@ test('full-site audit always includes the homepage when started from a subpage',
   assert.equal(report.pages.find((page) => page.url === 'https://example.com/').isHomepage, true);
 });
 
+test('uses the resolved entry URL as page identity and preserves the requested alias', async () => {
+  const calls = new Map();
+  const siteClient = {
+    async fetchPage(url) {
+      calls.set(url, (calls.get(url) || 0) + 1);
+      if (url === 'https://example.com/cn') {
+        return {
+          ...htmlPage('https://example.com/cn/'),
+          requestedUrl: url,
+          finalUrl: 'https://example.com/cn/',
+          redirectChain: [{
+            from: url,
+            statusCode: 301,
+            to: 'https://example.com/cn/'
+          }]
+        };
+      }
+      if (url === 'https://example.com/') return htmlPage(url);
+      if (url === 'https://example.com/cn/') return htmlPage(url);
+      throw new Error(`unexpected page ${url}`);
+    },
+    async probe(url) {
+      if (url.endsWith('/sitemap.xml')) {
+        return {
+          statusCode: 200,
+          body: '<urlset><url><loc>https://example.com/cn</loc></url><url><loc>https://example.com/cn/</loc></url></urlset>'
+        };
+      }
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/cn');
+
+  assert.equal(report.requestedUrl, 'https://example.com/cn');
+  assert.equal(report.finalUrl, 'https://example.com/cn/');
+  assert.equal(report.pages.filter((page) => page.finalUrl === 'https://example.com/cn/').length, 1);
+  assert.deepEqual(
+    report.pages.find((page) => page.finalUrl === 'https://example.com/cn/').aliases,
+    ['https://example.com/cn']
+  );
+  assert.deepEqual(report.site.redirectAliases, [{
+    requestedUrl: 'https://example.com/cn',
+    resolvedUrl: 'https://example.com/cn/',
+    redirectChain: [{
+      from: 'https://example.com/cn',
+      statusCode: 301,
+      to: 'https://example.com/cn/'
+    }]
+  }]);
+  assert.equal(calls.get('https://example.com/cn'), 1);
+  assert.equal(calls.get('https://example.com/cn/') || 0, 0);
+});
+
+test('merges concurrently fetched aliases before creating page checks or scores', async () => {
+  const root = htmlPage('https://example.com/', ['/legacy-a', '/legacy-b']);
+  const redirected = htmlPage('https://example.com/target');
+  redirected.html = redirected.html.replace(/<title>.*?<\/title>/, '');
+  const siteClient = {
+    async fetchPage(url) {
+      if (url === 'https://example.com/') return root;
+      if (['https://example.com/legacy-a', 'https://example.com/legacy-b'].includes(url)) {
+        return {
+          ...redirected,
+          requestedUrl: url,
+          finalUrl: 'https://example.com/target',
+          redirectChain: [{
+            from: url,
+            statusCode: 301,
+            to: 'https://example.com/target'
+          }]
+        };
+      }
+      throw new Error(`unexpected page ${url}`);
+    },
+    async probe() {
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+  const targetPages = report.pages.filter((page) => page.finalUrl === 'https://example.com/target');
+  const titleIssue = report.issues.find((issue) => issue.id === 'title');
+
+  assert.equal(targetPages.length, 1);
+  assert.deepEqual(targetPages[0].aliases, [
+    'https://example.com/legacy-a',
+    'https://example.com/legacy-b'
+  ]);
+  assert.deepEqual(titleIssue.affectedPages, ['https://example.com/target']);
+  assert.equal(titleIssue.count, 1);
+});
+
 test('uses the final entry origin after a cross-origin homepage redirect', async () => {
   const pages = new Map([
     ['https://example.com/', {
@@ -253,6 +433,45 @@ test('uses the final entry origin after a cross-origin homepage redirect', async
     'https://www.example.com/',
     'https://www.example.com/about'
   ]);
+});
+
+test('records a child redirect to another origin without scoring the external body', async () => {
+  const siteClient = {
+    async fetchPage(url) {
+      if (url === 'https://example.com/') {
+        return htmlPage(url, ['/leave']);
+      }
+      if (url === 'https://example.com/leave') {
+        return {
+          ...htmlPage('https://outside.example/secret'),
+          requestedUrl: url,
+          finalUrl: 'https://outside.example/secret',
+          html: '<html><head><title>不应进入本站报告的外域标题</title></head><body><h1>外域正文</h1></body></html>',
+          redirectChain: [{
+            from: url,
+            statusCode: 302,
+            to: 'https://outside.example/secret'
+          }]
+        };
+      }
+      throw new Error(`unexpected page ${url}`);
+    },
+    async probe() {
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+  const redirectedPage = report.pages.find((page) => page.url === 'https://example.com/leave');
+
+  assert.equal(redirectedPage.status, 'redirected_external');
+  assert.equal(redirectedPage.finalUrl, 'https://outside.example/secret');
+  assert.equal(Object.hasOwn(redirectedPage, 'title'), false);
+  assert.equal(report.site.failedPages, 0);
+  assert.equal(
+    report.issues.some((issue) => issue.affectedPages?.includes('https://outside.example/secret')),
+    false
+  );
 });
 
 test('continues after page failures and aggregates issues with affected URLs', async () => {
@@ -361,6 +580,15 @@ test('respects page limit, reports truncation and emits crawl progress', async (
   ]);
   const progress = [];
   const calls = { pages: new Map(), probes: new Map() };
+  const diagnostics = {
+    networkRequests: {
+      total: 7,
+      byKind: { page: 4, robots: 1, sitemap: 1, link_probe: 1 },
+      redirectHops: 0
+    },
+    renderAttempts: 0,
+    stopReason: null
+  };
   const siteClient = {
     async fetchPage(url) {
       calls.pages.set(url, (calls.pages.get(url) || 0) + 1);
@@ -369,6 +597,15 @@ test('respects page limit, reports truncation and emits crawl progress', async (
     async probe(url) {
       calls.probes.set(url, (calls.probes.get(url) || 0) + 1);
       return { statusCode: 404, body: '' };
+    },
+    recordRenderAttempts(count) {
+      diagnostics.renderAttempts += count;
+    },
+    setStopReason(stopReason) {
+      diagnostics.stopReason = stopReason;
+    },
+    getRequestDiagnostics() {
+      return structuredClone(diagnostics);
     }
   };
 
@@ -386,6 +623,15 @@ test('respects page limit, reports truncation and emits crawl progress', async (
   assert.equal(calls.pages.get('https://example.com/'), 1);
   assert.equal(calls.probes.get('https://example.com/robots.txt'), 1);
   assert.equal(calls.probes.get('https://example.com/sitemap.xml'), 1);
+  assert.deepEqual(report.site.crawlDiagnostics, {
+    networkRequests: {
+      total: 7,
+      byKind: { page: 4, robots: 1, sitemap: 1, link_probe: 1 },
+      redirectHops: 0
+    },
+    renderAttempts: 2,
+    stopReason: 'page_limit'
+  });
 });
 
 test('probes internal link targets outside the audited page limit', async () => {
@@ -412,6 +658,60 @@ test('probes internal link targets outside the audited page limit', async () => 
   assert.equal(probed.includes('https://example.com/missing'), true);
   assert.equal(
     report.sitewide.broken_links.internal.some((link) => link.url === 'https://example.com/missing'),
+    true
+  );
+});
+
+test('keeps an external WAF probe out of the target-site failure result and stops that external origin', async () => {
+  let externalRequests = 0;
+  const siteClient = createSeoSiteClient({
+    minOriginIntervalMs: 0,
+    resolveHostname: async () => [{ address: '93.184.216.34', family: 4 }],
+    request: async ({ url }) => {
+      const parsed = new URL(url);
+      if (parsed.origin === 'https://outside.example') {
+        externalRequests += 1;
+        return {
+          status: 403,
+          headers: { 'content-type': 'text/html' },
+          data: '<html><meta name="EO-Bot-Js-Token" content="REDACTED_TEST_VALUE"><script>window.__EDGEONE_TEST_CHALLENGE__ = true;</script></html>'
+        };
+      }
+      if (parsed.pathname === '/') {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+          data: htmlPage('https://example.com/', [
+            'https://outside.example/a',
+            'https://outside.example/b'
+          ]).html
+        };
+      }
+      return { status: 404, headers: { 'content-type': 'text/plain' }, data: '' };
+    }
+  });
+  const ruleConfig = {
+    ...defaultSeoAuditRules,
+    crawl: { ...defaultSeoAuditRules.crawl, concurrency: 1 }
+  };
+
+  const report = await createSeoSiteAuditService({
+    siteClient,
+    ruleConfig,
+    renderService: {
+      async sample() {
+        return { status: 'unavailable', reason: 'test', samples: [] };
+      }
+    }
+  }).audit('https://example.com/');
+
+  assert.equal(report.site.successfulPages, 1);
+  assert.equal(report.site.crawlDiagnostics.stopReason, 'completed');
+  assert.equal(externalRequests, 1);
+  assert.equal(
+    report.sitewide.broken_links.external.every((link) => (
+      link.errorCode === 'SEO_AUDIT_BLOCKED_BY_WAF'
+    )),
     true
   );
 });

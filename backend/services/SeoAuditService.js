@@ -10,7 +10,11 @@ const {
   calculateTechnicalHealth,
   detectTechnicalHealthBlockers
 } = require('./SeoHealthScoreService');
-const { isPrivateAuditAddress } = require('./SeoSiteClient');
+const {
+  assertNormalResponse,
+  classifyResponse,
+  isPrivateAuditAddress
+} = require('./SeoSiteClient');
 
 const CATEGORY_DEFINITIONS = [
   { key: 'crawlability', label: '收录与抓取' },
@@ -156,6 +160,32 @@ function analyzeSitemap(result) {
   };
 }
 
+function isAuditStopError(error) {
+  return ['SEO_AUDIT_BLOCKED_BY_WAF', 'SEO_AUDIT_RATE_LIMITED'].includes(error?.code);
+}
+
+async function probeTrustedResource(client, url, expectedKind) {
+  let result;
+  try {
+    result = await client.probe(url, {
+      expectedKind,
+      requestKind: expectedKind
+    });
+  } catch (error) {
+    if (isAuditStopError(error)) throw error;
+    return { statusCode: 0, body: '', classification: null };
+  }
+
+  const responseClassification = result.classification || classifyResponse(result, expectedKind);
+  if (['waf_blocked', 'rate_limited'].includes(responseClassification.outcome)) {
+    assertNormalResponse({ ...result, classification: responseClassification }, expectedKind);
+  }
+  if (responseClassification.outcome !== 'normal') {
+    return { ...result, body: '', classification: responseClassification };
+  }
+  return { ...result, classification: responseClassification };
+}
+
 function createSeoAuditService({
   siteClient,
   ruleConfig = defaultSeoAuditRules,
@@ -175,6 +205,7 @@ function createSeoAuditService({
     async audit(inputUrl) {
       const requestedUrl = normalizeWebsiteUrl(inputUrl);
       const response = await client.fetchPage(requestedUrl);
+      assertNormalResponse(response, 'page');
       const finalUrl = response.finalUrl || requestedUrl;
       const $ = cheerio.load(response.html || '');
       const origin = new URL(finalUrl).origin;
@@ -183,8 +214,10 @@ function createSeoAuditService({
       if (new URL(finalUrl).pathname !== '/') {
         try {
           const homepageResponse = await client.fetchPage(homepageUrl);
+          assertNormalResponse(homepageResponse, 'page');
           homepageHtml = homepageResponse.html || '';
-        } catch {
+        } catch (error) {
+          if (isAuditStopError(error)) throw error;
           homepageHtml = '';
         }
       }
@@ -316,8 +349,8 @@ function createSeoAuditService({
           : 'Open Graph 信息不完整';
 
       const [robotsResult, sitemapResult] = await Promise.all([
-        client.probe(`${origin}/robots.txt`).catch(() => ({ statusCode: 0, body: '' })),
-        client.probe(`${origin}/sitemap.xml`).catch(() => ({ statusCode: 0, body: '' }))
+        probeTrustedResource(client, `${origin}/robots.txt`, 'robots'),
+        probeTrustedResource(client, `${origin}/sitemap.xml`, 'sitemap')
       ]);
       const robotsAnalysis = analyzeRobots(robotsResult);
       const crawlerAccess = evaluateCrawlerAccess({
@@ -355,7 +388,7 @@ function createSeoAuditService({
         .slice(0, 3);
       const declaredSitemapResults = await Promise.all(declaredSitemapUrls.map(async (url) => ({
         url,
-        result: await client.probe(url).catch(() => ({ statusCode: 0, body: '' }))
+        result: await probeTrustedResource(client, url, 'sitemap')
       })));
       const sitemapCandidates = [
         { url: defaultSitemapUrl, result: sitemapResult },

@@ -1,8 +1,9 @@
 const defaultSeoAuditRules = Object.freeze({
-  version: '2026-07-23-v3',
+  version: '2026-07-30-v4',
   crawl: Object.freeze({
     pageLimit: 200,
-    concurrency: 3,
+    concurrency: 2,
+    minOriginIntervalMs: 500,
     sitemapLimit: 20,
     sitemapDepth: 3,
     linkProbeLimit: 500,

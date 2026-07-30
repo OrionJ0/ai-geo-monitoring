@@ -39,9 +39,49 @@ function summarize(row) {
   };
 }
 
+const SAFE_STOP_REASONS = new Set([
+  'completed',
+  'page_limit',
+  'waf_blocked',
+  'rate_limited',
+  'entry_http_error',
+  'entry_invalid_response',
+  'resource_invalid'
+]);
+
+function safeCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function safeCrawlDiagnostics(value) {
+  if (!value || typeof value !== 'object') return null;
+  const networkRequests = value.networkRequests || {};
+  const byKind = networkRequests.byKind || {};
+  return {
+    networkRequests: {
+      total: safeCount(networkRequests.total),
+      byKind: {
+        page: safeCount(byKind.page),
+        robots: safeCount(byKind.robots),
+        sitemap: safeCount(byKind.sitemap),
+        link_probe: safeCount(byKind.link_probe)
+      },
+      redirectHops: safeCount(networkRequests.redirectHops)
+    },
+    renderAttempts: safeCount(value.renderAttempts),
+    stopReason: SAFE_STOP_REASONS.has(value.stopReason) ? value.stopReason : null
+  };
+}
+
 function safeFailure(error) {
   if (error?.code && Number.isInteger(error.status)) {
-    return { code: error.code, message: error.message };
+    return {
+      code: error.code,
+      message: error.message,
+      stopReason: error.stopReason || null,
+      retryAt: error.retryAt || null,
+      crawlDiagnostics: safeCrawlDiagnostics(error.crawlDiagnostics)
+    };
   }
   return { code: 'AUDIT_FAILED', message: '全站 SEO 检测失败，请稍后重试' };
 }
@@ -107,7 +147,13 @@ function createSeoAuditJobService({
         error_code: failure.code,
         error_message: failure.message,
         completed_at: new Date(),
-        progress: { ...(job.progress || {}), phase: 'failed' }
+        progress: {
+          ...(job.progress || {}),
+          phase: 'failed',
+          ...(failure.stopReason ? { stopReason: failure.stopReason } : {}),
+          ...(failure.retryAt ? { retryAt: failure.retryAt } : {}),
+          ...(failure.crawlDiagnostics ? { crawlDiagnostics: failure.crawlDiagnostics } : {})
+        }
       });
     }
   }
