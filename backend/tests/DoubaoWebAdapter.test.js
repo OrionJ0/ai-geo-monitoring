@@ -13,7 +13,13 @@ const PNG = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 ]);
 
-test('Doubao composer contract includes the current contenteditable textbox', () => {
+test('Doubao composer contract includes the current textarea and contenteditable textbox', () => {
+  assert.equal(doubaoSelectors.selectorVersion, 'doubao-web-v3');
+  assert.ok(
+    doubaoSelectors.composer.includes(
+      'textarea[placeholder="发消息或按住空格说话..."]:not([disabled])'
+    )
+  );
   assert.ok(
     doubaoSelectors.composer.includes('[contenteditable="true"][role="textbox"]')
   );
@@ -144,7 +150,7 @@ test('captures one Doubao answer in standard mode without enabling deep research
   assert.equal(result.model_name, 'doubao-web-ui');
   assert.equal(result.text, answer);
   assert.equal(result.web_capture.schema_version, 'doubao-web-capture-v1');
-  assert.equal(result.web_capture.selector_version, 'doubao-web-v2');
+  assert.equal(result.web_capture.selector_version, 'doubao-web-v3');
   assert.equal(result.web_capture.page_origin, 'https://www.doubao.com');
   assert.equal(result.web_capture.capture_mode.name, 'standard');
   assert.equal(result.web_capture.search.requested, false);

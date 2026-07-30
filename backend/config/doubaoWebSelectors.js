@@ -1,5 +1,5 @@
 module.exports = Object.freeze({
-  selectorVersion: 'doubao-web-v2',
+  selectorVersion: 'doubao-web-v3',
   allowedOrigins: ['https://www.doubao.com'],
   loginMarkers: [
     'input[type="password"]',
@@ -16,6 +16,7 @@ module.exports = Object.freeze({
   ],
   composer: [
     'textarea[placeholder="发消息..."]:not([disabled])',
+    'textarea[placeholder="发消息或按住空格说话..."]:not([disabled])',
     '[contenteditable="true"][role="textbox"]'
   ],
   newConversationControl: Object.freeze({
