@@ -5,8 +5,26 @@ const jwt = require('jsonwebtoken');
 process.env.JWT_SECRET = 'analysis-settings-api-test-secret';
 
 const settingsRouter = require('../routes/settings');
+const User = require('../models/User');
 const AIAnalysisConfigService = require('../services/AIAnalysisConfigService');
 const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
+
+const originalFindByPk = User.findByPk;
+
+test.before(() => {
+  User.findByPk = async (id) => ({
+    id,
+    username: id === 1 ? 'admin' : 'user',
+    role: id === 1 ? 'admin' : 'user',
+    status: 'active',
+    membership_level: 'free',
+    membership_expires_at: null
+  });
+});
+
+test.after(() => {
+  User.findByPk = originalFindByPk;
+});
 
 function token(role) {
   return jwt.sign({ userId: role === 'admin' ? 1 : 2, username: role, role }, process.env.JWT_SECRET);
