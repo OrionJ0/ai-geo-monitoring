@@ -7,6 +7,14 @@ const ADAPTER_TYPES = new Set(['openai_responses', 'openai_chat_completions']);
 const RESERVED_PLATFORM_CODES = new Set(['deepseek-web', 'doubao-web']);
 const MANAGED_WEB_ADAPTER_TYPES = new Set(['deepseek_web', 'doubao_web']);
 const DEFAULT_PROJECT_PLATFORM_CODES = new Set(['doubao-web', 'deepseek-web']);
+const PLATFORM_DISPLAY_ORDER = new Map([
+  ['doubao-web', 0],
+  ['deepseek-web', 1],
+  ['doubao', 2],
+  ['deepseek', 3],
+  ['qwen', 4],
+  ['hunyuan', 5]
+]);
 const TEST_STATUSES = new Set(['untested', 'success', 'failed']);
 const WEB_SEARCH_TEST_STATUSES = new Set(['untested', 'success', 'failed', 'inconclusive']);
 const REQUEST_OPTIONS_MAX_BYTES = 16 * 1024;
@@ -46,12 +54,30 @@ const MANAGED_WEB_CAPABILITIES = Object.freeze({
 
 const PRESET_PLATFORMS = Object.freeze([
   Object.freeze({
+    code: 'doubao-web',
+    name: '豆包网页版',
+    adapter_type: 'doubao_web',
+    base_url: 'https://www.doubao.com',
+    default_model: 'doubao-web-ui',
+    enabled: false,
+    builtin: true
+  }),
+  Object.freeze({
+    code: 'deepseek-web',
+    name: 'DeepSeek 网页版',
+    adapter_type: 'deepseek_web',
+    base_url: 'https://chat.deepseek.com',
+    default_model: 'deepseek-web-ui',
+    enabled: false,
+    builtin: true
+  }),
+  Object.freeze({
     code: 'doubao',
     name: '豆包',
     adapter_type: 'openai_responses',
     base_url: 'https://ark.cn-beijing.volces.com/api/v3',
     default_model: 'doubao-seed-2-1-turbo-260628',
-    enabled: true,
+    enabled: false,
     builtin: true
   }),
   Object.freeze({
@@ -64,24 +90,6 @@ const PRESET_PLATFORMS = Object.freeze([
     builtin: true
   }),
   Object.freeze({
-    code: 'deepseek-web',
-    name: 'DeepSeek 网页版',
-    adapter_type: 'deepseek_web',
-    base_url: 'https://chat.deepseek.com',
-    default_model: 'deepseek-web-ui',
-    enabled: true,
-    builtin: true
-  }),
-  Object.freeze({
-    code: 'doubao-web',
-    name: '豆包网页版',
-    adapter_type: 'doubao_web',
-    base_url: 'https://www.doubao.com',
-    default_model: 'doubao-web-ui',
-    enabled: true,
-    builtin: true
-  }),
-  Object.freeze({
     code: 'qwen',
     name: '千问',
     adapter_type: 'openai_responses',
@@ -90,7 +98,7 @@ const PRESET_PLATFORMS = Object.freeze([
     request_options: Object.freeze({
       search_options: Object.freeze({ forced_search: true })
     }),
-    enabled: true,
+    enabled: false,
     builtin: true
   }),
   Object.freeze({
@@ -102,7 +110,7 @@ const PRESET_PLATFORMS = Object.freeze([
     request_options: Object.freeze({
       web_search_options: Object.freeze({ enable: true })
     }),
-    enabled: true,
+    enabled: false,
     builtin: true
   })
 ]);
@@ -179,6 +187,22 @@ function normalizeRequestOptions(value) {
 
 function rowValue(row, key) {
   return row?.get ? row.get(key) : row?.[key];
+}
+
+function sortPlatformsForDisplay(rows) {
+  return [...rows].sort((left, right) => {
+    const leftPriority = PLATFORM_DISPLAY_ORDER.get(rowValue(left, 'code'));
+    const rightPriority = PLATFORM_DISPLAY_ORDER.get(rowValue(right, 'code'));
+    if (leftPriority !== undefined || rightPriority !== undefined) {
+      if (leftPriority === undefined) return 1;
+      if (rightPriority === undefined) return -1;
+      return leftPriority - rightPriority;
+    }
+    const builtinDifference = Number(Boolean(rowValue(right, 'builtin')))
+      - Number(Boolean(rowValue(left, 'builtin')));
+    if (builtinDifference) return builtinDifference;
+    return Number(rowValue(left, 'id') || 0) - Number(rowValue(right, 'id') || 0);
+  });
 }
 
 function getPlatformCapabilities(row) {
@@ -365,12 +389,12 @@ class AIPlatformConfigService {
   async listAdminPlatforms({ includeArchived = false } = {}) {
     const where = includeArchived ? {} : { archived_at: null };
     const rows = await this.model.findAll({ where, order: [['builtin', 'DESC'], ['id', 'ASC']] });
-    return rows.map(toAdminView);
+    return sortPlatformsForDisplay(rows).map(toAdminView);
   }
 
   async listCatalog() {
     const rows = await this.model.findAll({ where: { archived_at: null }, order: [['builtin', 'DESC'], ['id', 'ASC']] });
-    return rows.map(toCatalogView);
+    return sortPlatformsForDisplay(rows).map(toCatalogView);
   }
 
   async listPlatformRows(codes = null, { includeArchived = true } = {}) {
@@ -414,7 +438,7 @@ class AIPlatformConfigService {
       row = await this.model.create({
         code,
         ...values,
-        enabled: payload.enabled === undefined ? true : Boolean(payload.enabled),
+        enabled: payload.enabled === undefined ? false : Boolean(payload.enabled),
         builtin: false,
         test_status: 'untested'
       });

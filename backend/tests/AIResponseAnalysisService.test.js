@@ -5,7 +5,7 @@ const {
   AIResponseAnalysisService
 } = require('../services/AIResponseAnalysisService');
 
-test('exposes the v4 semantic evidence prompt and DeepSeek high-thinking profile by default', () => {
+test('exposes the v4 semantic evidence prompt with DeepSeek thinking disabled by default', () => {
   const service = new AIResponseAnalysisService();
   const definition = service.getPromptDefinition();
 
@@ -32,7 +32,7 @@ test('exposes the v4 semantic evidence prompt and DeepSeek high-thinking profile
     web_search: false,
     token_limit: null,
     json_mode: 'chat_completions_only',
-    deepseek_thinking: 'high'
+    deepseek_thinking: 'disabled'
   });
   assert.deepEqual(definition.runtime_fields, [
     '当前问题',
@@ -77,7 +77,7 @@ test('grounds the production semantic prompt with diverse focused examples', () 
   assert.doesNotMatch(definition.template, /你是 GEO 回答结构化器/);
 });
 
-test('requests DeepSeek high thinking and JSON output without sampling or token limits', async () => {
+test('requests DeepSeek with thinking disabled and JSON output without sampling or token limits', async () => {
   let requestOptions;
   const service = new AIResponseAnalysisService({
     configService: {
@@ -117,8 +117,7 @@ test('requests DeepSeek high thinking and JSON output without sampling or token 
 
   assert.deepEqual(requestOptions.requestOptions, {
     response_format: { type: 'json_object' },
-    thinking: { type: 'enabled' },
-    reasoning_effort: 'high'
+    thinking: { type: 'disabled' }
   });
   assert.equal(requestOptions.maxTokens, undefined);
   assert.equal(requestOptions.omitTokenLimit, true);
@@ -127,6 +126,66 @@ test('requests DeepSeek high thinking and JSON output without sampling or token 
   assert.equal(result.sov_denominator, 0);
   assert.equal(result.answer_competitor_share, null);
   assert.equal(result.analysis_structure.prompt_revision, 'semantic_evidence_few_shot_v6');
+});
+
+test('applies administrator-confirmed analysis request option overrides', async () => {
+  let requestOptions;
+  const service = new AIResponseAnalysisService({
+    configService: {
+      getAnalysisPlatform: async () => ({
+        code: 'deepseek',
+        adapter_type: 'openai_chat_completions',
+        default_model: 'deepseek-v4-pro',
+        analysis_request_options: {
+          thinking: { type: 'enabled' },
+          reasoning_effort: 'high'
+        }
+      })
+    },
+    requestService: {
+      queryConfig: async (_platform, _prompt, options) => {
+        requestOptions = options;
+        return {
+          success: true,
+          data: { choices: [{ finish_reason: 'stop' }] },
+          text: JSON.stringify({
+            entities: [],
+            mentions: [],
+            target_entity_name: null,
+            competitor_relations: [],
+            candidate_lists: [],
+            recommendations: [],
+            claims: [],
+            sentiment: { label: 'neutral', reason: '未提及目标品牌', evidence: [], risk_terms: [] }
+          })
+        };
+      }
+    }
+  });
+
+  await service.analyze({
+    question: '测试问题',
+    responseText: '回答没有提到任何品牌。',
+    brand: { name: '广拓' }
+  });
+
+  assert.deepEqual(requestOptions.requestOptions, {
+    response_format: { type: 'json_object' },
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high'
+  });
+  assert.equal(
+    service.getPromptDefinition({
+      code: 'deepseek',
+      adapter_type: 'openai_chat_completions',
+      default_model: 'deepseek-v4-pro',
+      analysis_request_options: {
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'high'
+      }
+    }).request_profile.deepseek_thinking,
+    'enabled'
+  );
 });
 
 test('disables Responses reasoning for deterministic low-latency analysis', async () => {

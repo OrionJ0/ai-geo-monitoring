@@ -78,7 +78,8 @@ router.put('/analysis-api', adminRequired, async (req, res) => {
   try {
     const config = await AIAnalysisConfigService.setConfig({
       platform_code: req.body?.platform_code,
-      model_name: req.body?.model_name
+      model_name: req.body?.model_name,
+      request_options: req.body?.request_options
     });
     return res.json({ success: true, message: 'AI 分析 API 已更新', data: config });
   } catch (error) {

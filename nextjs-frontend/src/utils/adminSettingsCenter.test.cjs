@@ -14,7 +14,8 @@ test('admin settings is the single settings center with an analysis API tab', ()
   assert.match(settingsSource, /AI 分析 API/);
   assert.match(settingsSource, /运行设置/);
   assert.match(settingsSource, /站点 SEO/);
-  assert.match(settingsSource, /defaultActiveKey="ai-platforms"/);
+  assert.match(settingsSource, /useState\('ai-platforms'\)/);
+  assert.match(settingsSource, /activeKey=\{activeTab\}/);
   assert.equal(
     (settingsSource.match(/forceRender: true/g) || []).length,
     2,
@@ -76,6 +77,18 @@ test('analysis API test sends the current question required by the runtime contr
   assert.match(analysisSource, /当前问题/);
 });
 
+test('analysis request parameters are editable only after an explicit confirmation', () => {
+  assert.match(analysisSource, /name="request_options_text"/);
+  assert.match(analysisSource, /JSON\.parse\(values\.request_options_text/);
+  assert.match(analysisSource, /request_options:\s*requestOptions/);
+  assert.match(analysisSource, /Modal\.confirm/);
+  assert.match(analysisSource, /确认修改分析请求参数？/);
+  assert.match(analysisSource, /确认修改并保存/);
+  assert.match(analysisSource, /错误参数可能导致分析失败或变慢/);
+  assert.match(analysisSource, /DeepSeek 思考模式/);
+  assert.match(analysisSource, /关闭/);
+});
+
 test('platform settings use the management API for every explicit operation', () => {
   assert.match(platformSource, /\/api\/admin\/ai-platforms/);
   assert.match(platformSource, /\/enabled/);
@@ -113,6 +126,11 @@ test('platform settings use the management API for every explicit operation', ()
   assert.match(platformSource, /供应商 API 输出/);
   assert.match(platformSource, /输入和 API 输出不会写入数据库/);
   assert.match(platformSource, /Popconfirm/);
+  assert.match(
+    platformSource,
+    /const openCreate = \(\) => \{[\s\S]*?enabled: false/,
+    'new custom platforms must start disabled until an administrator opts in',
+  );
 });
 
 test('platform settings treat both managed Web adapters as browser sessions instead of APIs', () => {

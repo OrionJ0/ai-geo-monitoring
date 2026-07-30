@@ -21,7 +21,7 @@ const ANALYSIS_REQUEST_PROFILE = Object.freeze({
   web_search: false,
   token_limit: null,
   json_mode: 'chat_completions_only',
-  deepseek_thinking: 'high'
+  deepseek_thinking: 'disabled'
 });
 const RETRYABLE_REQUEST_ERROR_CODES = new Set([
   'invalid_provider_response',
@@ -1133,6 +1133,13 @@ class AIResponseAnalysisService {
   }
 
   getPromptDefinition(platform = null) {
+    const requestParameters = platform ? this.buildRequestParameters(platform) : null;
+    const requestProfile = { ...ANALYSIS_REQUEST_PROFILE };
+    if (platform?.code === 'deepseek') {
+      requestProfile.deepseek_thinking = String(
+        requestParameters?.request_body?.thinking?.type || 'disabled'
+      );
+    }
     return {
       version: ANALYSIS_METHOD,
       template: this.buildPrompt({
@@ -1148,8 +1155,8 @@ class AIResponseAnalysisService {
       runtime_fields: [...PROMPT_RUNTIME_FIELDS],
       expected_output: EXPECTED_OUTPUT,
       prompt_revision: PROMPT_REVISION,
-      request_profile: { ...ANALYSIS_REQUEST_PROFILE },
-      request_parameters: platform ? this.buildRequestParameters(platform) : null
+      request_profile: requestProfile,
+      request_parameters: requestParameters
     };
   }
 
@@ -1285,8 +1292,8 @@ class AIResponseAnalysisService {
   }
 
   buildAnalysisRequestOptions(platform) {
-    const deepseekHighThinking = platform?.code === 'deepseek';
-    const options = deepseekHighThinking
+    const isDeepSeek = platform?.code === 'deepseek';
+    const options = isDeepSeek
       ? {}
       : { temperature: DEFAULT_TEMPERATURE };
     if (platform?.adapter_type === 'openai_chat_completions') {
@@ -1295,11 +1302,13 @@ class AIResponseAnalysisService {
     if (platform?.adapter_type === 'openai_responses') {
       options.reasoning = { effort: 'none' };
     }
-    if (platform?.code === 'deepseek') {
-      options.thinking = { type: 'enabled' };
-      options.reasoning_effort = 'high';
+    if (isDeepSeek) {
+      options.thinking = { type: 'disabled' };
     }
-    return options;
+    return {
+      ...options,
+      ...(platform?.analysis_request_options || {})
+    };
   }
 
   getFinishReason(connection) {

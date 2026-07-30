@@ -38,12 +38,20 @@ test('stores a platform and independently selected model for the analysis API wi
 
   const result = await service.setConfig({
     platform_code: 'ANALYSIS-AI',
-    model_name: 'analysis-model-pro'
+    model_name: 'analysis-model-pro',
+    request_options: {
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high'
+    }
   });
 
   assert.equal(result.platform_code, 'analysis-ai');
   assert.equal(result.model_name, 'analysis-model-pro');
   assert.equal(result.configured, true);
+  assert.deepEqual(result.request_options, {
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high'
+  });
   assert.deepEqual(result.platform, {
     code: 'analysis-ai',
     name: '分析模型',
@@ -51,6 +59,10 @@ test('stores a platform and independently selected model for the analysis API wi
   });
   const runtimePlatform = await service.getAnalysisPlatform();
   assert.equal(runtimePlatform.default_model, 'analysis-model-pro');
+  assert.deepEqual(runtimePlatform.analysis_request_options, {
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high'
+  });
   assert.equal(JSON.stringify(result).includes('encrypted-only'), false);
 });
 
@@ -107,5 +119,41 @@ test('rejects a monitoring-only Web platform as the analysis provider', async ()
       model_name: 'deepseek-web-ui'
     }),
     (error) => error.code === 'analysis_platform_unsupported'
+  );
+});
+
+test('rejects analysis request options that would re-enable Web search', async () => {
+  const service = new AIAnalysisConfigService({
+    settingModel: {
+      findOne: async () => null,
+      findOrCreate: async () => {
+        throw new Error('settings must not be written');
+      }
+    },
+    platformConfigService: {
+      getPlatformByCode: async () => ({
+        code: 'deepseek',
+        name: 'DeepSeek',
+        adapter_type: 'openai_chat_completions',
+        default_model: 'deepseek-v4-pro',
+        enabled: true,
+        encrypted_api_key: 'encrypted-only',
+        base_url: 'https://api.deepseek.com/v1/chat/completions'
+      })
+    }
+  });
+
+  await assert.rejects(
+    service.setConfig({
+      platform_code: 'deepseek',
+      model_name: 'deepseek-v4-pro',
+      request_options: {
+        tools: [{ type: 'web_search' }]
+      }
+    }),
+    (error) => (
+      error.code === 'analysis_request_options_invalid'
+      && /tools/.test(error.message)
+    )
   );
 });

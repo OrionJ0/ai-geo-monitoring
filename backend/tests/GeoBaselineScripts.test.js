@@ -35,16 +35,16 @@ test('评测实验隔离输出目录并保留同一份样本和人工真值', ()
   );
 });
 
-test('评测分析器只暴露正式提示词与高思考路径', async () => {
+test('评测分析器只暴露正式提示词与默认关闭思考路径', async () => {
   const { analyzer, via } = await evaluateScript.buildAnalyzer({
     platform: null
   });
   const definition = analyzer.getPromptDefinition();
 
   assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v6');
-  assert.equal(definition.request_profile.deepseek_thinking, 'high');
+  assert.equal(definition.request_profile.deepseek_thinking, 'disabled');
   assert.match(via, /semantic_evidence_few_shot_v6/);
-  assert.match(via, /thinking=high/);
+  assert.match(via, /thinking=disabled/);
 });
 
 test('人工基线抽样文件声明当前契约并标记 10 条多实体复核样本', () => {

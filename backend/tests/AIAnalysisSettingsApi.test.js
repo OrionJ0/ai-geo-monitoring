@@ -70,16 +70,21 @@ async function api(method, routePath, { role, body = {} } = {}) {
 test('lets an administrator select and read the dedicated analysis API', async () => {
   const originalSet = AIAnalysisConfigService.setConfig;
   const originalGet = AIAnalysisConfigService.getPublicConfig;
-  AIAnalysisConfigService.setConfig = async (input) => ({
-    platform_code: input.platform_code,
-    model_name: input.model_name,
-    configured: true,
-    platform: {
-      code: input.platform_code,
-      name: '分析平台',
-      model_name: input.model_name
-    }
-  });
+  let savedInput;
+  AIAnalysisConfigService.setConfig = async (input) => {
+    savedInput = input;
+    return {
+      platform_code: input.platform_code,
+      model_name: input.model_name,
+      request_options: input.request_options,
+      configured: true,
+      platform: {
+        code: input.platform_code,
+        name: '分析平台',
+        model_name: input.model_name
+      }
+    };
+  };
   AIAnalysisConfigService.getPublicConfig = async () => ({
     platform_code: 'analysis-ai',
     model_name: 'analysis-model-pro',
@@ -91,11 +96,16 @@ test('lets an administrator select and read the dedicated analysis API', async (
     assert.equal((await api('GET', '/analysis-api', { role: 'user' })).status, 403);
     const updated = await api('PUT', '/analysis-api', {
       role: 'admin',
-      body: { platform_code: 'analysis-ai', model_name: 'analysis-model-pro' }
+      body: {
+        platform_code: 'analysis-ai',
+        model_name: 'analysis-model-pro',
+        request_options: { temperature: 0.2 }
+      }
     });
     assert.equal(updated.status, 200);
     assert.equal(updated.json.data.platform_code, 'analysis-ai');
     assert.equal(updated.json.data.model_name, 'analysis-model-pro');
+    assert.deepEqual(savedInput.request_options, { temperature: 0.2 });
     const loaded = await api('GET', '/analysis-api', { role: 'admin' });
     assert.equal(loaded.json.data.configured, true);
   } finally {
@@ -131,7 +141,7 @@ test('returns the versioned runtime analysis prompt template to administrators',
     assert.equal(response.json.data.request_profile.timeout_seconds, 120);
     assert.equal(response.json.data.request_profile.max_attempts, 2);
     assert.equal(response.json.data.request_profile.web_search, false);
-    assert.equal(response.json.data.request_profile.deepseek_thinking, 'high');
+    assert.equal(response.json.data.request_profile.deepseek_thinking, 'disabled');
     assert.deepEqual(response.json.data.request_parameters, {
       adapter_type: 'openai_chat_completions',
       request_body: {
@@ -141,8 +151,7 @@ test('returns the versioned runtime analysis prompt template to administrators',
           content: '<运行时注入完整结构化提示词>'
         }],
         response_format: { type: 'json_object' },
-        thinking: { type: 'enabled' },
-        reasoning_effort: 'high'
+        thinking: { type: 'disabled' }
       },
       runtime_policy: {
         timeout_seconds: 120,

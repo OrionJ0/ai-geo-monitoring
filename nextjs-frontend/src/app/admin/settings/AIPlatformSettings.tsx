@@ -210,7 +210,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       request_timeout_seconds: null,
       max_tokens: null,
       request_options_text: '{}',
-      enabled: true,
+      enabled: false,
     });
     setOpen(true);
   };

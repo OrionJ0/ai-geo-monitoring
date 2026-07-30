@@ -89,7 +89,7 @@ test('protects platform management with administrator authorization', async () =
   assert.equal((await api(adminRouter, 'GET', '/', { role: 'admin' })).status, 200);
 });
 
-test('creates and updates a platform without returning its API key', async () => {
+test('creates a disabled platform and updates it without returning its API key', async () => {
   const created = await api(adminRouter, 'POST', '/', {
     role: 'admin',
     body: {
@@ -103,7 +103,7 @@ test('creates and updates a platform without returning its API key', async () =>
   });
 
   assert.equal(created.status, 201);
-  assert.equal(created.json.data.enabled, true);
+  assert.equal(created.json.data.enabled, false);
   assert.equal(created.json.data.configured, true);
   assert.equal(created.json.data.api_key_last4, 'cret');
   assert.equal(JSON.stringify(created.json).includes('sk-api-route-secret'), false);

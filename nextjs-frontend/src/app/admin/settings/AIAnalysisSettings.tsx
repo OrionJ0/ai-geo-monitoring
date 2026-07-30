@@ -9,6 +9,7 @@ import {
   Descriptions,
   Form,
   Input,
+  Modal,
   Select,
   Space,
   Tag,
@@ -25,7 +26,7 @@ type PlatformRecord = {
   id: number;
   code: string;
   name: string;
-  adapter_type: 'openai_responses' | 'openai_chat_completions' | 'deepseek_web';
+  adapter_type: 'openai_responses' | 'openai_chat_completions' | 'deepseek_web' | 'doubao_web';
   default_model: string;
   enabled: boolean;
   configured: boolean;
@@ -63,6 +64,7 @@ type PromptDefinition = {
 type AnalysisConfig = {
   platform_code: string;
   model_name: string;
+  request_options: Record<string, unknown>;
   configured: boolean;
   unavailable_reason?: string | null;
   platform?: {
@@ -94,6 +96,7 @@ type TestValues = {
 type AnalysisConfigValues = {
   platform_code: string;
   model_name: string;
+  request_options_text: string;
 };
 
 const sampleQuestion = '教育行业周界安防厂商有哪些？';
@@ -102,6 +105,10 @@ const sampleAnswer = [
   '2. 大华股份：教育行业项目覆盖广。',
   '3. 上海广拓（GATO）：在张力式电子围栏领域经验丰富，是专业领域的头部选择。',
 ].join('\n');
+
+function stringifyRequestOptions(value?: Record<string, unknown>) {
+  return JSON.stringify(value && typeof value === 'object' && !Array.isArray(value) ? value : {}, null, 2);
+}
 
 function adapterLabel(adapterType?: PlatformRecord['adapter_type']) {
   return adapterType === 'openai_responses'
@@ -188,6 +195,7 @@ export default function AIAnalysisSettings() {
       configForm.setFieldsValue({
         platform_code: nextConfig?.platform_code || undefined,
         model_name: nextConfig?.model_name || undefined,
+        request_options_text: stringifyRequestOptions(nextConfig?.request_options),
       });
       const selectedPlatform = nextPlatforms.find(
         (item: PlatformRecord) => item.code === nextConfig?.platform_code,
@@ -243,11 +251,17 @@ export default function AIAnalysisSettings() {
     void loadModels(selectedPlatform.id, currentModel, true);
   };
 
-  const save = async () => {
+  const persistConfig = async (
+    values: AnalysisConfigValues,
+    requestOptions: Record<string, unknown>,
+  ) => {
     try {
-      const values = await configForm.validateFields();
       setSaving(true);
-      const response = await axios.put('/api/settings/analysis-api', values);
+      const response = await axios.put('/api/settings/analysis-api', {
+        platform_code: values.platform_code,
+        model_name: values.model_name,
+        request_options: requestOptions,
+      });
       setConfig(response?.data?.data || null);
       setTestResult(null);
       await load();
@@ -257,6 +271,29 @@ export default function AIAnalysisSettings() {
       message.error(getApiErrorMessage(error, '保存 AI 分析 API 失败'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const save = async () => {
+    try {
+      const values = await configForm.validateFields();
+      const requestOptions = JSON.parse(values.request_options_text || '{}') as Record<string, unknown>;
+      const requestOptionsChanged = JSON.stringify(requestOptions)
+        !== JSON.stringify(config?.request_options || {});
+      if (!requestOptionsChanged) {
+        await persistConfig(values, requestOptions);
+        return;
+      }
+      Modal.confirm({
+        title: '确认修改分析请求参数？',
+        content: '错误参数可能导致分析失败或变慢。保存后，结构化测试和正式监测分析都会立即使用新参数。',
+        okText: '确认修改并保存',
+        cancelText: '取消',
+        onOk: () => persistConfig(values, requestOptions),
+      });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'errorFields' in error) return;
+      message.error(getApiErrorMessage(error, '分析请求参数必须是有效 JSON 对象'));
     }
   };
 
@@ -387,6 +424,31 @@ export default function AIAnalysisSettings() {
           <Paragraph type="secondary">
             这组参数只用于结构化分析，不会修改监测平台参数或平台默认配置。
           </Paragraph>
+          <Form.Item
+            name="request_options_text"
+            label="分析请求附加参数（JSON）"
+            extra="默认使用低延迟参数，DeepSeek 思考模式默认关闭。修改时会再次确认；模型、消息正文、联网搜索和 Token 上限由系统保护，不能在这里覆盖。"
+            rules={[
+              {
+                validator: async (_, value) => {
+                  try {
+                    const parsed = JSON.parse(value || '{}');
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                      throw new Error('not an object');
+                    }
+                  } catch {
+                    throw new Error('请输入有效的 JSON 对象');
+                  }
+                },
+              },
+            ]}
+          >
+            <Input.TextArea
+              autoSize={{ minRows: 4, maxRows: 12 }}
+              spellCheck={false}
+              style={{ fontFamily: 'var(--font-geist-mono), monospace' }}
+            />
+          </Form.Item>
           <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} bordered>
             <Descriptions.Item label="温度">
               {promptDefinition?.request_profile?.temperature ?? '-'}

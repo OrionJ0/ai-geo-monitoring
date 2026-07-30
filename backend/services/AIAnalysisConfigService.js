@@ -2,11 +2,20 @@ const { Setting } = require('../models');
 const AIPlatformConfigService = require('./AIPlatformConfigService');
 const {
   getUnavailableReason,
-  hasPlatformCapability
+  hasPlatformCapability,
+  normalizeRequestOptions
 } = require('./AIPlatformConfigService');
 
 const PLATFORM_SETTING_KEY = 'ai_analysis_platform_code';
 const MODEL_SETTING_KEY = 'ai_analysis_model_name';
+const REQUEST_OPTIONS_SETTING_KEY = 'ai_analysis_request_options';
+const ANALYSIS_POLICY_REQUEST_OPTION_KEYS = new Set([
+  'tools',
+  'tool_choice',
+  'enable_search',
+  'search_options',
+  'web_search_options'
+]);
 
 class AIAnalysisConfigError extends Error {
   constructor(message, code = 'analysis_config_unavailable', status = 400) {
@@ -15,6 +24,19 @@ class AIAnalysisConfigError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+function normalizeAnalysisRequestOptions(value) {
+  const options = normalizeRequestOptions(value);
+  for (const key of Object.keys(options)) {
+    if (ANALYSIS_POLICY_REQUEST_OPTION_KEYS.has(key)) {
+      throw new AIAnalysisConfigError(
+        `AI 分析请求参数不能覆盖系统字段 ${key}`,
+        'analysis_request_options_invalid'
+      );
+    }
+  }
+  return options;
 }
 
 class AIAnalysisConfigService {
@@ -31,6 +53,20 @@ class AIAnalysisConfigService {
   async getConfiguredModelName(platform) {
     const row = await this.settingModel.findOne({ where: { key: MODEL_SETTING_KEY } });
     return String(row?.value || platform?.default_model || '').trim();
+  }
+
+  async getRequestOptions() {
+    const row = await this.settingModel.findOne({ where: { key: REQUEST_OPTIONS_SETTING_KEY } });
+    if (!row?.value) return {};
+    try {
+      return normalizeAnalysisRequestOptions(JSON.parse(row.value));
+    } catch (_) {
+      throw new AIAnalysisConfigError(
+        'AI 分析请求参数无效',
+        'analysis_request_options_invalid',
+        503
+      );
+    }
   }
 
   async getAnalysisPlatform() {
@@ -56,17 +92,29 @@ class AIAnalysisConfigService {
       throw new AIAnalysisConfigError('AI 分析 API 当前不可用', `analysis_api_${unavailableReason}`, 503);
     }
     const modelName = await this.getConfiguredModelName(platform);
+    const requestOptions = await this.getRequestOptions();
     if (!modelName) {
       throw new AIAnalysisConfigError('AI 分析模型未配置', 'analysis_model_not_configured', 503);
     }
     const value = platform?.get ? platform.get({ plain: true }) : { ...platform };
-    return { ...value, default_model: modelName };
+    return {
+      ...value,
+      default_model: modelName,
+      analysis_request_options: requestOptions
+    };
   }
 
   async getPublicConfig() {
     const platformCode = await this.getPlatformCode();
+    const requestOptions = await this.getRequestOptions();
     if (!platformCode) {
-      return { platform_code: '', model_name: '', configured: false, platform: null };
+      return {
+        platform_code: '',
+        model_name: '',
+        request_options: requestOptions,
+        configured: false,
+        platform: null
+      };
     }
     try {
       const platform = await this.platformConfigService.getPlatformByCode(platformCode);
@@ -74,6 +122,7 @@ class AIAnalysisConfigService {
         return {
           platform_code: platformCode,
           model_name: '',
+          request_options: requestOptions,
           configured: false,
           unavailable_reason: 'unsupported_platform_capability',
           platform: null
@@ -84,6 +133,7 @@ class AIAnalysisConfigService {
       return {
         platform_code: platformCode,
         model_name: modelName,
+        request_options: requestOptions,
         configured: unavailableReason === null && Boolean(modelName),
         unavailable_reason: unavailableReason,
         platform: {
@@ -96,6 +146,7 @@ class AIAnalysisConfigService {
       return {
         platform_code: platformCode,
         model_name: '',
+        request_options: requestOptions,
         configured: false,
         unavailable_reason: 'platform_not_found',
         platform: null
@@ -142,8 +193,18 @@ class AIAnalysisConfigService {
     if (modelName.length > 255) {
       throw new AIAnalysisConfigError('AI 分析模型长度不能超过 255', 'analysis_model_invalid');
     }
+    let requestOptions;
+    try {
+      requestOptions = normalizeAnalysisRequestOptions(input.request_options);
+    } catch (error) {
+      throw new AIAnalysisConfigError(
+        error?.message || 'AI 分析请求参数无效',
+        'analysis_request_options_invalid'
+      );
+    }
     await this.saveSetting(PLATFORM_SETTING_KEY, platformCode);
     await this.saveSetting(MODEL_SETTING_KEY, modelName);
+    await this.saveSetting(REQUEST_OPTIONS_SETTING_KEY, JSON.stringify(requestOptions));
     return this.getPublicConfig();
   }
 }
@@ -155,3 +216,4 @@ module.exports.AIAnalysisConfigService = AIAnalysisConfigService;
 module.exports.AIAnalysisConfigError = AIAnalysisConfigError;
 module.exports.PLATFORM_SETTING_KEY = PLATFORM_SETTING_KEY;
 module.exports.MODEL_SETTING_KEY = MODEL_SETTING_KEY;
+module.exports.REQUEST_OPTIONS_SETTING_KEY = REQUEST_OPTIONS_SETTING_KEY;

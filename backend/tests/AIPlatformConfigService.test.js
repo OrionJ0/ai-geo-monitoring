@@ -35,7 +35,7 @@ test.after(async () => {
   await sequelize.close();
 });
 
-test('seeds both managed Web presets enabled by default', async () => {
+test('seeds every preset disabled until an administrator enables it', async () => {
   const service = createService();
   await service.ensurePresets();
 
@@ -51,23 +51,20 @@ test('seeds both managed Web presets enabled by default', async () => {
   assert.equal(rows.every((row) => row.builtin), true);
   assert.equal(rows.every((row) => row.encrypted_api_key === null), true);
   assert.equal(rows.every((row) => row.api_key_last4 === null), true);
-  assert.equal(rows.find((row) => row.code === 'doubao').enabled, true);
-  assert.equal(rows.find((row) => row.code === 'qwen').enabled, true);
-  assert.equal(rows.find((row) => row.code === 'hunyuan').enabled, true);
-  assert.equal(rows.find((row) => row.code === 'deepseek').enabled, false);
+  assert.equal(rows.every((row) => row.enabled === false), true);
   assert.equal(rows.find((row) => row.code === 'deepseek').default_model, 'deepseek-v4-pro');
   const deepseekWeb = rows.find((row) => row.code === 'deepseek-web');
   assert.equal(deepseekWeb.name, 'DeepSeek 网页版');
   assert.equal(deepseekWeb.adapter_type, 'deepseek_web');
   assert.equal(deepseekWeb.base_url, 'https://chat.deepseek.com');
   assert.equal(deepseekWeb.default_model, 'deepseek-web-ui');
-  assert.equal(deepseekWeb.enabled, true);
+  assert.equal(deepseekWeb.enabled, false);
   const doubaoWeb = rows.find((row) => row.code === 'doubao-web');
   assert.equal(doubaoWeb.name, '豆包网页版');
   assert.equal(doubaoWeb.adapter_type, 'doubao_web');
   assert.equal(doubaoWeb.base_url, 'https://www.doubao.com');
   assert.equal(doubaoWeb.default_model, 'doubao-web-ui');
-  assert.equal(doubaoWeb.enabled, true);
+  assert.equal(doubaoWeb.enabled, false);
   const doubao = rows.find((row) => row.code === 'doubao');
   assert.equal(doubao.adapter_type, 'openai_responses');
   assert.equal(doubao.base_url, 'https://ark.cn-beijing.volces.com/api/v3');
@@ -110,6 +107,36 @@ test('keeps an existing administrator-disabled Doubao Web preset disabled', asyn
   assert.equal(doubaoWeb.enabled, false);
 });
 
+test('keeps existing administrator-enabled presets enabled after defaults change', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'doubao-web',
+    name: '豆包网页版',
+    adapter_type: 'doubao_web',
+    base_url: 'https://www.doubao.com',
+    default_model: 'doubao-web-ui',
+    enabled: true,
+    builtin: true
+  });
+  await AIPlatformConfig.create({
+    code: 'doubao',
+    name: '豆包',
+    adapter_type: 'openai_responses',
+    base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+    default_model: 'doubao-seed-2-1-turbo-260628',
+    encrypted_api_key: 'already-encrypted',
+    enabled: true,
+    builtin: true
+  });
+
+  await service.ensurePresets();
+
+  const rows = await AIPlatformConfig.findAll({
+    where: { code: ['doubao-web', 'doubao'] }
+  });
+  assert.equal(rows.every((row) => row.enabled === true), true);
+});
+
 test('treats both managed Web presets as configured without API keys and derives capabilities', async () => {
   const service = createService();
   await service.ensurePresets();
@@ -150,6 +177,10 @@ test('treats both managed Web presets as configured without API keys and derives
 test('catalog marks only selectable managed Web platforms as new-project defaults', async () => {
   const service = createService();
   await service.ensurePresets();
+  const deepseekWeb = await AIPlatformConfig.findOne({ where: { code: 'deepseek-web' } });
+  const doubaoWeb = await AIPlatformConfig.findOne({ where: { code: 'doubao-web' } });
+  await service.setEnabled(deepseekWeb.id, true);
+  await service.setEnabled(doubaoWeb.id, true);
 
   const catalog = await service.listCatalog();
   assert.deepEqual(
@@ -161,6 +192,44 @@ test('catalog marks only selectable managed Web platforms as new-project default
       .every((item) => item.default_for_new_project === false),
     true
   );
+});
+
+test('lists presets in the fixed Web-first product order regardless of database ids', async () => {
+  const service = createService();
+  await AIPlatformConfig.bulkCreate(
+    [...PRESET_PLATFORMS]
+      .reverse()
+      .map((preset) => ({
+        ...preset,
+        request_options: preset.request_options
+          ? JSON.parse(JSON.stringify(preset.request_options))
+          : {}
+      }))
+  );
+  await AIPlatformConfig.create({
+    code: 'example-ai',
+    name: 'Example AI',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1/chat/completions',
+    default_model: 'example-model',
+    enabled: false,
+    builtin: false
+  });
+
+  const adminPlatforms = await service.listAdminPlatforms();
+  const catalog = await service.listCatalog();
+  const expectedCodes = [
+    'doubao-web',
+    'deepseek-web',
+    'doubao',
+    'deepseek',
+    'qwen',
+    'hunyuan',
+    'example-ai'
+  ];
+
+  assert.deepEqual(adminPlatforms.map((item) => item.code), expectedCodes);
+  assert.deepEqual(catalog.map((item) => item.code), expectedCodes);
 });
 
 test('promotes an existing Qwen row to builtin without overwriting its connection settings', async () => {
@@ -420,7 +489,7 @@ test('rejects request parameter arrays, protected fields and prototype-pollution
   );
 });
 
-test('creates enabled custom platforms and deletes only custom platforms', async () => {
+test('creates custom platforms disabled by default and deletes only custom platforms', async () => {
   const service = createService();
   await service.ensurePresets();
 
@@ -431,7 +500,7 @@ test('creates enabled custom platforms and deletes only custom platforms', async
     base_url: 'https://api.example.com/v1/chat/completions',
     default_model: 'example-model'
   });
-  assert.equal(created.enabled, true);
+  assert.equal(created.enabled, false);
   assert.equal(created.builtin, false);
   assert.equal(created.configured, false);
 

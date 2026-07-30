@@ -42,7 +42,7 @@ blocked_by:
 - 本轮完整后端回归 880/880，定时调度相关回归 88/88，前端工具测试 248/248，Next.js 生产构建与 TypeScript 检查通过。
 - 独立临时数据库与 `127.0.0.1:3111/3112` 真实 UI/API 入口验证：
   - 管理员登录、平台配置、分析平台选择和 `GET /api/settings/analysis-api/prompt` 均通过。
-  - 接口返回 `ai_structured_v4`、`semantic_evidence_few_shot_v6`、`deepseek-v4-pro`、JSON mode、高强度思考、120 秒、2 次尝试、关闭 Web 搜索和 `token_limit=null`。
+  - 当时接口返回 `ai_structured_v4`、`semantic_evidence_few_shot_v6`、`deepseek-v4-pro`、JSON mode、高强度思考、120 秒、2 次尝试、关闭 Web 搜索和 `token_limit=null`；2026-07-30 后正式默认值改为关闭思考，管理员可在二次确认后显式修改分析请求参数。
   - 设置页真实结构化测试首次成功，识别 3 个企业实体、2 个竞品关系，目标品牌排名 3，SOV 为 1/3。
   - 单问题首次完整监测保留了 2371 字原回答，但两次 v4 输出均因 `sentiment.evidence` 无法定位而 fail-closed；没有写入 `visibility_metrics`。
   - analysis-only 重试复用与失败记录 SHA-256 完全相同的原回答，不重新调用监测平台；重试后 SOV 为 13/42（30.95%），情绪为中性。
