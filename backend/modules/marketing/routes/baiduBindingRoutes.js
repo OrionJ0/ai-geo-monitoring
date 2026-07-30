@@ -32,10 +32,10 @@ function createBaiduBindingRouter({
   accountRoute = '/admin/baidu/connections/:connectionId/accounts'
 }) {
   const router = express.Router();
-  router.use(adminRequired);
 
   if (includeAccounts) router.get(
     accountRoute,
+    adminRequired,
     async (req, res) => {
       try {
         res.set('Cache-Control', 'no-store');
@@ -46,36 +46,45 @@ function createBaiduBindingRouter({
     }
   );
 
-  if (includeBindings) router.get('/projects/:projectId/baidu-bindings', async (req, res) => {
-    try {
-      return res.json(await service.listBindings(req.params.projectId));
-    } catch (error) {
-      return sendError(res, error);
+  if (includeBindings) router.get(
+    '/projects/:projectId/baidu-bindings',
+    adminRequired,
+    async (req, res) => {
+      try {
+        return res.json(await service.listBindings(req.params.projectId));
+      } catch (error) {
+        return sendError(res, error);
+      }
     }
-  });
+  );
 
-  if (includeBindings) router.post('/projects/:projectId/baidu-bindings', async (req, res) => {
-    if (!exactBody(req.body, ['connectionId', 'externalAccountId'])) {
-      return sendError(res, {
-        status: 400,
-        code: 'BINDING_REQUEST_INVALID',
-        message: '绑定请求字段无效'
-      });
+  if (includeBindings) router.post(
+    '/projects/:projectId/baidu-bindings',
+    adminRequired,
+    async (req, res) => {
+      if (!exactBody(req.body, ['connectionId', 'externalAccountId'])) {
+        return sendError(res, {
+          status: 400,
+          code: 'BINDING_REQUEST_INVALID',
+          message: '绑定请求字段无效'
+        });
+      }
+      try {
+        return res.status(201).json(await service.createBinding({
+          projectId: req.params.projectId,
+          adminId: req.user.id,
+          connectionId: req.body.connectionId,
+          externalAccountId: req.body.externalAccountId
+        }));
+      } catch (error) {
+        return sendError(res, error);
+      }
     }
-    try {
-      return res.status(201).json(await service.createBinding({
-        projectId: req.params.projectId,
-        adminId: req.user.id,
-        connectionId: req.body.connectionId,
-        externalAccountId: req.body.externalAccountId
-      }));
-    } catch (error) {
-      return sendError(res, error);
-    }
-  });
+  );
 
   if (includeBindings) router.post(
     '/projects/:projectId/baidu-bindings/:bindingId/pause',
+    adminRequired,
     async (req, res) => {
       try {
         return res.json(await service.pauseBinding({
@@ -90,6 +99,7 @@ function createBaiduBindingRouter({
 
   if (includeBindings) router.post(
     '/projects/:projectId/baidu-bindings/:bindingId/resume',
+    adminRequired,
     async (req, res) => {
       try {
         return res.json(await service.resumeBinding({
@@ -104,6 +114,7 @@ function createBaiduBindingRouter({
 
   if (includeBindings) router.delete(
     '/projects/:projectId/baidu-bindings/:bindingId',
+    adminRequired,
     async (req, res) => {
       try {
         return res.json(await service.deleteBinding({

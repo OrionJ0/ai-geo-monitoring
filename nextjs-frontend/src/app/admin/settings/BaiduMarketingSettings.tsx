@@ -59,12 +59,16 @@ export default function BaiduMarketingSettings() {
       const nextModuleStatus = statusResponse.data.moduleState;
       setModuleStatus(nextModuleStatus);
       setModuleErrorCode(statusResponse.data.errorCode || null);
-      if (['READY', 'PILOT_READY'].includes(nextModuleStatus)) {
+      if ([
+        'READY',
+        'PILOT_READY',
+        'PILOT_DATA_READY',
+      ].includes(nextModuleStatus)) {
         const connectionsResponse = await axios.get(
           '/api/admin/marketing/baidu/connections'
         );
         setConnections(connectionsResponse.data);
-        if (nextModuleStatus === 'READY') {
+        if (['READY', 'PILOT_DATA_READY'].includes(nextModuleStatus)) {
           const projectsResponse = await axios.get('/api/geo-projects');
           const projectRows = projectsResponse?.data?.data
             || projectsResponse?.data
@@ -113,7 +117,9 @@ export default function BaiduMarketingSettings() {
   }, []);
 
   useEffect(() => {
-    if (moduleStatus === 'READY') loadBindings(projectId);
+    if (['READY', 'PILOT_DATA_READY'].includes(moduleStatus)) {
+      loadBindings(projectId);
+    }
   }, [loadBindings, moduleStatus, projectId]);
 
   useEffect(() => {
@@ -267,8 +273,13 @@ export default function BaiduMarketingSettings() {
     }
   };
 
-  const pilotMode = moduleStatus === 'PILOT_READY';
-  if (!['READY', 'PILOT_READY'].includes(moduleStatus)) {
+  const pilotAuthOnly = moduleStatus === 'PILOT_READY';
+  const pilotDataMode = moduleStatus === 'PILOT_DATA_READY';
+  if (![
+    'READY',
+    'PILOT_READY',
+    'PILOT_DATA_READY',
+  ].includes(moduleStatus)) {
     return (
       <Alert
         type={moduleStatus === 'LOADING' ? 'info' : 'warning'}
@@ -291,12 +302,21 @@ export default function BaiduMarketingSettings() {
           <h2 id="baidu-marketing-settings-title">百度搜索推广连接</h2>
           <p>只读取账户、推广计划、展现、点击和消费，不修改投放。</p>
         </div>
-        {pilotMode ? (
+        {pilotAuthOnly ? (
           <Alert
             type="info"
             showIcon
             message="受限试点模式"
             description="当前只可验证百度授权、Token 和账户目录；项目绑定、报表刷新和调度尚未开放。"
+          />
+        ) : null}
+        {pilotDataMode ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="真实数据试点模式"
+            description="当前只对项目白名单开放搜索账户绑定和最近 30 天只读报表；正式导航、币种与时区口径仍在验收。"
+            action={<Button href="/geo/marketing">打开营销监控</Button>}
           />
         ) : null}
         {error ? <Alert type="error" showIcon message={error} role="alert" /> : null}
@@ -369,7 +389,7 @@ export default function BaiduMarketingSettings() {
             },
           ]}
         />
-        {!pilotMode ? (
+        {!pilotAuthOnly ? (
           <>
         <div>
           <h2 id="baidu-marketing-bindings-title">项目账户绑定</h2>
@@ -499,16 +519,16 @@ export default function BaiduMarketingSettings() {
         </p>
       </Modal>
       <Modal
-        title={pilotMode ? '检查百度搜索账户目录' : '绑定百度搜索账户'}
+        title={pilotAuthOnly ? '检查百度搜索账户目录' : '绑定百度搜索账户'}
         open={bindingModalOpen}
-        onOk={pilotMode
+        onOk={pilotAuthOnly
           ? closeAccountModal
           : createBinding}
         onCancel={closeAccountModal}
-        okText={pilotMode ? '关闭' : '确认绑定'}
+        okText={pilotAuthOnly ? '关闭' : '确认绑定'}
         cancelText="取消"
         okButtonProps={{
-          disabled: pilotMode
+          disabled: pilotAuthOnly
             ? false
             : !bindingConnectionId || !bindingAccountId,
         }}
@@ -533,7 +553,7 @@ export default function BaiduMarketingSettings() {
                 ))}
             </select>
           </label>
-          {pilotMode ? (
+          {pilotAuthOnly ? (
             <p>这里仅检查当前授权可见的搜索账户，不会创建项目绑定。</p>
           ) : null}
           <label>
@@ -555,7 +575,7 @@ export default function BaiduMarketingSettings() {
             <Alert
               type="info"
               showIcon
-              message={pilotMode
+              message={pilotAuthOnly
                 ? '当前连接没有可见的只读搜索账户'
                 : '当前连接没有可绑定的只读搜索账户'}
             />

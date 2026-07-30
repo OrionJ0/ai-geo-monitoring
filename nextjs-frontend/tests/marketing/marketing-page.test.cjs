@@ -40,3 +40,14 @@ test('unverified marketing skeleton is not added to the production workspace nav
 
   assert.doesNotMatch(layout, /\/geo\/marketing/);
 });
+
+test('pilot marketing page reads Baidu Tongji separately from the local ad snapshot', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /\/tongji-trend/);
+  assert.match(source, /百度统计 · 实时试点/);
+  assert.match(source, /浏览量（PV）/);
+  assert.match(source, /访客数（UV）/);
+  assert.match(source, /不写入搜索广告的本地快照/);
+  assert.match(source, /无数据标记，不按 0 处理/);
+});

@@ -1,6 +1,6 @@
 # 营销监控系统第一期技术方案
 
-- 状态：Blocked（官方文档契约与受限试点已实现，等待百度真实响应与生产验收）
+- 状态：Active（白名单真实数据试点已实现，等待完整生产验收）
 - 日期：2026-07-29（2026-07-30 按百度商业开发者文档更新）
 - 对应 PRD：`prd.md`
 - 实施 issues：`issues/`
@@ -34,10 +34,10 @@
 当前工程状态：
 
 - 后端正式应用已经挂载营销状态、授权、绑定、看板和刷新路由，启动/关停链路也已接入；
-- 默认 `MARKETING_MONITORING_ENABLED=false`；显式试点配置只能进入 `PILOT_READY`，正式配置必须通过 `VERIFIED` 契约门禁才能进入 `READY`；
+- 默认 `MARKETING_MONITORING_ENABLED=false`；文档试点进入 `PILOT_READY`，真实响应试点进入 `PILOT_DATA_READY`，正式配置必须通过 `VERIFIED` 契约门禁才能进入 `READY`；
 - 前端直达页面和管理员设置页已构建，但工作台导航保持隐藏；
 - 默认配置不会向百度发起任何网络请求，也不会在正式业务流程产生营销数据；
-- `PILOT_READY` 只挂载授权、callback、连接与账户目录，项目绑定、看板、刷新和 executor 明确拒绝；
+- `PILOT_READY` 只挂载授权、callback、连接与账户目录；`PILOT_DATA_READY` 额外挂载白名单项目绑定、搜索快照、executor 和百度统计实时趋势；
 - 真实报表响应、金额/时区、refresh 轮换与生产验收完成后，新增不可变 `VERIFIED` 契约版本并关闭试点模式，正式路径才会生效。
 
 ## 3. 关键决策
@@ -114,7 +114,7 @@ SQLite/Sequelize 的 `BIGINT` 可能进入 JavaScript `Number`，不能用于外
 
 不用一个 `data_state` 混合多个维度。读模型分别返回：
 
-- `moduleState`：`DISABLED | PILOT_READY | READY | MISCONFIGURED | SCHEMA_MISSING | RECOVERY_FAILED`
+- `moduleState`：`DISABLED | PILOT_READY | PILOT_DATA_READY | READY | MISCONFIGURED | SCHEMA_MISSING | RECOVERY_FAILED`
 - `projectState`：`ACTIVE | ARCHIVED`
 - `sourceSummaryState`：项目级 `NOT_CONNECTED | CONNECTED | ACTION_REQUIRED | DISCONNECTED`
 - `bindingSummaryState`：项目级 `NONE | ACTIVE | BLOCKED`
@@ -628,7 +628,7 @@ BAIDU_MARKETING_HTTP_TIMEOUT_MS=
 规则：
 
 - 配置检查只报告缺失键名和稳定错误码，不回显值。
-- 试点模式只接受 `DOCUMENTED_PENDING_PILOT` 契约，并只挂载授权、callback、Token、连接和账户目录；其他营销业务接口返回 `MARKETING_PILOT_AUTH_ONLY`。
+- 试点模式接受两级契约：`DOCUMENTED_PENDING_PILOT` 只挂载授权、callback、Token、连接和账户目录；`PILOT_VERIFIED` 还必须匹配获批 Scope、脱敏真实 fixture、金额试点口径和只读出站白名单，才进入 `PILOT_DATA_READY`。
 - 正式模式拒绝有 blocker、无生产 allowlist、金额口径不完整或适配器未实现的契约。
 - 验收阶段服务端只允许管理员和 `MARKETING_MONITORING_ALLOWED_PROJECT_IDS` 中的项目；设为明确的 `*` 才表示正式扩大访问，不能只隐藏导航。
 - Redirect URI 必须精确匹配允许列表，只接受 HTTPS 生产地址；本地测试例外由显式测试配置控制。
@@ -733,10 +733,11 @@ Issue 002 是所有百度真实解析实现的阻塞门；Issue 009 通过前不
 3. 在公网 HTTPS 域名验证 `/api/health`、`/api/ready` 和禁用状态 callback 路由。
 4. 在百度为本项目新建专用应用，登记精确 callback，审核后取得 `appId/secretKey/scope`。
 5. 配置测试项目 allowlist、`MARKETING_MONITORING_PILOT_MODE=true` 和 `baidu-marketing-docs-2026-07-30`，确认状态为 `PILOT_READY`。
-6. 先用合成 canary 验证 ingress/APM 不记录 callback query，再完成真实授权、账户目录与 Token refresh 证据采集；此阶段绑定、报表和调度必须保持关闭。
-7. 用脱敏真实样本补全契约 blocker，新增 `VERIFIED` 版本。
-8. 把 `MARKETING_MONITORING_PILOT_MODE=false`，从正式入口完成绑定、刷新、百度后台核对和安全验收。
-9. 验收通过后扩大项目准入并显示导航。
+6. 用合成 canary 验证 ingress/APM 不记录 callback query，再从正式入口完成真实授权和账户目录检查。
+7. 部署脱敏真实 fixture，把契约切到 `baidu-marketing-pilot-2026-07-30`，确认状态为 `PILOT_DATA_READY`；只在项目白名单内完成绑定、搜索快照和百度统计实时读取。
+8. 继续采集 Token refresh、金额/时区、失败响应和同口径后台核对证据，新增 `VERIFIED` 版本。
+9. 把 `MARKETING_MONITORING_PILOT_MODE=false`，从正式入口完成最终安全与无障碍验收。
+10. 验收通过后扩大项目准入并显示导航。
 
 回滚：
 
@@ -775,12 +776,17 @@ git diff --check
 
 实现阻塞项：
 
-- 获批百度应用和只读权限；
-- 专用应用生成的真实 scope 与稳定公网 HTTPS callback；
-- 真实账户目录和搜索计划报告成功/错误响应；
 - Token `grantType` 冲突、refresh 轮换与响应丢失重放的真实验证；
-- 真实账户规模、金额币种/scale、报告时区和延迟口径；
+- 金额币种/scale、报告时区和延迟口径的正式证据及百度后台同口径核对；
+- 搜索报表与百度统计的真实错误响应和重试语义；
 - 现有 `CONFIG_ENCRYPTION_KEY` 的生产保管和泄露后全量重授权流程。
+
+## 19. 2026-07-30 白名单真实数据试点
+
+- `baidu-marketing-pilot-2026-07-30` 固化真实 OAuth、账户目录、4 页搜索报表、百度统计站点目录和趋势响应结构；所有本地 fixture 均使用合成账户名、域名、ID 和指标。
+- 搜索报表严格校验 `rowCount/totalRowCount`、账户、计划、日期和指标类型，消费按试点 `CNY`、2 位小数转为精确字符串；超精度直接拒绝。
+- 百度统计只选择当前授权主体下唯一正常站点，读取 `trend/time/a` 的 PV、访问次数和 UV；`--` 保留为无数据，不转换为 0。该数据在试点阶段实时读取，不进入搜索广告原子快照。
+- 服务器 Token 不删除、不导出；本地开发只使用脱敏 fixture。`PILOT_DATA_READY` 不等于正式 `READY`，正式导航继续隐藏。
 
 ## 18. 后续来源边界
 

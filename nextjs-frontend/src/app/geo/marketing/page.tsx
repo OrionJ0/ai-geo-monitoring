@@ -70,11 +70,15 @@ export default function MarketingPage() {
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState('');
   const [dashboard, setDashboard] = useState(null);
+  const [tongji, setTongji] = useState(null);
+  const [tongjiLoading, setTongjiLoading] = useState(false);
+  const [tongjiError, setTongjiError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [announcement, setAnnouncement] = useState('');
   const [filter, setFilter] = useState({ from: '', to: '' });
   const requestVersion = useRef(0);
+  const tongjiRequestVersion = useRef(0);
   const announcedRunState = useRef('');
   const autoRequestedRevision = useRef('');
 
@@ -109,6 +113,32 @@ export default function MarketingPage() {
     }
   }, []);
 
+  const loadTongji = useCallback(async (targetProjectId) => {
+    if (!targetProjectId) return;
+    const version = tongjiRequestVersion.current + 1;
+    tongjiRequestVersion.current = version;
+    setTongjiLoading(true);
+    setTongjiError('');
+    try {
+      const response = await axios.get(
+        `/api/marketing/projects/${targetProjectId}/tongji-trend`
+      );
+      if (tongjiRequestVersion.current !== version) return;
+      setTongji(response.data);
+    } catch (requestError) {
+      if (tongjiRequestVersion.current !== version) return;
+      setTongji(null);
+      setTongjiError(
+        requestError?.response?.data?.error?.message
+        || '无法读取百度统计，请稍后重试。'
+      );
+    } finally {
+      if (tongjiRequestVersion.current === version) {
+        setTongjiLoading(false);
+      }
+    }
+  }, []);
+
   const createRefresh = useCallback(async (triggerType) => {
     if (!projectId) return;
     setError('');
@@ -134,7 +164,10 @@ export default function MarketingPage() {
         const statusResponse = await axios.get('/api/marketing/status');
         if (!active) return;
         setModuleStatus(statusResponse.data);
-        if (statusResponse.data.moduleState !== 'READY') {
+        if (![
+          'READY',
+          'PILOT_DATA_READY',
+        ].includes(statusResponse.data.moduleState)) {
           setLoading(false);
           return;
         }
@@ -152,7 +185,12 @@ export default function MarketingPage() {
           || ''
         );
         setProjectId(String(selected));
-        if (selected) await loadDashboard(String(selected));
+        if (selected) {
+          await Promise.all([
+            loadDashboard(String(selected)),
+            loadTongji(String(selected)),
+          ]);
+        }
         else setLoading(false);
       } catch (requestError) {
         if (!active) return;
@@ -166,8 +204,9 @@ export default function MarketingPage() {
     return () => {
       active = false;
       requestVersion.current += 1;
+      tongjiRequestVersion.current += 1;
     };
-  }, [loadDashboard]);
+  }, [loadDashboard, loadTongji]);
 
   useEffect(() => {
     const refreshState = dashboard?.states?.refreshState;
@@ -215,7 +254,10 @@ export default function MarketingPage() {
   if (!moduleStatus && loading) {
     return <p role="status" className={styles.loading}>正在读取营销模块状态…</p>;
   }
-  if (moduleStatus?.moduleState !== 'READY') return moduleBoundary(moduleStatus);
+  if (![
+    'READY',
+    'PILOT_DATA_READY',
+  ].includes(moduleStatus?.moduleState)) return moduleBoundary(moduleStatus);
 
   const refreshBlocked = (
     dashboard?.states?.projectState !== 'ACTIVE'
@@ -244,9 +286,12 @@ export default function MarketingPage() {
               requestVersion.current += 1;
               setProjectId(event.target.value);
               setDashboard(null);
+              setTongji(null);
+              setTongjiError('');
               setLoading(true);
               autoRequestedRevision.current = '';
               loadDashboard(event.target.value);
+              loadTongji(event.target.value);
             }}
           >
             {projects.map((project) => (
@@ -265,6 +310,11 @@ export default function MarketingPage() {
           </button>
         </div>
       </header>
+      {moduleStatus.moduleState === 'PILOT_DATA_READY' ? (
+        <p role="status" className={styles.notice}>
+          当前为白名单真实数据试点；消费按人民币 2 位小数展示，正式币种与报表时区仍待最终核对。
+        </p>
+      ) : null}
 
       {refreshBlocked && dashboard ? (
         <p id="refresh-disabled-reason" className={styles.assistiveReason}>
@@ -335,6 +385,116 @@ export default function MarketingPage() {
                 )}
               </strong>
             </article>
+          </section>
+
+          <section
+            className={styles.trendSection}
+            aria-labelledby="tongji-heading"
+          >
+            <div className={styles.sectionHeading}>
+              <div>
+                <p className={styles.kicker}>百度统计 · 实时试点</p>
+                <h2 id="tongji-heading">网站访问数据</h2>
+                <p>
+                  {tongji?.site?.domain
+                    ? `${tongji.site.domain} · ${tongji.coverage.from} 至 ${tongji.coverage.to}`
+                    : '从当前百度授权账户读取唯一正常站点'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadTongji(projectId)}
+                disabled={tongjiLoading || !projectId}
+              >
+                {tongjiLoading ? '正在读取…' : '刷新百度统计'}
+              </button>
+            </div>
+            <p className={styles.notice}>
+              百度统计当前为实时只读查询，不写入搜索广告的本地快照。
+            </p>
+            {tongjiError ? (
+              <p role="alert" className={styles.error}>{tongjiError}</p>
+            ) : null}
+            {tongjiLoading && !tongji ? (
+              <p role="status" className={styles.loading}>
+                正在读取百度统计…
+              </p>
+            ) : null}
+            {tongji?.dataState === 'NO_DATA' ? (
+              <p role="status" className={styles.notice}>
+                当前 30 天窗口没有可用的百度统计指标；百度返回的是无数据标记，不按 0 处理。
+              </p>
+            ) : null}
+            {tongji?.dataState === 'DATA' ? (
+              <>
+                <div className={styles.metrics} aria-label="百度统计指标汇总">
+                  <article>
+                    <span>浏览量（PV）</span>
+                    <strong>
+                      {tongji.summary.pageviews == null
+                        ? '—'
+                        : groupDigits(tongji.summary.pageviews)}
+                    </strong>
+                  </article>
+                  <article>
+                    <span>访问次数</span>
+                    <strong>
+                      {tongji.summary.visits == null
+                        ? '—'
+                        : groupDigits(tongji.summary.visits)}
+                    </strong>
+                  </article>
+                  <article>
+                    <span>访客数（UV）</span>
+                    <strong>
+                      {tongji.summary.visitors == null
+                        ? '—'
+                        : groupDigits(tongji.summary.visitors)}
+                    </strong>
+                  </article>
+                </div>
+                <div
+                  className={styles.tableScroller}
+                  role="region"
+                  aria-label="百度统计逐日指标"
+                  tabIndex={0}
+                >
+                  <table>
+                    <caption>百度统计逐日数据表</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">日期</th>
+                        <th scope="col">浏览量（PV）</th>
+                        <th scope="col">访问次数</th>
+                        <th scope="col">访客数（UV）</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tongji.trend.map((row) => (
+                        <tr key={row.date}>
+                          <th scope="row">{row.date}</th>
+                          <td>
+                            {row.pageviews == null
+                              ? '—'
+                              : groupDigits(row.pageviews)}
+                          </td>
+                          <td>
+                            {row.visits == null
+                              ? '—'
+                              : groupDigits(row.visits)}
+                          </td>
+                          <td>
+                            {row.visitors == null
+                              ? '—'
+                              : groupDigits(row.visitors)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : null}
           </section>
 
           {dashboard.coverage ? (

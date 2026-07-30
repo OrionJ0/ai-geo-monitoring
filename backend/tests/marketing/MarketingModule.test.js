@@ -199,6 +199,53 @@ test('pilot module exposes OAuth callback parsing but blocks dashboard runtime',
   );
 });
 
+test('pilot data module mounts allowlisted binding and dashboard routes', async (t) => {
+  const database = await createMarketingTestDatabase(
+    'marketing-pilot-data-module-'
+  );
+  t.after(database.close);
+  const module = createMarketingModule({
+    env: enabledConfig({
+      MARKETING_MONITORING_PILOT_MODE: 'true',
+      MARKETING_MONITORING_ALLOWED_PROJECT_IDS: '11',
+      BAIDU_MARKETING_SCOPE: '67,71,1004606,1002161',
+      BAIDU_MARKETING_CONTRACT_VERSION:
+        'baidu-marketing-pilot-2026-07-30'
+    }),
+    sequelize: database.sequelize
+  });
+
+  assert.deepEqual(await module.getStatus(), {
+    moduleState: 'PILOT_DATA_READY',
+    errorCode: null
+  });
+  assert.deepEqual(await module.start(), {
+    moduleState: 'PILOT_DATA_READY',
+    errorCode: null
+  });
+
+  const app = express();
+  app.use((req, _res, next) => {
+    req.user = { id: 2, role: 'user', status: 'active' };
+    next();
+  });
+  app.use('/api/marketing', module.router);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const dashboard = await fetch(
+    `${baseUrl}/api/marketing/projects/11/dashboard`
+  );
+  assert.equal(dashboard.status, 200);
+  assert.equal(
+    (await dashboard.json()).states.moduleState,
+    'PILOT_DATA_READY'
+  );
+  await module.shutdown();
+});
+
 test('the application mounts marketing through its facade without changing global readiness inputs', () => {
   const appSource = fs.readFileSync(
     path.resolve(__dirname, '../../app.js'),

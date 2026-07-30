@@ -80,3 +80,9 @@ git diff --check
 - 代码已提供只开放 OAuth/账户检查的 `PILOT_READY`，可以安全部署后采集真实证据；正式绑定、报表、调度和导航仍不会生效。
 - mock、单元测试、浏览器 fixture 和本地数据库不得替代本 issue 的真实生产证据。
 - 因此正式导航保持隐藏，模块默认关闭，Issue 009 不关闭。
+
+## 2026-07-30 已完成的试点证据
+
+- 公网 HTTPS callback、获批应用、动态 state 授权、Token 加密落库和真实账户目录已完成。
+- 搜索报表和百度统计站点/趋势接口均从服务器发起只读请求并成功返回；本地只保存脱敏 fixture。
+- 尚未从部署后的 `PILOT_DATA_READY` 页面完成账户绑定、快照与百度后台同口径核对，也未实际触发 Refresh Token grant 和代理/APM 秘密扫描，因此本 issue 仍为 blocked。

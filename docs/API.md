@@ -337,8 +337,9 @@ Authorization: Bearer <token>
 
 营销模块默认关闭；未知或越级使用的契约会 fail-closed。所有外部 ID 和指标均以十进制或不透明字符串返回。
 
-- `GET /api/marketing/status`：读取模块状态，不探测百度网络；受限试点返回 `PILOT_READY`。
+- `GET /api/marketing/status`：读取模块状态，不探测百度网络；授权试点返回 `PILOT_READY`，真实数据只读试点返回 `PILOT_DATA_READY`。
 - `GET /api/marketing/projects/:projectId/dashboard`：纯读同一快照 revision；可同时传 `from`、`to` 筛选当前本地覆盖范围。
+- `GET /api/marketing/projects/:projectId/tongji-trend`：在真实数据只读试点中实时读取百度统计最近 30 个上海自然日的 PV、访问次数和访客数；百度无数据标记返回 `null`，不会伪装成 `0`。
 - `POST /api/marketing/projects/:projectId/refresh-runs`：请求体只接受 `triggerType`；固定读取最近 30 个上海自然日。
 - `GET /api/marketing/projects/:projectId/refresh-runs/:runId`：读取同项目运行状态。
 - `/api/marketing/projects/:projectId/baidu-bindings*`：管理员创建、暂停、恢复或删除整个百度搜索账户绑定。
@@ -350,7 +351,7 @@ Authorization: Bearer <token>
 - `GET /api/admin/marketing/baidu/connections/:connectionId/accounts`：管理员读取官方 `getUserInfo` 返回的主账户与子账户目录。
 - `POST /api/admin/marketing/baidu/connections/:connectionId/disconnect`：本地断开、清 Token 并暂停相关绑定。
 
-`PILOT_READY` 只开放上述授权、callback、Token、连接和账户目录接口；所有项目绑定、看板、刷新和调度接口返回 `MARKETING_PILOT_AUTH_ONLY`。正式 `READY` 仍等待真实响应契约与生产验收。系统不会向百度调用任何写接口，也不支持信息流、计划子集、落地页或销售数据。
+`PILOT_READY` 只开放上述授权、callback、Token、连接和账户目录接口；所有项目绑定、看板、刷新和调度接口返回 `MARKETING_PILOT_AUTH_ONLY`。`PILOT_DATA_READY` 仅对服务端项目白名单开放百度搜索账户绑定、搜索报表快照和百度统计实时读取；它不等同于正式 `READY`。本地开发只使用脱敏 fixture，真实 App ID、SecretKey、Access Token 和 Refresh Token 只保存在服务器环境与加密数据库中。正式 `READY` 仍等待完整金额/时区证据、Refresh Token 轮换与生产验收。系统不会向百度调用任何写接口，也不支持信息流、计划子集、落地页或销售数据。
 
 ## 响应状态码
 - `200 OK` - 请求成功

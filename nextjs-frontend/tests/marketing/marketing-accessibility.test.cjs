@@ -52,9 +52,11 @@ test('administrator UI exposes the complete account binding lifecycle', () => {
   assert.match(marketingSettings, /解除绑定不会修改百度来源数据/);
 });
 
-test('administrator UI exposes account inspection but not binding in pilot mode', () => {
+test('administrator UI keeps auth-only pilot separate from data pilot binding', () => {
   assert.match(marketingSettings, /PILOT_READY/);
+  assert.match(marketingSettings, /PILOT_DATA_READY/);
   assert.match(marketingSettings, /受限试点模式/);
+  assert.match(marketingSettings, /真实数据试点模式/);
   assert.match(marketingSettings, /检查账户目录/);
-  assert.match(marketingSettings, /!pilotMode/);
+  assert.match(marketingSettings, /!pilotAuthOnly/);
 });

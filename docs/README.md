@@ -33,7 +33,7 @@
 - `active-2026-07-27-002-doubao-web-monitoring/`：豆包 Web 注册表、隔离运行时、可信采集、设置页账号管理、双平台状态、默认启用预置与正式任务链路已完成本地实现；本地真实单问题采集已通过，仍需目标虚拟机完成专用 Profile 登录、问题集、自动监测和双浏览器资源验收
 - `blocked-2026-07-28-001-geo-entity-share-metrics/`：回答内竞品提及占比（SOV）的版本边界、v3 完整输入分析、回答级等权聚合、分析失败隔离、平台视图、历史兼容和人工基线；Issue 008 人工基线已关闭，等待 Issue 009 的真实入口验收
 - `blocked-2026-07-29-002-ai-semantic-analysis-quality/`：v4 全实体语义抽取、竞品/排序/情绪原文证据、DeepSeek Pro 基线校准和全入口硬切已完成实现与技术验收，等待 SOV 波动口径和补充情绪人工基线确认
-- `blocked-2026-07-29-001-marketing-monitoring/`：轻量只读营销监控；已按百度商业开发者文档实现签名 OAuth callback、Token、账户目录与搜索计划报告请求，并增加仅开放授权/账户检查的 `PILOT_READY` 部署模式；工作台导航和正式报表仍关闭，等待专用百度应用、真实响应、金额/时区口径与生产验收
+- `active-2026-07-29-001-marketing-monitoring/`：轻量只读营销监控；真实 OAuth、账户目录、搜索推广 30 日分页报表和百度统计站点/趋势响应已用脱敏 fixture 固化，`PILOT_DATA_READY` 仅向项目白名单开放绑定、搜索快照和统计实时读取；正式导航仍隐藏，等待金额/时区、Refresh Token 与完整生产验收
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 - `solutions/2026-07-30-ai-geo-production-deployment.md`：AI-GEO systemd、受信代理、生产验证、服务器修改台账与回滚记录

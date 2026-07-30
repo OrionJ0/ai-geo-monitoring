@@ -1,6 +1,6 @@
 # 营销监控系统 PRD
 
-- 状态：Blocked（官方文档契约与受限试点已实现，等待专用百度应用、真实响应与生产验收）
+- 状态：Active（真实授权、搜索报表与百度统计响应已进入白名单数据试点，等待完整生产验收）
 - 日期：2026-07-29
 - 需求依据：`docs/ideas/marketing-monitoring-system.md`
 - 领域术语：`CONTEXT.md` 中的“营销监控语言”
@@ -226,5 +226,12 @@
 
 ## Handoff
 
-- PRD：`docs/blocked-2026-07-29-001-marketing-monitoring/prd.md`
-- 下一步：部署公网 HTTPS 受限试点，为本项目申请专用百度应用，采集脱敏真实授权、账户目录、报告与 refresh 证据，补全 `VERIFIED` 契约后再启用正式路径。
+- PRD：`docs/active-2026-07-29-001-marketing-monitoring/prd.md`
+- 下一步：部署 `PILOT_DATA_READY`，从正式入口绑定白名单项目并核对搜索快照与百度统计；继续采集 refresh、金额/时区和失败响应证据，补全 `VERIFIED` 契约后再启用正式导航。
+
+## 2026-07-30 真实数据试点进展
+
+- 专用百度应用已生效，正式 HTTPS callback 完成一次动态 state 授权；Access Token 与 Refresh Token 只保留在服务器数据库密文中。
+- 真实账户目录成功返回一个搜索账户；搜索计划报告按 200 行分页读取 4 页、共 777 行，账户、日期、ID 与指标类型已验证。
+- 百度统计权限可用：站点目录返回 3 个站点，其中 1 个正常；`trend/time/a` 的日期、字段、字符串指标与 `--` 无数据标记已验证。
+- 新增 `baidu-marketing-pilot-2026-07-30`、脱敏 fixture 和 `PILOT_DATA_READY`。白名单项目可绑定搜索账户、生成 30 日本地广告快照，并实时只读查看百度统计；正式导航仍隐藏。

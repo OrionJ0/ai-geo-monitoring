@@ -1,0 +1,30 @@
+{
+  "header": {
+    "status": 0,
+    "desc": "success",
+    "failures": []
+  },
+  "body": {
+    "data": [
+      {
+        "list": [
+          {
+            "create_time": "2024-01-01 00:00:00",
+            "domain": "active.example.test",
+            "site_id": 301,
+            "status": 0,
+            "sub_dir_list": []
+          },
+          {
+            "create_time": "2024-01-02 00:00:00",
+            "domain": "paused.example.test",
+            "site_id": 302,
+            "status": 1,
+            "sub_dir_list": []
+          }
+        ]
+      }
+    ],
+    "expand": {}
+  }
+}

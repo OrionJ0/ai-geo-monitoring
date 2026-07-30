@@ -3,7 +3,7 @@
 - 状态：已确认
 - 确认日期：2026-07-29
 - 当前阶段：受限 OAuth/账户试点实现完成，等待真实百度应用与响应验收
-- 当前权威实现方案：`../blocked-2026-07-29-001-marketing-monitoring/TECH-SPEC.md`
+- 当前权威实现方案：`../active-2026-07-29-001-marketing-monitoring/TECH-SPEC.md`
 
 ## 一句话定义
 

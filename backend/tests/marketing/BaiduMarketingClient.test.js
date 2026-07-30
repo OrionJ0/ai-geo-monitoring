@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -11,7 +13,7 @@ const {
   createBaiduCallbackSignature
 } = require('../../modules/marketing/domain/baiduOAuthSignature');
 
-const manifest = loadBaiduContract('baidu-marketing-docs-2026-07-30');
+const manifest = loadBaiduContract('baidu-marketing-pilot-2026-07-30');
 const config = Object.freeze({
   appId: 'app-id-fixture',
   secretKey: '0123456789abcdef-secret-key-fixture',
@@ -249,39 +251,61 @@ test('account directory paginates super-admin children and keeps all ids as stri
   ]);
 });
 
-test('plan report sends only documented SEARCH fields and blocks undocumented response parsing', async () => {
+test('plan report parses the redacted real-response fixture into exact domain rows', async () => {
   let captured;
+  const fixture = JSON.parse(fs.readFileSync(path.resolve(
+    __dirname,
+    '../../modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/fixtures/search-report.success.redacted.json'
+  ), 'utf8'));
   const client = createClient(async (request) => {
     captured = request;
-    return {
-      header: {
-        status: 0,
-        desc: 'success',
-        failures: []
-      },
-      body: {
-        undocumentedShape: []
-      }
-    };
+    return fixture;
   });
 
-  await assert.rejects(
-    client.fetchSearchReport({
-      binding: {
-        accountId: '1234',
-        accountName: '主账户'
-      },
-      accessToken: 'access-token-fixture',
-      coverage: {
-        from: '2026-07-01',
-        to: '2026-07-30'
-      }
-    }),
-    { code: 'BAIDU_REPORT_RESPONSE_UNVERIFIED' }
-  );
+  const rows = await client.fetchSearchReport({
+    binding: {
+      accountId: '1234',
+      accountName: '脱敏搜索账户'
+    },
+    accessToken: 'access-token-fixture',
+    coverage: {
+      from: '2026-07-01',
+      to: '2026-07-30'
+    }
+  });
+
+  assert.deepEqual(rows, [
+    {
+      accountId: '1234',
+      campaignId: '101',
+      campaignName: '脱敏计划甲',
+      metricDate: '2026-07-28',
+      impressions: '123',
+      clicks: '7',
+      costAmountScaled: '1234'
+    },
+    {
+      accountId: '1234',
+      campaignId: '101',
+      campaignName: '脱敏计划甲',
+      metricDate: '2026-07-29',
+      impressions: '8',
+      clicks: '0',
+      costAmountScaled: '0'
+    },
+    {
+      accountId: '1234',
+      campaignId: '202',
+      campaignName: '脱敏计划乙[已删除]',
+      metricDate: '2026-07-29',
+      impressions: '21',
+      clicks: '1',
+      costAmountScaled: '50'
+    }
+  ]);
   assert.deepEqual(captured.json, {
     header: {
-      userName: '主账户',
+      userName: '脱敏搜索账户',
       accessToken: 'access-token-fixture'
     },
     body: {
@@ -307,6 +331,310 @@ test('plan report sends only documented SEARCH fields and blocks undocumented re
       needSum: false
     }
   });
+});
+
+test('plan report follows totalRowCount pagination without exposing provider rows', async () => {
+  const calls = [];
+  const responses = [
+    {
+      header: { status: 0, failures: [] },
+      body: {
+        data: [{
+          rowCount: 2,
+          totalRowCount: 3,
+          rows: [
+            {
+              userId: 1234,
+              userName: '脱敏搜索账户',
+              campaignId: 101,
+              campaignNameStatus: '计划甲',
+              date: '2026-07-28',
+              impression: 3,
+              click: 1,
+              cost: 1.2
+            },
+            {
+              userId: 1234,
+              userName: '脱敏搜索账户',
+              campaignId: 101,
+              campaignNameStatus: '计划甲',
+              date: '2026-07-29',
+              impression: 4,
+              click: 2,
+              cost: 2
+            }
+          ]
+        }]
+      }
+    },
+    {
+      header: { status: 0, failures: [] },
+      body: {
+        data: [{
+          rowCount: 1,
+          totalRowCount: 3,
+          rows: [{
+            userId: 1234,
+            userName: '脱敏搜索账户',
+            campaignId: 202,
+            campaignNameStatus: '计划乙',
+            date: '2026-07-29',
+            impression: 5,
+            click: 0,
+            cost: 0
+          }]
+        }]
+      }
+    }
+  ];
+  const client = new BaiduMarketingClient({
+    manifest: {
+      ...manifest,
+      searchPlanReport: {
+        ...manifest.searchPlanReport,
+        pageSize: 2,
+        maxRows: 10
+      }
+    },
+    ...config,
+    transport: async (request) => {
+      calls.push(request);
+      return responses.shift();
+    }
+  });
+
+  const rows = await client.fetchSearchReport({
+    binding: {
+      accountId: '1234',
+      accountName: '脱敏搜索账户'
+    },
+    accessToken: 'access-token-fixture',
+    coverage: {
+      from: '2026-07-01',
+      to: '2026-07-30'
+    }
+  });
+
+  assert.equal(rows.length, 3);
+  assert.deepEqual(
+    calls.map((call) => call.json.body.startRow),
+    [0, 2]
+  );
+});
+
+test('plan report rejects account mismatches and cost precision beyond the pilot scale', async () => {
+  const baseRow = {
+    userId: 1234,
+    userName: '脱敏搜索账户',
+    campaignId: 101,
+    campaignNameStatus: '计划甲',
+    date: '2026-07-29',
+    impression: 1,
+    click: 1,
+    cost: 0.001
+  };
+  const client = createClient(async () => ({
+    header: { status: 0, failures: [] },
+    body: {
+      data: [{
+        rowCount: 1,
+        totalRowCount: 1,
+        rows: [baseRow]
+      }]
+    }
+  }));
+
+  await assert.rejects(
+    client.fetchSearchReport({
+      binding: {
+        accountId: '1234',
+        accountName: '脱敏搜索账户'
+      },
+      accessToken: 'access-token-fixture',
+      coverage: {
+        from: '2026-07-01',
+        to: '2026-07-30'
+      }
+    }),
+    { code: 'BAIDU_REPORT_COST_SCALE_INVALID' }
+  );
+
+  const mismatchClient = createClient(async () => ({
+    header: { status: 0, failures: [] },
+    body: {
+      data: [{
+        rowCount: 1,
+        totalRowCount: 1,
+        rows: [{ ...baseRow, userId: 9999, cost: 1 }]
+      }]
+    }
+  }));
+  await assert.rejects(
+    mismatchClient.fetchSearchReport({
+      binding: {
+        accountId: '1234',
+        accountName: '脱敏搜索账户'
+      },
+      accessToken: 'access-token-fixture',
+      coverage: {
+        from: '2026-07-01',
+        to: '2026-07-30'
+      }
+    }),
+    { code: 'BAIDU_REPORT_RESPONSE_INVALID' }
+  );
+});
+
+test('plan report rejects invalid and out-of-range response dates', async () => {
+  const responseForDate = (date) => ({
+    header: { status: 0, failures: [] },
+    body: {
+      data: [{
+        rowCount: 1,
+        totalRowCount: 1,
+        rows: [{
+          userId: 1234,
+          userName: '脱敏搜索账户',
+          campaignId: 101,
+          campaignNameStatus: '计划甲',
+          date,
+          impression: 1,
+          click: 1,
+          cost: 1
+        }]
+      }]
+    }
+  });
+  const request = {
+    binding: {
+      accountId: '1234',
+      accountName: '脱敏搜索账户'
+    },
+    accessToken: 'access-token-fixture',
+    coverage: {
+      from: '2026-07-01',
+      to: '2026-07-30'
+    }
+  };
+
+  for (const date of ['2026-02-30', '2026-06-30']) {
+    const client = createClient(async () => responseForDate(date));
+    await assert.rejects(
+      client.fetchSearchReport(request),
+      { code: 'BAIDU_REPORT_RESPONSE_INVALID' }
+    );
+  }
+});
+
+test('Tongji site directory parses the redacted response fixture', async () => {
+  let captured;
+  const fixture = JSON.parse(fs.readFileSync(path.resolve(
+    __dirname,
+    '../../modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/fixtures/tongji-sites.success.redacted.json'
+  ), 'utf8'));
+  const client = createClient(async (request) => {
+    captured = request;
+    return fixture;
+  });
+
+  const sites = await client.listTongjiSites({
+    accountName: '脱敏搜索账户',
+    accessToken: 'access-token-fixture'
+  });
+
+  assert.deepEqual(sites, [
+    {
+      siteId: '301',
+      domain: 'active.example.test',
+      status: 'ACTIVE'
+    },
+    {
+      siteId: '302',
+      domain: 'paused.example.test',
+      status: 'PAUSED'
+    }
+  ]);
+  assert.deepEqual(captured.json, {
+    header: {
+      userName: '脱敏搜索账户',
+      accessToken: 'access-token-fixture'
+    },
+    body: {}
+  });
+});
+
+test('Tongji trend parses exact strings and preserves provider no-data markers', async () => {
+  let captured;
+  const fixture = JSON.parse(fs.readFileSync(path.resolve(
+    __dirname,
+    '../../modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/fixtures/tongji-trend.success.redacted.json'
+  ), 'utf8'));
+  const client = createClient(async (request) => {
+    captured = request;
+    return fixture;
+  });
+
+  const rows = await client.fetchTongjiTrend({
+    accountName: '脱敏搜索账户',
+    accessToken: 'access-token-fixture',
+    siteId: '301',
+    coverage: {
+      from: '2026-07-01',
+      to: '2026-07-30'
+    }
+  });
+
+  assert.deepEqual(rows, [
+    {
+      date: '2026-07-28',
+      pageviews: '123',
+      visits: '45',
+      visitors: '30'
+    },
+    {
+      date: '2026-07-29',
+      pageviews: null,
+      visits: null,
+      visitors: null
+    },
+    {
+      date: '2026-07-30',
+      pageviews: '1234',
+      visits: '56',
+      visitors: '40'
+    }
+  ]);
+  assert.deepEqual(captured.json.body, {
+    site_id: 301,
+    method: 'trend/time/a',
+    start_date: '20260701',
+    end_date: '20260730',
+    metrics: 'pv_count,visit_count,visitor_count',
+    max_results: 0,
+    gran: 'day'
+  });
+});
+
+test('Tongji trend rejects impossible calendar dates', async () => {
+  const fixture = JSON.parse(fs.readFileSync(path.resolve(
+    __dirname,
+    '../../modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/fixtures/tongji-trend.success.redacted.json'
+  ), 'utf8'));
+  fixture.body.data[0].result.items[0][0][0] = '2026/02/30';
+  const client = createClient(async () => fixture);
+
+  await assert.rejects(
+    client.fetchTongjiTrend({
+      accountName: '脱敏搜索账户',
+      accessToken: 'access-token-fixture',
+      siteId: '301',
+      coverage: {
+        from: '2026-01-01',
+        to: '2026-07-30'
+      }
+    }),
+    { code: 'BAIDU_TONGJI_RESPONSE_INVALID' }
+  );
 });
 
 test('client rejects endpoints outside the versioned outbound allowlist', async () => {

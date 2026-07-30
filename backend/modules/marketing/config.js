@@ -63,6 +63,22 @@ function hasValidSecretKey(env) {
   );
 }
 
+function hasValidMoneyContract(manifest) {
+  return (
+    /^[A-Z]{3}$/u.test(String(manifest.money?.currencyCode || ''))
+    && Number.isInteger(manifest.money?.costScale)
+    && manifest.money.costScale >= 0
+    && manifest.money.costScale <= 18
+  );
+}
+
+function hasApprovedScope(manifest, scope) {
+  return (
+    Array.isArray(manifest.oauth?.authorization?.approvedScopeValues)
+    && manifest.oauth.authorization.approvedScopeValues.includes(scope)
+  );
+}
+
 function auditMarketingConfig(env = {}, {
   contractLoader = loadBaiduContract
 } = {}) {
@@ -126,6 +142,25 @@ function auditMarketingConfig(env = {}, {
       );
     }
     if (pilot) {
+      if (manifest.status === 'PILOT_VERIFIED') {
+        if (
+          !Array.isArray(manifest.pilotOutboundAllowlist)
+          || manifest.pilotOutboundAllowlist.length === 0
+          || manifest.runtime?.adapterImplemented !== true
+          || manifest.runtime?.reportResponseParserImplemented !== true
+          || !hasApprovedScope(
+            manifest,
+            text(env.BAIDU_MARKETING_SCOPE)
+          )
+          || !hasValidMoneyContract(manifest)
+        ) {
+          return result(
+            'MISCONFIGURED',
+            'MARKETING_PILOT_CONTRACT_INVALID'
+          );
+        }
+        return result('PILOT_DATA_READY');
+      }
       if (
         manifest.status !== 'DOCUMENTED_PENDING_PILOT'
         || !Array.isArray(manifest.documentedOutboundAllowlist)
@@ -152,25 +187,16 @@ function auditMarketingConfig(env = {}, {
         'MARKETING_CONTRACT_NOT_VERIFIED'
       );
     }
-    if (
-      !Array.isArray(
-        manifest.oauth?.authorization?.approvedScopeValues
-      )
-      || !manifest.oauth.authorization.approvedScopeValues.includes(
-        text(env.BAIDU_MARKETING_SCOPE)
-      )
-    ) {
+    if (!hasApprovedScope(
+      manifest,
+      text(env.BAIDU_MARKETING_SCOPE)
+    )) {
       return result(
         'MISCONFIGURED',
         'MARKETING_SCOPE_NOT_APPROVED'
       );
     }
-    if (
-      !/^[A-Z]{3}$/u.test(String(manifest.money?.currencyCode || ''))
-      || !Number.isInteger(manifest.money?.costScale)
-      || manifest.money.costScale < 0
-      || manifest.money.costScale > 18
-    ) {
+    if (!hasValidMoneyContract(manifest)) {
       return result(
         'MISCONFIGURED',
         'MARKETING_CONTRACT_INVALID'

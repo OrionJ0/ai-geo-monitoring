@@ -91,15 +91,15 @@ npm run prod:start
 ## 营销监控（默认关闭）
 
 - `MARKETING_MONITORING_ENABLED`：总开关。默认 `false`。
-- `MARKETING_MONITORING_PILOT_MODE`：`true` 时进入受限试点，只开放管理员授权、公开 callback、连接列表和账户目录；项目绑定、看板、刷新与调度返回 `MARKETING_PILOT_AUTH_ONLY`。正式运行必须改为 `false`。
+- `MARKETING_MONITORING_PILOT_MODE`：`true` 时按契约进入试点。文档契约为 `PILOT_READY`，只开放授权、callback、连接和账户目录；真实响应契约为 `PILOT_DATA_READY`，额外向项目白名单开放搜索账户绑定、30 日搜索报表快照和百度统计实时趋势。正式 `READY` 仍必须改为 `false` 并使用零 blocker 的 `VERIFIED` 契约。
 - `MARKETING_MONITORING_ALLOWED_PROJECT_IDS`：试点项目 ID 逗号列表；正式扩大范围需显式设为 `*`。
 - `BAIDU_MARKETING_APP_ID` / `BAIDU_MARKETING_SECRET_KEY`：百度商业开发者中心审核通过后发放的 `appId`/`secretKey`，只能由部署环境注入；`secretKey` 前 16 个字符用于 callback AES 验签。
 - `BAIDU_MARKETING_SCOPE`：从该应用生成的授权链接取得的实际只读 scope，不自行猜测。
 - `BAIDU_MARKETING_REDIRECT_URI`：百度登记的稳定 HTTPS callback，禁止 query、fragment 和 URL 凭据。
-- `BAIDU_MARKETING_CONTRACT_VERSION`：试点固定使用 `baidu-marketing-docs-2026-07-30`；正式模式必须切到仓库内状态为 `VERIFIED`、无 blocker 且带生产出站 allowlist 的新契约版本。
+- `BAIDU_MARKETING_CONTRACT_VERSION`：仅授权试点使用 `baidu-marketing-docs-2026-07-30`；白名单真实数据试点使用 `baidu-marketing-pilot-2026-07-30`；正式模式必须切到仓库内状态为 `VERIFIED`、无 blocker 且带生产出站 allowlist 的新契约版本。
 - `BAIDU_MARKETING_HTTP_TIMEOUT_MS`：百度只读请求超时，允许 100–60000 毫秒。
 
-当前 `baidu-marketing-docs-2026-07-30` 已实现官方文档中的授权、签名 callback、换/刷新 Token、`getUserInfo` 账户目录和搜索计划报告请求，但仍缺真实响应、scope、金额、时区与刷新轮换证据，因此只能进入 `PILOT_READY`，不能进入正式 `READY`。配置不完整、未知版本或越级启用只会让营销路由 fail-closed，不影响 GEO/SEO 全局 `/api/ready`。
+`baidu-marketing-pilot-2026-07-30` 已记录获批 Scope，并使用脱敏 fixture 固化真实 `getUserInfo`、4 页搜索计划报表、百度统计站点目录和趋势响应。它采用人民币 2 位小数与上海自然日作为显式试点口径，只进入 `PILOT_DATA_READY`；百度统计当前实时读取，不写入搜索广告快照。金额/时区的正式文档证据、Refresh Token 轮换和完整生产验收仍未完成，因此不能进入 `READY`。配置不完整、未知版本或越级启用只会让营销路由 fail-closed，不影响 GEO/SEO 全局 `/api/ready`。
 
 试点环境最小形态：
 
@@ -107,11 +107,11 @@ npm run prod:start
 MARKETING_MONITORING_ENABLED=true
 MARKETING_MONITORING_PILOT_MODE=true
 MARKETING_MONITORING_ALLOWED_PROJECT_IDS=<试点项目 ID>
-BAIDU_MARKETING_CONTRACT_VERSION=baidu-marketing-docs-2026-07-30
+BAIDU_MARKETING_CONTRACT_VERSION=baidu-marketing-pilot-2026-07-30
 BAIDU_MARKETING_REDIRECT_URI=https://<域名>/api/admin/marketing/baidu/oauth/callback
 ```
 
-其余 `APP_ID`、`SECRET_KEY` 和 `SCOPE` 必须来自新建并审核通过的百度应用，不能复用其他系统的应用或 callback。
+其余 `APP_ID`、`SECRET_KEY` 和 `SCOPE` 必须来自新建并审核通过的百度应用，不能复用其他系统的应用或 callback。真实 Token 只保存在服务器数据库密文中；本地开发使用契约目录下的脱敏 fixture，不复制生产 Token。
 
 ## SEO 设置（可选）
 - `SEO_TITLE` 网站 SEO 标题

@@ -1,0 +1,275 @@
+{
+  "contractVersion": "baidu-marketing-pilot-2026-07-30",
+  "status": "PILOT_VERIFIED",
+  "evidenceDate": "2026-07-30",
+  "verifiedAccountType": "REAL_COMMERCIAL_ACCOUNT",
+  "sources": [
+    {
+      "title": "OAuth 接入指南",
+      "url": "https://dev2.baidu.com/content?sceneType=0&pageId=100441&nodeId=421&subhead=",
+      "official": true,
+      "supports": [
+        "authorization_url",
+        "signed_callback",
+        "token_exchange",
+        "token_refresh",
+        "account_directory"
+      ]
+    },
+    {
+      "title": "搜索推广计划报告",
+      "url": "https://dev2.baidu.com/content?sceneType=0&pageId=102474&nodeId=698&subhead=",
+      "official": true,
+      "supports": [
+        "search_plan_report",
+        "report_fields",
+        "report_pagination",
+        "report_date_range",
+        "report_qps"
+      ]
+    },
+    {
+      "title": "百度统计获取站点列表",
+      "url": "https://tongji.baidu.com/api/manual/Chapter1/getSiteList.html",
+      "official": true,
+      "supports": [
+        "tongji_site_directory"
+      ]
+    },
+    {
+      "title": "百度统计获取报告数据",
+      "url": "https://tongji.baidu.com/api/manual/Chapter1/getData.html",
+      "official": true,
+      "supports": [
+        "tongji_report"
+      ]
+    }
+  ],
+  "oauth": {
+    "authorization": {
+      "method": "GET",
+      "url": "https://u.baidu.com/oauth/page/index",
+      "platformId": "4960345965958561794",
+      "parameters": [
+        "platformId",
+        "appId",
+        "scope",
+        "state",
+        "callback"
+      ],
+      "stateMaxLength": 512,
+      "approvedScopeValues": [
+        "67,71,1004606,1002161"
+      ]
+    },
+    "callback": {
+      "method": "GET",
+      "parameters": [
+        "appId",
+        "authCode",
+        "state",
+        "userId",
+        "timestamp",
+        "signature"
+      ],
+      "signature": {
+        "canonicalization": "NATURAL_KEY_ORDER_JSON_EXCLUDING_SIGNATURE",
+        "base64": "UTF8_JSON",
+        "cipher": "AES-128-CBC-NO_PADDING",
+        "key": "SECRET_KEY_FIRST_16_CHARACTERS",
+        "iv": "16_NUL_BYTES",
+        "output": "UPPERCASE_HEX"
+      }
+    },
+    "token": {
+      "method": "POST",
+      "url": "https://u.baidu.com/oauth/accessToken",
+      "contentType": "application/json;charset:utf-8",
+      "parameters": [
+        "appId",
+        "authCode",
+        "secretKey",
+        "grantType",
+        "userId"
+      ],
+      "grantType": "auth_code",
+      "pilotObserved": true
+    },
+    "refresh": {
+      "method": "POST",
+      "url": "https://u.baidu.com/oauth/refreshToken",
+      "contentType": "application/json;charset:utf-8",
+      "parameters": [
+        "appId",
+        "refreshToken",
+        "secretKey",
+        "userId"
+      ],
+      "documentedAccessLifetimeSeconds": 86400,
+      "documentedRefreshLifetimeSeconds": 2592000,
+      "responseRotation": "UNVERIFIED_FOR_MARKETING"
+    },
+    "userInfo": {
+      "method": "POST",
+      "url": "https://u.baidu.com/oauth/getUserInfo",
+      "contentType": "application/json;charset:utf-8",
+      "parameters": [
+        "openId",
+        "accessToken",
+        "userId",
+        "needSubList",
+        "pageSize",
+        "lastPageMaxUcId"
+      ],
+      "pilotObserved": true
+    },
+    "reauthorizationErrorCodes": [
+      "894062",
+      "894063",
+      "894064"
+    ]
+  },
+  "accountDirectory": {
+    "accountTypes": {
+      "1": "NORMAL",
+      "2": "SUPER_ADMIN",
+      "4": "AGENCY"
+    },
+    "pagination": {
+      "defaultPageSize": 100,
+      "maxPageSize": 500,
+      "firstLastPageMaxUcId": 1
+    },
+    "externalIdWireTypes": [
+      "int",
+      "LONG",
+      "Long"
+    ],
+    "storageType": "LOSSLESS_DECIMAL_STRING",
+    "pilotObserved": {
+      "accountCount": 1,
+      "responseShapeVerified": true
+    }
+  },
+  "apiEnvelope": {
+    "request": {
+      "header": [
+        "userName",
+        "accessToken"
+      ],
+      "body": "ENDPOINT_SPECIFIC"
+    },
+    "responseHeaderStatuses": {
+      "0": "SUCCESS",
+      "1": "PARTIAL_FAILURE",
+      "2": "ALL_FAILURE",
+      "3": "SYSTEM_ERROR"
+    }
+  },
+  "searchPlanReport": {
+    "method": "POST",
+    "url": "https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData",
+    "reportType": 2290316,
+    "timeUnit": "DAY",
+    "maxDateRangeDays": 731,
+    "qps": 50,
+    "pageSize": 200,
+    "maxRows": 50000,
+    "columns": [
+      "date",
+      "userName",
+      "userId",
+      "campaignId",
+      "campaignNameStatus",
+      "campaignName",
+      "impression",
+      "click",
+      "cost"
+    ],
+    "response": {
+      "dataPath": "body.data[0]",
+      "rowsField": "rows",
+      "pageCountField": "rowCount",
+      "totalCountField": "totalRowCount",
+      "pilotObservedRows": 777,
+      "pilotObservedPages": 4
+    }
+  },
+  "tongji": {
+    "siteDirectory": {
+      "method": "POST",
+      "url": "https://api.baidu.com/json/tongji/v1/ReportService/getSiteList"
+    },
+    "report": {
+      "method": "POST",
+      "url": "https://api.baidu.com/json/tongji/v1/ReportService/getData",
+      "reportMethod": "trend/time/a",
+      "metrics": [
+        "pv_count",
+        "visit_count",
+        "visitor_count"
+      ]
+    },
+    "pilotObserved": {
+      "siteCount": 3,
+      "activeSiteCount": 1,
+      "siteDirectoryShapeVerified": true,
+      "trendResponseShapeVerified": true,
+      "dateFormat": "YYYY/MM/DD",
+      "metricWireType": "string",
+      "noDataMarker": "--"
+    }
+  },
+  "money": {
+    "wireType": "Double",
+    "currencyCode": "CNY",
+    "costScale": 2,
+    "pilotBasis": "The authorized account returned finite non-negative values with zero to two decimal places. Formal currency and scale documentation remains open."
+  },
+  "time": {
+    "reportingTimezone": "Asia/Shanghai",
+    "pilotBasis": "The internal pilot requests and stores China-local natural days. Formal provider timezone documentation remains open."
+  },
+  "fixtures": {
+    "observedRealResponses": true,
+    "redactedFiles": [
+      "fixtures/search-report.success.redacted.json",
+      "fixtures/tongji-sites.success.redacted.json",
+      "fixtures/tongji-trend.success.redacted.json"
+    ],
+    "redaction": "All account names, domains, identifiers and business metric values are synthetic."
+  },
+  "runtime": {
+    "adapterImplemented": true,
+    "reportResponseParserImplemented": true,
+    "productionActivation": "PILOT_DATA_ONLY"
+  },
+  "pilotOutboundAllowlist": [
+    "GET https://u.baidu.com/oauth/page/index",
+    "POST https://u.baidu.com/oauth/accessToken",
+    "POST https://u.baidu.com/oauth/refreshToken",
+    "POST https://u.baidu.com/oauth/getUserInfo",
+    "POST https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData",
+    "POST https://api.baidu.com/json/tongji/v1/ReportService/getSiteList",
+    "POST https://api.baidu.com/json/tongji/v1/ReportService/getData"
+  ],
+  "productionAllowlist": [],
+  "blockers": [
+    {
+      "key": "money_currency_scale_formal_evidence",
+      "reason": "The pilot observed two decimal places, but the reviewed SEARCH report page does not formally document currency or fixed scale."
+    },
+    {
+      "key": "reporting_timezone_latency_formal_evidence",
+      "reason": "The pilot date rows matched the requested China-local dates, but provider timezone and data latency remain undocumented."
+    },
+    {
+      "key": "refresh_rotation_replay",
+      "reason": "Refresh-token rotation and lost-response replay semantics have not yet been observed."
+    },
+    {
+      "key": "provider_revocation",
+      "reason": "No provider-side revocation endpoint is documented on the reviewed page."
+    }
+  ]
+}

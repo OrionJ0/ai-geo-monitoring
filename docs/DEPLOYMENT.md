@@ -129,9 +129,10 @@ server {
 5. 用公网域名检查 `GET /api/health`、`GET /api/ready`，再确认禁用状态的 callback 空请求返回营销模块 503 而不是 404；反向代理不得记录 callback query。
 6. 新建本项目专用百度应用，把完整 HTTPS callback 登记为 `https://<域名>/api/admin/marketing/baidu/oauth/callback`，审核通过后取得 `appId`、`secretKey` 和授权链接中的只读 `scope`。
 7. 配置 `MARKETING_MONITORING_ENABLED=true`、`MARKETING_MONITORING_PILOT_MODE=true`、试点项目白名单和 `baidu-marketing-docs-2026-07-30`，启动后确认营销状态为 `PILOT_READY`，callback 空请求返回 `OAUTH_CALLBACK_INVALID`。
-8. 试点只验收授权、callback、Token 和真实账户目录；项目绑定、看板、刷新和调度必须返回 `MARKETING_PILOT_AUTH_ONLY`。
-9. 保存脱敏真实响应并补全金额、时区、错误、报表响应体与 refresh 轮换契约；新增零 blocker 的 `VERIFIED` 清单后再关闭试点模式。
-10. 生产验收未完成前不添加营销工作台导航；百度不可达不得影响全局 readiness 或旧快照读取。
+8. 完成真实授权并确认账户目录后，部署包含脱敏 fixture 的代码，再把契约切到 `baidu-marketing-pilot-2026-07-30`；状态必须为 `PILOT_DATA_READY`，只向白名单项目开放绑定、搜索快照和百度统计实时读取。
+9. 真实 Token 与 Refresh Token 保留在服务器数据库密文中，不复制到本地；本地解析、回归和异常测试只使用脱敏 fixture。
+10. 补全金额、时区、错误与 refresh 轮换证据；新增零 blocker 的 `VERIFIED` 清单后再关闭试点模式。
+11. 生产验收未完成前不添加营销工作台导航；百度不可达不得影响全局 readiness 或旧搜索快照读取。
 
 故障时同时把 `MARKETING_MONITORING_ENABLED` 和 `MARKETING_MONITORING_PILOT_MODE` 恢复为 `false`。若 Token 或主密钥疑似泄露，先阻断连接并在百度控制台撤权，清除本地 Token，轮换应用 Secret 与 `CONFIG_ENCRYPTION_KEY`，然后逐连接重新授权；不得恢复任何旧营销实现或隐式 fallback。
 

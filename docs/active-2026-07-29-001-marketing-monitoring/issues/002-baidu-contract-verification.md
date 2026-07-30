@@ -78,3 +78,10 @@ git diff --check
 - 官方计划报告页没有给出成功响应体，`cost` 只说明为 `Double`，未说明币种/固定 scale/时区；适配器会在成功请求后以 `BAIDU_REPORT_RESPONSE_UNVERIFIED` 阻断解析，不伪造映射。
 - 新增 `PILOT_READY`：只允许授权、callback、Token 与账户目录，项目绑定、报表刷新、executor 和导航不会在正式流程生效。
 - 仍需本项目专用获批应用、实际 scope、普通/超管/代理商账户样本、报告成功/错误样本、refresh 轮换与响应丢失证据，因此本 issue 保持 blocked。
+
+## 2026-07-30 真实试点证据
+
+- 专用应用、稳定 HTTPS callback 和获批 Scope 已验证；动态 state 授权、Token 交换与账户目录成功。
+- 搜索计划报告真实返回 777 行、4 页；响应体、分页、账户/计划/日期/指标 wire 类型已用完全脱敏 fixture 固化。
+- 百度统计站点目录与 `trend/time/a` 响应已验证；`--` 无数据标记不转换为 0。
+- 新契约只标记为 `PILOT_VERIFIED`，保留金额/时区正式证据、refresh 轮换、撤权和错误重试 blocker，因此本 issue 仍不关闭。

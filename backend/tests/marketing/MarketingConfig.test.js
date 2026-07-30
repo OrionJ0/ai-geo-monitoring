@@ -73,6 +73,33 @@ test('documented contract can enter explicit auth-only pilot mode', () => {
   });
 });
 
+test('real-response contract can enter allowlisted pilot data mode', () => {
+  const result = auditMarketingConfig(enabledConfig({
+    MARKETING_MONITORING_PILOT_MODE: 'true',
+    BAIDU_MARKETING_SCOPE: '67,71,1004606,1002161',
+    BAIDU_MARKETING_CONTRACT_VERSION:
+      'baidu-marketing-pilot-2026-07-30'
+  }));
+
+  assert.deepEqual(result, {
+    moduleState: 'PILOT_DATA_READY',
+    errorCode: null,
+    missingKeys: []
+  });
+});
+
+test('pilot data mode rejects a scope not observed for the approved application', () => {
+  const result = auditMarketingConfig(enabledConfig({
+    MARKETING_MONITORING_PILOT_MODE: 'true',
+    BAIDU_MARKETING_SCOPE: 'unexpected-scope',
+    BAIDU_MARKETING_CONTRACT_VERSION:
+      'baidu-marketing-pilot-2026-07-30'
+  }));
+
+  assert.equal(result.moduleState, 'MISCONFIGURED');
+  assert.equal(result.errorCode, 'MARKETING_PILOT_CONTRACT_INVALID');
+});
+
 test('pilot mode rejects a manifest without a documented outbound allowlist', () => {
   const result = auditMarketingConfig(enabledConfig({
     MARKETING_MONITORING_PILOT_MODE: 'true'

@@ -87,3 +87,9 @@ git diff --check
 - 新增显式 `MARKETING_MONITORING_PILOT_MODE`；文档契约只能进入 `PILOT_READY`，正式模式仍要求 `VERIFIED`、零 blocker、完整金额口径与生产 allowlist。
 - 试点正式入口只开放授权/账户检查，绑定、看板、刷新和 executor 返回 `MARKETING_PILOT_AUTH_ONLY`；营销测试全量通过。
 - 尚未在用户服务器完成部署、HTTPS callback、反向代理/APM 秘密扫描或真实 PostgreSQL 验收，本 issue 不关闭。
+
+## 2026-07-30 服务器试点进展
+
+- 服务器已完成 systemd 部署、HTTPS callback、营销迁移审计和真实授权；Token 仅保留为数据库密文。
+- 新增 `PILOT_DATA_READY`，白名单项目可以使用搜索绑定/快照与百度统计实时趋势；正式导航仍隐藏。
+- 仍需部署后入口级数据核对、真实代理/APM 秘密扫描、Refresh Token grant 和 PostgreSQL 验收，本 issue 不关闭。

@@ -16,7 +16,8 @@ const {
   createMarketingDashboardRouter
 } = require('./routes/marketingDashboardRoutes');
 const {
-  BaiduMarketingClient
+  BaiduMarketingClient,
+  BaiduMarketingError
 } = require('./adapters/BaiduMarketingClient');
 const {
   BaiduAuthorizationService
@@ -36,6 +37,9 @@ const {
 const {
   MarketingExecutor
 } = require('./services/MarketingExecutor');
+const {
+  BaiduTongjiService
+} = require('./services/BaiduTongjiService');
 
 function createDefaultMigrationAuditor(sequelize) {
   return {
@@ -59,9 +63,11 @@ function createMarketingModule({
     env,
     { contractLoader }
   );
-  const configuredOperationalState = ['READY', 'PILOT_READY'].includes(
-    configAudit.moduleState
-  )
+  const configuredOperationalState = [
+    'READY',
+    'PILOT_READY',
+    'PILOT_DATA_READY'
+  ].includes(configAudit.moduleState)
     ? configAudit.moduleState
     : null;
   const schemaAuditor = migrationAuditor || createDefaultMigrationAuditor(sequelize);
@@ -118,7 +124,11 @@ function createMarketingModule({
   const authorizationRouter = express.Router();
   const requireReady = async (_req, res, next) => {
     const status = await getStatus();
-    if (['READY', 'PILOT_READY'].includes(status.moduleState)) return next();
+    if ([
+      'READY',
+      'PILOT_READY',
+      'PILOT_DATA_READY'
+    ].includes(status.moduleState)) return next();
     return res.status(503).json({
       error: {
         code: status.errorCode || 'MARKETING_MODULE_DISABLED',
@@ -160,6 +170,53 @@ function createMarketingModule({
         });
       }
     };
+    const tongjiProvider = {
+      async readTrend({ connection, coverage }) {
+        const accessToken = await connectionService.getAccessToken(
+          connection.id
+        );
+        const accounts = await baiduProvider.listAccounts({
+          connection,
+          accessToken
+        });
+        const account = accounts.find((item) => (
+          item.accountId === String(connection.authorized_principal_id)
+        ));
+        if (!account) {
+          throw new BaiduMarketingError(
+            '百度统计授权主体不在账户目录中',
+            'BAIDU_TONGJI_ACCOUNT_INVALID',
+            502
+          );
+        }
+        const sites = await baiduProvider.listTongjiSites({
+          accountName: account.accountName,
+          accessToken
+        });
+        const activeSites = sites.filter((site) => site.status === 'ACTIVE');
+        if (activeSites.length !== 1) {
+          throw new BaiduMarketingError(
+            activeSites.length === 0
+              ? '百度统计没有正常站点'
+              : '百度统计存在多个正常站点，暂时无法自动选择',
+            activeSites.length === 0
+              ? 'BAIDU_TONGJI_SITE_MISSING'
+              : 'BAIDU_TONGJI_SITE_AMBIGUOUS',
+            409
+          );
+        }
+        const site = activeSites[0];
+        return {
+          site,
+          rows: await baiduProvider.fetchTongjiTrend({
+            accountName: account.accountName,
+            accessToken,
+            siteId: site.siteId,
+            coverage
+          })
+        };
+      }
+    };
     const authorizationService = new BaiduAuthorizationService({
       sequelize,
       provider: baiduProvider,
@@ -179,10 +236,14 @@ function createMarketingModule({
       includeBindings: false,
       accountRoute: '/connections/:connectionId/accounts'
     }));
-    if (configuredOperationalState === 'READY') {
+    if ([
+      'READY',
+      'PILOT_DATA_READY'
+    ].includes(configuredOperationalState)) {
       const dashboardService = new MarketingDashboardService({
         sequelize,
-        allowedProjectIds: env.MARKETING_MONITORING_ALLOWED_PROJECT_IDS
+        allowedProjectIds: env.MARKETING_MONITORING_ALLOWED_PROJECT_IDS,
+        moduleState: configuredOperationalState
       });
       const refreshService = new MarketingRefreshService({
         sequelize,
@@ -190,6 +251,11 @@ function createMarketingModule({
         contractVersion: manifest.contractVersion,
         currencyCode: manifest.money?.currencyCode,
         costScale: manifest.money?.costScale
+      });
+      const tongjiService = new BaiduTongjiService({
+        sequelize,
+        provider: tongjiProvider,
+        allowedProjectIds: env.MARKETING_MONITORING_ALLOWED_PROJECT_IDS
       });
       executor = new MarketingExecutor({
         sequelize,
@@ -203,6 +269,7 @@ function createMarketingModule({
       router.use(createMarketingDashboardRouter({
         dashboardService,
         refreshService,
+        tongjiService,
         enqueue: (runId) => executor.enqueue(runId)
       }));
     } else {
@@ -224,7 +291,10 @@ function createMarketingModule({
 
   async function start() {
     const status = await getStatus();
-    if (status.moduleState !== 'READY' || !executor) return status;
+    if (
+      !['READY', 'PILOT_DATA_READY'].includes(status.moduleState)
+      || !executor
+    ) return status;
     try {
       await executor.start();
       return getStatus();

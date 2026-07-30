@@ -43,11 +43,13 @@ class MarketingDashboardService {
   constructor({
     sequelize,
     clock = () => Date.now(),
-    allowedProjectIds = '*'
+    allowedProjectIds = '*',
+    moduleState = 'READY'
   }) {
     this.sequelize = sequelize;
     this.clock = clock;
     this.projectAllowlist = parseProjectAllowlist(allowedProjectIds);
+    this.moduleState = moduleState;
   }
 
   async getProject(projectId, transaction) {
@@ -286,7 +288,7 @@ class MarketingDashboardService {
       projectName: project.name,
       revision: snapshotRun?.id || null,
       states: {
-        moduleState: 'READY',
+        moduleState: this.moduleState,
         projectState: project.status === 'archived' ? 'ARCHIVED' : 'ACTIVE',
         sourceSummaryState: !bindings.length
           ? 'NOT_CONNECTED'

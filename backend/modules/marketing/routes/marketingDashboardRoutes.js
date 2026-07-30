@@ -14,6 +14,7 @@ function sendError(res, error) {
 function createMarketingDashboardRouter({
   dashboardService,
   refreshService,
+  tongjiService = null,
   enqueue = (runId) => {
     setImmediate(() => {
       refreshService.executeRun(runId).catch(() => {});
@@ -37,6 +38,24 @@ function createMarketingDashboardRouter({
       return sendError(res, error);
     }
   });
+
+  if (tongjiService) router.get(
+    '/projects/:projectId/tongji-trend',
+    async (req, res) => {
+      try {
+        await dashboardService.assertAccess({
+          projectId: req.params.projectId,
+          user: req.user
+        });
+        res.set('Cache-Control', 'private, no-store');
+        return res.json(await tongjiService.readProjectTrend(
+          req.params.projectId
+        ));
+      } catch (error) {
+        return sendError(res, error);
+      }
+    }
+  );
 
   router.post('/projects/:projectId/refresh-runs', async (req, res) => {
     if (

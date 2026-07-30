@@ -37,7 +37,7 @@ GoodieAI GEO Monitoring System 是一个面向 Generative Engine Optimization（
 - 用户登录、权限、会员等级与额度管理
 - 管理后台：用户、任务、会员、系统配置与运行记录管理
 - 本地 SQLite 自动初始化，生产环境支持外部 Postgres 数据库
-- 百度搜索推广营销监控工程底座：显式迁移、OAuth/连接、账户级绑定、30 日原子快照、精确值看板与刷新生命周期均已实现；当前因真实百度业务契约和生产账户未提供而保持 fail-closed，未加入正式工作台导航
+- 百度营销真实数据试点：显式迁移、OAuth/Token、搜索账户绑定、30 日推广计划原子快照、精确值看板和刷新生命周期均已实现；`PILOT_DATA_READY` 还可通过同一授权实时只读展示百度统计 PV、UV 与访问次数。正式工作台导航继续隐藏，币种/时区、Refresh Token 轮换和完整生产验收仍是 `READY` 门禁
 
 ## 分析能力
 
@@ -169,7 +169,7 @@ npm run deploy
 
 该流程支持 macOS 和 Linux，允许部署期间停机。SQLite 部署会先生成并校验唯一最新快照，再执行 GEO 指标语义迁移和只读复审，全部通过后才启动服务；Postgres 部署必须通过 `AI_GEO_DATABASE_BACKUP_REFERENCE` 提供已完成外部备份的引用。Ubuntu 正式环境由仓库内的 `ai-geo-backend.service` 与 `ai-geo-frontend.service` 托管，异常退出自动恢复并随系统启动；`npm run prod:*` 和部署脚本在该环境中只调用 systemd，不再启动第二套 PID 管理进程。首次接管、失败处理和运行限制见 [单机原地部署](docs/SINGLE_HOST_DEPLOYMENT.md)。
 
-部署流程也会在启动前应用并复审营销模块的 4 个不可变迁移。该步骤在模块关闭时同样执行，不会启用百度网络调用。`baidu-marketing-docs-2026-07-30` 可在 `MARKETING_MONITORING_ENABLED=true` 且 `MARKETING_MONITORING_PILOT_MODE=true` 时进入受限试点，只开放百度授权、签名 callback、Token 和账户目录；项目绑定、报表刷新、调度和导航仍关闭。真实响应契约、金额/时区口径和生产验收完成后，必须新增 `VERIFIED` 契约版本并关闭试点模式，正式功能才会进入 `READY`。
+部署流程也会在启动前应用并复审营销模块的 4 个不可变迁移。该步骤在模块关闭时同样执行，不会启用百度网络调用。`baidu-marketing-docs-2026-07-30` 在试点模式下只进入 `PILOT_READY`，开放授权、Token 与账户目录；`baidu-marketing-pilot-2026-07-30` 使用已脱敏的真实搜索报表、百度统计站点和趋势响应进入 `PILOT_DATA_READY`，仅对服务端项目白名单开放账户绑定、30 日搜索快照和百度统计实时读取。正式导航仍隐藏；完整金额/时区、Refresh Token 轮换和生产验收完成后，必须新增零 blocker 的 `VERIFIED` 契约并关闭试点模式，正式功能才会进入 `READY`。
 
 生产环境建议：
 

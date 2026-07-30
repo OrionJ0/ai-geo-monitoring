@@ -1,0 +1,51 @@
+{
+  "header": {
+    "status": 0,
+    "desc": "success",
+    "failures": []
+  },
+  "body": {
+    "data": [
+      {
+        "rowCount": 3,
+        "rows": [
+          {
+            "campaignId": 101,
+            "campaignName": "脱敏计划甲",
+            "campaignNameStatus": "脱敏计划甲",
+            "click": 7,
+            "cost": 12.34,
+            "date": "2026-07-28",
+            "impression": 123,
+            "userId": 1234,
+            "userName": "脱敏搜索账户"
+          },
+          {
+            "campaignId": 101,
+            "campaignName": "脱敏计划甲",
+            "campaignNameStatus": "脱敏计划甲",
+            "click": 0,
+            "cost": 0,
+            "date": "2026-07-29",
+            "impression": 8,
+            "userId": 1234,
+            "userName": "脱敏搜索账户"
+          },
+          {
+            "campaignId": 202,
+            "campaignName": "脱敏计划乙",
+            "campaignNameStatus": "脱敏计划乙[已删除]",
+            "click": 1,
+            "cost": 0.5,
+            "date": "2026-07-29",
+            "impression": 21,
+            "userId": 1234,
+            "userName": "脱敏搜索账户"
+          }
+        ],
+        "totalRowCount": 3
+      }
+    ],
+    "expand": {}
+  }
+}
