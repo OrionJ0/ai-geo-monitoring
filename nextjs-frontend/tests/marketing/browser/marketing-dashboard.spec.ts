@@ -110,8 +110,11 @@ test('fresh snapshot is keyboard-readable and axe-clean', async ({ page }) => {
     '超长品牌搜索推广计划名称——响应式与键盘验收夹具'
   )).toBeVisible();
 
+  const projectSelector = page.getByLabel('监控项目');
+  await projectSelector.focus();
+  await expect(projectSelector).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.locator(':focus')).toBeVisible();
+  await expect(page.getByRole('button', { name: '立即刷新' })).toBeFocused();
 
   const results = await new AxeBuilder({ page })
     .exclude('.ant-menu-submenu')
