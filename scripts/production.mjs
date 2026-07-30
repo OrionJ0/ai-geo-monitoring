@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { createProcessManager } from './processManager.mjs';
+import { createSystemdProcessManager } from './systemdProcessManager.mjs';
 
+const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeDirectory =
   process.env.AI_GEO_RUNTIME_DIR || path.join(projectRoot, '.runtime');
@@ -48,6 +52,18 @@ function parseEnvFile(filename) {
 const backendConfig = parseEnvFile(path.join(backendDirectory, '.env'));
 const backendPort = backendConfig.PORT || '3002';
 const frontendPort = process.env.AI_GEO_FRONTEND_PORT || '3001';
+const configuredProcessManager = String(
+  backendConfig.AI_GEO_PROCESS_MANAGER
+    || process.env.AI_GEO_PROCESS_MANAGER
+    || ''
+).trim();
+const processManagerMode = configuredProcessManager
+  || (process.platform === 'linux' ? 'systemd' : 'manual');
+if (!['manual', 'systemd'].includes(processManagerMode)) {
+  throw new Error(
+    'AI_GEO_PROCESS_MANAGER 只允许 manual 或 systemd'
+  );
+}
 const sharedEnvironment = { ...process.env, NODE_ENV: 'production' };
 const services = {
   backend: {
@@ -68,7 +84,28 @@ const services = {
     alternateMarkers: ['next-server'],
   },
 };
-const manager = createProcessManager({ runtimeDirectory, logDirectory });
+const manualManager = createProcessManager({ runtimeDirectory, logDirectory });
+
+async function runSystemctl(args, { privileged = false } = {}) {
+  const systemctl = process.env.NODE_ENV === 'test'
+    ? (process.env.AI_GEO_TEST_SYSTEMCTL_BIN || '/usr/bin/systemctl')
+    : '/usr/bin/systemctl';
+  const command = privileged && process.getuid?.() !== 0
+    ? '/usr/bin/sudo'
+    : systemctl;
+  const commandArgs = command === systemctl
+    ? args
+    : ['-n', systemctl, ...args];
+  return execFileAsync(command, commandArgs, {
+    cwd: projectRoot,
+    maxBuffer: 1024 * 1024,
+  });
+}
+
+const systemdManager = createSystemdProcessManager({
+  runSystemctl,
+  waitForHttp,
+});
 
 function requireFile(filename, description) {
   if (!fs.existsSync(filename)) {
@@ -96,9 +133,12 @@ async function waitForHttp(url, label, timeoutMs = 45_000) {
 }
 
 async function getStatus() {
+  if (processManagerMode === 'systemd') {
+    return systemdManager.status();
+  }
   return {
-    backend: await manager.status(services.backend),
-    frontend: await manager.status(services.frontend),
+    backend: await manualManager.status(services.backend),
+    frontend: await manualManager.status(services.frontend),
   };
 }
 
@@ -108,13 +148,17 @@ async function start() {
   requireFile(frontendEntry, 'Next.js 生产入口');
   requireFile(path.join(frontendDirectory, '.next', 'BUILD_ID'), 'Next.js 构建产物');
 
+  if (processManagerMode === 'systemd') {
+    return systemdManager.start();
+  }
+
   try {
-    await manager.start(services.backend);
+    await manualManager.start(services.backend);
     await waitForHttp(
       `http://127.0.0.1:${backendPort}/api/health`,
       '后端'
     );
-    await manager.start(services.frontend);
+    await manualManager.start(services.frontend);
     await waitForHttp(`http://127.0.0.1:${frontendPort}/`, '前端');
     await waitForHttp(
       `http://127.0.0.1:${frontendPort}/api/health`,
@@ -133,9 +177,13 @@ async function start() {
 }
 
 async function stop() {
+  if (processManagerMode === 'systemd') {
+    return systemdManager.stop();
+  }
+
   const [frontendResult, backendResult] = await Promise.allSettled([
-    manager.stop(services.frontend),
-    manager.stop(services.backend),
+    manualManager.stop(services.frontend),
+    manualManager.stop(services.backend),
   ]);
   const failures = [
     ['frontend', frontendResult],

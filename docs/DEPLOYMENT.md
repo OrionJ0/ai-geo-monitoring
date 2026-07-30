@@ -56,18 +56,18 @@
 - 生产建议配置 `DATABASE_URL` 使用托管 Postgres（如 Supabase）。未配置时会使用 SQLite（`backend/config/database.js`，默认 `database.sqlite`）。
 
 ## 构建与运行（生产）
-- 安装依赖：
-  - `npm ci`
-  - `cd backend && npm ci`
-  - `cd ../nextjs-frontend && npm ci`
-- 前端构建：
-  - 在项目根目录执行 `npm run build`
-- 后端：
-  - `cd backend && npm run start`
-  - 建议使用进程管理器接管（PM2 或 systemd），并将日志滚动输出
-- 前端：
-  - `cd nextjs-frontend && npm run start`
-  - 建议通过进程管理器接管 Next.js 服务，并由 Nginx 反向代理到 Next.js 监听端口
+
+- Ubuntu 正式环境固定使用仓库 `deploy/systemd/` 中的 `ai-geo-backend.service` 和 `ai-geo-frontend.service`，不使用 PM2 或 Docker。
+- 两个 systemd 服务都以 `ubuntu` 普通用户运行；前端只监听 `127.0.0.1:3001`，后端监听 `127.0.0.1:3002`。
+- 安装 unit、启用开机启动和首次切换见 [单机原地部署](SINGLE_HOST_DEPLOYMENT.md)。
+- 日常发布执行 `npm run deploy`；当 `AI_GEO_PROCESS_MANAGER=systemd` 时，部署脚本通过 systemd 停止、启动和验证服务。
+- 查看状态与日志：
+
+```bash
+npm run prod:status
+systemctl status ai-geo-backend.service ai-geo-frontend.service
+journalctl -u ai-geo-backend.service -u ai-geo-frontend.service
+```
 
 ## Nginx 反向代理示例
 - 单域部署（前后端同域，避免跨域）：
@@ -165,25 +165,11 @@ server {
 - 速率限制（429）：默认限制通用 API 500次/15分钟，定时任务 API 1000次/15分钟，登录 5次/15分钟
 - JWT 配置错误：确保 `JWT_SECRET` 已设置为强随机值
 
-## 进程管理示例（可选）
-- 使用 systemd（示例）：
-```
-[Unit]
-Description=AI GEO Monitoring System Backend
-After=network.target
+## 进程管理
 
-[Service]
-Type=simple
-WorkingDirectory=/srv/ai-geo-monitoring-system/backend
-Environment=NODE_ENV=production
-EnvironmentFile=/srv/ai-geo-monitoring-system/backend/.env
-ExecStart=/usr/bin/node app.js
-Restart=always
+正式 unit 以仓库文件为唯一模板，不在服务器手写第二份：
 
-[Install]
-WantedBy=multi-user.target
-```
-- 安装后执行：`systemctl daemon-reload && systemctl enable --now ai-geo-monitoring-system-backend.service`
-- Next.js 前端也可使用独立 systemd 服务托管，核心命令为：
-  - `WorkingDirectory=/srv/ai-geo-monitoring-system/nextjs-frontend`
-  - `ExecStart=/usr/bin/npm run start`
+- `deploy/systemd/ai-geo-backend.service`
+- `deploy/systemd/ai-geo-frontend.service`
+
+修改 unit 后先执行 `systemd-analyze verify`，再执行 `systemctl daemon-reload` 和受控重启。不得通过 PM2、`nohup`、旧 PID 文件或另一套 Node 命令提供静默 fallback。

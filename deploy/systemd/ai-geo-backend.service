@@ -1,0 +1,29 @@
+[Unit]
+Description=AI-GEO backend
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/ai-geo-monitoring/backend
+Environment=NODE_ENV=production
+Environment=HOME=/home/ubuntu
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+ExecStart=/usr/bin/node /opt/ai-geo-monitoring/backend/app.js
+Restart=always
+RestartSec=3s
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=60s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-geo-backend
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,6 @@
 # 单机原地部署
 
-本方案面向内部使用的单台 macOS 或 Linux 服务器。部署期间允许网站暂停；构建或测试失败后，由维护者修复代码并重新执行部署。不使用双槽位、release 目录、Docker、GitHub Actions，也不提供自动回滚或进程崩溃自动恢复。
+本方案面向内部使用的单台 macOS 或 Ubuntu 服务器。部署期间允许网站暂停；构建或测试失败后，由维护者修复代码并重新执行部署。不使用双槽位、release 目录、Docker 或 GitHub Actions。Ubuntu 正式环境使用 systemd 自动恢复前后端进程；部署失败仍保持停止，不做应用版本自动回滚。
 
 ## 前提
 
@@ -10,6 +10,7 @@
 - 干净的 `main` 工作区
 - 已存在且有效的 `backend/.env`
 - 使用 SQLite 时，数据库文件必须已经存在
+- Ubuntu 正式环境已安装仓库 `deploy/systemd/` 中的两个 unit，并明确配置 `AI_GEO_PROCESS_MANAGER=systemd`
 
 真实 `.env`、`.env.local`、SQLite、日志和运行状态均被 Git 忽略。部署脚本不会输出 `JWT_SECRET`、`CONFIG_ENCRYPTION_KEY` 或其他秘密。
 
@@ -17,9 +18,24 @@
 
 ## 首次接管
 
-第一次使用生产命令前，先人工停止由终端、VS Code 或 Codex 启动的旧前后端，确保 3001 和 3002 端口不再被旧进程占用。部署命令只能管理由 `npm run prod:start` 启动并记录的进程，不能安全识别此前由其他会话启动的服务。
+Ubuntu 首次安装 systemd：
 
-在服务器项目根目录执行：
+```bash
+cd /opt/ai-geo-monitoring
+sudo install -o root -g root -m 0644 \
+  deploy/systemd/ai-geo-backend.service \
+  deploy/systemd/ai-geo-frontend.service \
+  /etc/systemd/system/
+sudo systemd-analyze verify \
+  /etc/systemd/system/ai-geo-backend.service \
+  /etc/systemd/system/ai-geo-frontend.service
+sudo systemctl daemon-reload
+sudo systemctl enable ai-geo-backend.service ai-geo-frontend.service
+```
+
+从旧 PID 管理器首次切换时，先保持 `AI_GEO_PROCESS_MANAGER=manual`，执行 `npm run prod:stop` 并确认 3001/3002 已释放；再把配置明确改为 `systemd`，最后执行 `npm run prod:start`。不得并行保留两套管理器。
+
+完成安装后，在服务器项目根目录执行：
 
 ```bash
 npm run deploy:check
@@ -48,12 +64,12 @@ npm run deploy
 1. 要求当前分支为 `main`，且工作区没有未提交或未跟踪文件。
 2. 执行 `git pull --ff-only origin main`，并确认 `HEAD` 与 `origin/main` 完全一致；服务器上的本地提交即使工作区干净也不会被部署。
 3. 检查 `JWT_SECRET`、`CONFIG_ENCRYPTION_KEY` 和数据库配置。
-4. 停止由生产命令管理的前后端。
+4. 通过 systemd 停止前端和后端。
 5. SQLite 使用 Online Backup API 更新唯一最新快照并执行 `PRAGMA quick_check`；Postgres 要求 `AI_GEO_DATABASE_BACKUP_REFERENCE` 已声明外部备份引用。
 6. 后端执行 `npm ci` 和完整测试。
 7. 前端执行 `npm ci`、lint 和生产构建。
 8. 使用第 5 步的备份引用执行 GEO 指标语义迁移，再运行一次只读迁移审计；任一步失败都不启动服务。
-9. 以生产模式启动后端和 Next.js，并检查后端、前端页面和前端 `/api` 代理。
+9. 通过 systemd 依次启动后端和 Next.js，并检查后端 ready、前端页面和前端 `/api` 代理。
 
 任何步骤失败都会返回非零退出码并写入部署日志。服务停止后的步骤失败时，网站保持停止；修复问题后重新执行 `npm run deploy`。
 
@@ -89,25 +105,18 @@ npm run prod:stop
 npm run prod:status
 ```
 
-进程会脱离当前终端运行，日志位置为：
+Ubuntu 正式环境中，这三个命令是 systemd 的项目级入口。它们不会读取旧 `.runtime/*.json` 作为生产真值，也不会生成第二套脱离终端的 Node 进程。
 
-```text
-logs/backend.log
-logs/frontend.log
-logs/deployments.log
+```bash
+systemctl status ai-geo-backend.service ai-geo-frontend.service
+journalctl -u ai-geo-backend.service -u ai-geo-frontend.service
 ```
 
-PID 状态保存在 `.runtime/`。停止时会先发送 `SIGTERM`，等待超时后才强制终止，并在操作前核对 PID 对应的命令，避免误杀无关进程。
+部署结果摘要继续写入 `logs/deployments.log`；前后端标准输出和错误统一进入 journald。两个 unit 直接运行项目 Node/Next.js 入口，以 `ubuntu` 用户启动，使用 `Restart=always` 自动恢复，并通过 `SIGTERM` 和 60 秒停止窗口执行应用优雅关闭。
 
-重复执行 `npm run prod:start` 会复用已核验的受管进程，不会启动第二个受管后端。PID 存活但命令不匹配时，启动、状态接管和停止都会拒绝覆盖或终止该未知进程。正式环境禁止绕过生产命令并行执行第二套 `node backend/app.js`；即使端口不同，第二个进程也会破坏全局 Web FIFO 假设，profile lock 只负责阻止它同时操作同一个 DeepSeek profile。
+前端正式 unit 只绑定 `127.0.0.1:3001`，后端继续绑定 `127.0.0.1:3002`。正式环境禁止绕过 systemd 并行执行第二套 `node backend/app.js`；即使端口不同，第二个进程也会破坏全局 Web FIFO 假设。
 
-本阶段不配置 launchd 或 systemd，因此：
-
-- 服务器重启后需要人工执行 `npm run prod:start`。
-- 前端或后端崩溃后不会自动恢复。
-- 日志不会自动轮转。
-
-以后迁移到 Linux 时，这套手动部署命令可以直接使用。如需引入 systemd，需要替换启动和停止适配层；拉取、备份、测试和构建步骤不变。
+旧 PID 管理器只为 macOS 兼容环境保留；Linux 默认要求 systemd，且服务器 `.env` 应明确配置 `AI_GEO_PROCESS_MANAGER=systemd`。unit 缺失时直接失败，不静默回退。
 
 ## 受管 Web 虚拟机运行边界
 
@@ -164,4 +173,4 @@ curl -f http://127.0.0.1:3001/api/health
 
 使用有效 JWT 检查 DeepSeek Web 公共状态；不要把 Token 写入共享脚本、日志或工单。`idle` 仅表示没有待处理工作和已知阻塞，不代替正式运行前的真实 preflight。
 
-部署失败时先查看 `logs/deployments.log`，再查看对应的前后端日志。不要通过 `git clean -fdx` 清理项目，因为该命令会删除被 Git 忽略的真实环境文件和 SQLite 数据。
+部署失败时先查看 `logs/deployments.log`，再用 `journalctl` 查看对应 unit。不要通过 `git clean -fdx` 清理项目，因为该命令会删除被 Git 忽略的真实环境文件和 SQLite 数据。

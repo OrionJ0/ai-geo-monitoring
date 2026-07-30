@@ -1,0 +1,27 @@
+[Unit]
+Description=AI-GEO frontend
+Wants=network-online.target ai-geo-backend.service
+After=network-online.target ai-geo-backend.service
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/ai-geo-monitoring/nextjs-frontend
+Environment=NODE_ENV=production
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/bin/node /opt/ai-geo-monitoring/nextjs-frontend/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3001
+Restart=always
+RestartSec=3s
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=60s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-geo-frontend
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
