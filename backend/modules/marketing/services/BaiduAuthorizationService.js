@@ -284,15 +284,28 @@ class BaiduAuthorizationService {
 
   validateProviderResult(result) {
     const principalId = result?.principalId;
+    const openId = result?.openId;
     const accessToken = result?.accessToken;
     const expiresInSeconds = Number(result?.expiresInSeconds);
+    const refreshExpiresInSeconds = result?.refreshExpiresInSeconds == null
+      ? null
+      : Number(result.refreshExpiresInSeconds);
     if (
       typeof principalId !== 'string'
       || !principalId
+      || typeof openId !== 'string'
+      || !openId
       || typeof accessToken !== 'string'
       || !accessToken
       || !Number.isInteger(expiresInSeconds)
       || expiresInSeconds <= 0
+      || (
+        refreshExpiresInSeconds !== null
+        && (
+          !Number.isInteger(refreshExpiresInSeconds)
+          || refreshExpiresInSeconds <= 0
+        )
+      )
       || (
         result?.refreshToken !== undefined
         && result?.refreshToken !== null
@@ -315,11 +328,41 @@ class BaiduAuthorizationService {
         : null,
       accessToken,
       refreshToken: result?.refreshToken || null,
-      expiresInSeconds
+      openId,
+      expiresInSeconds,
+      refreshExpiresInSeconds
     };
   }
 
-  async completeCallback({ state, code }) {
+  async completeCallback({
+    appId,
+    authCode,
+    state,
+    userId,
+    timestamp,
+    signature
+  }) {
+    const callback = {
+      appId,
+      authCode,
+      state,
+      userId,
+      timestamp,
+      signature
+    };
+    let signatureValid = false;
+    try {
+      signatureValid = this.provider.verifyCallbackSignature(callback) === true;
+    } catch {
+      signatureValid = false;
+    }
+    if (!signatureValid) {
+      throw new MarketingAuthorizationError(
+        '百度授权回调签名无效',
+        'BAIDU_CALLBACK_SIGNATURE_INVALID',
+        400
+      );
+    }
     const processingAt = nowIso(this.clock);
     const rows = await this.sequelize.query(
       `SELECT *
@@ -364,7 +407,11 @@ class BaiduAuthorizationService {
     let providerResult;
     try {
       providerResult = this.validateProviderResult(
-        await this.provider.exchangeAuthorizationCode({ code })
+        await this.provider.exchangeAuthorizationCode({
+          appId,
+          authCode,
+          userId
+        })
       );
     } catch (error) {
       const outcomeUnknown = error?.code === 'OUTCOME_UNKNOWN';
@@ -386,6 +433,12 @@ class BaiduAuthorizationService {
       this.clock,
       providerResult.expiresInSeconds * 1000
     );
+    const refreshTokenExpiresAt = providerResult.refreshExpiresInSeconds
+      ? plusMilliseconds(
+        this.clock,
+        providerResult.refreshExpiresInSeconds * 1000
+      )
+      : null;
     const resultTicket = randomTicket();
     try {
       await this.sequelize.transaction(async (transaction) => {
@@ -397,14 +450,17 @@ class BaiduAuthorizationService {
           await this.sequelize.query(
           `INSERT INTO baidu_marketing_connections (
             id, status, authorized_principal_id, authorized_principal_name,
+            authorized_open_id,
             access_token_ciphertext, refresh_token_ciphertext,
-            access_token_expires_at, auth_generation, token_version,
+            access_token_expires_at, refresh_token_expires_at,
+            auth_generation, token_version,
             refresh_claim_token, refresh_claim_until, created_by_user_id,
             last_error_code, created_at, updated_at
           ) VALUES (
             :id, 'CONNECTED', :principalId, :principalName,
+            :openId,
             :accessCiphertext, :refreshCiphertext,
-            :expiresAt, 0, 1,
+            :expiresAt, :refreshExpiresAt, 0, 1,
             NULL, NULL, :adminId,
             NULL, :completedAt, :completedAt
           )`,
@@ -413,6 +469,7 @@ class BaiduAuthorizationService {
               id: connectionId,
               principalId: providerResult.principalId,
               principalName: providerResult.principalName,
+              openId: providerResult.openId,
               accessCiphertext: encryptSecret(
                 providerResult.accessToken,
                 this.encryptionKey
@@ -421,6 +478,7 @@ class BaiduAuthorizationService {
                 ? encryptSecret(providerResult.refreshToken, this.encryptionKey)
                 : null,
               expiresAt: accessTokenExpiresAt,
+              refreshExpiresAt: refreshTokenExpiresAt,
               adminId: attempt.initiated_by_user_id,
               completedAt
             },
@@ -433,9 +491,11 @@ class BaiduAuthorizationService {
            SET status = 'CONNECTED',
                authorized_principal_id = :principalId,
                authorized_principal_name = :principalName,
+               authorized_open_id = :openId,
                access_token_ciphertext = :accessCiphertext,
                refresh_token_ciphertext = :refreshCiphertext,
                access_token_expires_at = :expiresAt,
+               refresh_token_expires_at = :refreshExpiresAt,
                token_version = token_version + 1,
                refresh_claim_token = NULL,
                refresh_claim_until = NULL,
@@ -450,6 +510,7 @@ class BaiduAuthorizationService {
               expectedGeneration: attempt.expected_auth_generation,
               principalId: providerResult.principalId,
               principalName: providerResult.principalName,
+              openId: providerResult.openId,
               accessCiphertext: encryptSecret(
                 providerResult.accessToken,
                 this.encryptionKey
@@ -458,6 +519,7 @@ class BaiduAuthorizationService {
                 ? encryptSecret(providerResult.refreshToken, this.encryptionKey)
                 : null,
               expiresAt: accessTokenExpiresAt,
+              refreshExpiresAt: refreshTokenExpiresAt,
               completedAt
             },
             transaction,
@@ -511,56 +573,6 @@ class BaiduAuthorizationService {
       };
     }
     return { resultTicket };
-  }
-
-  async completeCallbackFailure({ state }) {
-    const processingAt = nowIso(this.clock);
-    const rows = await this.sequelize.query(
-      `SELECT id
-       FROM baidu_authorization_attempts
-       WHERE provider_state_hash = :stateHash
-         AND status = 'PENDING'
-         AND launch_consumed_at IS NOT NULL
-         AND expires_at > :processingAt
-       LIMIT 1`,
-      {
-        replacements: {
-          stateHash: hashSecret(state),
-          processingAt
-        },
-        type: QueryTypes.SELECT
-      }
-    );
-    if (!rows[0]) {
-      throw new MarketingAuthorizationError(
-        '授权回调无效、已过期或已处理',
-        'AUTHORIZATION_CALLBACK_REJECTED',
-        409
-      );
-    }
-    const [, affected] = await this.sequelize.query(
-      `UPDATE baidu_authorization_attempts
-       SET status = 'PROCESSING', updated_at = :processingAt
-       WHERE id = :id AND status = 'PENDING'`,
-      {
-        replacements: { id: rows[0].id, processingAt },
-        type: QueryTypes.UPDATE
-      }
-    );
-    if (affected !== 1) {
-      throw new MarketingAuthorizationError(
-        '授权回调已处理',
-        'AUTHORIZATION_CALLBACK_REPLAYED',
-        409
-      );
-    }
-    return {
-      resultTicket: await this.markAttemptTerminal(
-        rows[0].id,
-        'FAILED',
-        'PROVIDER_AUTHORIZATION_DENIED'
-      )
-    };
   }
 
   async consumeResult({ resultTicket, adminId }) {

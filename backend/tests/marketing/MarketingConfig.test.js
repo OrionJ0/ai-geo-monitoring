@@ -10,10 +10,12 @@ function enabledConfig(overrides = {}) {
   return {
     NODE_ENV: 'production',
     MARKETING_MONITORING_ENABLED: 'true',
+    MARKETING_MONITORING_PILOT_MODE: 'false',
     MARKETING_MONITORING_ALLOWED_PROJECT_IDS: 'project-1',
     CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
-    BAIDU_MARKETING_CLIENT_ID: 'client-id-canary',
-    BAIDU_MARKETING_CLIENT_SECRET: 'client-secret-canary',
+    BAIDU_MARKETING_APP_ID: 'app-id-canary',
+    BAIDU_MARKETING_SECRET_KEY: '0123456789abcdef-secret-key-canary',
+    BAIDU_MARKETING_SCOPE: 'search-report-read-canary',
     BAIDU_MARKETING_REDIRECT_URI: 'https://marketing.example.test/api/admin/marketing/baidu/oauth/callback',
     BAIDU_MARKETING_CONTRACT_VERSION: 'baidu-search-test-v1',
     BAIDU_MARKETING_HTTP_TIMEOUT_MS: '10000',
@@ -25,7 +27,15 @@ const verifiedContract = {
   status: 'VERIFIED',
   productionAllowlist: ['GET https://provider.example.test/report'],
   blockers: [],
-  runtime: { adapterImplemented: true },
+  oauth: {
+    authorization: {
+      approvedScopeValues: ['search-report-read-canary']
+    }
+  },
+  runtime: {
+    adapterImplemented: true,
+    reportResponseParserImplemented: true
+  },
   money: { currencyCode: 'CNY', costScale: 6 }
 };
 
@@ -49,18 +59,47 @@ test('disabled marketing ignores dormant provider configuration during rollback'
   });
 });
 
+test('documented contract can enter explicit auth-only pilot mode', () => {
+  const result = auditMarketingConfig(enabledConfig({
+    MARKETING_MONITORING_PILOT_MODE: 'true',
+    BAIDU_MARKETING_CONTRACT_VERSION:
+      'baidu-marketing-docs-2026-07-30'
+  }));
+
+  assert.deepEqual(result, {
+    moduleState: 'PILOT_READY',
+    errorCode: null,
+    missingKeys: []
+  });
+});
+
+test('pilot mode rejects a manifest without a documented outbound allowlist', () => {
+  const result = auditMarketingConfig(enabledConfig({
+    MARKETING_MONITORING_PILOT_MODE: 'true'
+  }), {
+    contractLoader: () => ({
+      status: 'DOCUMENTED_PENDING_PILOT',
+      documentedOutboundAllowlist: [],
+      runtime: { adapterImplemented: true }
+    })
+  });
+
+  assert.equal(result.moduleState, 'MISCONFIGURED');
+  assert.equal(result.errorCode, 'MARKETING_PILOT_CONTRACT_INVALID');
+});
+
 test('enabled marketing config reports only missing key names and never values', () => {
   const secret = 'must-not-appear-in-config-audit';
   const result = auditMarketingConfig({
     MARKETING_MONITORING_ENABLED: 'true',
-    BAIDU_MARKETING_CLIENT_SECRET: secret
+    BAIDU_MARKETING_SECRET_KEY: secret
   });
 
   assert.equal(result.moduleState, 'MISCONFIGURED');
   assert.equal(result.errorCode, 'MARKETING_CONFIG_INCOMPLETE');
   assert.deepEqual(
     result.missingKeys,
-    REQUIRED_ENABLED_KEYS.filter((key) => key !== 'BAIDU_MARKETING_CLIENT_SECRET')
+    REQUIRED_ENABLED_KEYS.filter((key) => key !== 'BAIDU_MARKETING_SECRET_KEY')
   );
   assert.doesNotMatch(JSON.stringify(result), new RegExp(secret));
 });
@@ -105,10 +144,21 @@ test('enabled marketing rejects unknown and explicitly blocked contracts', () =>
   assert.equal(
     auditMarketingConfig(enabledConfig({
       BAIDU_MARKETING_CONTRACT_VERSION:
-        'baidu-marketing-pending-2026-07-29'
+        'baidu-marketing-docs-2026-07-30'
     })).errorCode,
     'MARKETING_CONTRACT_NOT_VERIFIED'
   );
+});
+
+test('enabled marketing rejects a secretKey that cannot supply a 16-byte AES key', () => {
+  const result = auditMarketingConfig(enabledConfig({
+    BAIDU_MARKETING_SECRET_KEY: '短密钥'
+  }), {
+    contractLoader: () => verifiedContract
+  });
+
+  assert.equal(result.moduleState, 'MISCONFIGURED');
+  assert.equal(result.errorCode, 'MARKETING_SECRET_KEY_INVALID');
 });
 
 test('enabled marketing stays blocked until the real adapter is implemented', () => {
@@ -121,6 +171,32 @@ test('enabled marketing stays blocked until the real adapter is implemented', ()
 
   assert.equal(result.moduleState, 'MISCONFIGURED');
   assert.equal(result.errorCode, 'MARKETING_CONTRACT_NOT_VERIFIED');
+});
+
+test('production stays blocked until the real report parser is implemented', () => {
+  const result = auditMarketingConfig(enabledConfig(), {
+    contractLoader: () => ({
+      ...verifiedContract,
+      runtime: {
+        adapterImplemented: true,
+        reportResponseParserImplemented: false
+      }
+    })
+  });
+
+  assert.equal(result.moduleState, 'MISCONFIGURED');
+  assert.equal(result.errorCode, 'MARKETING_CONTRACT_NOT_VERIFIED');
+});
+
+test('production rejects a scope value not recorded in the verified contract', () => {
+  const result = auditMarketingConfig(enabledConfig({
+    BAIDU_MARKETING_SCOPE: 'unexpected-write-scope'
+  }), {
+    contractLoader: () => verifiedContract
+  });
+
+  assert.equal(result.moduleState, 'MISCONFIGURED');
+  assert.equal(result.errorCode, 'MARKETING_SCOPE_NOT_APPROVED');
 });
 
 test('enabled marketing rejects an invalid encryption key without echoing it', () => {

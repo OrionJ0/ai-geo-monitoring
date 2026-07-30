@@ -105,9 +105,18 @@ class BaiduConnectionService {
       || response.expiresInSeconds <= 0
       || (
         response.refreshToken !== undefined
+        && response.refreshToken !== null
         && (
           typeof response.refreshToken !== 'string'
           || !response.refreshToken
+        )
+      )
+      || (
+        response.refreshExpiresInSeconds !== undefined
+        && response.refreshExpiresInSeconds !== null
+        && (
+          !Number.isInteger(response.refreshExpiresInSeconds)
+          || response.refreshExpiresInSeconds <= 0
         )
       )
     ) {
@@ -189,7 +198,8 @@ class BaiduConnectionService {
     try {
       response = this.validateRefreshResponse(
         await this.provider.refreshAccessToken({
-          refreshToken: oldRefreshToken
+          refreshToken: oldRefreshToken,
+          userId: connection.authorized_principal_id
         })
       );
     } catch (error) {
@@ -207,6 +217,37 @@ class BaiduConnectionService {
         409
       );
     }
+    if (
+      response.principalId != null
+      && response.principalId !== connection.authorized_principal_id
+    ) {
+      const changed = await this.requireReauthorization(
+        connection,
+        claimToken,
+        'REFRESH_PRINCIPAL_MISMATCH'
+      );
+      throw new MarketingAuthorizationError(
+        changed ? 'Token 刷新主体不一致' : '晚到的 Token 刷新结果已拒绝',
+        changed ? 'REFRESH_PRINCIPAL_MISMATCH' : 'REFRESH_CAS_REJECTED',
+        409
+      );
+    }
+    if (
+      response.openId != null
+      && connection.authorized_open_id
+      && response.openId !== connection.authorized_open_id
+    ) {
+      const changed = await this.requireReauthorization(
+        connection,
+        claimToken,
+        'REFRESH_OPEN_ID_MISMATCH'
+      );
+      throw new MarketingAuthorizationError(
+        changed ? 'Token 刷新 openId 不一致' : '晚到的 Token 刷新结果已拒绝',
+        changed ? 'REFRESH_OPEN_ID_MISMATCH' : 'REFRESH_CAS_REJECTED',
+        409
+      );
+    }
 
     const nextRefreshCiphertext = (
       !response.refreshToken
@@ -217,12 +258,18 @@ class BaiduConnectionService {
     const expiresAt = new Date(
       this.clock() + (response.expiresInSeconds * 1000)
     ).toISOString();
+    const refreshExpiresAt = response.refreshExpiresInSeconds
+      ? new Date(
+        this.clock() + (response.refreshExpiresInSeconds * 1000)
+      ).toISOString()
+      : connection.refresh_token_expires_at;
     const now = new Date(this.clock()).toISOString();
     const [, affected] = await this.sequelize.query(
       `UPDATE baidu_marketing_connections
        SET access_token_ciphertext = :accessCiphertext,
            refresh_token_ciphertext = :refreshCiphertext,
            access_token_expires_at = :expiresAt,
+           refresh_token_expires_at = :refreshExpiresAt,
            token_version = token_version + 1,
            refresh_claim_token = NULL,
            refresh_claim_until = NULL,
@@ -245,6 +292,7 @@ class BaiduConnectionService {
           ),
           refreshCiphertext: nextRefreshCiphertext,
           expiresAt,
+          refreshExpiresAt,
           now
         },
         type: QueryTypes.UPDATE

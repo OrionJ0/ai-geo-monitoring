@@ -39,6 +39,17 @@ async function seedAdmin(sequelize) {
   );
 }
 
+function callbackParameters(state, authCode) {
+  return {
+    appId: 'app-id-fixture',
+    authCode,
+    state,
+    userId: '1234',
+    timestamp: '1611216626171',
+    signature: 'signature-fixture'
+  };
+}
+
 test('concurrent callback exchanges an authorization code at most once', async (t) => {
   const { directory, sequelize } = makeDatabase();
   t.after(async () => {
@@ -53,11 +64,13 @@ test('concurrent callback exchanges an authorization code at most once', async (
     buildAuthorizationUrl({ state }) {
       return `https://provider.invalid/?state=${state}`;
     },
+    verifyCallbackSignature() { return true; },
     async exchangeAuthorizationCode() {
       exchangeCalls += 1;
       await new Promise((resolve) => setTimeout(resolve, 20));
       return {
         principalId: '0009007199254740993123',
+        openId: 'open-id-race',
         accessToken: 'race-access-canary',
         refreshToken: 'race-refresh-canary',
         expiresInSeconds: 3600
@@ -81,8 +94,8 @@ test('concurrent callback exchanges an authorization code at most once', async (
   await service.consumeLaunch({ launchTicket: attempt.launchTicket });
 
   const settled = await Promise.allSettled([
-    service.completeCallback({ state, code: 'same-code' }),
-    service.completeCallback({ state, code: 'same-code' })
+    service.completeCallback(callbackParameters(state, 'same-code')),
+    service.completeCallback(callbackParameters(state, 'same-code'))
   ]);
   assert.equal(settled.filter((item) => item.status === 'fulfilled').length, 1);
   assert.equal(settled.filter((item) => item.status === 'rejected').length, 1);
@@ -106,6 +119,7 @@ test('uncertain code exchange becomes a recoverable terminal result', async (t) 
         state = value;
         return 'https://provider.invalid/';
       },
+      verifyCallbackSignature() { return true; },
       async exchangeAuthorizationCode() {
         const error = new Error('request timed out');
         error.code = 'OUTCOME_UNKNOWN';
@@ -119,7 +133,9 @@ test('uncertain code exchange becomes a recoverable terminal result', async (t) 
     operation: 'CONNECT'
   });
   await service.consumeLaunch({ launchTicket: attempt.launchTicket });
-  const result = await service.completeCallback({ state, code: 'maybe-used' });
+  const result = await service.completeCallback(
+    callbackParameters(state, 'maybe-used')
+  );
   const terminal = await service.consumeResult({
     resultTicket: result.resultTicket,
     adminId: 7
@@ -162,9 +178,11 @@ test('reauthorization cannot replace a connection with another principal', async
         state = value;
         return 'https://provider.invalid/';
       },
+      verifyCallbackSignature() { return true; },
       async exchangeAuthorizationCode() {
         return {
           principalId: 'principal-other',
+          openId: 'open-id-other',
           accessToken: 'must-not-replace',
           expiresInSeconds: 3600
         };
@@ -179,8 +197,7 @@ test('reauthorization cannot replace a connection with another principal', async
   });
   await service.consumeLaunch({ launchTicket: attempt.launchTicket });
   const callback = await service.completeCallback({
-    state,
-    code: 'wrong-principal'
+    ...callbackParameters(state, 'wrong-principal')
   });
   const result = await service.consumeResult({
     resultTicket: callback.resultTicket,
@@ -228,10 +245,12 @@ test('a newer reauthorization generation rejects an older callback', async (t) =
       buildAuthorizationUrl({ state }) {
         return `https://provider.invalid/?state=${state}`;
       },
-      async exchangeAuthorizationCode({ code }) {
+      verifyCallbackSignature() { return true; },
+      async exchangeAuthorizationCode({ authCode }) {
         return {
           principalId: 'principal-stable',
-          accessToken: `access-${code}`,
+          openId: 'open-id-stable',
+          accessToken: `access-${authCode}`,
           expiresInSeconds: 3600
         };
       }
@@ -269,8 +288,7 @@ test('a newer reauthorization generation rejects an older callback', async (t) =
   );
 
   const oldCallback = await service.completeCallback({
-    state: olderState,
-    code: 'older'
+    ...callbackParameters(olderState, 'older')
   });
   const oldResult = await service.consumeResult({
     resultTicket: oldCallback.resultTicket,
@@ -280,8 +298,7 @@ test('a newer reauthorization generation rejects an older callback', async (t) =
   assert.equal(oldResult.failureCode, 'AUTHORIZATION_GENERATION_CHANGED');
 
   const newCallback = await service.completeCallback({
-    state: newerState,
-    code: 'newer'
+    ...callbackParameters(newerState, 'newer')
   });
   const newResult = await service.consumeResult({
     resultTicket: newCallback.resultTicket,

@@ -77,5 +77,13 @@ git diff --check
 
 - 已完成 5 张领域表与 ledger、SQLite 迁移/审计、PostgreSQL runner、安全配置审计、试点项目 allowlist 和独立授权限流。
 - 部署脚本已按备份后、启动前执行营销迁移与 checksum 审计，并运行营销后端/前端/浏览器测试。
-- 阻塞契约生产 allowlist 为空，适配器无网络请求实现；全局 readiness 不依赖百度。
+- 历史：2026-07-29 阻塞契约没有网络适配器；当前已有文档白名单适配器和受限试点，生产 allowlist 仍为空，全局 readiness 仍不依赖百度。
 - 真实 PostgreSQL、生产 ingress/APM canary、日志扫描、部署 singleton 和正式入口验收需外部环境，本 issue 不关闭。
+
+## 2026-07-30 发布准备进展
+
+- 不可变迁移增加到 4 个，新增 `authorized_open_id` 与 `refresh_token_expires_at`，SQLite 测试已覆盖升级后的列审计。
+- 环境变量已硬切到百度官方术语 `APP_ID/SECRET_KEY/SCOPE`，删除旧 `CLIENT_ID/CLIENT_SECRET` 路径。
+- 新增显式 `MARKETING_MONITORING_PILOT_MODE`；文档契约只能进入 `PILOT_READY`，正式模式仍要求 `VERIFIED`、零 blocker、完整金额口径与生产 allowlist。
+- 试点正式入口只开放授权/账户检查，绑定、看板、刷新和 executor 返回 `MARKETING_PILOT_AUTH_ONLY`；营销测试全量通过。
+- 尚未在用户服务器完成部署、HTTPS callback、反向代理/APM 秘密扫描或真实 PostgreSQL 验收，本 issue 不关闭。

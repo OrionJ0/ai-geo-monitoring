@@ -127,7 +127,8 @@ class BaiduBindingService {
 
   async getConnectedConnection(connectionId, transaction) {
     const rows = await this.sequelize.query(
-      `SELECT id, status, authorized_principal_id, auth_generation
+      `SELECT id, status, authorized_principal_id, authorized_open_id,
+              auth_generation
        FROM baidu_marketing_connections
        WHERE id = :connectionId
        LIMIT 1`,

@@ -41,9 +41,10 @@ test('concurrent expiry performs one refresh grant and both callers use its toke
     sequelize: database.sequelize,
     encryptionKey,
     provider: {
-      async refreshAccessToken({ refreshToken }) {
+      async refreshAccessToken({ refreshToken, userId }) {
         refreshCalls += 1;
         assert.equal(refreshToken, 'refresh-old');
+        assert.equal(userId, 'principal-connection-1');
         await new Promise((resolve) => setTimeout(resolve, 20));
         return {
           accessToken: 'access-new',
@@ -113,7 +114,7 @@ test('missing or same refresh token preserves old ciphertext; new value rotates 
   now += 2000;
   await service.getAccessToken('connection-1');
   const [rotatedRows] = await database.sequelize.query(
-    `SELECT refresh_token_ciphertext, token_version
+    `SELECT refresh_token_ciphertext, refresh_token_expires_at, token_version
      FROM baidu_marketing_connections
      WHERE id = 'connection-1'`
   );
@@ -121,7 +122,43 @@ test('missing or same refresh token preserves old ciphertext; new value rotates 
     decryptSecret(rotatedRows[0].refresh_token_ciphertext, encryptionKey),
     'refresh-rotated'
   );
+  assert.equal(rotatedRows[0].refresh_token_expires_at, null);
   assert.equal(rotatedRows[0].token_version, 4);
+});
+
+test('refresh stores the documented refresh-token lifetime', async (t) => {
+  const database = await createMarketingTestDatabase();
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  await expireConnection(database.sequelize);
+  const service = new BaiduConnectionService({
+    sequelize: database.sequelize,
+    encryptionKey,
+    provider: {
+      async refreshAccessToken() {
+        return {
+          principalId: 'principal-connection-1',
+          accessToken: 'access-new',
+          refreshToken: 'refresh-new',
+          expiresInSeconds: 86400,
+          refreshExpiresInSeconds: 2592000
+        };
+      }
+    },
+    clock: () => Date.parse('2026-07-29T04:00:00.000Z'),
+    wait: async () => {}
+  });
+
+  await service.getAccessToken('connection-1');
+  const [rows] = await database.sequelize.query(
+    `SELECT refresh_token_expires_at
+     FROM baidu_marketing_connections
+     WHERE id = 'connection-1'`
+  );
+  assert.equal(
+    new Date(rows[0].refresh_token_expires_at).toISOString(),
+    '2026-08-28T04:00:00.000Z'
+  );
 });
 
 test('a late refresh failure cannot pause a newer authorization generation', async (t) => {

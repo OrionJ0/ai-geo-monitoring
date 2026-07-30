@@ -69,5 +69,13 @@ git diff --check
 
 - 已完成一次性 launch/result Cookie、state 哈希、callback CAS、凭据加密、重授权代次、断开清密钥与绑定暂停。
 - 已用真实 Express 入口和竞态测试验证重放、重复参数、结果未知、错误主体及断开行为。
-- 生产路由已接入正式应用，但阻塞契约会统一返回 fail-closed，当前不会向百度发起请求。
+- 历史：2026-07-29 阻塞契约下所有授权路由 fail-closed；当前默认仍关闭，但显式 `PILOT_READY` 已可调用只读试点接口。
 - 待 Issue 002 提供真实 Token/撤权契约后实现并验收生产适配器，因此本 issue 不关闭。
+
+## 2026-07-30 官方 OAuth 适配进展
+
+- callback 已硬切为百度营销的 `appId/authCode/state/userId/timestamp/signature`，删除通用百度 OAuth 的 `code/error/error_description` 兼容。
+- 已按官方算法实现自然 key 排序 JSON、Base64、`secretKey` 前 16 字符、AES-128-CBC/NoPadding、零 IV、大写 HEX 和常量时间比较。
+- Token 交换已硬切到 `POST https://u.baidu.com/oauth/accessToken`，Refresh Token 已硬切到 `POST https://u.baidu.com/oauth/refreshToken`。
+- 新增迁移 `004-baidu-oauth-identity`，保存加密 Token 之外的 `openId` 与 Refresh Token 到期时间；刷新请求同时绑定授权 `userId`。
+- 受限试点可从公网正式路由完成真实 OAuth，但百度应用尚未申请/审核，真实 callback 与撤权仍未验收，本 issue 不关闭。

@@ -39,6 +39,8 @@ function moduleBoundary(status) {
   const code = status?.errorCode;
   const detail = code === 'MARKETING_CONTRACT_NOT_VERIFIED'
     ? '百度搜索推广真实契约仍待获批应用和测试账户核验。'
+    : status?.moduleState === 'PILOT_READY'
+      ? '当前只开放百度授权和账户目录试点，项目绑定与报表尚未开放。'
     : code === 'MARKETING_SCHEMA_MISSING'
       ? '营销数据库迁移尚未应用。'
       : status?.moduleState === 'DISABLED'

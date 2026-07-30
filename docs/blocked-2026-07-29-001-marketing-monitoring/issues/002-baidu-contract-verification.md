@@ -64,7 +64,17 @@ git diff --check
 
 ## 2026-07-29 工程进展
 
-- 已建立版本化阻塞清单 `baidu-marketing-pending-2026-07-29/manifest.json`，记录证据日期、3 个官方来源、已确认的通用 OAuth 事实和全部未知项。
-- 生产出站 allowlist 保持为空，`runtime.adapterImplemented=false`；配置审计和适配器构造都会 fail-closed。
+- 历史：曾建立 `baidu-marketing-pending-2026-07-29` 通用 OAuth 阻塞清单；该错误路径已于 2026-07-30 删除，不再是当前契约入口。
+- 历史：当时生产出站 allowlist 为空且适配器未实现；当前状态以 2026-07-30 进展为准。
 - 已完成来源追溯、阻塞状态、秘密扫描和无出站请求测试。
 - 未提供获批应用、真实账户或脱敏响应，因此账户目录、搜索报表、金额、时区、分页、限流、错误、撤权和刷新轮换仍不得推测，本 issue 不关闭。
+
+## 2026-07-30 官方文档与实现进展
+
+- 用户指定的 `pageId=100138` 是营销 API 能力总览；具体 OAuth 契约来自同一官方站点 `pageId=100441`，搜索推广计划报告来自 `pageId=102474`。
+- 已新增不可变清单 `baidu-marketing-docs-2026-07-30/manifest.json`，确认授权页、六参数签名 callback、Token/refresh、`getUserInfo`、请求包裹和 `reportType=2290316` 计划报告请求。
+- 已实现官方 AES-128-CBC/NoPadding callback 验签、出站方法+主机+路径白名单、Token/账户请求和计划报告请求构造；生产 allowlist 仍为空。
+- 官方 Token 参数表要求 `grantType=auth_code`，同页 Demo 使用 `access_token`；当前遵循参数表并保留真实试点 blocker。
+- 官方计划报告页没有给出成功响应体，`cost` 只说明为 `Double`，未说明币种/固定 scale/时区；适配器会在成功请求后以 `BAIDU_REPORT_RESPONSE_UNVERIFIED` 阻断解析，不伪造映射。
+- 新增 `PILOT_READY`：只允许授权、callback、Token 与账户目录，项目绑定、报表刷新、executor 和导航不会在正式流程生效。
+- 仍需本项目专用获批应用、实际 scope、普通/超管/代理商账户样本、报告成功/错误样本、refresh 轮换与响应丢失证据，因此本 issue 保持 blocked。

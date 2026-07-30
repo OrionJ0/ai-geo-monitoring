@@ -74,3 +74,10 @@ git diff --check
 - 已完成 dashboard 纯读陈旧判断、单进程 FIFO executor、启动恢复、关停全部排队/运行任务失效及归档/迟到提交栅栏。
 - 自动化测试证明并发过期仅一次 refresh grant，项目归档先完成时晚到结果零写入。
 - 真实 refresh 轮换、丢响应重放语义和跨进程部署锁仍需 Issue 002 与生产环境验证，本 issue 不关闭。
+
+## 2026-07-30 Token 生命周期进展
+
+- Refresh 请求已按官方参数增加授权 `userId`，并校验响应主体/openId 不得串连接。
+- Access/Refresh 有效期使用官方响应 `expiresIn/refreshExpiresIn`，不依赖文档默认值；Refresh Token 到期时间由迁移 004 持久化。
+- 缺失/相同/新 Refresh Token 的 CAS 行为保持不变，自动化测试覆盖单飞刷新和晚到结果。
+- 真实轮换、旧 Access Token 是否仍有效和响应丢失重放仍未观察，受限试点失败时保持保守重新授权，本 issue 不关闭。

@@ -69,7 +69,8 @@ test('marketing migration CLI applies and audits all immutable migrations', () =
       appliedVersions: [
         '001-authorization-connections',
         '002-project-bindings',
-        '003-campaign-snapshots'
+        '003-campaign-snapshots',
+        '004-baidu-oauth-identity'
       ],
       pendingVersions: []
     });
@@ -84,10 +85,12 @@ test('marketing audit rejects an unsafe callback without echoing config values',
     DB_STORAGE: ':memory:',
     NODE_ENV: 'production',
     MARKETING_MONITORING_ENABLED: 'true',
+    MARKETING_MONITORING_PILOT_MODE: 'false',
     MARKETING_MONITORING_ALLOWED_PROJECT_IDS: 'project-1',
     CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
-    BAIDU_MARKETING_CLIENT_ID: 'client-id-canary',
-    BAIDU_MARKETING_CLIENT_SECRET: secret,
+    BAIDU_MARKETING_APP_ID: 'app-id-canary',
+    BAIDU_MARKETING_SECRET_KEY: secret,
+    BAIDU_MARKETING_SCOPE: 'search-report-read-canary',
     BAIDU_MARKETING_REDIRECT_URI: 'http://marketing.example.test/callback?code=canary',
     BAIDU_MARKETING_CONTRACT_VERSION: 'baidu-search-test-v1',
     BAIDU_MARKETING_HTTP_TIMEOUT_MS: '10000'

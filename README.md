@@ -169,7 +169,7 @@ npm run deploy
 
 该流程支持 macOS 和 Linux，允许部署期间停机。SQLite 部署会先生成并校验唯一最新快照，再执行 GEO 指标语义迁移和只读复审，全部通过后才启动服务；Postgres 部署必须通过 `AI_GEO_DATABASE_BACKUP_REFERENCE` 提供已完成外部备份的引用。服务器重启或进程崩溃后需要人工执行 `npm run prod:start`。首次接管、失败处理和运行限制见 [单机原地部署](docs/SINGLE_HOST_DEPLOYMENT.md)。
 
-部署流程也会在启动前应用并复审营销模块的 3 个不可变迁移。该步骤在模块关闭时同样执行，但不会启用百度网络调用。只有获批应用、真实契约、稳定 HTTPS callback、试点项目白名单和生产验收全部完成后，才能把 `MARKETING_MONITORING_ENABLED` 改为 `true`；当前仓库中的 `baidu-marketing-pending-2026-07-29` 清单明确为 `BLOCKED`，配置审计会拒绝启用。
+部署流程也会在启动前应用并复审营销模块的 4 个不可变迁移。该步骤在模块关闭时同样执行，不会启用百度网络调用。`baidu-marketing-docs-2026-07-30` 可在 `MARKETING_MONITORING_ENABLED=true` 且 `MARKETING_MONITORING_PILOT_MODE=true` 时进入受限试点，只开放百度授权、签名 callback、Token 和账户目录；项目绑定、报表刷新、调度和导航仍关闭。真实响应契约、金额/时区口径和生产验收完成后，必须新增 `VERIFIED` 契约版本并关闭试点模式，正式功能才会进入 `READY`。
 
 生产环境建议：
 

@@ -27,6 +27,13 @@ let server;
 let baseUrl;
 let admin;
 let exchangeCalls = 0;
+const callbackFixture = {
+  appId: 'app-id-fixture',
+  authCode: 'one-time-code',
+  userId: '1234',
+  timestamp: '1611216626171',
+  signature: 'SIGNATURE-FIXTURE'
+};
 
 function cookieValue(setCookie, name) {
   const match = String(setCookie || '').match(new RegExp(`(?:^|,\\s*)${name}=([^;]+)`));
@@ -51,15 +58,26 @@ test.before(async () => {
       url.searchParams.set('state', state);
       return url.toString();
     },
-    async exchangeAuthorizationCode({ code }) {
+    verifyCallbackSignature(parameters) {
+      assert.deepEqual(parameters, {
+        ...callbackFixture,
+        state: parameters.state
+      });
+      return true;
+    },
+    async exchangeAuthorizationCode({ appId, authCode, userId }) {
       exchangeCalls += 1;
-      assert.equal(code, 'one-time-code');
+      assert.equal(appId, callbackFixture.appId);
+      assert.equal(authCode, callbackFixture.authCode);
+      assert.equal(userId, callbackFixture.userId);
       return {
         principalId: '0009007199254740993123',
         principalName: '脱敏账户',
+        openId: 'open-id-fixture',
         accessToken: 'access-token-canary',
         refreshToken: 'refresh-token-canary',
-        expiresInSeconds: 3600
+        expiresInSeconds: 3600,
+        refreshExpiresInSeconds: 2592000
       };
     }
   };
@@ -127,9 +145,13 @@ test('administrator completes one-time authorization without exposing credential
   const providerUrl = new URL(launchResponse.headers.get('location'));
   const state = providerUrl.searchParams.get('state');
   assert.ok(state);
+  const callbackQuery = new URLSearchParams({
+    ...callbackFixture,
+    state
+  });
 
   const callbackResponse = await fetch(
-    `${baseUrl}/api/admin/marketing/baidu/oauth/callback?code=one-time-code&state=${encodeURIComponent(state)}`,
+    `${baseUrl}/api/admin/marketing/baidu/oauth/callback?${callbackQuery}`,
     { redirect: 'manual' }
   );
   assert.equal(callbackResponse.status, 303);
@@ -159,7 +181,8 @@ test('administrator completes one-time authorization without exposing credential
 
   const [connections] = await sequelize.query(
     `SELECT id, status, authorized_principal_id,
-            access_token_ciphertext, refresh_token_ciphertext
+            authorized_open_id, access_token_ciphertext,
+            refresh_token_ciphertext, refresh_token_expires_at
      FROM baidu_marketing_connections`
   );
   assert.equal(connections.length, 1);
@@ -168,12 +191,14 @@ test('administrator completes one-time authorization without exposing credential
     connections[0].authorized_principal_id,
     '0009007199254740993123'
   );
+  assert.equal(connections[0].authorized_open_id, 'open-id-fixture');
   assert.match(connections[0].access_token_ciphertext, /^v1:/u);
   assert.match(connections[0].refresh_token_ciphertext, /^v1:/u);
+  assert.ok(connections[0].refresh_token_expires_at);
   assert.doesNotMatch(JSON.stringify(connections), /access-token-canary|refresh-token-canary/iu);
 
   const replay = await fetch(
-    `${baseUrl}/api/admin/marketing/baidu/oauth/callback?code=one-time-code&state=${encodeURIComponent(state)}`,
+    `${baseUrl}/api/admin/marketing/baidu/oauth/callback?${callbackQuery}`,
     { redirect: 'manual' }
   );
   assert.equal(replay.status, 409);
@@ -198,8 +223,13 @@ test('administrator completes one-time authorization without exposing credential
 
 test('callback rejects duplicate security parameters before provider exchange', async () => {
   const before = exchangeCalls;
+  const query = new URLSearchParams({
+    ...callbackFixture,
+    state: crypto.randomBytes(32).toString('base64url')
+  });
+  query.append('authCode', 'duplicate');
   const response = await fetch(
-    `${baseUrl}/api/admin/marketing/baidu/oauth/callback?code=a&code=b&state=${crypto.randomBytes(32).toString('base64url')}`,
+    `${baseUrl}/api/admin/marketing/baidu/oauth/callback?${query}`,
     { redirect: 'manual' }
   );
 

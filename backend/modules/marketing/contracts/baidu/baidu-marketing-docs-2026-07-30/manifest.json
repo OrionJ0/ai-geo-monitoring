@@ -1,0 +1,240 @@
+{
+  "contractVersion": "baidu-marketing-docs-2026-07-30",
+  "status": "DOCUMENTED_PENDING_PILOT",
+  "evidenceDate": "2026-07-30",
+  "verifiedAccountType": null,
+  "sources": [
+    {
+      "title": "百度营销 API 介绍",
+      "url": "https://dev2.baidu.com/content?sceneType=0&pageId=100138&nodeId=15&subhead=",
+      "official": true,
+      "supports": [
+        "marketing_api_capability",
+        "custom_reporting_capability"
+      ]
+    },
+    {
+      "title": "OAuth 接入指南",
+      "url": "https://dev2.baidu.com/content?sceneType=0&pageId=100441&nodeId=421&subhead=",
+      "official": true,
+      "supports": [
+        "authorization_url",
+        "signed_callback",
+        "token_exchange",
+        "token_refresh",
+        "account_directory",
+        "api_request_envelope",
+        "oauth_error_codes"
+      ]
+    },
+    {
+      "title": "搜索推广计划报告",
+      "url": "https://dev2.baidu.com/content?sceneType=0&pageId=102474&nodeId=698&subhead=",
+      "official": true,
+      "supports": [
+        "search_plan_report",
+        "report_fields",
+        "report_pagination",
+        "report_date_range",
+        "report_qps"
+      ]
+    }
+  ],
+  "oauth": {
+    "authorization": {
+      "method": "GET",
+      "url": "https://u.baidu.com/oauth/page/index",
+      "platformId": "4960345965958561794",
+      "parameters": [
+        "platformId",
+        "appId",
+        "scope",
+        "state",
+        "callback"
+      ],
+      "stateMaxLength": 512
+    },
+    "callback": {
+      "method": "GET",
+      "parameters": [
+        "appId",
+        "authCode",
+        "state",
+        "userId",
+        "timestamp",
+        "signature"
+      ],
+      "signature": {
+        "canonicalization": "NATURAL_KEY_ORDER_JSON_EXCLUDING_SIGNATURE",
+        "base64": "UTF8_JSON",
+        "cipher": "AES-128-CBC-NO_PADDING",
+        "key": "SECRET_KEY_FIRST_16_CHARACTERS",
+        "iv": "16_NUL_BYTES",
+        "output": "UPPERCASE_HEX"
+      }
+    },
+    "token": {
+      "method": "POST",
+      "url": "https://u.baidu.com/oauth/accessToken",
+      "contentType": "application/json;charset:utf-8",
+      "parameters": [
+        "appId",
+        "authCode",
+        "secretKey",
+        "grantType",
+        "userId"
+      ],
+      "grantType": "auth_code",
+      "documentConflict": "The parameter table says auth_code while the callback demo sends access_token."
+    },
+    "refresh": {
+      "method": "POST",
+      "url": "https://u.baidu.com/oauth/refreshToken",
+      "contentType": "application/json;charset:utf-8",
+      "parameters": [
+        "appId",
+        "refreshToken",
+        "secretKey",
+        "userId"
+      ],
+      "documentedAccessLifetimeSeconds": 86400,
+      "documentedRefreshLifetimeSeconds": 2592000,
+      "responseRotation": "UNVERIFIED_FOR_MARKETING"
+    },
+    "userInfo": {
+      "method": "POST",
+      "url": "https://u.baidu.com/oauth/getUserInfo",
+      "contentType": "application/json;charset:utf-8",
+      "parameters": [
+        "openId",
+        "accessToken",
+        "userId",
+        "needSubList",
+        "pageSize",
+        "lastPageMaxUcId"
+      ]
+    },
+    "reauthorizationErrorCodes": [
+      "894062",
+      "894063",
+      "894064"
+    ]
+  },
+  "accountDirectory": {
+    "accountTypes": {
+      "1": "NORMAL",
+      "2": "SUPER_ADMIN",
+      "4": "AGENCY"
+    },
+    "pagination": {
+      "defaultPageSize": 100,
+      "maxPageSize": 500,
+      "firstLastPageMaxUcId": 1
+    },
+    "externalIdWireTypes": [
+      "int",
+      "LONG",
+      "Long"
+    ],
+    "storageType": "LOSSLESS_DECIMAL_STRING"
+  },
+  "apiEnvelope": {
+    "request": {
+      "header": [
+        "userName",
+        "accessToken"
+      ],
+      "body": "ENDPOINT_SPECIFIC"
+    },
+    "responseHeaderStatuses": {
+      "0": "SUCCESS",
+      "1": "PARTIAL_FAILURE",
+      "2": "ALL_FAILURE",
+      "3": "SYSTEM_ERROR"
+    }
+  },
+  "searchPlanReport": {
+    "method": "POST",
+    "url": "https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData",
+    "reportType": 2290316,
+    "timeUnit": "DAY",
+    "maxDateRangeDays": 731,
+    "qps": 50,
+    "pageSize": 200,
+    "columns": [
+      "date",
+      "userName",
+      "userId",
+      "campaignId",
+      "campaignNameStatus",
+      "campaignName",
+      "impression",
+      "click",
+      "cost"
+    ]
+  },
+  "money": {
+    "wireType": "Double",
+    "currencyCode": null,
+    "costScale": null
+  },
+  "fixtures": {
+    "observedRealResponses": false,
+    "reason": "The official request contract is documented, but no approved application, real callback, account response or report response was provided."
+  },
+  "runtime": {
+    "adapterImplemented": true,
+    "reportResponseParserImplemented": false,
+    "productionActivation": "BLOCKED_BY_CONFIG_AUDIT"
+  },
+  "documentedOutboundAllowlist": [
+    "GET https://u.baidu.com/oauth/page/index",
+    "POST https://u.baidu.com/oauth/accessToken",
+    "POST https://u.baidu.com/oauth/refreshToken",
+    "POST https://u.baidu.com/oauth/getUserInfo",
+    "POST https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData"
+  ],
+  "productionAllowlist": [],
+  "blockers": [
+    {
+      "key": "approved_read_scopes",
+      "reason": "The SEARCH read-only scope is generated for the approved application and has not been supplied."
+    },
+    {
+      "key": "token_grant_type_conflict",
+      "reason": "The official parameter table says auth_code while the official callback demo sends access_token; the adapter follows the table until a real pilot confirms it."
+    },
+    {
+      "key": "account_directory_real_fixture",
+      "reason": "The getUserInfo request and response fields are documented but a real normal, super-admin or agency response has not been captured."
+    },
+    {
+      "key": "report_response_body_fixture",
+      "reason": "The plan report request and columns are documented, but the page does not specify the endpoint response body and no real fixture has been captured."
+    },
+    {
+      "key": "money_currency_scale",
+      "reason": "The cost field is documented as Double without a currency or fixed scale."
+    },
+    {
+      "key": "timezone_latency_window",
+      "reason": "The maximum date range is documented as 731 days, but reporting timezone and data latency are not."
+    },
+    {
+      "key": "business_error_retry",
+      "reason": "The common response status and OAuth errors are documented, but endpoint-specific retry and throttling semantics need a pilot."
+    },
+    {
+      "key": "refresh_rotation_replay",
+      "reason": "Refresh-token rotation and lost-response replay semantics have not been observed."
+    },
+    {
+      "key": "provider_revocation",
+      "reason": "No provider-side revocation endpoint is documented on the reviewed page."
+    },
+    {
+      "key": "pilot_account_scale",
+      "reason": "Real account, child-account, campaign row and payload sizes remain unknown."
+    }
+  ]
+}

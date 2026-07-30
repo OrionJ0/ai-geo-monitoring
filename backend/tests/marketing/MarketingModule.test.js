@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const express = require('express');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -6,15 +7,20 @@ const test = require('node:test');
 const {
   createMarketingModule
 } = require('../../modules/marketing');
+const {
+  createMarketingTestDatabase
+} = require('./helpers/createMarketingTestDatabase');
 
 function enabledConfig(overrides = {}) {
   return {
     NODE_ENV: 'production',
     MARKETING_MONITORING_ENABLED: 'true',
+    MARKETING_MONITORING_PILOT_MODE: 'false',
     MARKETING_MONITORING_ALLOWED_PROJECT_IDS: 'project-1',
     CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
-    BAIDU_MARKETING_CLIENT_ID: 'client-id-canary',
-    BAIDU_MARKETING_CLIENT_SECRET: 'module-secret-canary',
+    BAIDU_MARKETING_APP_ID: 'app-id-canary',
+    BAIDU_MARKETING_SECRET_KEY: '0123456789abcdef-module-secret-canary',
+    BAIDU_MARKETING_SCOPE: 'search-report-read-canary',
     BAIDU_MARKETING_REDIRECT_URI: 'https://marketing.example.test/api/admin/marketing/baidu/oauth/callback',
     BAIDU_MARKETING_CONTRACT_VERSION: 'baidu-search-test-v1',
     BAIDU_MARKETING_HTTP_TIMEOUT_MS: '10000',
@@ -26,7 +32,15 @@ const loadVerifiedContract = () => ({
   status: 'VERIFIED',
   productionAllowlist: ['GET https://provider.example.test/report'],
   blockers: [],
-  runtime: { adapterImplemented: true },
+  oauth: {
+    authorization: {
+      approvedScopeValues: ['search-report-read-canary']
+    }
+  },
+  runtime: {
+    adapterImplemented: true,
+    reportResponseParserImplemented: true
+  },
   money: { currencyCode: 'CNY', costScale: 6 }
 });
 
@@ -91,7 +105,7 @@ test('status route reveals missing config key names only to administrators', asy
   const module = createMarketingModule({
     env: {
       MARKETING_MONITORING_ENABLED: 'true',
-      BAIDU_MARKETING_CLIENT_SECRET: 'module-secret-canary'
+      BAIDU_MARKETING_SECRET_KEY: '0123456789abcdef-module-secret-canary'
     }
   });
 
@@ -137,6 +151,52 @@ test('enabled module distinguishes missing schema from a ready migration ledger'
     moduleState: 'READY',
     errorCode: null
   });
+});
+
+test('pilot module exposes OAuth callback parsing but blocks dashboard runtime', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-pilot-module-');
+  t.after(database.close);
+  const module = createMarketingModule({
+    env: enabledConfig({
+      MARKETING_MONITORING_PILOT_MODE: 'true',
+      BAIDU_MARKETING_CONTRACT_VERSION:
+        'baidu-marketing-docs-2026-07-30'
+    }),
+    sequelize: database.sequelize
+  });
+  assert.deepEqual(await module.getStatus(), {
+    moduleState: 'PILOT_READY',
+    errorCode: null
+  });
+  assert.deepEqual(await module.start(), {
+    moduleState: 'PILOT_READY',
+    errorCode: null
+  });
+
+  const app = express();
+  app.use('/api/admin/marketing/baidu', module.authorizationRouter);
+  app.use('/api/marketing', module.router);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const invalidCallback = await fetch(
+    `${baseUrl}/api/admin/marketing/baidu/oauth/callback`
+  );
+  assert.equal(invalidCallback.status, 400);
+  assert.equal(
+    (await invalidCallback.json()).error.code,
+    'OAUTH_CALLBACK_INVALID'
+  );
+  const dashboard = await fetch(
+    `${baseUrl}/api/marketing/projects/11/dashboard`
+  );
+  assert.equal(dashboard.status, 503);
+  assert.equal(
+    (await dashboard.json()).error.code,
+    'MARKETING_PILOT_AUTH_ONLY'
+  );
 });
 
 test('the application mounts marketing through its facade without changing global readiness inputs', () => {

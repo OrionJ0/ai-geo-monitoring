@@ -59,13 +59,14 @@ test('root sequelize sync never registers or creates marketing domain tables', (
   }
 });
 
-test('marketing ships the three immutable domain migrations in order', () => {
+test('marketing ships the four immutable domain migrations in order', () => {
   assert.deepEqual(
     loadMarketingMigrations().map((migration) => migration.version),
     [
       '001-authorization-connections',
       '002-project-bindings',
-      '003-campaign-snapshots'
+      '003-campaign-snapshots',
+      '004-baidu-oauth-identity'
     ]
   );
 });
@@ -95,7 +96,8 @@ test('marketing migration audit is read-only and apply creates five domain table
     pendingVersions: [
       '001-authorization-connections',
       '002-project-bindings',
-      '003-campaign-snapshots'
+      '003-campaign-snapshots',
+      '004-baidu-oauth-identity'
     ]
   });
   assert.deepEqual(await database.getQueryInterface().showAllTables(), []);
@@ -114,6 +116,11 @@ test('marketing migration audit is read-only and apply creates five domain table
     'baidu_project_bindings',
     'marketing_schema_migrations'
   ]);
+  const columns = await database.getQueryInterface().describeTable(
+    'baidu_marketing_connections'
+  );
+  assert.ok(columns.authorized_open_id);
+  assert.ok(columns.refresh_token_expires_at);
 });
 
 test('concurrent SQLite runners serialize and apply a migration once', async (t) => {

@@ -56,25 +56,32 @@ export default function BaiduMarketingSettings() {
     setError('');
     try {
       const statusResponse = await axios.get('/api/marketing/status');
-      setModuleStatus(statusResponse.data.moduleState);
+      const nextModuleStatus = statusResponse.data.moduleState;
+      setModuleStatus(nextModuleStatus);
       setModuleErrorCode(statusResponse.data.errorCode || null);
-      if (statusResponse.data.moduleState === 'READY') {
-        const [connectionsResponse, projectsResponse] = await Promise.all([
-          axios.get('/api/admin/marketing/baidu/connections'),
-          axios.get('/api/geo-projects'),
-        ]);
-        const projectRows = projectsResponse?.data?.data
-          || projectsResponse?.data
-          || [];
+      if (['READY', 'PILOT_READY'].includes(nextModuleStatus)) {
+        const connectionsResponse = await axios.get(
+          '/api/admin/marketing/baidu/connections'
+        );
         setConnections(connectionsResponse.data);
-        setProjects(Array.isArray(projectRows) ? projectRows : []);
-        setProjectId((current) => (
-          projectRows.some(
-            (project: Project) => String(project.id) === current
-          )
-            ? current
-            : String(projectRows[0]?.id || '')
-        ));
+        if (nextModuleStatus === 'READY') {
+          const projectsResponse = await axios.get('/api/geo-projects');
+          const projectRows = projectsResponse?.data?.data
+            || projectsResponse?.data
+            || [];
+          setProjects(Array.isArray(projectRows) ? projectRows : []);
+          setProjectId((current) => (
+            projectRows.some(
+              (project: Project) => String(project.id) === current
+            )
+              ? current
+              : String(projectRows[0]?.id || '')
+          ));
+          return;
+        }
+        setProjects([]);
+        setProjectId('');
+        setBindings([]);
       } else {
         setConnections([]);
         setProjects([]);
@@ -182,6 +189,21 @@ export default function BaiduMarketingSettings() {
     setBindingModalOpen(true);
   };
 
+  const openAccountDirectory = (
+    event: React.MouseEvent<HTMLElement>,
+    connectionId: string
+  ) => {
+    returnFocusRef.current = event.currentTarget;
+    setBindingConnectionId(connectionId);
+    setBindingAccountId('');
+    setBindingModalOpen(true);
+  };
+
+  const closeAccountModal = () => {
+    setBindingModalOpen(false);
+    window.setTimeout(() => returnFocusRef.current?.focus(), 0);
+  };
+
   const createBinding = async () => {
     if (!projectId || !bindingConnectionId || !bindingAccountId) return;
     setBusy(true);
@@ -245,7 +267,8 @@ export default function BaiduMarketingSettings() {
     }
   };
 
-  if (moduleStatus !== 'READY') {
+  const pilotMode = moduleStatus === 'PILOT_READY';
+  if (!['READY', 'PILOT_READY'].includes(moduleStatus)) {
     return (
       <Alert
         type={moduleStatus === 'LOADING' ? 'info' : 'warning'}
@@ -268,6 +291,14 @@ export default function BaiduMarketingSettings() {
           <h2 id="baidu-marketing-settings-title">百度搜索推广连接</h2>
           <p>只读取账户、推广计划、展现、点击和消费，不修改投放。</p>
         </div>
+        {pilotMode ? (
+          <Alert
+            type="info"
+            showIcon
+            message="受限试点模式"
+            description="当前只可验证百度授权、Token 和账户目录；项目绑定、报表刷新和调度尚未开放。"
+          />
+        ) : null}
         {error ? <Alert type="error" showIcon message={error} role="alert" /> : null}
         <Space wrap>
           <Button
@@ -312,6 +343,12 @@ export default function BaiduMarketingSettings() {
               render: (_, row) => (
                 <Space wrap>
                   <Button
+                    onClick={(event) => openAccountDirectory(event, row.id)}
+                    disabled={row.status !== 'CONNECTED'}
+                  >
+                    检查账户目录
+                  </Button>
+                  <Button
                     onClick={() => authorize('REAUTHORIZE', row.id)}
                     disabled={row.status === 'DISCONNECTED'}
                   >
@@ -332,6 +369,8 @@ export default function BaiduMarketingSettings() {
             },
           ]}
         />
+        {!pilotMode ? (
+          <>
         <div>
           <h2 id="baidu-marketing-bindings-title">项目账户绑定</h2>
           <p>
@@ -438,6 +477,8 @@ export default function BaiduMarketingSettings() {
             },
           ]}
         />
+          </>
+        ) : null}
       </Space>
       <Modal
         title="断开百度搜索推广连接？"
@@ -458,17 +499,18 @@ export default function BaiduMarketingSettings() {
         </p>
       </Modal>
       <Modal
-        title="绑定百度搜索账户"
+        title={pilotMode ? '检查百度搜索账户目录' : '绑定百度搜索账户'}
         open={bindingModalOpen}
-        onOk={createBinding}
-        onCancel={() => {
-          setBindingModalOpen(false);
-          window.setTimeout(() => returnFocusRef.current?.focus(), 0);
-        }}
-        okText="确认绑定"
+        onOk={pilotMode
+          ? closeAccountModal
+          : createBinding}
+        onCancel={closeAccountModal}
+        okText={pilotMode ? '关闭' : '确认绑定'}
         cancelText="取消"
         okButtonProps={{
-          disabled: !bindingConnectionId || !bindingAccountId,
+          disabled: pilotMode
+            ? false
+            : !bindingConnectionId || !bindingAccountId,
         }}
         confirmLoading={busy}
         destroyOnHidden
@@ -491,6 +533,9 @@ export default function BaiduMarketingSettings() {
                 ))}
             </select>
           </label>
+          {pilotMode ? (
+            <p>这里仅检查当前授权可见的搜索账户，不会创建项目绑定。</p>
+          ) : null}
           <label>
             搜索推广账户
             <br />
@@ -510,7 +555,9 @@ export default function BaiduMarketingSettings() {
             <Alert
               type="info"
               showIcon
-              message="当前连接没有可绑定的只读搜索账户"
+              message={pilotMode
+                ? '当前连接没有可见的只读搜索账户'
+                : '当前连接没有可绑定的只读搜索账户'}
             />
           ) : null}
         </Space>

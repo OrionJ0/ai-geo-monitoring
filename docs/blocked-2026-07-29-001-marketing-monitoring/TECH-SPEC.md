@@ -1,7 +1,7 @@
 # 营销监控系统第一期技术方案
 
-- 状态：Blocked（可离线完成的工程底座已实现，等待百度真实契约与生产验收）
-- 日期：2026-07-29
+- 状态：Blocked（官方文档契约与受限试点已实现，等待百度真实响应与生产验收）
+- 日期：2026-07-29（2026-07-30 按百度商业开发者文档更新）
 - 对应 PRD：`prd.md`
 - 实施 issues：`issues/`
 
@@ -27,16 +27,18 @@
 - 模块代码存在；
 - 营销迁移已应用；
 - `MARKETING_MONITORING_ENABLED=true`；
+- `MARKETING_MONITORING_PILOT_MODE=true|false`；
 - 路由和导航已接入；
 - 真实百度账户已完成生产验收。
 
 当前工程状态：
 
 - 后端正式应用已经挂载营销状态、授权、绑定、看板和刷新路由，启动/关停链路也已接入；
-- 默认 `MARKETING_MONITORING_ENABLED=false`，阻塞契约和未实现真实适配器都不能进入 `READY`；
+- 默认 `MARKETING_MONITORING_ENABLED=false`；显式试点配置只能进入 `PILOT_READY`，正式配置必须通过 `VERIFIED` 契约门禁才能进入 `READY`；
 - 前端直达页面和管理员设置页已构建，但工作台导航保持隐藏；
-- 当前不会向百度发起任何网络请求，也不会在正式业务流程产生营销数据；
-- 真实契约、生产 PostgreSQL、稳定 HTTPS callback、真实账户和人工验收完成后，才可实现真实适配器并启用试点入口。
+- 默认配置不会向百度发起任何网络请求，也不会在正式业务流程产生营销数据；
+- `PILOT_READY` 只挂载授权、callback、连接与账户目录，项目绑定、看板、刷新和 executor 明确拒绝；
+- 真实报表响应、金额/时区、refresh 轮换与生产验收完成后，新增不可变 `VERIFIED` 契约版本并关闭试点模式，正式路径才会生效。
 
 ## 3. 关键决策
 
@@ -46,16 +48,28 @@
 
 ### 3.2 真实契约先行
 
-百度开放平台字段和权限可能因应用、账户和版本不同。真实数据实现前先完成契约门禁，产出版本化清单和脱敏样本。未经证据确认，不猜测：
+2026-07-30 已按百度商业开发者中心官方文档确认并实现以下请求边界：
 
-- OAuth 授权、换 Token 和 Refresh Token 请求；
-- Refresh Token 是否轮换；
-- refresh grant 在响应丢失后的重放语义，以及百度侧撤权端点是否存在；
-- 账户目录和搜索推广报表的服务名、请求体、分页及错误包裹；
-- 外部账户 ID、推广计划 ID 的 wire 类型、字符集、前导零和唯一命名空间；
-- 消费金额单位、币种、时区和统计延迟；
-- 外部错误到内部稳定码、可重试性和退避的映射；
-- 限流、最大日期范围，以及单账户和项目合计的最大推广计划数量。
+| 能力 | 官方契约 |
+|---|---|
+| 授权页 | `GET https://u.baidu.com/oauth/page/index`，固定 `platformId=4960345965958561794`，参数为 `appId/scope/state/callback` |
+| callback | `GET`，精确参数为 `appId/authCode/state/userId/timestamp/signature`，`state` 最长 512 |
+| callback 验签 | 除 `signature` 外按 key 自然排序为 JSON，UTF-8 Base64 后用 `secretKey` 前 16 字符执行 AES-128-CBC/NoPadding，16 个 NUL 字节 IV，结果为大写 HEX |
+| 换 Token | `POST https://u.baidu.com/oauth/accessToken`，JSON 参数 `appId/authCode/secretKey/grantType/userId` |
+| 刷新 Token | `POST https://u.baidu.com/oauth/refreshToken`，JSON 参数 `appId/refreshToken/secretKey/userId` |
+| 账户目录 | `POST https://u.baidu.com/oauth/getUserInfo`，支持主账户、子账户及 `lastPageMaxUcId` 游标，`pageSize` 最大 500 |
+| 搜索计划报告 | `POST https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData`，`reportType=2290316`、`DAY`、`startRow/rowCount`，QPS 50，最大 731 天 |
+
+上述契约固化在 `baidu-marketing-docs-2026-07-30/manifest.json`。官方 Token 参数表写 `grantType=auth_code`，同页 callback Demo 却写 `access_token`；适配器遵循参数表，并把冲突保留为真实试点 blocker。
+
+仍不得猜测的内容：
+
+- 应用审核后生成的实际 SEARCH 只读 scope；
+- `getUserInfo` 的真实普通/超管/代理商响应差异；
+- 搜索计划报告成功响应体及完整分页终止条件；
+- Refresh Token 是否轮换、响应丢失后的重放语义，以及百度侧撤权端点；
+- 消费币种、固定 scale、报告时区和统计延迟；
+- 业务错误的可重试性、退避和真实账户规模。
 
 契约产物建议放置：
 
@@ -100,7 +114,7 @@ SQLite/Sequelize 的 `BIGINT` 可能进入 JavaScript `Number`，不能用于外
 
 不用一个 `data_state` 混合多个维度。读模型分别返回：
 
-- `moduleState`：`DISABLED | READY | MISCONFIGURED | SCHEMA_MISSING | RECOVERY_FAILED`
+- `moduleState`：`DISABLED | PILOT_READY | READY | MISCONFIGURED | SCHEMA_MISSING | RECOVERY_FAILED`
 - `projectState`：`ACTIVE | ARCHIVED`
 - `sourceSummaryState`：项目级 `NOT_CONNECTED | CONNECTED | ACTION_REQUIRED | DISCONNECTED`
 - `bindingSummaryState`：项目级 `NONE | ACTIVE | BLOCKED`
@@ -125,6 +139,7 @@ backend/
 │   │   └── BaiduMarketingClient.js
 │   ├── contracts/baidu/<version>/
 │   ├── domain/
+│   │   ├── baiduOAuthSignature.js
 │   │   ├── exactValues.js
 │   │   ├── states.js
 │   │   └── syncWindow.js
@@ -132,7 +147,8 @@ backend/
 │   │   ├── index.js
 │   │   ├── 001-authorization-connections.js
 │   │   ├── 002-project-bindings.js
-│   │   └── 003-campaign-snapshots.js
+│   │   ├── 003-campaign-snapshots.js
+│   │   └── 004-baidu-oauth-identity.js
 │   ├── models/
 │   │   └── registerMarketingModels.js
 │   ├── routes/
@@ -455,13 +471,14 @@ run 资源固定返回 `runId/projectId/triggerType/status/coverage/createdAt/st
   │ 生成 provider state 并保存哈希
   ▼ 303
 百度授权页
-  │ callback(code, state)
+  │ callback(appId, authCode, state, userId, timestamp, signature)
   ▼
 本站精确解析单值参数
+  │ 校验 appId 并按百度 AES-CBC 算法常量时间验签
   │ state 哈希定位尝试
   │ CAS: PENDING -> PROCESSING
   │ 重查管理员、目标连接、auth_generation
-  │ 用 code 换 Token
+  │ 用 appId + authCode + userId 换 Token
   │ 事务 CAS 写连接并完成尝试
   │ 设置一次性结果 Cookie
   ▼ 303
@@ -470,7 +487,8 @@ run 资源固定返回 `runId/projectId/triggerType/status/coverage/createdAt/st
 
 安全要求：
 
-- callback 对 `code`、`state`、错误字段拒绝数组、重复键和超长值；
+- callback 只接受 `appId/authCode/state/userId/timestamp/signature` 六个单值参数，拒绝未知键、重复键、超长值、错误 appId、签名篡改、过期 attempt 和重放；
+- callback 验签使用官方 `secretKey` 前 16 字符、AES-128-CBC/NoPadding、零 IV 和大写 HEX；验签失败不得换 Token；
 - launch、callback、结果页使用 `Cache-Control: no-store` 和严格 `Referrer-Policy: no-referrer`；
 - CDN/LB/代理/APM/应用不得采集 launch Cookie、callback query、OAuth/Token 请求响应体或 303 `Location`；错误只写稳定码和 request ID；
 - 新的重新授权或断开递增 `auth_generation`，使旧尝试失效；
@@ -597,9 +615,11 @@ PostgreSQL 写事务使用项目行 `FOR UPDATE`；SQLite 从事务入口使用 
 
 ```text
 MARKETING_MONITORING_ENABLED=false
+MARKETING_MONITORING_PILOT_MODE=false
 MARKETING_MONITORING_ALLOWED_PROJECT_IDS=
-BAIDU_MARKETING_CLIENT_ID=
-BAIDU_MARKETING_CLIENT_SECRET=
+BAIDU_MARKETING_APP_ID=
+BAIDU_MARKETING_SECRET_KEY=
+BAIDU_MARKETING_SCOPE=
 BAIDU_MARKETING_REDIRECT_URI=
 BAIDU_MARKETING_CONTRACT_VERSION=
 BAIDU_MARKETING_HTTP_TIMEOUT_MS=
@@ -608,6 +628,8 @@ BAIDU_MARKETING_HTTP_TIMEOUT_MS=
 规则：
 
 - 配置检查只报告缺失键名和稳定错误码，不回显值。
+- 试点模式只接受 `DOCUMENTED_PENDING_PILOT` 契约，并只挂载授权、callback、Token、连接和账户目录；其他营销业务接口返回 `MARKETING_PILOT_AUTH_ONLY`。
+- 正式模式拒绝有 blocker、无生产 allowlist、金额口径不完整或适配器未实现的契约。
 - 验收阶段服务端只允许管理员和 `MARKETING_MONITORING_ALLOWED_PROJECT_IDS` 中的项目；设为明确的 `*` 才表示正式扩大访问，不能只隐藏导航。
 - Redirect URI 必须精确匹配允许列表，只接受 HTTPS 生产地址；本地测试例外由显式测试配置控制。
 - 出站客户端只允许契约清单中的百度 HTTPS 主机，不跟随到非白名单主机。
@@ -633,7 +655,7 @@ npm --prefix backend run migrate:marketing
 - `migrate:marketing` 在方言对应互斥锁内应用不可变版本迁移，可重复执行。
 - 发布顺序：备份 → apply migration → audit → 启动 → readiness → 入口验收。
 - 模块禁用时营销结构缺失不影响现有应用。
-- 模块启用时配置、结构或启动恢复失败使营销模块状态失败、路由 fail-closed；共享 GEO/SEO 全局 readiness 保持独立。
+- 模块启用时配置或结构失败使营销模块 fail-closed；正式模式还要求启动恢复成功。共享 GEO/SEO 全局 readiness 保持独立。
 - 百度网络可达性不参与全局或营销模块 readiness。
 
 PostgreSQL 集成测试必须使用 `POSTGRES_TEST_URL` 指向一次性数据库或 schema。测试 runner 在执行任何 DDL 前拒绝：
@@ -708,14 +730,17 @@ Issue 002 是所有百度真实解析实现的阻塞门；Issue 009 通过前不
 
 1. 保持 `MARKETING_MONITORING_ENABLED=false` 部署代码。
 2. 应用迁移并执行只读审计。
-3. 配置生产密钥、回调和契约版本。
-4. 配置服务端测试项目 allowlist，启用模块并检查营销模块状态和管理员连接页。
-5. 先用合成 canary 验证真实 ingress/APM 不记录 OAuth 敏感字段，再用测试项目完成真实授权、绑定、刷新和后台核对。
-6. 验收通过后把服务端准入扩展到正式项目并显示导航。
+3. 在公网 HTTPS 域名验证 `/api/health`、`/api/ready` 和禁用状态 callback 路由。
+4. 在百度为本项目新建专用应用，登记精确 callback，审核后取得 `appId/secretKey/scope`。
+5. 配置测试项目 allowlist、`MARKETING_MONITORING_PILOT_MODE=true` 和 `baidu-marketing-docs-2026-07-30`，确认状态为 `PILOT_READY`。
+6. 先用合成 canary 验证 ingress/APM 不记录 callback query，再完成真实授权、账户目录与 Token refresh 证据采集；此阶段绑定、报表和调度必须保持关闭。
+7. 用脱敏真实样本补全契约 blocker，新增 `VERIFIED` 版本。
+8. 把 `MARKETING_MONITORING_PILOT_MODE=false`，从正式入口完成绑定、刷新、百度后台核对和安全验收。
+9. 验收通过后扩大项目准入并显示导航。
 
 回滚：
 
-- 关闭模块开关并重启，现有 GEO/SEO 继续使用原入口。
+- 同时关闭模块总开关和试点开关并重启，现有 GEO/SEO 继续使用原入口。
 - 保留营销表以便诊断，不重新启用任何旧营销实现，因为此前没有旧实现。
 - 若 OAuth 凭据或主密钥疑似泄露，先阻断本地连接并在百度侧撤权，清除全部百度 Token，轮换应用 Secret/`CONFIG_ENCRYPTION_KEY` 后逐连接重新授权。
 - 数据迁移只做向前修复；破坏性删表另行审批和备份。
@@ -751,9 +776,10 @@ git diff --check
 实现阻塞项：
 
 - 获批百度应用和只读权限；
-- 可用的测试回调地址及最终生产 HTTPS 域名；
-- 版本化百度真实契约；
-- 真实账户规模和金额口径；
+- 专用应用生成的真实 scope 与稳定公网 HTTPS callback；
+- 真实账户目录和搜索计划报告成功/错误响应；
+- Token `grantType` 冲突、refresh 轮换与响应丢失重放的真实验证；
+- 真实账户规模、金额币种/scale、报告时区和延迟口径；
 - 现有 `CONFIG_ENCRYPTION_KEY` 的生产保管和泄露后全量重授权流程。
 
 ## 18. 后续来源边界

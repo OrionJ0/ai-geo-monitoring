@@ -76,3 +76,10 @@ git diff --check
 - dashboard 在单一读事务中返回 revision、正交状态、覆盖范围、精确汇总、逐日趋势和完整计划明细。
 - SQLite 已验证失败零替换与数据库十进制 CHECK；PostgreSQL disposable runner 已覆盖方言专用 ledger、并发单活动 run、精确快照与失败保留旧 revision，并有拒绝生产 URL 的安全门，但本环境未提供 `POSTGRES_TEST_URL`。
 - 真实报表服务、分页、金额 scale、规模预算和 PostgreSQL 实例验收依赖 Issue 002/外部环境，本 issue 不关闭。
+
+## 2026-07-30 搜索计划报告进展
+
+- 已按官方计划报告页固定端点、`reportType=2290316`、`DAY`、9 个必要字段（含已删除计划展示名）、`startRow=0`、`rowCount=200`、QPS 50 和最大 731 天请求约束。
+- `PILOT_READY` 不挂载刷新/看板/调度，无法从正式业务入口调用报告。
+- 官方页面没有成功响应体、分页终止字段、消费币种/scale 和时区；当前客户端在成功响应后明确返回 `BAIDU_REPORT_RESPONSE_UNVERIFIED`，不进入快照映射。
+- 取得脱敏真实响应并完成百度后台同口径核对前，本 issue 不关闭，正式流程不会生成营销快照。

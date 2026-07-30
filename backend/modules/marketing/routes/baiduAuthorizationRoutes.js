@@ -35,39 +35,32 @@ function readCookie(req, name) {
 
 function callbackParameters(req) {
   const url = new URL(req.originalUrl || req.url, 'https://local.invalid');
-  const code = url.searchParams.getAll('code');
-  const state = url.searchParams.getAll('state');
-  const providerError = url.searchParams.getAll('error');
-  const providerErrorDescription = url.searchParams.getAll('error_description');
-  const allowedKeys = new Set(['code', 'state', 'error', 'error_description']);
+  const allowedKeys = new Set([
+    'appId',
+    'authCode',
+    'state',
+    'userId',
+    'timestamp',
+    'signature'
+  ]);
   if ([...url.searchParams.keys()].some((key) => !allowedKeys.has(key))) {
     return null;
   }
-  if (
-    state.length !== 1
-    || !state[0]
-    || state[0].length > 4096
-    || providerErrorDescription.length > 1
-    || (providerErrorDescription[0]?.length || 0) > 1024
-  ) {
-    return null;
+  const parameters = {};
+  for (const key of allowedKeys) {
+    const values = url.searchParams.getAll(key);
+    if (values.length !== 1 || !values[0]) return null;
+    parameters[key] = values[0];
   }
-  const success = (
-    code.length === 1
-    && Boolean(code[0])
-    && code[0].length <= 4096
-    && providerError.length === 0
-  );
-  const failure = (
-    code.length === 0
-    && providerError.length === 1
-    && Boolean(providerError[0])
-    && providerError[0].length <= 256
-  );
-  if (!success && !failure) return null;
-  return success
-    ? { code: code[0], state: state[0] }
-    : { providerError: providerError[0], state: state[0] };
+  if (
+    parameters.appId.length > 512
+    || parameters.authCode.length > 4096
+    || parameters.state.length > 512
+    || !/^\d{1,64}$/u.test(parameters.userId)
+    || !/^\d{10,16}$/u.test(parameters.timestamp)
+    || parameters.signature.length > 4096
+  ) return null;
+  return parameters;
 }
 
 function sendError(res, error) {
@@ -153,9 +146,7 @@ function createBaiduAuthorizationRouter({
       });
     }
     try {
-      const result = parameters.providerError
-        ? await service.completeCallbackFailure(parameters)
-        : await service.completeCallback(parameters);
+      const result = await service.completeCallback(parameters);
       noStore(res);
       res.set(
         'Set-Cookie',

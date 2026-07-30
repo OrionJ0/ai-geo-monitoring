@@ -1,8 +1,10 @@
 const REQUIRED_ENABLED_KEYS = Object.freeze([
   'MARKETING_MONITORING_ALLOWED_PROJECT_IDS',
+  'MARKETING_MONITORING_PILOT_MODE',
   'CONFIG_ENCRYPTION_KEY',
-  'BAIDU_MARKETING_CLIENT_ID',
-  'BAIDU_MARKETING_CLIENT_SECRET',
+  'BAIDU_MARKETING_APP_ID',
+  'BAIDU_MARKETING_SECRET_KEY',
+  'BAIDU_MARKETING_SCOPE',
   'BAIDU_MARKETING_REDIRECT_URI',
   'BAIDU_MARKETING_CONTRACT_VERSION',
   'BAIDU_MARKETING_HTTP_TIMEOUT_MS'
@@ -53,6 +55,14 @@ function hasValidRedirectUri(env) {
   );
 }
 
+function hasValidSecretKey(env) {
+  const value = text(env.BAIDU_MARKETING_SECRET_KEY);
+  return (
+    value.length >= 16
+    && Buffer.byteLength(value.slice(0, 16), 'utf8') === 16
+  );
+}
+
 function auditMarketingConfig(env = {}, {
   contractLoader = loadBaiduContract
 } = {}) {
@@ -62,6 +72,14 @@ function auditMarketingConfig(env = {}, {
   }
 
   const enabled = enabledValue === 'true';
+  const pilotValue = text(env.MARKETING_MONITORING_PILOT_MODE).toLowerCase();
+  if (pilotValue && pilotValue !== 'true' && pilotValue !== 'false') {
+    return result('MISCONFIGURED', 'MARKETING_PILOT_VALUE_INVALID');
+  }
+  const pilot = pilotValue === 'true';
+  if (pilot && !enabled) {
+    return result('MISCONFIGURED', 'MARKETING_PILOT_REQUIRES_ENABLED');
+  }
   const missingKeys = enabled
     ? REQUIRED_ENABLED_KEYS.filter((key) => !text(env[key]))
     : [];
@@ -78,6 +96,10 @@ function auditMarketingConfig(env = {}, {
       'MISCONFIGURED',
       'MARKETING_ENCRYPTION_KEY_INVALID'
     );
+  }
+
+  if (enabled && !hasValidSecretKey(env)) {
+    return result('MISCONFIGURED', 'MARKETING_SECRET_KEY_INVALID');
   }
 
   if (enabled && !hasValidRedirectUri(env)) {
@@ -103,16 +125,44 @@ function auditMarketingConfig(env = {}, {
         'MARKETING_CONTRACT_UNKNOWN'
       );
     }
+    if (pilot) {
+      if (
+        manifest.status !== 'DOCUMENTED_PENDING_PILOT'
+        || !Array.isArray(manifest.documentedOutboundAllowlist)
+        || manifest.documentedOutboundAllowlist.length === 0
+        || manifest.runtime?.adapterImplemented !== true
+      ) {
+        return result(
+          'MISCONFIGURED',
+          'MARKETING_PILOT_CONTRACT_INVALID'
+        );
+      }
+      return result('PILOT_READY');
+    }
     if (
       manifest.status !== 'VERIFIED'
       || !Array.isArray(manifest.productionAllowlist)
       || manifest.productionAllowlist.length === 0
       || (manifest.blockers?.length || 0) > 0
       || manifest.runtime?.adapterImplemented !== true
+      || manifest.runtime?.reportResponseParserImplemented !== true
     ) {
       return result(
         'MISCONFIGURED',
         'MARKETING_CONTRACT_NOT_VERIFIED'
+      );
+    }
+    if (
+      !Array.isArray(
+        manifest.oauth?.authorization?.approvedScopeValues
+      )
+      || !manifest.oauth.authorization.approvedScopeValues.includes(
+        text(env.BAIDU_MARKETING_SCOPE)
+      )
+    ) {
+      return result(
+        'MISCONFIGURED',
+        'MARKETING_SCOPE_NOT_APPROVED'
       );
     }
     if (

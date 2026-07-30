@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const contractDirectory = path.resolve(
   __dirname,
-  '../../modules/marketing/contracts/baidu/baidu-marketing-pending-2026-07-29'
+  '../../modules/marketing/contracts/baidu/baidu-marketing-docs-2026-07-30'
 );
 
 test('Baidu contract artifacts contain no credential or raw callback material', () => {

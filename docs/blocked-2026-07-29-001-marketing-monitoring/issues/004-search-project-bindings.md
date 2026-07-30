@@ -66,3 +66,10 @@ git diff --check
 - 服务端在创建与恢复时重新读取目录，拒绝伪造账户、未知 scope 和非 SEARCH 只读账户。
 - 试点项目 allowlist 会在任何目录出站前拒绝非试点项目。
 - 真实账户目录服务、字段和跨连接 canonical identity 尚未由 Issue 002 证明，本 issue 不关闭。
+
+## 2026-07-30 账户目录进展
+
+- 已按官方 `POST https://u.baidu.com/oauth/getUserInfo` 实现主账户与子账户目录。
+- 子账户请求固定 `pageSize=500`，首个 `lastPageMaxUcId=1`，后续使用上一页最大 `ucId`，并有重复账户、游标不推进和 100 页预算保护。
+- 官方 `int` 账户 ID 在进入领域层后立即保存为十进制字符串；超出 JavaScript 安全整数范围时拒绝，不静默丢精度。
+- `PILOT_READY` 只开放账户列表检查，不允许创建项目绑定。真实账户类型和跨连接 canonical identity 仍待专用应用验证。

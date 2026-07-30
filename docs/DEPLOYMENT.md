@@ -124,12 +124,16 @@ server {
 
 1. 先完成数据库备份。
 2. 执行 `cd backend && npm run migrate:marketing`。
-3. 执行 `cd backend && npm run audit:marketing`，确认 3 个版本均已应用且无 checksum 漂移。
+3. 执行 `cd backend && npm run audit:marketing`，确认 4 个版本均已应用且无 checksum 漂移。
 4. 保持 `MARKETING_MONITORING_ENABLED=false` 启动并回归 GEO/SEO。
-5. 只有真实百度契约、稳定 HTTPS callback、只读权限、试点项目白名单和秘密扫描完成后才启用模块。
-6. 生产验收未完成前不添加营销工作台导航；百度不可达不得影响全局 readiness 或旧快照读取。
+5. 用公网域名检查 `GET /api/health`、`GET /api/ready`，再确认禁用状态的 callback 空请求返回营销模块 503 而不是 404；反向代理不得记录 callback query。
+6. 新建本项目专用百度应用，把完整 HTTPS callback 登记为 `https://<域名>/api/admin/marketing/baidu/oauth/callback`，审核通过后取得 `appId`、`secretKey` 和授权链接中的只读 `scope`。
+7. 配置 `MARKETING_MONITORING_ENABLED=true`、`MARKETING_MONITORING_PILOT_MODE=true`、试点项目白名单和 `baidu-marketing-docs-2026-07-30`，启动后确认营销状态为 `PILOT_READY`，callback 空请求返回 `OAUTH_CALLBACK_INVALID`。
+8. 试点只验收授权、callback、Token 和真实账户目录；项目绑定、看板、刷新和调度必须返回 `MARKETING_PILOT_AUTH_ONLY`。
+9. 保存脱敏真实响应并补全金额、时区、错误、报表响应体与 refresh 轮换契约；新增零 blocker 的 `VERIFIED` 清单后再关闭试点模式。
+10. 生产验收未完成前不添加营销工作台导航；百度不可达不得影响全局 readiness 或旧快照读取。
 
-故障时先把模块开关恢复为 `false`。若 Token 或主密钥疑似泄露，先阻断连接并在百度控制台撤权，清除本地 Token，轮换应用 Secret 与 `CONFIG_ENCRYPTION_KEY`，然后逐连接重新授权；不得恢复任何旧营销实现或隐式 fallback。
+故障时同时把 `MARKETING_MONITORING_ENABLED` 和 `MARKETING_MONITORING_PILOT_MODE` 恢复为 `false`。若 Token 或主密钥疑似泄露，先阻断连接并在百度控制台撤权，清除本地 Token，轮换应用 Secret 与 `CONFIG_ENCRYPTION_KEY`，然后逐连接重新授权；不得恢复任何旧营销实现或隐式 fallback。
 
 ## 安全与合规建议
 - ⚠️ **JWT_SECRET 必须设置为强随机值**（至少32字符），使用默认值会导致严重安全风险
