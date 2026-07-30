@@ -19,6 +19,7 @@ import {
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import type { AIPlatformCapabilities } from '@/lib/useAIPlatformCatalog';
+import analysisTestSample from '@/fixtures/ai-analysis-real-response-sample.json';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -98,13 +99,6 @@ type AnalysisConfigValues = {
   model_name: string;
   request_options_text: string;
 };
-
-const sampleQuestion = '教育行业周界安防厂商有哪些？';
-const sampleAnswer = [
-  '1. 海康威视：综合安防能力强。',
-  '2. 大华股份：教育行业项目覆盖广。',
-  '3. 上海广拓（GATO）：在张力式电子围栏领域经验丰富，是专业领域的头部选择。',
-].join('\n');
 
 function stringifyRequestOptions(value?: Record<string, unknown>) {
   return JSON.stringify(value && typeof value === 'object' && !Array.isArray(value) ? value : {}, null, 2);
@@ -215,10 +209,10 @@ export default function AIAnalysisSettings() {
   useEffect(() => {
     load();
     testForm.setFieldsValue({
-      question_text: sampleQuestion,
-      brand_name: '上海广拓',
-      brand_aliases_text: '广拓，GATO',
-      response_text: sampleAnswer,
+      question_text: analysisTestSample.question_text,
+      brand_name: analysisTestSample.brand_name,
+      brand_aliases_text: analysisTestSample.brand_aliases_text,
+      response_text: analysisTestSample.response_text,
     });
   }, [load, testForm]);
 
@@ -499,7 +493,9 @@ export default function AIAnalysisSettings() {
       <Card size="small">
         <Title level={5} style={{ marginTop: 0 }}>临时结构化测试</Title>
         <Paragraph type="secondary">
-          用一段真实回答检查实体、目标品牌映射、提及、候选顺序、推荐关系和待核验事实声明。系统不会保存测试输入和输出，只返回本次请求结果；引用来源要在真实监测运行中从平台响应提取。
+          默认案例来自真实 DeepSeek Web 监测回答，包含长文本、多厂商对比、选型建议和页面引用标记。
+          回答中的事实声明仍需核验；系统不会保存测试输入和输出，只返回本次请求结果。
+          引用来源要在真实监测运行中从平台响应提取。
         </Paragraph>
         <Form form={testForm} layout="vertical" requiredMark={false}>
           <Form.Item
@@ -527,7 +523,7 @@ export default function AIAnalysisSettings() {
             label="待分析的 AI 回答"
             rules={[{ required: true, message: '请输入待分析回答' }]}
           >
-            <Input.TextArea rows={9} showCount />
+            <Input.TextArea autoSize={{ minRows: 12, maxRows: 24 }} showCount />
           </Form.Item>
           <Button type="primary" loading={testing} disabled={!config?.configured} onClick={runTest}>
             测试结构化

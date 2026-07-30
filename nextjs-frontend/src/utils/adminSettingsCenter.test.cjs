@@ -8,6 +8,10 @@ const settingsSource = fs.readFileSync(path.resolve(__dirname, '../app/admin/set
 const platformSource = fs.readFileSync(path.resolve(__dirname, '../app/admin/settings/AIPlatformSettings.tsx'), 'utf8');
 const analysisSource = fs.readFileSync(path.resolve(__dirname, '../app/admin/settings/AIAnalysisSettings.tsx'), 'utf8');
 const layoutSource = fs.readFileSync(path.resolve(__dirname, '../app/admin/layout.tsx'), 'utf8');
+const analysisSamplePath = path.resolve(
+  __dirname,
+  '../fixtures/ai-analysis-real-response-sample.json',
+);
 
 test('admin settings is the single settings center with an analysis API tab', () => {
   assert.match(settingsSource, /AI 平台/);
@@ -75,6 +79,22 @@ test('analysis API test sends the current question required by the runtime contr
   assert.match(analysisSource, /name="question_text"/);
   assert.match(analysisSource, /question_text:\s*values\.question_text/);
   assert.match(analysisSource, /当前问题/);
+});
+
+test('temporary structured analysis test starts with a real long-form Web answer', () => {
+  assert.equal(fs.existsSync(analysisSamplePath), true, '应提供真实 Web 回答测试样例');
+  const sample = JSON.parse(fs.readFileSync(analysisSamplePath, 'utf8'));
+
+  assert.equal(sample.source_platform_code, 'deepseek-web');
+  assert.equal(sample.question_text, '国内做振动光纤周界报警的厂家，哪些比较靠谱？');
+  assert.equal(sample.brand_name, '上海广拓');
+  assert.ok(sample.response_text.length >= 800, '真实回答不应退化成简短候选列表');
+  assert.match(sample.response_text, /厂商对比概览/);
+  assert.match(sample.response_text, /如何选择适合你的厂商/);
+  assert.match(sample.response_text, /-\n2\n-/);
+  assert.match(analysisSource, /ai-analysis-real-response-sample\.json/);
+  assert.match(analysisSource, /来自真实 DeepSeek Web 监测回答/);
+  assert.match(analysisSource, /事实声明仍需核验/);
 });
 
 test('analysis request parameters are editable only after an explicit confirmation', () => {
