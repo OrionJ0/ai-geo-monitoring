@@ -19,6 +19,8 @@ function runMigration(args, environment) {
       ...process.env,
       DB_LOGGING: 'false',
       DATABASE_URL: '',
+      MARKETING_MONITORING_ENABLED: 'false',
+      MARKETING_MONITORING_PILOT_MODE: 'false',
       ...environment
     },
     encoding: 'utf8'
