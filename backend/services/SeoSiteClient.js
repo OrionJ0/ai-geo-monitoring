@@ -268,7 +268,10 @@ function classifyResponse(response, expectedKind = 'link_probe') {
     /(?:document\.cookie\s*=|["'])[^;\n]*EO_BOT_TOKEN\s*=/i,
     /(?:solveChallenge\s*\(|__EDGEONE_TEST_CHALLENGE__\s*=)/i
   ].filter((pattern) => pattern.test(body));
-  if (edgeOneSignals.length >= 2) {
+  const currentEdgeOneScriptChallenge = /tencentedgeone/i.test(headerValue(headers, 'server'))
+    && /EO-Bot-Js-Token/i.test(body)
+    && /document\.cookie\s*=/i.test(body);
+  if (edgeOneSignals.length >= 2 || currentEdgeOneScriptChallenge) {
     return classification('waf_blocked', expectedKind, {
       provider: 'edgeone',
       signals: ['edgeone_token']

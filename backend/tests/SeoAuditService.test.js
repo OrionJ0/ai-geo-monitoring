@@ -45,8 +45,15 @@ test('rejects a WAF challenge before probes or SEO scoring', async () => {
         finalUrl: url,
         statusCode: 200,
         durationMs: 10,
-        headers: { 'content-type': 'text/html; charset=utf-8' },
-        html: '<html><head><meta name="EO-Bot-Js-Token" content="REDACTED_TEST_VALUE"></head><body><script>window.__EDGEONE_TEST_CHALLENGE__ = true;</script></body></html>'
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          server: 'TencentEdgeOne'
+        },
+        html: `<html><body><script>
+          const cookieName = 'EO-Bot-Js-Token';
+          document.cookie = cookieName + '=REDACTED_TEST_VALUE; Path=/';
+          window.__challenge_state__ = 'waf';
+        </script></body></html>`
       };
     },
     async probe() {
@@ -192,7 +199,7 @@ test('does not treat empty robots and sitemap responses as healthy', async () =>
   assert.equal(sitemap.severity, 'high');
   assert.equal(sitemap.weight, 7);
   assert.equal(report.scoreVersion, '2026-07-23-v4');
-  assert.equal(report.ruleVersion, '2026-07-30-v4');
+  assert.equal(report.ruleVersion, '2026-07-30-v5');
 });
 
 test('does not parse HTML error pages as robots or sitemap resources', async () => {
@@ -216,13 +223,38 @@ test('does not parse HTML error pages as robots or sitemap resources', async () 
 
   const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
   const checks = report.categories.flatMap((category) => category.checks);
+  const robots = checks.find((check) => check.id === 'robots-txt');
+  const sitemap = checks.find((check) => check.id === 'sitemap');
 
-  assert.equal(checks.find((check) => check.id === 'robots-txt').status, 'failed');
-  assert.equal(checks.find((check) => check.id === 'sitemap').status, 'failed');
+  assert.equal(robots.status, 'failed');
+  assert.equal(robots.finding, 'robots.txt 返回了非预期 HTML');
+  assert.equal(sitemap.status, 'failed');
+  assert.equal(sitemap.finding, 'Sitemap 返回了非预期 HTML');
   assert.deepEqual(probeKinds, [
     ['/robots.txt', { expectedKind: 'robots', requestKind: 'robots' }],
     ['/sitemap.xml', { expectedKind: 'sitemap', requestKind: 'sitemap' }]
   ]);
+});
+
+test('reports transient robots and sitemap probe failures as unknown instead of missing', async () => {
+  const siteClient = createSiteClient();
+  siteClient.probe = async () => {
+    const error = new Error('upstream timeout');
+    error.code = 'UPSTREAM_TIMEOUT';
+    throw error;
+  };
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
+  const checks = report.categories.flatMap((category) => category.checks);
+  const robots = checks.find((check) => check.id === 'robots-txt');
+  const sitemap = checks.find((check) => check.id === 'sitemap');
+
+  assert.equal(robots.finding, '本次无法访问 robots.txt，无法判断是否存在');
+  assert.equal(robots.value, '请求超时');
+  assert.equal(sitemap.finding, '本次无法访问 Sitemap，无法判断是否存在');
+  assert.match(sitemap.value, /^请求超时 · \/sitemap\.xml$/);
+  assert.equal(report.crawlerAccess.sourceStatus, 'unreachable');
+  assert.equal(report.score, null);
 });
 
 test('uses the polite crawl defaults for task-local request control', () => {
@@ -296,7 +328,7 @@ test('validates a sitemap declared in robots.txt instead of trusting the declara
   assert.match(sitemap.value, /2 个 URL/);
 });
 
-test('reports present but empty SEO tags as specific issues', async () => {
+test('reports present but empty SEO tags without mislabeling explicit empty image alt', async () => {
   const siteClient = {
     async fetchPage(url) {
       return {
@@ -334,16 +366,46 @@ test('reports present but empty SEO tags as specific issues', async () => {
   assert.equal(checks.get('h1').finding, 'H1 内容为空');
   assert.equal(checks.get('structured-data').finding, 'JSON-LD 内容为空');
   assert.equal(checks.get('open-graph').finding, 'Open Graph 标签内容为空');
-  assert.equal(checks.get('image-alt').finding, '1 张图片缺少有效 Alt');
+  assert.equal(
+    checks.get('image-alt').finding,
+    '所有图片均声明 alt；1 张使用空 alt（需确认均为装饰图）'
+  );
+  assert.equal(checks.get('image-alt').status, 'passed');
   assert.equal([...checks.values()].filter((check) => check.id in {
     title: true,
     'meta-description': true,
     canonical: true,
     h1: true,
     'structured-data': true,
-    'open-graph': true,
-    'image-alt': true
+    'open-graph': true
   }).every((check) => check.status === 'failed'), true);
+});
+
+test('does not report explicit empty alt attributes as missing image descriptions', async () => {
+  const siteClient = createSiteClient();
+  const originalFetchPage = siteClient.fetchPage;
+  siteClient.fetchPage = async (url) => ({
+    ...await originalFetchPage(url),
+    html: `<!doctype html><html lang="en"><head>
+      <title>Decorative image example page</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+    </head><body>
+      <h1>Decorative images</h1>
+      <img src="/one.png" alt="">
+      <img src="/two.png" alt=" ">
+    </body></html>`
+  });
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
+  const imageAlt = report.categories
+    .flatMap((category) => category.checks)
+    .find((check) => check.id === 'image-alt');
+
+  assert.equal(imageAlt.status, 'passed');
+  assert.equal(imageAlt.finding, '所有图片均声明 alt；2 张使用空 alt（需确认均为装饰图）');
+  assert.equal(imageAlt.value, '图片总数：2 张 · 已声明 Alt：2 张 · 非空 Alt：0 张');
+  assert.equal(report.page.imagesWithAltAttribute, 2);
+  assert.equal(report.page.imagesWithAlt, 0);
 });
 
 test('reports non-empty search engine verification tags as page evidence only', async () => {
@@ -503,6 +565,38 @@ test('caps a homepage noindex report and exposes the confirmed blocker', async (
   assert.equal(report.health.scoreCap, 39);
   assert.equal(report.health.blockers[0].id, 'homepage-noindex');
   assert.equal(report.priorities[0].kind, 'blocker');
+});
+
+test('shows both Meta Robots and X-Robots-Tag when the response header blocks indexing', async () => {
+  const siteClient = createSiteClient();
+  const originalFetchPage = siteClient.fetchPage;
+  siteClient.fetchPage = async (url) => {
+    const response = await originalFetchPage(url);
+    return {
+      ...response,
+      headers: {
+        ...response.headers,
+        'x-robots-tag': 'noindex, nofollow'
+      },
+      html: response.html.replace(
+        '<meta name="viewport"',
+        '<meta name="robots" content="index,follow"><meta name="viewport"'
+      )
+    };
+  };
+
+  const report = await createSeoAuditService({ siteClient }).audit('https://example.com/');
+  const indexability = report.categories
+    .flatMap((category) => category.checks)
+    .find((check) => check.id === 'indexability');
+
+  assert.equal(indexability.status, 'failed');
+  assert.equal(indexability.finding, '响应头 X-Robots-Tag 设置了 noindex');
+  assert.equal(
+    indexability.value,
+    'Meta Robots：index,follow · X-Robots-Tag：noindex, nofollow'
+  );
+  assert.equal(report.page.indexable, false);
 });
 
 test('rejects an incomplete rule configuration before an audit starts', () => {

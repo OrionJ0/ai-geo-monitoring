@@ -155,7 +155,7 @@ Authorization: Bearer <token>
   - 判定边界：`robots.txt` 返回普通 4xx 或内容为空表示“未声明抓取限制”，但独立的 `robots-txt` 有效性检查仍会报缺失/空内容；429、5xx、网络失败或非空但无法解析的文件返回“无法判断”。允许状态不能证明真实 UA 已成功访问、收录或引用
   - 响应闸门：页面、robots 和 Sitemap 在解析前按预期类型分类；WAF、429、普通 HTTP 错误或不可分析入口不会生成成功报告。GoodieAI 出口被 WAF 拦截不能据此推断搜索引擎也被拦截
   - 搜索平台标签：固定从站点首页分别检查 Google、Bing、百度 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不识别 DNS 或验证文件方式
-  - 评分配置：响应包含 `scoreVersion`、`ruleVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前规则版本 `2026-07-30-v4` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7
+  - 评分配置：响应包含 `scoreVersion`、`ruleVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前规则版本 `2026-07-30-v5` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7；图片仅在缺少 `alt` 属性时失败，显式 `alt=""` 作为可能的装饰图提示，不直接扣分
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：默认拒绝本机和私网目标。内部部署设置 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=true` 后，允许所有已登录用户检测后端 `localhost`、loopback 和 RFC1918 IPv4 字面地址；单次任务只能访问提交 URL 的精确来源。带用户名/密码的网址、链路本地/云元数据等特殊地址始终拒绝
 - `POST /api/seo-audits/site` 创建全站异步检测任务

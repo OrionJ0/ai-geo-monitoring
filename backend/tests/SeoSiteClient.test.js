@@ -105,6 +105,34 @@ test('classifies responses by expected resource kind without mistaking a legitim
   }
 });
 
+test('classifies the current TencentEdgeOne script-only challenge without trusting the 200 status', () => {
+  const currentEdgeOneChallenge = {
+    statusCode: 200,
+    headers: {
+      'content-type': 'text/html',
+      server: 'TencentEdgeOne'
+    },
+    body: `<!doctype html><html><body><script>
+      const cookieName = 'EO-Bot-Js-Token';
+      document.cookie = cookieName + '=REDACTED_TEST_VALUE; Path=/';
+      window.__challenge_state__ = 'waf';
+    </script></body></html>`
+  };
+
+  assert.deepEqual(classifyResponse(currentEdgeOneChallenge, 'page'), {
+    outcome: 'waf_blocked',
+    expectedKind: 'page',
+    provider: 'edgeone',
+    signals: ['edgeone_token'],
+    retryAfterMs: null,
+    retryAt: null
+  });
+  assert.equal(classifyResponse({
+    ...currentEdgeOneChallenge,
+    body: '<html><body><h1>TencentEdgeOne customer site</h1></body></html>'
+  }, 'page').outcome, 'normal');
+});
+
 test('rejects loopback and credential-bearing URLs before making a request', async () => {
   let requestCount = 0;
   const client = createSeoSiteClient({

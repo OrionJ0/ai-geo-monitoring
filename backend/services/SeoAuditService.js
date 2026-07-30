@@ -102,11 +102,33 @@ function successfulResponse(result) {
   return result.statusCode >= 200 && result.statusCode < 300;
 }
 
+function probeFailureLabel(errorCode) {
+  if (errorCode === 'UPSTREAM_TIMEOUT') return '请求超时';
+  if (errorCode === 'DNS_LOOKUP_FAILED') return '域名解析失败';
+  if (errorCode === 'PAGE_TOO_LARGE') return '响应内容过大';
+  return '请求失败';
+}
+
 function analyzeRobots(result) {
   const body = String(result.body || '').trim();
   const statusValue = result.statusCode ? `HTTP ${result.statusCode}` : '无法访问';
+  if (!result.statusCode) {
+    return {
+      passed: false,
+      finding: '本次无法访问 robots.txt，无法判断是否存在',
+      value: probeFailureLabel(result.errorCode)
+    };
+  }
   if (!successfulResponse(result)) {
     return { passed: false, finding: '未找到可用 robots.txt', value: statusValue };
+  }
+  if (result.classification?.outcome === 'invalid_response') {
+    const unexpectedHtml = result.classification.signals?.includes('unexpected_html');
+    return {
+      passed: false,
+      finding: unexpectedHtml ? 'robots.txt 返回了非预期 HTML' : 'robots.txt 返回了无法分析的内容',
+      value: `${statusValue} · 响应类型不匹配`
+    };
   }
   if (!body) {
     return { passed: false, finding: 'robots.txt 内容为空', value: `${statusValue} · 0 条规则` };
@@ -126,8 +148,23 @@ function analyzeRobots(result) {
 function analyzeSitemap(result) {
   const body = String(result.body || '').trim();
   const statusValue = result.statusCode ? `HTTP ${result.statusCode}` : '无法访问';
+  if (!result.statusCode) {
+    return {
+      passed: false,
+      finding: '本次无法访问 Sitemap，无法判断是否存在',
+      value: probeFailureLabel(result.errorCode)
+    };
+  }
   if (!successfulResponse(result)) {
     return { passed: false, finding: '未找到可用 Sitemap', value: statusValue };
+  }
+  if (result.classification?.outcome === 'invalid_response') {
+    const unexpectedHtml = result.classification.signals?.includes('unexpected_html');
+    return {
+      passed: false,
+      finding: unexpectedHtml ? 'Sitemap 返回了非预期 HTML' : 'Sitemap 返回了无法分析的内容',
+      value: `${statusValue} · 响应类型不匹配`
+    };
   }
   if (!body) {
     return { passed: false, finding: 'Sitemap 内容为空', value: `${statusValue} · 0 个 URL` };
@@ -173,7 +210,12 @@ async function probeTrustedResource(client, url, expectedKind) {
     });
   } catch (error) {
     if (isAuditStopError(error)) throw error;
-    return { statusCode: 0, body: '', classification: null };
+    return {
+      statusCode: 0,
+      body: '',
+      classification: null,
+      errorCode: typeof error?.code === 'string' ? error.code : 'UPSTREAM_UNAVAILABLE'
+    };
   }
 
   const responseClassification = result.classification || classifyResponse(result, expectedKind);
@@ -237,16 +279,34 @@ function createSeoAuditService({
       const viewport = $('meta[name="viewport"]').attr('content')?.trim() || '';
       const robotsMeta = $('meta[name="robots"]').attr('content')?.toLowerCase() || '';
       const xRobotsTag = String(response.headers?.['x-robots-tag'] || '').toLowerCase();
+      const metaNoindex = robotsMeta.includes('noindex');
+      const headerNoindex = xRobotsTag.includes('noindex');
+      const indexabilityFinding = metaNoindex && headerNoindex
+        ? 'Meta Robots 与响应头 X-Robots-Tag 均设置了 noindex'
+        : metaNoindex
+          ? 'Meta Robots 设置了 noindex'
+          : headerNoindex
+            ? '响应头 X-Robots-Tag 设置了 noindex'
+            : '未发现 noindex';
+      const indexabilityValue = [
+        `Meta Robots：${robotsMeta || '未设置'}`,
+        `X-Robots-Tag：${xRobotsTag || '未设置'}`
+      ].join(' · ');
       const h1Elements = $('h1');
       const h1Count = h1Elements.length;
       const h1Texts = h1Elements.map((_, element) => $(element).text().trim()).get();
       const h2Count = $('h2').length;
       const h3Count = $('h3').length;
       const imageCount = $('img').length;
+      const imagesWithAltAttribute = $('img').filter((_, element) => (
+        typeof $(element).attr('alt') === 'string'
+      )).length;
       const imagesWithAlt = $('img').filter((_, element) => {
         const alt = $(element).attr('alt');
         return typeof alt === 'string' && alt.trim().length > 0;
       }).length;
+      const imagesWithEmptyAlt = imagesWithAltAttribute - imagesWithAlt;
+      const imagesMissingAlt = imageCount - imagesWithAltAttribute;
       const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
       const contentCharacters = bodyText.replace(/\s/g, '').length;
       const links = $('a[href]').map((_, element) => $(element).attr('href')?.trim() || '').get();
@@ -413,10 +473,9 @@ function createSeoAuditService({
         }),
         createCheck({
           id: 'indexability', category: 'crawlability', title: '索引指令',
-          passed: !robotsMeta.includes('noindex') && !xRobotsTag.includes('noindex'),
-          finding: robotsMeta.includes('noindex') || xRobotsTag.includes('noindex')
-            ? '页面设置了 noindex' : '未发现 noindex',
-          value: robotsMeta || xRobotsTag || '未发现 noindex',
+          passed: !metaNoindex && !headerNoindex,
+          finding: indexabilityFinding,
+          value: indexabilityValue,
           description: 'noindex 指令会阻止搜索引擎把页面加入索引。',
           recommendation: '如果页面需要获得自然搜索流量，请移除 noindex 指令。'
         }),
@@ -538,11 +597,14 @@ function createSeoAuditService({
         createCheck({
           id: 'image-alt', category: 'experience', title: '图片 Alt',
           finding: imageCount === 0 ? '页面没有需要描述的图片'
-            : imagesWithAlt === imageCount ? '所有图片均有有效 Alt' : `${imageCount - imagesWithAlt} 张图片缺少有效 Alt`,
-          passed: imageCount === 0 || imagesWithAlt === imageCount,
-          value: `图片总数：${imageCount} 张 · 有效 Alt：${imagesWithAlt} 张`,
+            : imagesMissingAlt > 0 ? `${imagesMissingAlt} 张图片缺少 alt 属性`
+              : imagesWithEmptyAlt > 0
+                ? `所有图片均声明 alt；${imagesWithEmptyAlt} 张使用空 alt（需确认均为装饰图）`
+                : '所有图片均有非空 Alt',
+          passed: imageCount === 0 || imagesMissingAlt === 0,
+          value: `图片总数：${imageCount} 张 · 已声明 Alt：${imagesWithAltAttribute} 张 · 非空 Alt：${imagesWithAlt} 张`,
           description: 'Alt 文本帮助搜索引擎和屏幕阅读器理解图片。',
-          recommendation: `为缺少 alt 的 ${imageCount - imagesWithAlt} 张图片补充准确描述。`
+          recommendation: `为缺少 alt 属性的 ${imagesMissingAlt} 张图片补充准确描述；装饰图应显式使用 alt=""。`
         }),
         createCheck({
           id: 'language', category: 'experience', title: '页面语言',
@@ -658,6 +720,7 @@ function createSeoAuditService({
           language,
           h1Count,
           imageCount,
+          imagesWithAltAttribute,
           imagesWithAlt,
           internalLinks,
           externalLinks,
