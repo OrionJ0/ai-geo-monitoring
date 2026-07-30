@@ -36,6 +36,7 @@
 - `blocked-2026-07-29-001-marketing-monitoring/`：轻量只读营销监控；已按百度商业开发者文档实现签名 OAuth callback、Token、账户目录与搜索计划报告请求，并增加仅开放授权/账户检查的 `PILOT_READY` 部署模式；工作台导航和正式报表仍关闭，等待专用百度应用、真实响应、金额/时区口径与生产验收
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
+- `solutions/2026-07-30-ai-geo-production-deployment.md`：AI-GEO systemd、受信代理、生产验证、服务器修改台账与回滚记录
 
 ## 重要约定
 
