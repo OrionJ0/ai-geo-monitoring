@@ -7,8 +7,10 @@ const bcrypt = require('bcryptjs');
 const { createCorsOptionsDelegate } = require('./config/corsPolicy');
 const { shouldSkipGeneralLimiter } = require('./config/apiRateLimitPolicy');
 const { resolveServerHost } = require('./config/serverBinding');
+const { configureTrustedProxy } = require('./config/trustedProxyPolicy');
 
 const app = express();
+configureTrustedProxy(app);
 
 // 中间件
 // 同机 Next.js/Nginx 代理通过 TCP loopback 受信；外部跨域请求仍需显式白名单。
