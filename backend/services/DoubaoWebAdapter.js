@@ -262,13 +262,7 @@ class DoubaoWebPage extends DeepSeekWebPage {
           '[data-container-type="block-v1"][data-render-engine="block"]'
         );
         if (block && visible(block)) return block;
-        return Array.from(message.querySelectorAll('[data-render-engine="node"]'))
-          .filter(visible)
-          .find((node) => (
-            !String(node.getAttribute('data-plugin-identifier') || '')
-              .includes('search_query_result_block.search_type:1')
-            && String(node.innerText || node.textContent || '').trim()
-          )) || null;
+        return null;
       };
       const assistantMessages = Array.from(
         document.querySelectorAll('[data-message-id]')
@@ -335,13 +329,7 @@ class DoubaoWebPage extends DeepSeekWebPage {
       const root = message.querySelector('.md-box-root')
         || message.querySelector(
           '[data-container-type="block-v1"][data-render-engine="block"]'
-        )
-        || Array.from(message.querySelectorAll('[data-render-engine="node"]'))
-          .find((node) => (
-            !String(node.getAttribute('data-plugin-identifier') || '')
-              .includes('search_query_result_block.search_type:1')
-            && String(node.innerText || node.textContent || '').trim()
-          ));
+        );
       if (!root) return [];
       const rows = [];
       const seen = new Set();

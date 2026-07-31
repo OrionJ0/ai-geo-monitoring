@@ -393,6 +393,10 @@ test('Doubao generation snapshot treats search progress as busy instead of a fin
     assert.match(expression, /querySelector\('\.md-box-root'\)/);
     assert.match(expression, /search_query_result_block\.search_type:1/);
     assert.match(expression, /searchInProgress/);
+    assert.doesNotMatch(
+      expression,
+      /querySelectorAll\('\[data-render-engine="node"\]'\)/
+    );
     return {
       assistantTurns: [],
       generationActive: true,
@@ -412,7 +416,10 @@ test('Doubao citation extraction targets final answer content instead of search 
   const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });
   doubaoPage.callDocument = async (functionDeclaration) => {
     assert.match(functionDeclaration, /querySelector\('\.md-box-root'\)/);
-    assert.match(functionDeclaration, /search_query_result_block\.search_type:1/);
+    assert.doesNotMatch(
+      functionDeclaration,
+      /querySelectorAll\('\[data-render-engine="node"\]'\)/
+    );
     return [{
       url: 'https://link.wtturl.cn/?target=https%3A%2F%2Fopenai.com%2Findex%2Fexample',
       title: 'OpenAI'
