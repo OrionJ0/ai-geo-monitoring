@@ -200,7 +200,11 @@ function calculateTechnicalHealth({
   const issues = [...ruleResults.values()]
     .filter((result) => result.failedInstances.length > 0)
     .map((result) => {
-      const first = result.failedInstances[0].check;
+      const first = [...result.failedInstances]
+        .sort((left, right) => (
+          (SEVERITY_PRIORITY[left.check.severity] ?? Number.MAX_SAFE_INTEGER)
+          - (SEVERITY_PRIORITY[right.check.severity] ?? Number.MAX_SAFE_INTEGER)
+        ))[0].check;
       return {
         id: result.id,
         title: first.title,
@@ -288,7 +292,32 @@ function calculateTechnicalHealth({
   };
 }
 
+function summarizeInformationalChecks({ instances, ruleIds }) {
+  return ruleIds.flatMap((id) => {
+    const applicable = instances.filter((instance) => instance.check.id === id);
+    const failed = applicable.filter((instance) => instance.check.status === 'failed');
+    if (!failed.length) return [];
+    const representative = [...failed]
+      .sort((left, right) => (
+        (SEVERITY_PRIORITY[left.check.severity] ?? Number.MAX_SAFE_INTEGER)
+        - (SEVERITY_PRIORITY[right.check.severity] ?? Number.MAX_SAFE_INTEGER)
+      ))[0].check;
+    const affectedPages = [...new Set(failed.map((instance) => instance.url))];
+    const applicablePages = new Set(applicable.map((instance) => instance.url)).size;
+    return [{
+      ...representative,
+      affectsScore: false,
+      deduction: null,
+      count: affectedPages.length,
+      affectedPages,
+      applicablePages,
+      coverage: applicablePages ? roundScore(affectedPages.length / applicablePages) : 0
+    }];
+  });
+}
+
 module.exports = {
   calculateTechnicalHealth,
-  detectTechnicalHealthBlockers
+  detectTechnicalHealthBlockers,
+  summarizeInformationalChecks
 };

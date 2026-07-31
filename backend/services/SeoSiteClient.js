@@ -373,6 +373,7 @@ function createSeoSiteClient({
   policy,
   minOriginIntervalMs = 250,
   originIntervalOverrides = {},
+  originCoordinator = null,
   now = Date.now,
   wait
 } = {}) {
@@ -380,6 +381,7 @@ function createSeoSiteClient({
   const crawlerPolicy = policy || createSeoAuditCrawlerPolicy({
     minOriginIntervalMs,
     originIntervalOverrides,
+    originCoordinator,
     now,
     ...(wait ? { wait } : {})
   });
@@ -592,6 +594,10 @@ function createSeoSiteClient({
 
     setStopReason(stopReason) {
       crawlerPolicy.setStopReason(stopReason);
+    },
+
+    close() {
+      crawlerPolicy.close?.();
     }
   };
 }

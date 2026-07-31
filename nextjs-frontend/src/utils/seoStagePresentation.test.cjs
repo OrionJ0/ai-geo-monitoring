@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  buildInformationalChecks,
   buildPriorityContent,
   buildStageGroups,
   sortPriorities,
@@ -229,6 +230,27 @@ test('四阶段检测账本可以按处理级别和通过状态筛选', () => {
     buildStageGroups(report, 'passed')[0].checks.map((check) => check.id),
     ['h1']
   );
+});
+
+test('信息性检查单独展示且不进入优先修复清单', () => {
+  const report = {
+    informationalChecks: [{
+      id: 'meta-keywords',
+      title: 'Keywords 标签',
+      status: 'failed',
+      severity: 'low',
+      affectsScore: false,
+      finding: 'Keywords 标签缺失',
+      value: '0 个关键词',
+      affectedPages: ['https://example.com/'],
+      applicablePages: 1,
+      count: 1,
+    }],
+    priorities: [],
+  };
+
+  assert.deepEqual(buildInformationalChecks(report), report.informationalChecks);
+  assert.deepEqual(buildPriorityContent(report), []);
 });
 
 test('报告视图按阻断、严重级别、扣分和阶段稳定重排问题', () => {

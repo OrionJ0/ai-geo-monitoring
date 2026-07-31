@@ -36,7 +36,36 @@ function createSiteClient() {
   };
 }
 
-test('rejects a WAF challenge before probes or SEO scoring', async () => {
+test('does not request a submitted page disallowed for GoodieAI', async () => {
+  const calls = [];
+  const siteClient = {
+    async fetchPage(url) {
+      calls.push(['page', url]);
+      throw new Error('robots-disallowed page must not be fetched');
+    },
+    async probe(url, options) {
+      calls.push(['probe', url, options?.requestKind]);
+      return {
+        statusCode: 200,
+        body: 'User-agent: GoodieAI-SEO-Audit\nDisallow: /private/'
+      };
+    }
+  };
+
+  await assert.rejects(
+    () => createSeoAuditService({ siteClient }).audit('https://example.com/private/'),
+    {
+      code: 'SEO_AUDIT_ROBOTS_DISALLOWED',
+      status: 422,
+      stopReason: 'robots_disallowed'
+    }
+  );
+  assert.deepEqual(calls, [
+    ['probe', 'https://example.com/robots.txt', 'robots']
+  ]);
+});
+
+test('rejects a WAF challenge after robots preflight and before SEO scoring', async () => {
   let probeCount = 0;
   const siteClient = {
     async fetchPage(url) {
@@ -70,7 +99,7 @@ test('rejects a WAF challenge before probes or SEO scoring', async () => {
       && /搜索引擎/.test(error.message)
     )
   );
-  assert.equal(probeCount, 0);
+  assert.equal(probeCount, 1);
 });
 
 test('stops a subpage audit when the required homepage fetch is a WAF challenge', async () => {
@@ -103,7 +132,7 @@ test('stops a subpage audit when the required homepage fetch is a WAF challenge'
     () => createSeoAuditService({ siteClient }).audit('https://example.com/products/one'),
     { code: 'SEO_AUDIT_BLOCKED_BY_WAF' }
   );
-  assert.equal(probeCount, 0);
+  assert.equal(probeCount, 1);
 });
 
 test('returns a prioritized, categorized SEO report for a public page', async () => {
@@ -129,8 +158,8 @@ test('returns a prioritized, categorized SEO report for a public page', async ()
   assert.equal(report.summary.total, report.summary.passed + report.summary.issues);
   assert.equal(report.summary.high > 0, true);
   assert.equal(report.score >= 0 && report.score <= 100, true);
-  assert.equal(report.scoreVersion, '2026-07-23-v4');
-  assert.equal(report.scoreModel, 'technical-health-v4');
+  assert.equal(report.scoreVersion, '2026-07-31-v5');
+  assert.equal(report.scoreModel, 'technical-health-v5');
   assert.equal(report.score, report.health.score);
   assert.equal(report.grade, report.health.status);
   assert.deepEqual(
@@ -143,6 +172,31 @@ test('returns a prioritized, categorized SEO report for a public page', async ()
   assert.equal(report.priorities.some((item) => item.id === 'sitemap'), true);
   assert.equal(report.priorities.some((item) => item.id === 'search-verification'), false);
   assert.equal(report.priorities.every((item) => item.status === 'failed'), true);
+});
+
+test('treats length heuristics as advice and keeps keywords informational', async () => {
+  const report = await createSeoAuditService({ siteClient: createSiteClient() })
+    .audit('https://example.com/');
+  const checks = report.categories.flatMap((category) => category.checks);
+  const title = checks.find((check) => check.id === 'title');
+  const description = checks.find((check) => check.id === 'meta-description');
+  const keywords = checks.find((check) => check.id === 'meta-keywords');
+
+  assert.equal(title.finding, '页面标题过短');
+  assert.equal(title.severity, 'low');
+  assert.equal(description.finding, 'Meta 描述缺失');
+  assert.equal(description.severity, 'medium');
+  assert.equal(keywords.status, 'failed');
+  assert.equal(report.priorities.some((item) => item.id === 'meta-keywords'), false);
+  assert.equal(
+    report.health.stages.some((stage) => stage.ruleIds.includes('meta-keywords')),
+    false
+  );
+  assert.deepEqual(
+    report.informationalChecks.map((check) => check.id),
+    ['search-verification', 'meta-keywords']
+  );
+  assert.equal(report.informationalChecks.every((check) => check.affectsScore === false), true);
 });
 
 test('allows heading levels to return from a subsection to a sibling section', async () => {
@@ -198,8 +252,8 @@ test('does not treat empty robots and sitemap responses as healthy', async () =>
   assert.equal(sitemap.finding, 'Sitemap 内容为空');
   assert.equal(sitemap.severity, 'high');
   assert.equal(sitemap.weight, 7);
-  assert.equal(report.scoreVersion, '2026-07-23-v4');
-  assert.equal(report.ruleVersion, '2026-07-31-v7');
+  assert.equal(report.scoreVersion, '2026-07-31-v5');
+  assert.equal(report.ruleVersion, '2026-07-31-v8');
 });
 
 test('does not parse HTML error pages as robots or sitemap resources', async () => {
@@ -523,7 +577,7 @@ test('reports the affected crawler when a specific robots group blocks the audit
   assert.match(crawlerCheck.recommendation, /OAI-SearchBot/);
 });
 
-test('uses the injected versioned rule configuration inside the maintainable v4 score model', async () => {
+test('uses the injected versioned rule configuration inside the maintainable v5 score model', async () => {
   const { defaultSeoAuditRules } = require('../config/seoAuditRules');
   const customRules = {
     ...defaultSeoAuditRules,
@@ -537,7 +591,7 @@ test('uses the injected versioned rule configuration inside the maintainable v4 
   const customReport = await createSeoAuditService({ siteClient: createSiteClient(), ruleConfig: customRules }).audit('https://example.com/');
   const customTitle = customReport.categories.flatMap((category) => category.checks).find((check) => check.id === 'title');
 
-  assert.equal(customReport.scoreVersion, '2026-07-23-v4');
+  assert.equal(customReport.scoreVersion, '2026-07-31-v5');
   assert.equal(customReport.ruleVersion, 'test-heavy-title-v1');
   assert.equal(customTitle.weight, 80);
   assert.equal(customReport.summary.totalWeight, 201);

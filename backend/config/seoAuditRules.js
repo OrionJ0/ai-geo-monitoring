@@ -1,5 +1,5 @@
 const defaultSeoAuditRules = Object.freeze({
-  version: '2026-07-31-v7',
+  version: '2026-07-31-v8',
   crawl: Object.freeze({
     pageLimit: 200,
     concurrency: 4,
@@ -64,9 +64,9 @@ const defaultSeoAuditRules = Object.freeze({
 });
 
 const defaultSeoHealthScoreConfig = Object.freeze({
-  version: '2026-07-23-v4',
+  version: '2026-07-31-v5',
   homepageWeight: 3,
-  informationalRuleIds: Object.freeze(['search-verification']),
+  informationalRuleIds: Object.freeze(['search-verification', 'meta-keywords']),
   siteScopedRuleIds: Object.freeze(['robots-txt', 'sitemap', 'search-verification']),
   blockerPolicy: Object.freeze({
     homepageUnavailableCap: 20,
@@ -98,7 +98,7 @@ const defaultSeoHealthScoreConfig = Object.freeze({
       label: '内容理解',
       budget: 30,
       ruleIds: Object.freeze([
-        'title', 'meta-description', 'meta-keywords', 'h1',
+        'title', 'meta-description', 'h1',
         'heading-order', 'content-depth', 'language'
       ])
     }),

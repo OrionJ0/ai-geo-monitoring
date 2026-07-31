@@ -5,7 +5,10 @@ const {
   createSeoAuditTargetPolicy
 } = require('./SeoSiteClient');
 const { createSeoRenderService } = require('./SeoRenderService');
+const { createSeoAuditOriginCoordinator } = require('./SeoAuditCrawlerPolicy');
 const { defaultSeoAuditRules } = require('../config/seoAuditRules');
+
+const sharedOriginCoordinator = createSeoAuditOriginCoordinator();
 
 const SITE_CRAWL_PROFILES = Object.freeze({
   standard: Object.freeze({
@@ -54,19 +57,33 @@ function resolveSeoAuditTarget(inputUrl, options = {}) {
   return { requestedUrl, policy };
 }
 
+function withClientLifecycle(service, siteClient) {
+  return {
+    async audit(...args) {
+      try {
+        return await service.audit(...args);
+      } finally {
+        siteClient.close?.();
+      }
+    }
+  };
+}
+
 function createPageAuditRuntime(inputUrl, options = {}) {
   const target = resolveSeoAuditTarget(inputUrl, options);
   const clientOptions = options.clientOptions || {};
   const siteClient = createSeoSiteClient({
     ...clientOptions,
     allowedPrivateOrigin: target.policy.allowedPrivateOrigin,
+    originCoordinator: clientOptions.originCoordinator ?? sharedOriginCoordinator,
     minOriginIntervalMs: clientOptions.minOriginIntervalMs
       ?? defaultSeoAuditRules.crawl.minOriginIntervalMs
   });
+  const service = createSeoAuditService({ siteClient });
   return {
     ...target,
     siteClient,
-    service: createSeoAuditService({ siteClient })
+    service: withClientLifecycle(service, siteClient)
   };
 }
 
@@ -85,24 +102,26 @@ function createSiteAuditRuntime(inputUrl, options = {}) {
   const siteClient = createSeoSiteClient({
     ...clientOptions,
     allowedPrivateOrigin: target.policy.allowedPrivateOrigin,
+    originCoordinator: clientOptions.originCoordinator ?? sharedOriginCoordinator,
     minOriginIntervalMs: clientOptions.minOriginIntervalMs
       ?? SITE_CRAWL_PROFILES.standard.minOriginIntervalMs,
     originIntervalOverrides: clientOptions.originIntervalOverrides
       ?? configuredOriginIntervals
   });
+  const service = createSeoSiteAuditService({
+    siteClient,
+    networkScope: target.policy.networkScope,
+    crawlProfile: crawlProfile.key,
+    ruleConfig,
+    renderService: options.renderService || (target.policy.networkScope === 'private'
+      ? undefined
+      : createSeoRenderService())
+  });
   return {
     ...target,
     crawlProfile,
     siteClient,
-    service: createSeoSiteAuditService({
-      siteClient,
-      networkScope: target.policy.networkScope,
-      crawlProfile: crawlProfile.key,
-      ruleConfig,
-      renderService: options.renderService || (target.policy.networkScope === 'private'
-        ? undefined
-        : createSeoRenderService())
-    })
+    service: withClientLifecycle(service, siteClient)
   };
 }
 

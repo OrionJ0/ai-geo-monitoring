@@ -1,0 +1,69 @@
+name: 部署生产环境
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-geo-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.AI_GEO_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - name: 检出完整 main 历史
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: 生成并校验发布 Bundle
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="${RUNNER_TEMP}/ai-geo-release-${GITHUB_SHA}.bundle"
+          git bundle create "$bundle" refs/heads/main
+          git bundle verify "$bundle"
+          checksum="$(sha256sum "$bundle" | cut -d ' ' -f 1)"
+          echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+
+      - name: 配置生产 SSH 身份
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.AI_GEO_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.AI_GEO_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/ai_geo_deploy"
+          chmod 600 "$HOME/.ssh/ai_geo_deploy"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: 上传发布 Bundle
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.AI_GEO_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.AI_GEO_DEPLOY_USER }}
+          BUNDLE: ${{ steps.release.outputs.bundle }}
+        run: |
+          set -euo pipefail
+          scp -O -i "$HOME/.ssh/ai_geo_deploy" "$BUNDLE" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/ai-geo-release-${GITHUB_SHA}.bundle"
+
+      - name: 校验、快进并执行正式部署
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.AI_GEO_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.AI_GEO_DEPLOY_USER }}
+          CHECKSUM: ${{ steps.release.outputs.checksum }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/ai_geo_deploy" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd /opt/ai-geo-monitoring && node scripts/deploy-from-bundle.mjs --bundle=/tmp/ai-geo-release-${GITHUB_SHA}.bundle --revision=${GITHUB_SHA} --sha256=${CHECKSUM}"

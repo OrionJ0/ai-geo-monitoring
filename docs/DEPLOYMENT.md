@@ -60,7 +60,7 @@
 - Ubuntu 正式环境固定使用仓库 `deploy/systemd/` 中的 `ai-geo-backend.service` 和 `ai-geo-frontend.service`，不使用 PM2 或 Docker。
 - 两个 systemd 服务都以 `ubuntu` 普通用户运行；前端只监听 `127.0.0.1:3001`，后端监听 `127.0.0.1:3002`。
 - 安装 unit、启用开机启动和首次切换见 [单机原地部署](SINGLE_HOST_DEPLOYMENT.md)。
-- 日常发布执行 `npm run deploy`；当 `AI_GEO_PROCESS_MANAGER=systemd` 时，部署脚本通过 systemd 停止、启动和验证服务。
+- 日常正式发布由 `.github/workflows/deploy-production.yml` 上传已校验 Git Bundle；服务器无需访问 GitHub。Bundle 快进完成后复用部署脚本，并在 `AI_GEO_PROCESS_MANAGER=systemd` 时通过 systemd 停止、启动和验证服务。完整配置与人工引导步骤见[单机原地部署](SINGLE_HOST_DEPLOYMENT.md)。
 - 查看状态与日志：
 
 ```bash

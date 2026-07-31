@@ -8,7 +8,8 @@ const {
 } = require('../config/seoAuditRules');
 const {
   calculateTechnicalHealth,
-  detectTechnicalHealthBlockers
+  detectTechnicalHealthBlockers,
+  summarizeInformationalChecks
 } = require('./SeoHealthScoreService');
 const {
   analyzeSitewideEvidence,
@@ -21,6 +22,7 @@ const {
 } = require('./SeoSiteClient');
 const {
   AUDIT_CRAWLER_USER_AGENT,
+  auditCrawlerDisallowedError,
   evaluateAuditCrawlerAccess
 } = require('./RobotsAccessService');
 
@@ -221,16 +223,6 @@ function attachCrawlDiagnostics(error, client) {
   return error;
 }
 
-function robotsDisallowedError(permission) {
-  const error = new Error(
-    `robots.txt 明确禁止 ${AUDIT_CRAWLER_USER_AGENT} 抓取当前检测入口（${permission.matchedRule}），已停止检测。`
-  );
-  error.code = 'SEO_AUDIT_ROBOTS_DISALLOWED';
-  error.status = 422;
-  error.stopReason = 'robots_disallowed';
-  return error;
-}
-
 async function probeTrustedResource(client, url, expectedKind) {
   let result;
   try {
@@ -313,7 +305,32 @@ function createSeoSiteAuditService({
 
       const startedAt = Date.now();
       const requestedUrl = normalizeWebsiteUrl(inputUrl);
-      const entryResponse = await client.fetchPage(requestedUrl);
+      const entryRobotsByOrigin = new Map();
+      const robotsForTarget = (url) => {
+        const targetOrigin = new URL(url).origin;
+        if (!entryRobotsByOrigin.has(targetOrigin)) {
+          entryRobotsByOrigin.set(
+            targetOrigin,
+            probeTrustedResource(client, `${targetOrigin}/robots.txt`, 'robots')
+          );
+        }
+        return entryRobotsByOrigin.get(targetOrigin);
+      };
+      const entryPermissionFor = async (url) => evaluateAuditCrawlerAccess({
+        robotsResult: await robotsForTarget(url),
+        targetUrl: url
+      });
+      const assertEntryRequestAllowed = async (url) => {
+        const permission = await entryPermissionFor(url);
+        if (permission.status === 'blocked') {
+          throw attachCrawlDiagnostics(auditCrawlerDisallowedError(permission), client);
+        }
+        return true;
+      };
+      await assertEntryRequestAllowed(requestedUrl);
+      const entryResponse = await client.fetchPage(requestedUrl, {
+        beforeUrlRequest: assertEntryRequestAllowed
+      });
       try {
         assertNormalResponse(entryResponse, 'page');
       } catch (error) {
@@ -332,6 +349,14 @@ function createSeoSiteAuditService({
       const aliasesByResolved = new Map();
       const resolvedByRequested = new Map();
       const redirectAliases = new Map();
+      const recordRobotsSkip = (url, matchedRule) => {
+        if (robotsSkippedUrls.has(url)) return;
+        robotsSkippedUrls.add(url);
+        robotsSkippedCount += 1;
+        if (robotsSkippedByUrl.size < maxPages) {
+          robotsSkippedByUrl.set(url, { url, matchedRule });
+        }
+      };
       const recordAlias = (requested, resolved, redirectChain = []) => {
         const normalizedRequested = normalizeHttpUrl(requested, requested) || requested;
         const normalizedResolved = normalizeHttpUrl(resolved, requested) || resolved;
@@ -364,17 +389,20 @@ function createSeoSiteAuditService({
         });
         auditRobotsSourceStatus = permission.sourceStatus;
         if (permission.status !== 'blocked') return true;
-        if (!robotsSkippedUrls.has(url)) {
-          robotsSkippedUrls.add(url);
-          robotsSkippedCount += 1;
-          if (robotsSkippedByUrl.size < maxPages) {
-            robotsSkippedByUrl.set(url, {
-              url,
-              matchedRule: permission.matchedRule
-            });
-          }
-        }
+        recordRobotsSkip(url, permission.matchedRule);
         return false;
+      };
+      const isRequestAllowedForAudit = async (url) => {
+        if (new URL(url).origin === origin) return isAllowedForAudit(url);
+        try {
+          const permission = await entryPermissionFor(url);
+          if (permission.status !== 'blocked') return true;
+          recordRobotsSkip(url, permission.matchedRule);
+          return false;
+        } catch (error) {
+          if (isAuditStopError(error)) return false;
+          throw error;
+        }
       };
       const addPage = (value, baseUrl = entryFinalUrl) => {
         const normalized = normalizeSameOriginUrl(value, baseUrl, origin, normalizeOpts);
@@ -395,7 +423,7 @@ function createSeoSiteAuditService({
 
       const robotsUrl = `${origin}/robots.txt`;
       const defaultSitemapUrl = `${origin}/sitemap.xml`;
-      const robots = await probeTrustedResource(client, robotsUrl, 'robots');
+      const robots = await robotsForTarget(entryFinalUrl);
       auditRobotsResult = robots;
       const entryPermission = evaluateAuditCrawlerAccess({
         robotsResult: robots,
@@ -403,7 +431,7 @@ function createSeoSiteAuditService({
       });
       auditRobotsSourceStatus = entryPermission.sourceStatus;
       if (entryPermission.status === 'blocked') {
-        throw attachCrawlDiagnostics(robotsDisallowedError(entryPermission), client);
+        throw attachCrawlDiagnostics(auditCrawlerDisallowedError(entryPermission), client);
       }
       const preflightPages = discovered.splice(0, discovered.length);
       discoveredSet.clear();
@@ -474,7 +502,7 @@ function createSeoSiteAuditService({
         let resolvedUrl = url;
         try {
           const response = await client.fetchPage(url, {
-            beforeUrlRequest: isAllowedForAudit
+            beforeUrlRequest: isRequestAllowedForAudit
           });
           resolvedUrl = normalizeHttpUrl(response.finalUrl || url, url) || url;
           recordAlias(url, resolvedUrl, response.redirectChain);
@@ -809,6 +837,10 @@ function createSeoSiteAuditService({
           : priority
       ));
       const health = { ...scoredHealth, issues, priorities };
+      const informationalChecks = summarizeInformationalChecks({
+        instances: checkInstances,
+        ruleIds: scoring.informationalRuleIds
+      });
       const persistedPages = pages.map(({
         links: _links,
         navigationIssues: _navigationIssues,
@@ -820,7 +852,7 @@ function createSeoSiteAuditService({
       const report = {
         mode: 'site',
         scoreVersion: scoring.version,
-        scoreModel: 'technical-health-v4',
+        scoreModel: 'technical-health-v5',
         ruleVersion: rules.version,
         requestedUrl,
         finalUrl: entryFinalUrl,
@@ -871,6 +903,7 @@ function createSeoSiteAuditService({
         health,
         priorities,
         issues,
+        informationalChecks,
         pages: persistedPages,
         sitewide
       };

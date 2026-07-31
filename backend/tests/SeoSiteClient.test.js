@@ -8,6 +8,9 @@ const {
   createSeoSiteClient,
   createSeoAuditTargetPolicy
 } = require('../services/SeoSiteClient');
+const {
+  createSeoAuditOriginCoordinator
+} = require('../services/SeoAuditCrawlerPolicy');
 
 function responseFixture(name) {
   return fs.readFileSync(path.join(__dirname, 'fixtures', 'seo-responses', name), 'utf8');
@@ -477,6 +480,132 @@ test('paces and counts every real request in a redirect chain', async () => {
     renderAttempts: 0,
     stopReason: null
   });
+});
+
+test('shares origin request spacing across audit clients', async () => {
+  let currentTime = 1000;
+  const requestStartedAt = [];
+  const coordinator = createSeoAuditOriginCoordinator();
+  const sharedOptions = {
+    minOriginIntervalMs: 500,
+    originCoordinator: coordinator,
+    now: () => currentTime,
+    wait: async (delayMs) => {
+      currentTime += delayMs;
+    },
+    resolveHostname: async () => [{ address: '93.184.216.34', family: 4 }],
+    request: async () => {
+      requestStartedAt.push(currentTime);
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+        data: '<html><body>ok</body></html>'
+      };
+    }
+  };
+  const firstClient = createSeoSiteClient(sharedOptions);
+  const secondClient = createSeoSiteClient(sharedOptions);
+
+  await firstClient.fetchPage('https://example.com/first');
+  await secondClient.fetchPage('https://example.com/second');
+
+  assert.deepEqual(requestStartedAt, [1000, 1500]);
+});
+
+test('shares a WAF or rate-limit circuit across audit clients', async () => {
+  let requestCount = 0;
+  const coordinator = createSeoAuditOriginCoordinator();
+  const sharedOptions = {
+    minOriginIntervalMs: 0,
+    originCoordinator: coordinator,
+    resolveHostname: async () => [{ address: '93.184.216.34', family: 4 }]
+  };
+  const limitedClient = createSeoSiteClient({
+    ...sharedOptions,
+    request: async () => {
+      requestCount += 1;
+      return {
+        status: 429,
+        headers: { 'content-type': 'text/plain', 'retry-after': '60' },
+        data: 'Too many requests'
+      };
+    }
+  });
+  const waitingClient = createSeoSiteClient({
+    ...sharedOptions,
+    request: async () => {
+      requestCount += 1;
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+        data: '<html><body>must not be requested</body></html>'
+      };
+    }
+  });
+
+  const limited = await limitedClient.probe('https://example.com/robots.txt', {
+    expectedKind: 'robots',
+    requestKind: 'robots'
+  });
+  assert.equal(limited.classification.outcome, 'rate_limited');
+  limitedClient.close();
+
+  await assert.rejects(
+    () => waitingClient.fetchPage('https://example.com/'),
+    {
+      code: 'SEO_AUDIT_RATE_LIMITED',
+      stopReason: 'rate_limited'
+    }
+  );
+  assert.equal(requestCount, 1);
+});
+
+test('releases a shared rate-limit circuit after Retry-After expires', async () => {
+  let currentTime = 1000;
+  let requestCount = 0;
+  const coordinator = createSeoAuditOriginCoordinator();
+  const sharedOptions = {
+    minOriginIntervalMs: 0,
+    originCoordinator: coordinator,
+    now: () => currentTime,
+    wait: async (delayMs) => {
+      currentTime += delayMs;
+    },
+    resolveHostname: async () => [{ address: '93.184.216.34', family: 4 }]
+  };
+  const limitedClient = createSeoSiteClient({
+    ...sharedOptions,
+    request: async () => {
+      requestCount += 1;
+      return {
+        status: 429,
+        headers: { 'content-type': 'text/plain', 'retry-after': '1' },
+        data: 'Too many requests'
+      };
+    }
+  });
+  await limitedClient.probe('https://example.com/robots.txt', {
+    expectedKind: 'robots',
+    requestKind: 'robots'
+  });
+  limitedClient.close();
+  currentTime = 2001;
+
+  const recoveredClient = createSeoSiteClient({
+    ...sharedOptions,
+    request: async () => {
+      requestCount += 1;
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+        data: '<html><body>recovered</body></html>'
+      };
+    }
+  });
+  const recovered = await recoveredClient.fetchPage('https://example.com/');
+
+  assert.equal(recovered.classification.outcome, 'normal');
+  assert.equal(requestCount, 2);
 });
 
 test('opens a task-local circuit after rate limiting and blocks later requests before Axios', async () => {

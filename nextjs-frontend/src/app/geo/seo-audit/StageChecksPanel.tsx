@@ -4,7 +4,10 @@
 import React, { useMemo, useState } from 'react';
 import { Segmented } from 'antd';
 import { CheckCircleFilled, ExclamationCircleFilled } from '@ant-design/icons';
-import { buildStageGroups } from '@/utils/seoStagePresentation.cjs';
+import {
+  buildInformationalChecks,
+  buildStageGroups,
+} from '@/utils/seoStagePresentation.cjs';
 import styles from './seo-audit.module.css';
 
 const FILTER_OPTIONS = [
@@ -59,12 +62,13 @@ function CheckFact({ check, isSite }) {
 export default function StageChecksPanel({ report }) {
   const [filter, setFilter] = useState('all');
   const allGroups = useMemo(() => buildStageGroups(report), [report]);
+  const informationalChecks = useMemo(() => buildInformationalChecks(report), [report]);
   const filteredGroups = useMemo(() => (
     buildStageGroups(report, filter).filter((stage) => stage.checks.length > 0)
   ), [filter, report]);
   const isSite = report.mode === 'site';
 
-  if (report.scoreModel !== 'technical-health-v4' || allGroups.length === 0) return null;
+  if (!['technical-health-v4', 'technical-health-v5'].includes(report.scoreModel) || allGroups.length === 0) return null;
 
   return (
     <section className={styles.stageChecksPanel} aria-labelledby="stage-checks-title">
@@ -144,6 +148,52 @@ export default function StageChecksPanel({ report }) {
           );
         })}
       </div>
+
+      {informationalChecks.length > 0 && (
+        <div className={styles.stageCheckGrid}>
+          <article className={`${styles.stageCheckCard} ${styles.stage_enhancement}`}>
+            <header>
+              <span className={styles.stageSequence}>提示</span>
+              <div>
+                <h3>信息提示</h3>
+                <p>保留事实供站长按需处理，不进入技术健康分和优先修复排序。</p>
+              </div>
+              <div className={styles.stageCheckCount}>
+                <strong>{informationalChecks.length}</strong>
+                <span>项不计分提示</span>
+              </div>
+            </header>
+            <div className={styles.stageCheckRows}>
+              {informationalChecks.map((check) => (
+                <div key={check.id} className={styles.stageCheckRow}>
+                  <span className={styles.failedIcon}>
+                    <ExclamationCircleFilled aria-label="信息提示" />
+                  </span>
+                  <div>
+                    <div className={styles.checkTitle}>
+                      <strong>{check.title}</strong>
+                      <span className={styles.passedBadge}>不计分</span>
+                    </div>
+                    <p className={styles.stageCheckDescription}>{check.description}</p>
+                    <CheckFact check={check} isSite={isSite} />
+                    {isSite && (
+                      <div className={styles.stageCheckMetrics}>
+                        <span>覆盖率 {Math.round(Number(check.coverage || 0) * 100)}%</span>
+                        <span>
+                          影响 {check.count || check.affectedPages?.length || 0}
+                          {' / '}
+                          {check.applicablePages || report.site?.auditedPages || 0} 页
+                        </span>
+                        <strong>不计入技术健康分</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
+        </div>
+      )}
 
       {filteredGroups.length === 0 && (
         <div className={styles.emptyFilter}>当前筛选条件下没有检测项。</div>

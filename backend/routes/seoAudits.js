@@ -11,7 +11,7 @@ const { defaultSeoHealthScoreConfig } = require('../config/seoAuditRules');
 
 function createRuntimeInfoHandler({
   scoreVersion = defaultSeoHealthScoreConfig.version,
-  scoreModel = 'technical-health-v4',
+  scoreModel = 'technical-health-v5',
   allowPrivateTargets = privateTargetsEnabled
 } = {}) {
   return function runtimeInfoHandler(req, res) {

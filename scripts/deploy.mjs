@@ -7,7 +7,8 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const scriptPath = fileURLToPath(import.meta.url);
+const scriptDirectory = path.dirname(scriptPath);
 const projectRoot = path.resolve(
   process.env.AI_GEO_PROJECT_ROOT || path.join(scriptDirectory, '..')
 );
@@ -118,11 +119,31 @@ async function checkPreconditions() {
 
   return {
     branch,
+    revision: await git(['rev-parse', 'HEAD']),
     databasePath,
     databaseType: config.DATABASE_URL ? 'postgres' : 'sqlite',
     node: process.versions.node,
     ok: true,
   };
+}
+
+function preparedRevisionArgument() {
+  const prefix = '--prepared-revision=';
+  const argument = process.argv.find((value) => value.startsWith(prefix));
+  if (!argument) return '';
+  const revision = argument.slice(prefix.length).trim().toLowerCase();
+  if (!/^[a-f0-9]{40}$/.test(revision)) {
+    throw new Error('预置版本必须是完整的 40 位 Git commit');
+  }
+  return revision;
+}
+
+function assertPreparedRevision(expectedRevision, actualRevision) {
+  if (expectedRevision && expectedRevision !== actualRevision) {
+    throw new Error(
+      `预置版本与当前 HEAD 不一致：期望 ${expectedRevision.slice(0, 12)}，实际 ${actualRevision.slice(0, 12)}`
+    );
+  }
 }
 
 function run(command, args, options = {}) {
@@ -146,7 +167,7 @@ function run(command, args, options = {}) {
   });
 }
 
-async function acquireLock() {
+export async function acquireDeploymentLock() {
   await fs.promises.mkdir(runtimeDirectory, { recursive: true });
   try {
     await fs.promises.mkdir(lockDirectory);
@@ -158,7 +179,7 @@ async function acquireLock() {
   }
 }
 
-async function releaseLock() {
+export async function releaseDeploymentLock() {
   await fs.promises.rm(lockDirectory, { recursive: true, force: true });
 }
 
@@ -170,21 +191,29 @@ async function appendDeploymentLog(message) {
   );
 }
 
-async function deploy() {
+export async function deploy(preparedRevision = '', { lockAlreadyAcquired = false } = {}) {
   const initial = await checkPreconditions();
-  await acquireLock();
+  assertPreparedRevision(preparedRevision, initial.revision);
+  if (!lockAlreadyAcquired) await acquireDeploymentLock();
   let servicesStopped = false;
   let databaseBackupReference = '';
 
   try {
-    console.log('1/10 拉取 origin/main');
-    await run('git', ['pull', '--ff-only', 'origin', 'main'], {
-      label: 'git pull',
-    });
-    const revision = await git(['rev-parse', 'HEAD']);
-    const remoteRevision = await git(['rev-parse', 'origin/main']);
-    if (revision !== remoteRevision) {
-      throw new Error('HEAD 与 origin/main 不一致，拒绝部署服务器本地提交');
+    let revision;
+    if (preparedRevision) {
+      console.log('1/10 校验已上传的预置版本');
+      revision = await git(['rev-parse', 'HEAD']);
+      assertPreparedRevision(preparedRevision, revision);
+    } else {
+      console.log('1/10 拉取 origin/main');
+      await run('git', ['pull', '--ff-only', 'origin', 'main'], {
+        label: 'git pull',
+      });
+      revision = await git(['rev-parse', 'HEAD']);
+      const remoteRevision = await git(['rev-parse', 'origin/main']);
+      if (revision !== remoteRevision) {
+        throw new Error('HEAD 与 origin/main 不一致，拒绝部署服务器本地提交');
+      }
     }
     const checked = await checkPreconditions();
 
@@ -295,7 +324,7 @@ async function deploy() {
     }
     throw error;
   } finally {
-    await releaseLock();
+    if (!lockAlreadyAcquired) await releaseDeploymentLock();
   }
 
   return initial;
@@ -304,16 +333,20 @@ async function deploy() {
 async function main() {
   const checkOnly = process.argv.includes('--check');
   const json = process.argv.includes('--json');
+  const preparedRevision = preparedRevisionArgument();
   if (checkOnly) {
     const result = await checkPreconditions();
+    assertPreparedRevision(preparedRevision, result.revision);
     if (json) console.log(JSON.stringify(result));
     else console.log('部署前置检查通过');
     return;
   }
-  await deploy();
+  await deploy(preparedRevision);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

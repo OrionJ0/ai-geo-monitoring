@@ -142,7 +142,13 @@ export default function SeoAuditHistoryDrawer({
                 </div>
                 <div className={styles.historyScore}>
                   <strong style={{ color: historyScoreColor(item.score) }}>{item.score ?? '—'}</strong>
-                  <span>{scoreVersion === '2026-07-23-v4' ? 'v4 技术健康分' : '旧版评分'}</span>
+                  <span>
+                    {scoreVersion === '2026-07-31-v5'
+                      ? 'v5 技术健康分'
+                      : scoreVersion === '2026-07-23-v4'
+                        ? 'v4 技术健康分'
+                        : '旧版评分'}
+                  </span>
                 </div>
               </header>
               <p title={item.finalUrl}>{item.finalUrl}</p>

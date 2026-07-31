@@ -175,6 +175,11 @@ function buildStageGroups(report, filter = 'all') {
   }));
 }
 
+function buildInformationalChecks(report = {}) {
+  return (Array.isArray(report.informationalChecks) ? report.informationalChecks : [])
+    .filter((check) => check?.affectsScore === false);
+}
+
 function sortPriorities(priorities = []) {
   return [...priorities].sort((left, right) => {
     const blockerDifference = Number(right.kind === 'blocker') - Number(left.kind === 'blocker');
@@ -259,6 +264,7 @@ function buildPriorityContent(report = {}) {
 }
 
 module.exports = {
+  buildInformationalChecks,
   buildPriorityContent,
   buildStageGroups,
   sortPriorities,

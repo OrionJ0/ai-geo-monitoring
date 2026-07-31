@@ -310,11 +310,11 @@ test('SEO runtime endpoint exposes the active score contract', () => {
 
   assert.deepEqual(response.payload, {
     success: true,
-    data: {
-      scoreVersion: '2026-07-23-v4',
-      scoreModel: 'technical-health-v4',
-      privateTargetsEnabled: false
-    }
+      data: {
+        scoreVersion: '2026-07-31-v5',
+        scoreModel: 'technical-health-v5',
+        privateTargetsEnabled: false
+      }
   });
 });
 

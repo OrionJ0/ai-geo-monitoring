@@ -1,6 +1,8 @@
 # 单机原地部署
 
-本方案面向内部使用的单台 macOS 或 Ubuntu 服务器。部署期间允许网站暂停；构建或测试失败后，由维护者修复代码并重新执行部署。不使用双槽位、release 目录、Docker 或 GitHub Actions。Ubuntu 正式环境使用 systemd 自动恢复前后端进程；部署失败仍保持停止，不做应用版本自动回滚。
+本方案面向内部使用的单台 macOS 或 Ubuntu 服务器。部署期间允许网站暂停；构建或测试失败后，由维护者修复代码并重新执行部署。不使用双槽位、release 目录或 Docker。Ubuntu 正式环境使用 systemd 自动恢复前后端进程；部署失败仍保持停止，不做应用版本自动回滚。
+
+正式发布由维护者在 `main` 更新后手动触发 GitHub Actions。工作流生成 Git Bundle，通过 SSH 上传到服务器；服务器校验完整 commit、Bundle SHA-256、`main` 引用、干净工作区和快进关系后，复用仓库部署脚本完成备份、测试、构建、迁移与 systemd 重启。服务器不需要访问 GitHub，也不在这条正式链路中执行 `git pull`。
 
 ## 前提
 
@@ -35,34 +37,55 @@ sudo systemctl enable ai-geo-backend.service ai-geo-frontend.service
 
 从旧 PID 管理器首次切换时，先保持 `AI_GEO_PROCESS_MANAGER=manual`，执行 `npm run prod:stop` 并确认 3001/3002 已释放；再把配置明确改为 `systemd`，最后执行 `npm run prod:start`。不得并行保留两套管理器。
 
-完成安装后，在服务器项目根目录执行：
+首次启用 Bundle 发布前，先人工把包含 `scripts/deploy-from-bundle.mjs` 的版本以同样的已校验 Bundle 方式引导到服务器。完成安装后，可在服务器项目根目录执行只读检查：
 
 ```bash
 npm run deploy:check
-npm run deploy
 ```
 
 `deploy:check` 只做读取和校验，不会拉取代码、停止服务、备份数据库或构建。
 
 ## 日常流程
 
-开发电脑：
+正式日常流程：
 
 ```bash
 git push origin main
+# 然后在 GitHub Actions 中手动运行“部署生产环境”
 ```
 
-服务器：
+手动触发 `.github/workflows/deploy-production.yml` 后会依次：
 
-```bash
-cd /实际项目路径
-npm run deploy
-```
+1. 检出完整 `main`，生成并本地验证 Git Bundle。
+2. 计算 Bundle SHA-256。
+3. 使用 production 环境的 SSH secrets 上传到服务器临时目录。
+4. 由 `scripts/deploy-from-bundle.mjs` 校验并快进服务器 `main`。
+5. 以 `--prepared-revision=<完整 commit>` 调用 `scripts/deploy.mjs`，完成原有正式部署。
+
+GitHub production 环境必须配置：
+
+- Repository/Environment variable `AI_GEO_DEPLOY_ENABLED=true`
+- `AI_GEO_DEPLOY_HOST`
+- `AI_GEO_DEPLOY_USER`
+- `AI_GEO_DEPLOY_SSH_KEY`
+- `AI_GEO_DEPLOY_KNOWN_HOSTS`
+
+主机密钥必须来自运维侧预先核验，不得在 workflow 中临时执行无校验的 `ssh-keyscan`。SSH 私钥应使用只允许该服务器、该部署用户的专用密钥。
+服务器把仓库 `deploy/ai-geo-deploy-gate.sh` 安装到
+`/home/ubuntu/.local/bin/ai-geo-deploy-gate`，并在该公钥的
+`authorized_keys` 条目中配置
+`command="/home/ubuntu/.local/bin/ai-geo-deploy-gate",restrict`。这把密钥只允许
+以旧式 SCP 协议上传命名规范的临时 Bundle，以及执行参数经过严格校验的正式部署命令；
+不能获得通用交互式 Shell、端口转发或图形会话。
+
+在专用公钥安装、主机指纹核验和四个 secrets 全部完成前，不得设置
+`AI_GEO_DEPLOY_ENABLED=true`。变量缺失或不是 `true` 时，手动运行只会跳过生产部署
+job，不会用空凭据尝试连接服务器。
 
 部署命令按以下顺序执行：
 
 1. 要求当前分支为 `main`，且工作区没有未提交或未跟踪文件。
-2. 执行 `git pull --ff-only origin main`，并确认 `HEAD` 与 `origin/main` 完全一致；服务器上的本地提交即使工作区干净也不会被部署。
+2. 校验 Bundle SHA-256、`refs/heads/main` 与预期完整 commit，拒绝非快进版本；快进后再次核对 `HEAD`。
 3. 检查 `JWT_SECRET`、`CONFIG_ENCRYPTION_KEY` 和数据库配置。
 4. 通过 systemd 停止前端和后端。
 5. SQLite 使用 Online Backup API 更新唯一最新快照并执行 `PRAGMA quick_check`；Postgres 要求 `AI_GEO_DATABASE_BACKUP_REFERENCE` 已声明外部备份引用。
@@ -71,7 +94,7 @@ npm run deploy
 8. 使用第 5 步的备份引用执行 GEO 指标语义迁移，再运行一次只读迁移审计；任一步失败都不启动服务。
 9. 通过 systemd 依次启动后端和 Next.js，并检查后端 ready、前端页面和前端 `/api` 代理。
 
-任何步骤失败都会返回非零退出码并写入部署日志。服务停止后的步骤失败时，网站保持停止；修复问题后重新执行 `npm run deploy`。
+任何步骤失败都会返回非零退出码并写入部署日志。服务停止后的步骤失败时，网站保持停止；修复问题后重新运行对应 workflow。`npm run deploy` 保留为服务器能够稳定访问 GitHub 时的人工兼容入口，不是当前正式 Bundle 发布路径。
 
 ## SQLite 最新备份
 

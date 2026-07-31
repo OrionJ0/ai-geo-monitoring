@@ -170,8 +170,19 @@ function evaluateAuditCrawlerAccess({ robotsResult, targetUrl }) {
   };
 }
 
+function auditCrawlerDisallowedError(permission) {
+  const error = new Error(
+    `robots.txt 明确禁止 ${AUDIT_CRAWLER_USER_AGENT} 抓取当前检测入口（${permission.matchedRule}），已停止检测。`
+  );
+  error.code = 'SEO_AUDIT_ROBOTS_DISALLOWED';
+  error.status = 422;
+  error.stopReason = 'robots_disallowed';
+  return error;
+}
+
 module.exports = {
   AUDIT_CRAWLER_USER_AGENT,
+  auditCrawlerDisallowedError,
   evaluateAuditCrawlerAccess,
   evaluateCrawlerAccess
 };

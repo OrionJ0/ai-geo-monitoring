@@ -163,7 +163,8 @@ Authorization: Bearer <token>
   - 返回：`202 Accepted`，`data.id` 为任务编号，初始 `status` 为 `queued`，`progress.phase` 为 `queued`
   - 发现来源：真实入口 URL、页面内链、根目录 `/sitemap.xml`、robots 声明的 Sitemap；支持 Sitemap index、片段移除，并按重定向后的 resolved URL 合并页面；报告保留 requested URL、final URL 和重定向别名
   - 抓取限制：默认上限 200 页、页面并发 4、同一 origin 请求启动间隔至少 250ms、最多读取 20 个 Sitemap、递归深度 3；达到页面预算后不再递归更多 Sitemap。主任务只探活未覆盖的站内目标，预算为至少 10 个、每个成功页面 2 个、全任务最多 50 个网络探活；已检测页面的状态直接复用，不占探活预算。站外链接仍保留在逐页链接数据中，但不发出网络请求，也不参与“失效内链”检查。达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
-  - 有界预检：递归 Sitemap 与页面循环前依次请求入口、robots 和一个默认 Sitemap；确认 WAF 或 429 后停止本任务对该 origin 的后续请求
+  - 有界预检：在请求入口前先读取对应 origin 的 robots，并在每个重定向目标发出页面请求前重复核验目标 origin；明确禁止 GoodieAI 的入口不会收到页面请求。随后验证一个默认 Sitemap，再进入递归 Sitemap 与页面循环
+  - 抓取止损：确认 WAF 或 429 后停止本任务对该 origin 的后续请求；同一应用实例中的其他任务共享同域启动间隔和有效熔断窗口，429 按 `Retry-After` 到期恢复，WAF 使用短期冷却。多实例部署仍需外部协调器
   - 请求诊断：成功报告的 `site.crawlDiagnostics` 固定记录页面、robots、Sitemap、链接探活请求数、重定向跳数、逻辑渲染尝试数和完成原因
   - 专项报告：`report.sitewide.version` 当前为 `sitewide-audit-v4`；`sitemap-coverage` 独立比较有效 Sitemap 页面清单与已知可索引页面，没有有效页面地址时返回 `unknown`，疑似孤儿页与内链来源质量也不会误报为通过
   - 导航证据：`navigation_crawlability` 返回无有效 `href` 的 `<a>`、有明确页面跳转证据的非语义化控件及交互后才创建的链接；只有点击样式、`cursor-pointer` 或通用点击事件的 `span`/`div` 不判定为 SEO 链接错误

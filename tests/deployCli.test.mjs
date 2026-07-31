@@ -68,6 +68,22 @@ test('deployment check accepts a clean main checkout and rejects local changes',
     { cwd: projectRoot, env: environment }
   );
   assert.equal(JSON.parse(stdout).ok, true);
+  const { stdout: revisionOutput } = await git(directory, ['rev-parse', 'HEAD']);
+  const revision = revisionOutput.trim();
+  const prepared = await execFileAsync(
+    process.execPath,
+    [deployScript, '--check', '--json', `--prepared-revision=${revision}`],
+    { cwd: projectRoot, env: environment }
+  );
+  assert.equal(JSON.parse(prepared.stdout).revision, revision);
+  await assert.rejects(
+    execFileAsync(
+      process.execPath,
+      [deployScript, '--check', '--json', `--prepared-revision=${'0'.repeat(40)}`],
+      { cwd: projectRoot, env: environment }
+    ),
+    /预置版本与当前 HEAD 不一致/
+  );
 
   fs.appendFileSync(path.join(directory, 'README.md'), 'dirty\n');
   await assert.rejects(

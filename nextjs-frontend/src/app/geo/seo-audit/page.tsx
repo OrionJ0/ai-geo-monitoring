@@ -26,8 +26,8 @@ import { sortPriorities } from '@/utils/seoStagePresentation.cjs';
 import styles from './seo-audit.module.css';
 
 const ACTIVE_JOB_KEY = 'goodie-seo-active-job';
-const EXPECTED_SCORE_VERSION = '2026-07-23-v4';
-const EXPECTED_SCORE_MODEL = 'technical-health-v4';
+const EXPECTED_SCORE_VERSION = '2026-07-31-v5';
+const EXPECTED_SCORE_MODEL = 'technical-health-v5';
 
 const SEVERITY_LABELS = {
   critical: '严重',

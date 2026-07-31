@@ -275,13 +275,13 @@ test('相同事实和评分版本会产生完全相同的评分结果', () => {
   );
 });
 
-test('v4 配置以四阶段覆盖全部计分规则并排除信息性标签', () => {
+test('v5 配置以四阶段覆盖全部计分规则并排除信息性标签', () => {
   const config = validateSeoHealthScoreConfig(defaultSeoHealthScoreConfig, defaultSeoAuditRules);
   const assignedRuleIds = config.stages.flatMap((stage) => stage.ruleIds);
   const scoringRuleIds = Object.keys(defaultSeoAuditRules.checks)
     .filter((id) => !config.informationalRuleIds.includes(id));
 
-  assert.equal(config.version, '2026-07-23-v4');
+  assert.equal(config.version, '2026-07-31-v5');
   assert.equal(config.stages.reduce((sum, stage) => sum + stage.budget, 0), 100);
   assert.equal(new Set(assignedRuleIds).size, assignedRuleIds.length);
   assert.deepEqual([...assignedRuleIds].sort(), [...scoringRuleIds].sort());
@@ -289,7 +289,7 @@ test('v4 配置以四阶段覆盖全部计分规则并排除信息性标签', ()
     config.stages.find((stage) => stage.ruleIds.includes('sitemap')).key,
     'access'
   );
-  assert.deepEqual(config.informationalRuleIds, ['search-verification']);
+  assert.deepEqual(config.informationalRuleIds, ['search-verification', 'meta-keywords']);
 });
 
 test('v4 配置会拒绝不可维护的阻断阈值与重复爬虫 key', () => {
@@ -342,6 +342,37 @@ test('问题优先级先列阻断，再按严重级别排列', () => {
   assert.equal(result.priorities[0].kind, 'blocker');
   assert.equal(result.priorities[1].stage, 'access');
   assert.equal(result.priorities[2].stage, 'content');
+});
+
+test('聚合问题使用受影响页面中的最高严重级别作为代表', () => {
+  const shortTitle = instance('title', 'failed', {
+    url: 'https://example.com/short',
+    isHomepage: false
+  });
+  shortTitle.check.severity = 'low';
+  shortTitle.check.finding = '页面标题过短';
+  const missingTitle = instance('title', 'failed', {
+    url: 'https://example.com/missing',
+    isHomepage: false
+  });
+  missingTitle.check.severity = 'high';
+  missingTitle.check.finding = '缺少页面标题';
+
+  const result = calculateTechnicalHealth({
+    instances: [
+      instance('http-status', 'passed'),
+      instance('indexability', 'passed'),
+      shortTitle,
+      missingTitle,
+      instance('viewport', 'passed')
+    ],
+    rules: TEST_RULES,
+    scoreConfig: TEST_SCORE_CONFIG
+  });
+  const titleIssue = result.issues.find((issue) => issue.id === 'title');
+
+  assert.equal(titleIssue.severity, 'high');
+  assert.equal(titleIssue.finding, '缺少页面标题');
 });
 
 test('按严重级别优先于实际扣分排列', () => {

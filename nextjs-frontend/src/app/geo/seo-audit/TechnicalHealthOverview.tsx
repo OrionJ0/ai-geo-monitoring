@@ -67,15 +67,15 @@ function reportScope(report) {
 
 export default function TechnicalHealthOverview({ report }) {
   const health = report.health;
-  const isV4 = report.scoreModel === 'technical-health-v4' && health;
-  const status = isV4 ? health.status : report.grade;
+  const isTechnicalHealth = ['technical-health-v4', 'technical-health-v5'].includes(report.scoreModel) && health;
+  const status = isTechnicalHealth ? health.status : report.grade;
   const tone = scoreTone(status, report.score);
-  const stages = isV4 && Array.isArray(health.stages) && health.stages.length
+  const stages = isTechnicalHealth && Array.isArray(health.stages) && health.stages.length
     ? health.stages
     : STAGE_FALLBACK;
-  const blockers = isV4 && Array.isArray(health.blockers) ? health.blockers : [];
-  const unknownReasons = isV4 && Array.isArray(health.unknownReasons) ? health.unknownReasons : [];
-  const bottleneck = isV4 ? health.bottleneck : null;
+  const blockers = isTechnicalHealth && Array.isArray(health.blockers) ? health.blockers : [];
+  const unknownReasons = isTechnicalHealth && Array.isArray(health.unknownReasons) ? health.unknownReasons : [];
+  const bottleneck = isTechnicalHealth ? health.bottleneck : null;
   const hasScore = report.score !== null
     && report.score !== undefined
     && Number.isFinite(Number(report.score));
@@ -110,7 +110,7 @@ export default function TechnicalHealthOverview({ report }) {
           </div>
         </div>
         <span className={styles.healthStatus}>{STATUS_LABELS[status] || '旧版评分'}</span>
-        {isV4 ? (
+        {isTechnicalHealth ? (
           <p>
             {bottleneck
               ? <>主要瓶颈：<b>{bottleneck.label}</b></>

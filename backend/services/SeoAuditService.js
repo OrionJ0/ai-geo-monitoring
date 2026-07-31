@@ -5,10 +5,15 @@ const {
   validateSeoAuditRules,
   validateSeoHealthScoreConfig
 } = require('../config/seoAuditRules');
-const { evaluateCrawlerAccess } = require('./RobotsAccessService');
+const {
+  auditCrawlerDisallowedError,
+  evaluateAuditCrawlerAccess,
+  evaluateCrawlerAccess
+} = require('./RobotsAccessService');
 const {
   calculateTechnicalHealth,
-  detectTechnicalHealthBlockers
+  detectTechnicalHealthBlockers,
+  summarizeInformationalChecks
 } = require('./SeoHealthScoreService');
 const {
   assertNormalResponse,
@@ -240,13 +245,42 @@ function createSeoAuditService({
   const createCheck = (input) => {
     const configuredRule = rules.checks[input.id];
     if (!configuredRule) throw new Error(`SEO 规则配置缺少检查项 ${input.id}`);
-    return buildCheck({ ...input, ...configuredRule });
+    return buildCheck({
+      ...input,
+      ...configuredRule,
+      severity: input.severity || configuredRule.severity
+    });
   };
 
   return {
     async audit(inputUrl) {
       const requestedUrl = normalizeWebsiteUrl(inputUrl);
-      const response = await client.fetchPage(requestedUrl);
+      const robotsByOrigin = new Map();
+      const robotsForTarget = (url) => {
+        const targetOrigin = new URL(url).origin;
+        if (!robotsByOrigin.has(targetOrigin)) {
+          robotsByOrigin.set(
+            targetOrigin,
+            probeTrustedResource(client, `${targetOrigin}/robots.txt`, 'robots')
+          );
+        }
+        return robotsByOrigin.get(targetOrigin);
+      };
+      const auditPermissionFor = async (url) => evaluateAuditCrawlerAccess({
+        robotsResult: await robotsForTarget(url),
+        targetUrl: url
+      });
+      const assertEntryRequestAllowed = async (url) => {
+        const permission = await auditPermissionFor(url);
+        if (permission.status === 'blocked') {
+          throw auditCrawlerDisallowedError(permission);
+        }
+        return true;
+      };
+      await assertEntryRequestAllowed(requestedUrl);
+      const response = await client.fetchPage(requestedUrl, {
+        beforeUrlRequest: assertEntryRequestAllowed
+      });
       assertNormalResponse(response, 'page');
       const finalUrl = response.finalUrl || requestedUrl;
       const $ = cheerio.load(response.html || '');
@@ -409,7 +443,7 @@ function createSeoAuditService({
           : 'Open Graph 信息不完整';
 
       const [robotsResult, sitemapResult] = await Promise.all([
-        probeTrustedResource(client, `${origin}/robots.txt`, 'robots'),
+        robotsForTarget(finalUrl),
         probeTrustedResource(client, `${origin}/sitemap.xml`, 'sitemap')
       ]);
       const robotsAnalysis = analyzeRobots(robotsResult);
@@ -523,6 +557,7 @@ function createSeoAuditService({
         createCheck({
           id: 'title', category: 'metadata', title: '页面标题', finding: titleFinding,
           passed: titlePassed,
+          severity: titleElements.length === 0 || !title ? 'high' : 'low',
           value: `标题长度：${title.length} 字符${title ? ` · ${title}` : ''}`,
           description: '标题用于概括页面主题，并常作为搜索结果标题。',
           recommendation: title ? '将标题调整为 10–60 个字符，并自然包含页面核心主题。' : '添加唯一且能准确概括页面主题的 title。'
@@ -530,6 +565,7 @@ function createSeoAuditService({
         createCheck({
           id: 'meta-description', category: 'metadata', title: 'Meta 描述', finding: descriptionFinding,
           passed: descriptionPassed,
+          severity: descriptionElements.length === 0 || !description ? 'medium' : 'low',
           value: `描述长度：${description.length} 字符`,
           description: '描述常用于搜索结果摘要，影响用户是否点击。',
           recommendation: description ? '将描述调整为 50–160 个字符，清楚说明页面价值。' : '添加 50–160 个字符的独特页面描述。'
@@ -692,11 +728,15 @@ function createSeoAuditService({
         rules,
         scoreConfig: scoring
       });
+      const informationalChecks = summarizeInformationalChecks({
+        instances: checks.map((check) => ({ url: finalUrl, isHomepage, check })),
+        ruleIds: scoring.informationalRuleIds
+      });
 
       return {
         mode: 'page',
         scoreVersion: scoring.version,
-        scoreModel: 'technical-health-v4',
+        scoreModel: 'technical-health-v5',
         ruleVersion: rules.version,
         requestedUrl,
         finalUrl,
@@ -745,6 +785,7 @@ function createSeoAuditService({
         crawlerAccess,
         health,
         priorities: health.priorities,
+        informationalChecks,
         categories
       };
     }

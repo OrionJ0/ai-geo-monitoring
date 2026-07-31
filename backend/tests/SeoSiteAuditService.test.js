@@ -94,11 +94,11 @@ test('runs a bounded entry, robots and default sitemap preflight before discover
     }
   );
   assert.deepEqual(calls, [
-    ['page', 'https://example.com/'],
     ['probe', 'https://example.com/robots.txt', {
       expectedKind: 'robots',
       requestKind: 'robots'
     }],
+    ['page', 'https://example.com/'],
     ['probe', 'https://example.com/sitemap.xml', {
       expectedKind: 'sitemap',
       requestKind: 'sitemap'
@@ -184,8 +184,8 @@ test('discovers and audits unique same-origin pages from links and recursive sit
   assert.equal(report.site.auditedPages, 5);
   assert.equal(report.site.failedPages, 0);
   assert.equal(report.site.truncated, false);
-  assert.equal(report.scoreVersion, '2026-07-23-v4');
-  assert.equal(report.scoreModel, 'technical-health-v4');
+  assert.equal(report.scoreVersion, '2026-07-31-v5');
+  assert.equal(report.scoreModel, 'technical-health-v5');
   assert.equal(report.score, report.health.score);
   assert.equal(report.grade, report.health.status);
   assert.equal(report.health.stages.reduce((sum, stage) => sum + stage.budget, 0), 100);
@@ -474,6 +474,73 @@ test('records a child redirect to another origin without scoring the external bo
   );
 });
 
+test('checks destination robots before following a child redirect to another origin', async () => {
+  let externalPageRequests = 0;
+  let externalRobotsRequests = 0;
+  const siteClient = createSeoSiteClient({
+    minOriginIntervalMs: 0,
+    resolveHostname: async () => [{ address: '93.184.216.34', family: 4 }],
+    request: async ({ url }) => {
+      const parsed = new URL(url);
+      if (parsed.origin === 'https://outside.example') {
+        if (parsed.pathname === '/robots.txt') {
+          externalRobotsRequests += 1;
+          return {
+            status: 200,
+            headers: { 'content-type': 'text/plain' },
+            data: 'User-agent: GoodieAI-SEO-Audit\nDisallow: /secret'
+          };
+        }
+        externalPageRequests += 1;
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+          data: '<html><body>must not be requested</body></html>'
+        };
+      }
+      if (parsed.pathname === '/robots.txt') {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+          data: 'User-agent: GoodieAI-SEO-Audit\nAllow: /'
+        };
+      }
+      if (parsed.pathname === '/') {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+          data: htmlPage('https://example.com/', ['/leave']).html
+        };
+      }
+      if (parsed.pathname === '/leave') {
+        return {
+          status: 302,
+          headers: { location: 'https://outside.example/secret' },
+          data: ''
+        };
+      }
+      return { status: 404, headers: { 'content-type': 'text/plain' }, data: '' };
+    }
+  });
+
+  const report = await createSeoSiteAuditService({
+    siteClient,
+    renderService: {
+      async sample() {
+        return { status: 'unavailable', reason: 'test', samples: [] };
+      }
+    }
+  }).audit('https://example.com/');
+
+  assert.equal(externalRobotsRequests, 1);
+  assert.equal(externalPageRequests, 0);
+  assert.equal(report.site.robotsPolicy.skippedCount, 1);
+  assert.equal(
+    report.site.robotsPolicy.skippedPages[0].url,
+    'https://outside.example/secret'
+  );
+});
+
 test('continues after page failures and aggregates issues with affected URLs', async () => {
   const root = htmlPage('https://example.com/', ['/missing-title', '/unavailable']);
   const missingTitle = htmlPage('https://example.com/missing-title');
@@ -640,7 +707,6 @@ test('stops a site audit when robots explicitly disallows the submitted entry', 
     }
   );
   assert.deepEqual(calls, [
-    ['page', 'https://example.com/private/'],
     ['probe', 'https://example.com/robots.txt', 'robots']
   ]);
 });

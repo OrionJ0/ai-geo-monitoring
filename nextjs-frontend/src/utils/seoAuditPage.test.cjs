@@ -91,7 +91,7 @@ test('SEO audit checks the live backend score contract before creating a report'
   const source = fs.readFileSync(pagePath, 'utf8');
 
   assert.match(source, /get\('\/api\/seo-audits\/runtime'/);
-  assert.match(source, /2026-07-23-v4/);
+  assert.match(source, /2026-07-31-v5/);
   assert.match(source, /后端评分服务仍为旧版/);
 });
 

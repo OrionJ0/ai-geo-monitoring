@@ -18,9 +18,84 @@ function circuitError(classification) {
   return error;
 }
 
+function createSeoAuditOriginCoordinator({
+  wafCooldownMs = 5 * 60 * 1000,
+  defaultRateLimitCooldownMs = 60 * 1000
+} = {}) {
+  const origins = new Map();
+
+  const originState = (url) => {
+    const origin = new URL(url).origin;
+    if (!origins.has(origin)) {
+      origins.set(origin, {
+        nextStartAt: 0,
+        circuit: null,
+        circuitUntil: 0,
+        participants: new Set()
+      });
+    }
+    return origins.get(origin);
+  };
+
+  return {
+    async beforeRequest({ policyId, url, intervalMs, now, wait }) {
+      const currentTime = now();
+      origins.forEach((candidate, origin) => {
+        if (candidate.circuit && candidate.circuitUntil <= currentTime) {
+          candidate.circuit = null;
+          candidate.circuitUntil = 0;
+        }
+        if (
+          candidate.participants.size === 0
+          && !candidate.circuit
+          && candidate.nextStartAt <= currentTime
+        ) {
+          origins.delete(origin);
+        }
+      });
+      const state = originState(url);
+      state.participants.add(policyId);
+      if (state.circuit) throw circuitError(state.circuit);
+
+      const reservedStartAt = Math.max(currentTime, state.nextStartAt);
+      state.nextStartAt = reservedStartAt + intervalMs;
+      if (reservedStartAt > currentTime) {
+        await wait(reservedStartAt - currentTime);
+      }
+      if (state.circuit) throw circuitError(state.circuit);
+    },
+
+    observeResponse({ policyId, url, classification, now }) {
+      if (!['waf_blocked', 'rate_limited'].includes(classification?.outcome)) return;
+      const state = originState(url);
+      state.participants.add(policyId);
+      state.circuit = classification;
+      const currentTime = now();
+      const explicitRetryAt = Date.parse(classification.retryAt || '');
+      const retryAfterMs = Number.isFinite(classification.retryAfterMs)
+        ? classification.retryAfterMs
+        : defaultRateLimitCooldownMs;
+      state.circuitUntil = Number.isFinite(explicitRetryAt) && explicitRetryAt > currentTime
+        ? explicitRetryAt
+        : currentTime + (
+          classification.outcome === 'rate_limited'
+            ? retryAfterMs
+            : wafCooldownMs
+        );
+    },
+
+    release(policyId) {
+      origins.forEach((state) => {
+        state.participants.delete(policyId);
+      });
+    }
+  };
+}
+
 function createSeoAuditCrawlerPolicy({
   minOriginIntervalMs = 250,
   originIntervalOverrides = {},
+  originCoordinator = null,
   now = Date.now,
   wait = defaultWait
 } = {}) {
@@ -37,6 +112,7 @@ function createSeoAuditCrawlerPolicy({
   );
 
   const origins = new Map();
+  const policyId = Symbol('seo-audit-policy');
   const diagnostics = {
     networkRequests: {
       total: 0,
@@ -67,11 +143,21 @@ function createSeoAuditCrawlerPolicy({
       const state = originState(url);
       if (state.circuit) throw circuitError(state.circuit);
 
-      const currentTime = now();
-      const reservedStartAt = Math.max(currentTime, state.nextStartAt);
-      state.nextStartAt = reservedStartAt + intervalFor(url);
-      if (reservedStartAt > currentTime) {
-        await wait(reservedStartAt - currentTime);
+      if (originCoordinator) {
+        await originCoordinator.beforeRequest({
+          policyId,
+          url,
+          intervalMs: intervalFor(url),
+          now,
+          wait
+        });
+      } else {
+        const currentTime = now();
+        const reservedStartAt = Math.max(currentTime, state.nextStartAt);
+        state.nextStartAt = reservedStartAt + intervalFor(url);
+        if (reservedStartAt > currentTime) {
+          await wait(reservedStartAt - currentTime);
+        }
       }
 
       if (state.circuit) throw circuitError(state.circuit);
@@ -92,6 +178,12 @@ function createSeoAuditCrawlerPolicy({
         ...classification,
         retryAt
       };
+      originCoordinator?.observeResponse({
+        policyId,
+        url,
+        classification: state.circuit,
+        now
+      });
       diagnostics.stopReason = classification.outcome;
     },
 
@@ -113,10 +205,15 @@ function createSeoAuditCrawlerPolicy({
         renderAttempts: diagnostics.renderAttempts,
         stopReason: diagnostics.stopReason
       };
+    },
+
+    close() {
+      originCoordinator?.release(policyId);
     }
   };
 }
 
 module.exports = {
+  createSeoAuditOriginCoordinator,
   createSeoAuditCrawlerPolicy
 };
