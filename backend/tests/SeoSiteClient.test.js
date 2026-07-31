@@ -105,6 +105,21 @@ test('classifies responses by expected resource kind without mistaking a legitim
   }
 });
 
+test('classifies a large minified HTML page without rescanning from every quote', () => {
+  const body = `<html><body>${'<a href="/">normal content</a>'.repeat(9_000)}</body></html>`;
+  const startedAt = process.hrtime.bigint();
+
+  const result = classifyResponse({
+    statusCode: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body
+  }, 'page');
+
+  const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+  assert.equal(result.outcome, 'normal');
+  assert.ok(elapsedMs < 250, `响应分类耗时 ${elapsedMs.toFixed(1)}ms，疑似重复扫描正文`);
+});
+
 test('classifies the current TencentEdgeOne script-only challenge without trusting the 200 status', () => {
   const currentEdgeOneChallenge = {
     statusCode: 200,

@@ -265,7 +265,7 @@ function classifyResponse(response, expectedKind = 'link_probe') {
 
   const edgeOneSignals = [
     /<meta\b[^>]*(?:name|id)\s*=\s*["']EO-Bot-Js-Token["']/i,
-    /(?:document\.cookie\s*=|["'])[^;\n]*EO_BOT_TOKEN\s*=/i,
+    /EO_BOT_TOKEN\s*=/i,
     /(?:solveChallenge\s*\(|__EDGEONE_TEST_CHALLENGE__\s*=)/i
   ].filter((pattern) => pattern.test(body));
   const currentEdgeOneScriptChallenge = /tencentedgeone/i.test(headerValue(headers, 'server'))
