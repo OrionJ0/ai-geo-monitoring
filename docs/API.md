@@ -150,19 +150,19 @@ Authorization: Bearer <token>
   - 请求体：`url` 必填，可省略 `http://` 或 `https://`
   - 返回：新保存的 `auditId`、最终 URL、状态码、响应时间、0–100 基础分、问题统计、优先修复项、六类检查结果与搜索/分享预览
   - 检查项：每项包含 `title`（检查对象）、`finding`（具体发现）、`status`、`severity`、`value`（检测事实）、`description`（影响）和 `recommendation`（建议）
-  - 内容有效性：`robots.txt` 和 Sitemap 必须含有效内容；Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 与图片 Alt 不会因空标签而通过；`robots.txt` 中声明的自定义 Sitemap 会被实际抓取并校验
+  - 内容有效性：`robots.txt` 和 Sitemap 必须含有效内容；Title、Meta Description、Canonical、H1、JSON-LD、Open Graph 与图片 Alt 不会因空标签而通过；根 `/sitemap.xml` 不可用或无效时，才会继续实际抓取并校验 `robots.txt` 中最多 3 个自定义 Sitemap，已有一个有效 Sitemap 后停止额外可用性探测
   - 爬虫权限：响应的 `crawlerAccess` 按当前页面路径分别展示 Google、Bing、百度和重要 AI 爬虫在 `robots.txt` 中的允许、禁止或无法判断状态；搜索与 AI 搜索爬虫纳入评分，用户触发访问及 AI 训练/数据使用策略不计分
   - 判定边界：`robots.txt` 返回普通 4xx 或内容为空表示“未声明抓取限制”，但独立的 `robots-txt` 有效性检查仍会报缺失/空内容；429、5xx、网络失败或非空但无法解析的文件返回“无法判断”。允许状态不能证明真实 UA 已成功访问、收录或引用
   - 响应闸门：页面、robots 和 Sitemap 在解析前按预期类型分类；WAF、429、普通 HTTP 错误或不可分析入口不会生成成功报告。GoodieAI 出口被 WAF 拦截不能据此推断搜索引擎也被拦截
   - 搜索平台标签：固定从站点首页分别检查 Google、Bing、百度 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不识别 DNS 或验证文件方式
-  - 评分配置：响应包含 `scoreVersion`、`ruleVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前规则版本 `2026-07-30-v5` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7；图片仅在缺少 `alt` 属性时失败，显式 `alt=""` 作为可能的装饰图提示，不直接扣分
+  - 评分配置：响应包含 `scoreVersion`、`ruleVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前规则版本 `2026-07-31-v6` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7；图片仅在缺少 `alt` 属性时失败，显式 `alt=""` 作为可能的装饰图提示，不直接扣分
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：默认拒绝本机和私网目标。内部部署设置 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=true` 后，允许所有已登录用户检测后端 `localhost`、loopback 和 RFC1918 IPv4 字面地址；单次任务只能访问提交 URL 的精确来源。带用户名/密码的网址、链路本地/云元数据等特殊地址始终拒绝
 - `POST /api/seo-audits/site` 创建全站异步检测任务
   - 请求体：`url` 必填；以该 URL 为入口，只发现同源 HTTP/HTTPS 页面
   - 返回：`202 Accepted`，`data.id` 为任务编号，初始 `status` 为 `queued`，`progress.phase` 为 `queued`
   - 发现来源：真实入口 URL、页面内链、根目录 `/sitemap.xml`、robots 声明的 Sitemap；支持 Sitemap index、片段移除，并按重定向后的 resolved URL 合并页面；报告保留 requested URL、final URL 和重定向别名
-  - 抓取限制：默认上限 200 页、页面并发 2、同一 origin 请求启动间隔至少 500ms、最多读取 20 个 Sitemap、递归深度 3；达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
+  - 抓取限制：默认上限 200 页、页面并发 4、同一 origin 请求启动间隔至少 250ms、最多读取 20 个 Sitemap、递归深度 3；达到页面预算后不再递归更多 Sitemap。链接探活优先检查未覆盖的站内目标，预算为至少 10 个、每个成功页面 2 个、全任务最多 50 个网络探活；已检测页面的状态直接复用，不占探活预算。达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
   - 有界预检：递归 Sitemap 与页面循环前依次请求入口、robots 和一个默认 Sitemap；确认 WAF 或 429 后停止本任务对该 origin 的后续请求
   - 请求诊断：成功报告的 `site.crawlDiagnostics` 固定记录页面、robots、Sitemap、链接探活请求数、重定向跳数、逻辑渲染尝试数和完成原因
   - 专项报告：`report.sitewide.version` 当前为 `sitewide-audit-v4`；`sitemap-coverage` 独立比较有效 Sitemap 页面清单与已知可索引页面，没有有效页面地址时返回 `unknown`，疑似孤儿页与内链来源质量也不会误报为通过

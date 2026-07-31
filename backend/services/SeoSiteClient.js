@@ -371,7 +371,7 @@ function createSeoSiteClient({
   request = axios.request,
   allowedPrivateOrigin = '',
   policy,
-  minOriginIntervalMs = 500,
+  minOriginIntervalMs = 250,
   now = Date.now,
   wait
 } = {}) {

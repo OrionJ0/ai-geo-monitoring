@@ -634,6 +634,75 @@ test('respects page limit, reports truncation and emits crawl progress', async (
   });
 });
 
+test('bounds auxiliary discovery work to the requested page scope', async () => {
+  const internalLinks = Array.from({ length: 30 }, (_, index) => `/internal-${index + 1}`);
+  const externalLinks = Array.from(
+    { length: 30 },
+    (_, index) => `https://outside-${index + 1}.example/page`
+  );
+  const probes = [];
+  const siteClient = {
+    async fetchPage(url) {
+      return htmlPage(url, [...externalLinks, ...internalLinks]);
+    },
+    async probe(url, options) {
+      probes.push({ url, kind: options?.requestKind });
+      if (url.endsWith('/robots.txt')) {
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'text/plain' },
+          body: 'User-agent: *\nAllow: /\nSitemap: https://example.com/declared-index.xml'
+        };
+      }
+      if (url.endsWith('/sitemap.xml')) {
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'application/xml' },
+          body: '<urlset><url><loc>https://example.com/from-sitemap</loc></url></urlset>'
+        };
+      }
+      if (url.endsWith('/declared-index.xml')) {
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'application/xml' },
+          body: '<sitemapindex><sitemap><loc>https://example.com/child.xml</loc></sitemap></sitemapindex>'
+        };
+      }
+      return {
+        statusCode: 200,
+        finalUrl: url,
+        headers: { 'content-type': 'text/html' },
+        body: ''
+      };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({
+    siteClient,
+    renderService: {
+      async sample() {
+        return { status: 'unavailable', reason: 'test', samples: [] };
+      }
+    }
+  }).audit('https://example.com/', { maxPages: 1 });
+
+  const linkProbes = probes.filter((entry) => entry.kind === 'link_probe');
+  assert.equal(
+    probes.some((entry) => entry.url === 'https://example.com/declared-index.xml'),
+    false
+  );
+  assert.equal(linkProbes.length, 10);
+  assert.equal(linkProbes.every((entry) => entry.url.startsWith('https://example.com/')), true);
+  assert.deepEqual(report.sitewide.broken_links.coverage, {
+    checked_targets: 10,
+    complete: false
+  });
+  assert.equal(
+    report.sitewide.checks.find((check) => check.id === 'broken-links').status,
+    'unknown'
+  );
+});
+
 test('probes internal link targets outside the audited page limit', async () => {
   const pages = new Map([
     ['https://example.com/', htmlPage('https://example.com/', ['/a', '/missing'])],

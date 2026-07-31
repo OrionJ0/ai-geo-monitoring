@@ -433,7 +433,10 @@ function createSeoAuditService({
         `无法判断：${unknownScoringCrawlers.length} 个`
       ].join(' · ');
       const defaultSitemapUrl = `${origin}/sitemap.xml`;
-      const declaredSitemapUrls = [...String(robotsResult.body || '').matchAll(/^sitemap\s*:\s*(\S+)/gim)]
+      const defaultSitemapAnalysis = analyzeSitemap(sitemapResult);
+      const declaredSitemapUrls = (defaultSitemapAnalysis.passed
+        ? []
+        : [...String(robotsResult.body || '').matchAll(/^sitemap\s*:\s*(\S+)/gim)]
         .map((match) => match[1])
         .filter((value, index, values) => {
           try {
@@ -445,7 +448,7 @@ function createSeoAuditService({
             return false;
           }
         })
-        .slice(0, 3);
+        .slice(0, 3));
       const declaredSitemapResults = await Promise.all(declaredSitemapUrls.map(async (url) => ({
         url,
         result: await probeTrustedResource(client, url, 'sitemap')

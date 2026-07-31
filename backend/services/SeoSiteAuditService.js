@@ -359,7 +359,11 @@ function createSeoSiteAuditService({
       const sitemapUrls = new Set();
       const sitemapReferences = [];
 
-      while (sitemapQueue.length && visitedSitemaps.size < rules.crawl.sitemapLimit) {
+      while (
+        sitemapQueue.length
+        && visitedSitemaps.size < rules.crawl.sitemapLimit
+        && discovered.length < maxPages
+      ) {
         const current = sitemapQueue.shift();
         if (visitedSitemaps.has(current.url)) continue;
         visitedSitemaps.add(current.url);
@@ -588,9 +592,24 @@ function createSeoSiteAuditService({
       });
       const eligibleLinkTargets = Array.from(linkTargets.values())
         .filter((entry) => !privateTarget || entry.internal);
-      const linkEntries = eligibleLinkTargets.slice(0, rules.crawl.linkProbeLimit);
+      const checkedPageTargets = eligibleLinkTargets.filter((entry) => (
+        entry.internal && pageByUrl.has(entry.url)
+      ));
+      const checkedPageTargetUrls = new Set(checkedPageTargets.map((entry) => entry.url));
+      const probeBudget = Math.min(
+        rules.crawl.linkProbeLimit,
+        Math.max(
+          rules.crawl.linkProbeMinimum,
+          successfulPages.length * rules.crawl.linkProbesPerPage
+        )
+      );
+      const probeTargets = eligibleLinkTargets
+        .filter((entry) => !checkedPageTargetUrls.has(entry.url))
+        .sort((left, right) => Number(right.internal) - Number(left.internal))
+        .slice(0, probeBudget);
+      const linkEntries = [...checkedPageTargets, ...probeTargets];
       const linkInventoryComplete = (
-        eligibleLinkTargets.length <= rules.crawl.linkProbeLimit
+        eligibleLinkTargets.length <= linkEntries.length
         && (!privateTarget || eligibleLinkTargets.length === linkTargets.size)
       );
       const linkChecks = [];

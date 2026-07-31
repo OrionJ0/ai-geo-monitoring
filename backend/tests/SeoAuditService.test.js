@@ -199,7 +199,7 @@ test('does not treat empty robots and sitemap responses as healthy', async () =>
   assert.equal(sitemap.severity, 'high');
   assert.equal(sitemap.weight, 7);
   assert.equal(report.scoreVersion, '2026-07-23-v4');
-  assert.equal(report.ruleVersion, '2026-07-30-v5');
+  assert.equal(report.ruleVersion, '2026-07-31-v6');
 });
 
 test('does not parse HTML error pages as robots or sitemap resources', async () => {
@@ -257,11 +257,11 @@ test('reports transient robots and sitemap probe failures as unknown instead of 
   assert.equal(report.score, null);
 });
 
-test('uses the polite crawl defaults for task-local request control', () => {
+test('uses bounded fast defaults for task-local request control', () => {
   const { defaultSeoAuditRules } = require('../config/seoAuditRules');
 
-  assert.equal(defaultSeoAuditRules.crawl.concurrency, 2);
-  assert.equal(defaultSeoAuditRules.crawl.minOriginIntervalMs, 500);
+  assert.equal(defaultSeoAuditRules.crawl.concurrency, 4);
+  assert.equal(defaultSeoAuditRules.crawl.minOriginIntervalMs, 250);
 });
 
 test('explains that a successful sitemap response contains no valid page addresses', async () => {

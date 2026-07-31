@@ -19,7 +19,7 @@ function circuitError(classification) {
 }
 
 function createSeoAuditCrawlerPolicy({
-  minOriginIntervalMs = 500,
+  minOriginIntervalMs = 250,
   now = Date.now,
   wait = defaultWait
 } = {}) {
