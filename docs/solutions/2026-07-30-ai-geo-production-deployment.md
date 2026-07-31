@@ -21,7 +21,8 @@ Web 采集全部可用。百度营销仍缺真实权限和账户，不能认定�
 ## 范围与版本
 
 - 生产目录：`/opt/ai-geo-monitoring`
-- 生产域名：`https://insight.gato.com.cn`
+- 验收时生产域名：`https://insight.gato.com.cn`（历史记录；已于
+  2026-07-31 退役，当前入口见本文末“生产域名切换”）
 - 基线提交：`dca4cae8aac0f4fb5561d06965cf0b33ede99d9c`
 - systemd 提交：`93229d9bda28f23822adeb7337413a1f9f5c0318`
 - 受信代理提交：`e29166e0b0ce2a6420aeda177972d31f718ced0d`
@@ -105,7 +106,7 @@ Web 采集全部可用。百度营销仍缺真实权限和账户，不能认定�
 
 ### DeepSeek 与豆包 Web
 
-2026-07-30 18:25—18:30 CST，从用户真实访问入口
+2026-07-30 18:25—18:30 CST，从当时的用户真实访问入口（现已退役）
 `https://insight.gato.com.cn` 执行问题集生产验收。服务器图形桌面仍只承载
 DeepSeek/豆包专用 Chrome 的账户登录、验证和维护，不是 AI-GEO 用户入口。
 
@@ -217,3 +218,88 @@ DeepSeek API 结构化分析 → 独立运行报告”链路已由 4 个样本�
 - [单机部署与回滚说明](../SINGLE_HOST_DEPLOYMENT.md) — `docs/SINGLE_HOST_DEPLOYMENT.md`
 
 服务器 journald、Nginx access log 和现场命令输出属于生产实时证据，本报告仅记录汇总结论，不复制可能包含用户活动信息的原始日志。
+
+## 2026-07-31 稳定性修复部署补充
+
+### 修复与正式切换
+
+- 正式入口已切换到 `f5138ea17a42`，包含三个连续提交：
+  `f1c2790`（空 `surface_forms` 的受控规范化）、`debbb71`
+  （同一问题集运行修订的进程内重复调度保护）和 `f5138ea`
+  （移除百度营销页面 Ant Design 弃用属性）。
+- `surface_forms` 只有在字段为数组、数组为空、且实体名称逐字出现在原始回答中
+  时，才回填精确实体名称；非数组或回答中没有该实体名称仍然拒绝，不放宽证据
+  约束。
+- 问题集调度以 `run_id:revision` 为进程内活动键，覆盖从立即派发到整个批次结束
+  的生命周期。数据库记录 lease 继续作为跨进程最终防线，没有被删除或替代。
+- 原因复盘确认：此前只有一个后端进程且 `NRestarts=0`。问题集创建后立即派发
+  整批记录，但 30 秒轮询器会把同一运行中尚未轮到的 Web 记录再次视为待派发；
+  `activeRecordIds` 只能保护已经开始执行的记录，不能保护同批次后续排队记录，
+  因而产生 6 次 `record_lease_claim_rejected`。这不是多实例造成。
+
+### 服务器修改台账
+
+| 修改对象 | 影响服务 | 修改与结果 | 验证 | 回滚方法 |
+| --- | --- | --- | --- | --- |
+| `/opt/ai-geo-monitoring` Git 工作树 | AI-GEO 全栈 | 服务器访问 GitHub 超时后，使用两端 SHA-256 一致且 `git bundle verify` 通过的离线 bundle 快进到 `f5138ea`；部署时临时使用同一提交的本机 bare origin，退出 trap 已恢复正式 origin。没有修改官网、Nginx 或 Docker | `git rev-parse --short HEAD=f5138ea`；工作树 `main...origin/main` 且干净；正式 origin 长度与部署前一致 | 在本地对三个提交按逆序执行 `git revert`，推送后重新运行标准部署；不得在服务器使用 `git reset --hard` |
+| `/opt/ai-geo-monitoring/backend/node_modules` | AI-GEO 后端 | 标准部署重新执行 `npm ci` | 后端完整测试 914/914；营销专项 91/91；依赖审计 0 个漏洞 | 回退代码提交后重新执行标准部署，由 lockfile 重建依赖 |
+| `/opt/ai-geo-monitoring/nextjs-frontend/node_modules` 与 `.next` | AI-GEO 前端 | 标准部署重新安装依赖并生成 30 个路由的生产产物 | 前端静态测试 11/11、Playwright 2/2、ESLint 和标准 Next.js Turbopack 生产构建通过 | 回退代码提交后重新执行标准部署，由 lockfile 和源码重建 |
+| `/opt/ai-geo-monitoring/backend/database.latest.sqlite` | SQLite 最新备份 | 标准部署停服务后更新滚动备份；业务库没有删除或重建 | GEO 迁移前后 `quick_check=ok`、无缺列和待迁移语义；营销 4 个版本全部已应用且审计通过 | 如业务库异常，停止 AI-GEO 服务后按 SQLite 恢复流程使用该快照；正常代码回滚不需要数据回滚 |
+| `ai-geo-backend.service`、`ai-geo-frontend.service` | AI-GEO 正式入口 | 标准部署仅停止并重新启动这两个单元；未重启服务器 | 两项均 `active/enabled`、`NRestarts=0`，分别监听 `127.0.0.1:3002/3001`；公网 `/api/ready=200`，约 58 ms | 先回退代码，再由标准部署重启这两个单元；不得操作无关服务 |
+| 后端专用 DeepSeek/豆包 Profile | AI-GEO Web 采集 | 部署后分别通过项目正式登录校验命令启动专用 Chrome，检查真实页面输入区后正常关闭，Profile 保留；没有读取账号密码或浏览器会话数据 | DeepSeek Web 和豆包 Web 均返回登录状态已确认；校验结束无受管 Chrome 残留，后端约 61 MiB、整机可用内存约 2.4 GiB | 无持久配置变更；如需失效会话，只能通过正式管理员入口切换账号，不能删除 Profile |
+
+标准部署于 2026-07-31 11:16—11:18 CST 完成。部署后 journald 未出现
+`record_lease_claim_rejected`、`ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` 或未处理
+异常。部署窗口内未修改或 reload Nginx，未操作 Docker/官网，未重启整台服务器。
+
+### 依赖与系统补丁审计
+
+- 前端全量 `npm audit` 为 9 个 high、0 critical，全部位于 ESLint 开发工具链；
+  生产依赖 `npm audit --omit=dev` 为 0 个漏洞。审计建议涉及 ESLint 主版本变更
+  或不合理降级，未执行 `npm audit fix --force`。
+- GitHub push 仍提示默认分支有 1 critical、1 high 的 Dependabot 告警；本机
+  GitHub CLI 凭据失效，当前无法读取告警明细，因此不能把这两个远端告警标为
+  已解决。
+- Ubuntu 当前有 3 个普通更新：`distro-info-data`、`tzdata-legacy` 和
+  `tzdata`；没有标准仓库安全更新。Ubuntu Pro 未连接，另显示 6 个 ESM Apps
+  更新。`/var/run/reboot-required.pkgs` 仍记录
+  `evolution-data-server`，需要维护窗口才能升级并重启验收；本次未升级、未重启。
+
+### 尚待正式入口验收
+
+- 两个 Web Profile 的登录校验通过不等于正式发问通过。仍需从公网管理员/用户
+  入口重试问题集 #1 的 6 个失败项，确认原 DeepSeek 真实回答可在空
+  `surface_forms` 场景成功结构化、豆包真实提问不再触发验证，并确认本轮没有
+  新增 `record_lease_claim_rejected`。
+- 本机 Chrome 的 AI-GEO 登录会话当前失效，已打开登录页等待用户重新登录；
+  在完成正式入口重试前，整体结论仍保持 `partial`，不能宣称豆包 Web 可用。
+
+## 2026-07-31 生产域名切换
+
+### 当前结论
+
+- 唯一支持的正式入口已切换为 `https://insight.guangtuo.com`。
+- `insight.gato.com.cn` 已退役；本文前面的旧域名只用于还原
+  2026-07-30 当时的验收事实，不再是运行说明。
+- `http://182.254.140.163/` 命中 Nginx 默认站点，不是 AI-GEO；HTTPS 直连
+  IP 也不是支持入口。以后不得用直接 IP 是否出现应用页面判断部署状态。
+- 切换完成后公网首页为 HTTP 200，`/api/ready` 返回 `ready`，TLS 验证通过，
+  HTTP 域名访问重定向到 HTTPS，两个 systemd 服务保持运行。
+- 域名切换只调整 Nginx、证书、前后端环境与前端生产构建。服务器 Git 工作树
+  保持干净且仍为 `f5138ea`，没有在服务器直接修改项目源码，也没有把域名切换
+  误报成代码已经更新到最新 `main`。
+
+### 修改台账
+
+| 修改对象 | 修改与结果 | 验证 | 回滚 |
+| --- | --- | --- | --- |
+| `/etc/nginx/sites-available/insight` | 80/443 的 `server_name` 切到 `insight.guangtuo.com`；80 重定向 HTTPS，443 继续反代 `127.0.0.1:3001` | `nginx -t` 通过；新域名首页与 `/api/ready` 通过 | 恢复切换前备份并重新执行 `nginx -t`；只有旧域名 DNS 和证书重新有效时才可 reload |
+| `/etc/letsencrypt/live/insight.guangtuo.com/` | 签发并启用新域名 Let's Encrypt 证书 | 公网 TLS 校验通过；指定证书续期 dry-run 成功 | Nginx 恢复旧证书路径前必须先确认旧域名仍可解析且证书有效 |
+| `nextjs-frontend/.env.production` | `NEXT_PUBLIC_SITE_URL` 改为 `https://insight.guangtuo.com`，服务端代理继续为 `http://127.0.0.1:3002` | 前端生产构建通过，重启后正式域名可访问 | 恢复旧值后重新构建并重启前端 |
+| `backend/.env` | `BAIDU_MARKETING_REDIRECT_URI` 改为新域名完整 callback；`HOST=127.0.0.1`，同源代理下 `ALLOWED_ORIGINS` 保持空值 | 后端重启后 `/api/ready=ready`，既有百度连接和服务器密文 Token 保留 | 恢复旧 callback 仅适用于旧域名重新启用且百度控制台同步回退的情况 |
+
+百度开发者控制台还必须人工登记
+`https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`。服务器配置
+已完成不等于控制台已经同步；在人工确认前，既有 Token 继续保留，但未来重新
+授权仍视为未验收。当前操作真值以后统一以
+[部署与运维](../DEPLOYMENT.md#当前正式单机实例)为准。

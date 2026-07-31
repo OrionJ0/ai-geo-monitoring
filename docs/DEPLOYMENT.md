@@ -1,5 +1,39 @@
 # 部署与运维
 
+## 当前正式单机实例
+
+> 本节记录 2026-07-31 域名切换完成时已经验证的生产真值。运行状态会变化；
+> 回答“现在是否正常”或“服务器是否最新”前，仍需按本节命令重新检查。
+
+| 项目 | 当前值与边界 |
+| --- | --- |
+| 唯一支持的公网入口 | `https://insight.guangtuo.com` |
+| DNS | `insight.guangtuo.com` 的 A 记录指向 `182.254.140.163` |
+| HTTP 域名访问 | `http://insight.guangtuo.com` 由 Nginx 重定向到 HTTPS |
+| 直接 IP 访问 | `http://182.254.140.163/` 命中 Nginx 默认站点，不是本应用；HTTPS 直连 IP 存在证书主机名不匹配，也不是支持入口 |
+| 已退役域名 | `insight.gato.com.cn`；只可在明确标注日期的历史验收记录中作为历史事实出现 |
+| Nginx 活动配置 | `/etc/nginx/sites-available/insight`，80/443 的 `server_name` 均为 `insight.guangtuo.com`，反代到 `127.0.0.1:3001` |
+| TLS | Let's Encrypt 证书目录 `/etc/letsencrypt/live/insight.guangtuo.com/`；切换时已通过续期 dry-run |
+| 前端生产环境 | `/opt/ai-geo-monitoring/nextjs-frontend/.env.production`：`NEXT_PUBLIC_SITE_URL=https://insight.guangtuo.com`、`API_BASE_URL=http://127.0.0.1:3002` |
+| 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
+| 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
+| 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
+| 切换时源码版本 | 服务器 `HEAD=f5138ea`。域名切换是基础设施变更，没有同步之后的 `main`；是否最新必须现场比较服务器 `HEAD` 与 `origin/main` |
+
+2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
+通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
+永久健康承诺。重新检查时使用：
+
+```bash
+curl -f https://insight.guangtuo.com/
+curl -f https://insight.guangtuo.com/api/ready
+ssh ubuntu@182.254.140.163 'cd /opt/ai-geo-monitoring && git status --short --branch && git rev-parse HEAD && git rev-parse origin/main'
+```
+
+百度开发者控制台中的 callback 属于外部人工配置。截至本次文档收敛，服务器
+环境已经切换，但控制台新地址尚未得到人工确认；完成确认前，现有服务器密文
+Token 应继续保留，但不得宣称在新域名上重新授权已经通过。
+
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`
 - 服务器具备 Nginx 或其他反向代理能力
@@ -119,6 +153,8 @@ server {
 - 问题集可靠性迁移前先生成可恢复的数据库备份并执行 `PRAGMA quick_check`；迁移后运行 `cd backend && npm run audit:run-ownership`，确认新运行无悬空归属、重复槽位或完整性错误。未完成生产迁移和回滚确认时不得把需求标记为已关闭。
 - AI 平台配置：管理员登录 `/admin/settings`，人工填写 API Key 和供应商明确支持的模型请求参数，再分别执行“测试连接”和“检测联网能力”。腾讯混元还需先在 TokenHub“工具管理”领取联网搜索免费资源包或开通后付费；普通对话成功但没有 `search_results` 时仍是“证据不足”
 - 登录验证：使用默认管理员登录并立即修改密码（见下方安全建议）
+- 当前正式实例只通过 `https://insight.guangtuo.com` 验收；不要用直接 IP 的默认
+  Nginx 页面替代域名、TLS 和 Host 路由检查。
 
 ### 营销模块发布顺序
 

@@ -29,6 +29,7 @@ supabase/
 
 # local verification and tool artifacts
 /output/
+/nextjs-frontend/output/
 /tmp/
 /work/
 /test-results/

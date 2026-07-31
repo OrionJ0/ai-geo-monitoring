@@ -1,6 +1,10 @@
 # Next.js Frontend
 
-这是 AI GEO Monitoring System 的 Next.js 前端。
+这是 GoodieAI 只读市场数据监控系统的 Next.js 前端。GEO/SEO 是当前正式数据工作流，百度营销与百度统计是页面入口已展示但真实数据仍受白名单保护的试点；不得将当前页面范围解释为项目仍是单一 GEO/SEO 监测系统。完整定位和实施状态见根目录 `README.md` 与 `CONTEXT.md`。
+
+当前唯一支持的生产入口是 `https://insight.guangtuo.com`。旧域名已退役，直接
+访问 `http://182.254.140.163/` 只会命中 Nginx 默认站点；完整运行真值见
+`../docs/DEPLOYMENT.md#当前正式单机实例`。
 
 ## Getting Started
 

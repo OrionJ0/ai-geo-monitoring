@@ -4,7 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI GEO Monitoring System for Generative Engine Optimization, with a Next.js 16.2.12 frontend (App Router) and Express.js backend. The system monitors brand visibility across AI platforms (豆包, DeepSeek, Kimi, 千问) by analyzing AI-generated responses for keyword mentions.
+This project's current product identity is a read-only market data monitoring system, not a single-purpose AI GEO/SEO monitor. It uses a Next.js 16.2.12 frontend (App Router) and Express.js backend. GEO/SEO is the currently formal workflow, but that delivery stage does not redefine the product boundary. A Baidu marketing and analytics module exists as a project-allowlisted `PILOT_DATA_READY` trial; its formal workspace navigation remains hidden until production gates pass. Landing-page consultations, signed order amounts, and manual mapping are the unimplemented long-term path documented in the root `README.md` and `CONTEXT.md`. Legacy repository, service, page, or heading names containing `AI GEO` do not override this positioning.
+
+### Production Truth
+
+- The only supported production URL is `https://insight.guangtuo.com`; `insight.gato.com.cn` is retired.
+- `http://182.254.140.163/` is the Nginx default site, not this application. Never use direct-IP output as proof that the app is or is not deployed.
+- Production processes run through systemd. The persistent desktop session exists for managed DeepSeek/Doubao Chrome; the backend is not manually launched from that desktop.
+- Treat `../docs/DEPLOYMENT.md#当前正式单机实例` as the operational source of truth. Recheck runtime and Git state before claiming that production is healthy or current.
 
 ## Development Setup
 
@@ -52,6 +59,7 @@ src/app/
 │   ├── dashboard/      # Analytics dashboard
 │   ├── history/        # Detection history
 │   ├── tasks/          # Scheduled tasks
+│   ├── marketing/      # Allowlisted Baidu marketing trial page
 │   ├── profile/        # User profile
 │   └── notice/         # GEO notices
 ├── admin/              # Admin panel
@@ -80,6 +88,7 @@ src/app/
 ```
 backend/
 ├── app.js              # Main Express app with middleware
+├── modules/marketing/  # Isolated read-only marketing module and migrations
 ├── config/database.js  # Sequelize configuration
 ├── models/             # Sequelize models
 ├── middleware/         # Custom middleware
@@ -149,6 +158,14 @@ backend/
 - **For batch operations**, use the matching backend batch endpoint when one exists
 - Handle 401 errors gracefully (already handled by interceptors - auto-redirects to login)
 - **Important**: Avoid setting `axios.defaults.baseURL` or `axios.defaults.headers.common['Authorization']` in individual components - use the global config
+
+### Marketing Boundaries
+- Describe the product as a read-only market data monitoring system. When scope matters, distinguish the formal GEO/SEO workflow, the allowlisted Baidu trial, and the unimplemented full-funnel target.
+- Keep the marketing module read-only. Do not add source-system write actions for ads, consultations, leads, opportunities, or orders.
+- Do not expose the marketing page in formal workspace navigation until the PRD/Tech Spec production gates are complete.
+- Landing-page consultations, the minimum order identity needed for mapping, signed order amounts, and manual cross-system mapping are future work; do not create placeholder facts or describe the Baidu trial as a complete funnel.
+- Treat signed order amount as the only required sales-system outcome metric. Effective leads, sales opportunities, order counts, and other sales fields are process context, not required monitoring metrics.
+- Keep Baidu contract parsing inside `backend/modules/marketing/adapters/BaiduMarketingClient.js`.
 
 ### Error Handling
 - API errors are caught and displayed using Ant Design's `message` component
