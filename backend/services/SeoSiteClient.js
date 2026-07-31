@@ -411,7 +411,8 @@ function createSeoSiteClient({
     maxBytes,
     accept,
     expectedKind,
-    requestKind
+    requestKind,
+    beforeUrlRequest
   }) {
     const startedAt = now();
     let currentUrl = assertAllowedUrl(inputUrl, { allowedPrivateOrigin: privateOrigin });
@@ -419,6 +420,17 @@ function createSeoSiteClient({
     const visitedUrls = new Set([currentUrl.toString()]);
 
     for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+      if (beforeUrlRequest && await beforeUrlRequest(currentUrl.toString()) === false) {
+        const error = new SeoAuditRequestError(
+          'robots.txt 禁止 GoodieAI 抓取该页面，已跳过请求',
+          'SEO_AUDIT_ROBOTS_SKIPPED',
+          422
+        );
+        error.requestedUrl = inputUrl;
+        error.skippedUrl = currentUrl.toString();
+        error.redirectChain = redirectChain;
+        throw error;
+      }
       const addresses = await resolvePublicTarget(currentUrl);
       const lookup = createPinnedLookup(addresses);
       await crawlerPolicy.beforeRequest({
@@ -533,12 +545,16 @@ function createSeoSiteClient({
       return parsed.toString();
     },
 
-    async fetchPage(url, { requestKind = 'page' } = {}) {
+    async fetchPage(url, {
+      requestKind = 'page',
+      beforeUrlRequest
+    } = {}) {
       const response = await requestWithRedirects(url, {
         maxBytes: PAGE_LIMIT_BYTES,
         accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
         expectedKind: 'page',
-        requestKind
+        requestKind,
+        beforeUrlRequest
       });
       return {
         requestedUrl: url,
@@ -554,13 +570,15 @@ function createSeoSiteClient({
 
     async probe(url, {
       expectedKind = 'link_probe',
-      requestKind = 'link_probe'
+      requestKind = 'link_probe',
+      beforeUrlRequest
     } = {}) {
       return requestWithRedirects(url, {
         maxBytes: PROBE_LIMIT_BYTES,
         accept: 'text/plain,application/xml,text/xml,*/*;q=0.5',
         expectedKind,
-        requestKind
+        requestKind,
+        beforeUrlRequest
       });
     },
 

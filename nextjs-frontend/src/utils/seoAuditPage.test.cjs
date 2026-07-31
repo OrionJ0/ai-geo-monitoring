@@ -103,6 +103,14 @@ test('SEO audit page renders crawl progress and a site-level report contract', (
   assert.match(source, /job\.progress/);
 });
 
+test('全站报告说明被 GoodieAI robots 策略跳过的页面', () => {
+  const source = fs.readFileSync(siteReportPath, 'utf8');
+
+  assert.match(source, /robotsPolicy/);
+  assert.match(source, /robots\.txt 跳过/);
+  assert.match(source, /GoodieAI-SEO-Audit/);
+});
+
 test('全站检测进度不再用动态发现页数作为实时分母', () => {
   const source = fs.readFileSync(jobProgressPath, 'utf8');
 

@@ -524,7 +524,16 @@ test('evaluates crawler permissions per path and aggregates only affected pages'
     },
     async probe(url) {
       if (url === 'https://example.com/robots.txt') {
-        return { statusCode: 200, body: 'User-agent: *\nDisallow: /private/' };
+        return {
+          statusCode: 200,
+          body: [
+            'User-agent: *',
+            'Disallow: /private/',
+            '',
+            'User-agent: GoodieAI-SEO-Audit',
+            'Allow: /'
+          ].join('\n')
+        };
       }
       return { statusCode: 404, body: '' };
     }
@@ -539,6 +548,101 @@ test('evaluates crawler permissions per path and aggregates only affected pages'
   assert.equal(rootPage.crawlerAccess.crawlers.find((crawler) => crawler.key === 'googlebot').status, 'allowed');
   assert.equal(privatePage.crawlerAccess.crawlers.find((crawler) => crawler.key === 'googlebot').status, 'blocked');
   assert.equal(report.crawlerAccess.targetPath, '/');
+});
+
+test('skips pages disallowed for GoodieAI without fetching or probing them', async () => {
+  const pages = new Map([
+    ['https://example.com/', htmlPage('https://example.com/', [
+      '/public',
+      '/private/account',
+      '/private/public/help'
+    ])],
+    ['https://example.com/public', htmlPage('https://example.com/public')],
+    ['https://example.com/private/public/help', htmlPage('https://example.com/private/public/help')]
+  ]);
+  const fetched = [];
+  const probed = [];
+  const siteClient = {
+    async fetchPage(url) {
+      fetched.push(url);
+      if (!pages.has(url)) throw new Error(`unexpected page fetch: ${url}`);
+      return pages.get(url);
+    },
+    async probe(url, options) {
+      probed.push({ url, kind: options?.requestKind });
+      if (url.endsWith('/robots.txt')) {
+        return {
+          statusCode: 200,
+          body: [
+            'User-agent: *',
+            'Allow: /',
+            '',
+            'User-agent: GoodieAI-SEO-Audit',
+            'Disallow: /private/',
+            'Allow: /private/public/'
+          ].join('\n')
+        };
+      }
+      return { statusCode: 404, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({ siteClient }).audit('https://example.com/');
+
+  assert.equal(fetched.includes('https://example.com/private/account'), false);
+  assert.equal(
+    probed.some(({ url, kind }) => (
+      url === 'https://example.com/private/account' && kind === 'link_probe'
+    )),
+    false
+  );
+  assert.deepEqual(report.site.robotsPolicy, {
+    userAgent: 'GoodieAI-SEO-Audit',
+    sourceStatus: 'valid',
+    skippedCount: 1,
+    skippedPages: [{
+      url: 'https://example.com/private/account',
+      matchedRule: 'Disallow: /private/'
+    }]
+  });
+  assert.deepEqual(report.pages.map((page) => page.url).sort(), [
+    'https://example.com/',
+    'https://example.com/private/public/help',
+    'https://example.com/public'
+  ]);
+});
+
+test('stops a site audit when robots explicitly disallows the submitted entry', async () => {
+  const calls = [];
+  const siteClient = {
+    async fetchPage(url) {
+      calls.push(['page', url]);
+      return htmlPage(url);
+    },
+    async probe(url, options) {
+      calls.push(['probe', url, options?.requestKind]);
+      if (url.endsWith('/robots.txt')) {
+        return {
+          statusCode: 200,
+          body: 'User-agent: GoodieAI-SEO-Audit\nDisallow: /private/'
+        };
+      }
+      throw new Error('default sitemap must not be fetched after robots denies the entry');
+    }
+  };
+
+  await assert.rejects(
+    () => createSeoSiteAuditService({ siteClient }).audit('https://example.com/private/'),
+    {
+      code: 'SEO_AUDIT_ROBOTS_DISALLOWED',
+      status: 422,
+      stopReason: 'robots_disallowed'
+    }
+  );
+  assert.deepEqual(calls, [
+    ['page', 'https://example.com/private/'],
+    ['probe', 'https://example.com/robots.txt', 'robots']
+  ]);
 });
 
 test('uses weighted site coverage and caps widespread noindex without averaging page scores', async () => {

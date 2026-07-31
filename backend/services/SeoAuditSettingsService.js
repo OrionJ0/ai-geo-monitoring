@@ -1,6 +1,7 @@
 const { Setting } = require('../models');
 
 const OWNED_ORIGINS_SETTING_KEY = 'seo_audit_owned_origins';
+const DEFAULT_OWNED_ORIGINS = Object.freeze(['https://gato.com.cn']);
 const MAX_OWNED_ORIGINS = 10;
 const MAX_SETTING_VALUE_LENGTH = 255;
 
@@ -83,7 +84,7 @@ class SeoAuditSettingsService {
     const row = await this.model.findOne({
       where: { key: OWNED_ORIGINS_SETTING_KEY }
     });
-    if (!row) return { ownedOrigins: [] };
+    if (!row) return { ownedOrigins: [...DEFAULT_OWNED_ORIGINS] };
 
     try {
       const parsed = JSON.parse(row.value);
@@ -122,5 +123,6 @@ module.exports = service;
 module.exports.SeoAuditSettingsService = SeoAuditSettingsService;
 module.exports.SeoAuditSettingsError = SeoAuditSettingsError;
 module.exports.OWNED_ORIGINS_SETTING_KEY = OWNED_ORIGINS_SETTING_KEY;
+module.exports.DEFAULT_OWNED_ORIGINS = DEFAULT_OWNED_ORIGINS;
 module.exports.normalizeOwnedOrigin = normalizeOwnedOrigin;
 module.exports.normalizeOwnedOrigins = normalizeOwnedOrigins;

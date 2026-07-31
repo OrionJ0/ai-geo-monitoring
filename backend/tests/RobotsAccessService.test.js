@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { evaluateCrawlerAccess } = require('../services/RobotsAccessService');
+const {
+  evaluateAuditCrawlerAccess,
+  evaluateCrawlerAccess
+} = require('../services/RobotsAccessService');
 
 const profiles = [
   { key: 'googlebot', label: 'Googlebot', token: 'Googlebot', category: 'search', affectsScore: true },
@@ -76,6 +79,35 @@ test('the longest matching rule wins and allow wins an equal-length tie', () => 
   assert.equal(result.crawlers[0].matchedRule, 'Allow: /catalog/public/');
   assert.equal(tie.crawlers[0].status, 'allowed');
   assert.equal(tie.crawlers[0].matchedRule, 'Allow: /same');
+});
+
+test('evaluates GoodieAI crawl permission independently from search crawler reporting', () => {
+  const robotsResult = {
+    statusCode: 200,
+    body: [
+      'User-agent: *',
+      'Allow: /',
+      '',
+      'User-agent: GoodieAI-SEO-Audit',
+      'Disallow: /private/',
+      'Allow: /private/public/'
+    ].join('\n')
+  };
+
+  const blocked = evaluateAuditCrawlerAccess({
+    robotsResult,
+    targetUrl: 'https://example.com/private/account'
+  });
+  const allowed = evaluateAuditCrawlerAccess({
+    robotsResult,
+    targetUrl: 'https://example.com/private/public/help'
+  });
+
+  assert.equal(blocked.status, 'blocked');
+  assert.equal(blocked.matchedUserAgent, 'GoodieAI-SEO-Audit');
+  assert.equal(blocked.matchedRule, 'Disallow: /private/');
+  assert.equal(allowed.status, 'allowed');
+  assert.equal(allowed.matchedRule, 'Allow: /private/public/');
 });
 
 test('supports wildcard, end-anchor and query matching in path rules', () => {

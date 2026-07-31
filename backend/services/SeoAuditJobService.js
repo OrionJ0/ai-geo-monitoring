@@ -47,6 +47,7 @@ const SAFE_STOP_REASONS = new Set([
   'rate_limited',
   'entry_http_error',
   'entry_invalid_response',
+  'robots_disallowed',
   'resource_invalid'
 ]);
 

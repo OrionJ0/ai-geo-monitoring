@@ -49,6 +49,13 @@ export default function SeoSiteAuditReport({ report }) {
         <dl>
           <div><dt>已检测</dt><dd>{report.site.auditedPages} / {report.site.discoveredPages} 页</dd></div>
           <div><dt>失败</dt><dd>{report.site.failedPages} 页</dd></div>
+          <div>
+            <dt>robots.txt 跳过</dt>
+            <dd>
+              {report.site.robotsPolicy?.skippedCount || 0} 页
+              <span className={styles.srOnly}>（GoodieAI-SEO-Audit）</span>
+            </dd>
+          </div>
           <div><dt>耗时</dt><dd>{formatDuration(report.durationMs)}</dd></div>
           <div><dt>检测时间</dt><dd>{formatDate(report.checkedAt)}</dd></div>
         </dl>

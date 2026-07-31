@@ -1,3 +1,13 @@
+const AUDIT_CRAWLER_USER_AGENT = 'GoodieAI-SEO-Audit';
+const AUDIT_CRAWLER_PROFILE = Object.freeze({
+  key: 'goodieai-seo-audit',
+  label: 'GoodieAI SEO Audit',
+  token: AUDIT_CRAWLER_USER_AGENT,
+  category: 'audit',
+  affectsScore: false,
+  robotsPolicy: 'standard'
+});
+
 function parseGroups(body) {
   const groups = [];
   let current = null;
@@ -148,4 +158,20 @@ function evaluateCrawlerAccess({ robotsResult, targetUrl, profiles = [] }) {
   };
 }
 
-module.exports = { evaluateCrawlerAccess };
+function evaluateAuditCrawlerAccess({ robotsResult, targetUrl }) {
+  const result = evaluateCrawlerAccess({
+    robotsResult,
+    targetUrl,
+    profiles: [AUDIT_CRAWLER_PROFILE]
+  });
+  return {
+    ...result.crawlers[0],
+    sourceStatus: result.sourceStatus
+  };
+}
+
+module.exports = {
+  AUDIT_CRAWLER_USER_AGENT,
+  evaluateAuditCrawlerAccess,
+  evaluateCrawlerAccess
+};

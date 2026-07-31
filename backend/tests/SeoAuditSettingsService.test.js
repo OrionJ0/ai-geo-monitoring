@@ -67,11 +67,15 @@ test('stores owned sites as normalized exact HTTP origins', async () => {
   );
 });
 
-test('returns a safe empty list when persisted owned-site settings are missing or corrupt', async () => {
+test('uses gato.com.cn as the default owned site while keeping explicit empty settings', async () => {
   const missing = new SeoAuditSettingsService({ model: createSettingModel() });
+  const explicitlyEmpty = new SeoAuditSettingsService({ model: createSettingModel('[]') });
   const corrupt = new SeoAuditSettingsService({ model: createSettingModel('{bad-json') });
 
-  assert.deepEqual(await missing.getSettings(), { ownedOrigins: [] });
+  assert.deepEqual(await missing.getSettings(), {
+    ownedOrigins: ['https://gato.com.cn']
+  });
+  assert.deepEqual(await explicitlyEmpty.getSettings(), { ownedOrigins: [] });
   assert.deepEqual(await corrupt.getSettings(), { ownedOrigins: [] });
 });
 

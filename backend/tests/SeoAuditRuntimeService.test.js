@@ -99,6 +99,102 @@ test('the public site runtime stops after a robots WAF in the formal preflight c
   assert.deepEqual(requestedPaths, ['/', '/robots.txt']);
 });
 
+test('the public site runtime stops before sitemap discovery when robots denies GoodieAI', async () => {
+  const requestedPaths = [];
+  const runtime = createSiteAuditRuntime('https://example.com/private/', {
+    clientOptions: clientOptions(async ({ url }) => {
+      const pathname = new URL(url).pathname;
+      requestedPaths.push(pathname);
+      if (pathname === '/private/') {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+          data: fixture('normal.html')
+        };
+      }
+      if (pathname === '/robots.txt') {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+          data: 'User-agent: GoodieAI-SEO-Audit\nDisallow: /private/'
+        };
+      }
+      throw new Error(`unexpected request: ${pathname}`);
+    }),
+    renderService: {
+      async sample() {
+        throw new Error('robots-disallowed entry must not render');
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => runtime.service.audit(runtime.requestedUrl),
+    {
+      code: 'SEO_AUDIT_ROBOTS_DISALLOWED',
+      stopReason: 'robots_disallowed'
+    }
+  );
+  assert.deepEqual(requestedPaths, ['/private/', '/robots.txt']);
+  assert.equal(
+    runtime.siteClient.getRequestDiagnostics().stopReason,
+    'robots_disallowed'
+  );
+});
+
+test('the public site runtime does not follow a redirect into a robots-disallowed page', async () => {
+  const requestedPaths = [];
+  const runtime = createSiteAuditRuntime('https://example.com/', {
+    clientOptions: clientOptions(async ({ url }) => {
+      const pathname = new URL(url).pathname;
+      requestedPaths.push(pathname);
+      if (pathname === '/') {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+          data: fixture('normal.html').replace('</body>', '<a href="/go">go</a></body>')
+        };
+      }
+      if (pathname === '/robots.txt') {
+        return {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+          data: 'User-agent: GoodieAI-SEO-Audit\nDisallow: /private/'
+        };
+      }
+      if (pathname === '/sitemap.xml') {
+        return {
+          status: 404,
+          headers: { 'content-type': 'text/plain' },
+          data: ''
+        };
+      }
+      if (pathname === '/go') {
+        return {
+          status: 302,
+          headers: { location: '/private/account' },
+          data: ''
+        };
+      }
+      throw new Error(`robots-disallowed redirect target was requested: ${pathname}`);
+    }),
+    renderService: {
+      async sample() {
+        return { status: 'unavailable', reason: 'test', samples: [] };
+      }
+    }
+  });
+
+  const report = await runtime.service.audit(runtime.requestedUrl);
+
+  assert.equal(requestedPaths.includes('/private/account'), false);
+  assert.equal(requestedPaths.filter((path) => path === '/go').length, 1);
+  assert.deepEqual(report.site.robotsPolicy.skippedPages, [{
+    url: 'https://example.com/private/account',
+    matchedRule: 'Disallow: /private/'
+  }]);
+});
+
 test('the public site runtime reports the resolved entry and real request baseline', async () => {
   const runtime = createSiteAuditRuntime('https://example.com/cn', {
     ownedOrigins: ['https://example.com'],
