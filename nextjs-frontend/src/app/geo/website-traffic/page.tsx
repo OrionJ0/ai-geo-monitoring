@@ -92,25 +92,14 @@ export default function WebsiteTrafficPage() {
   }
   if (!marketing.capabilities.trafficRead) {
     return (
-      <section className={styles.boundary} aria-labelledby="traffic-page-title">
-        <p className={styles.eyebrow}>百度统计 · 实时只读</p>
-        <h1 id="traffic-page-title">网站流量</h1>
-        <p>网站流量能力尚未对当前环境开放，页面不会读取未经验证的数据。</p>
-      </section>
+      <p role="status" className={styles.notice}>网站流量尚未开放</p>
     );
   }
 
   return (
-    <main className={styles.page} aria-labelledby="traffic-page-title">
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>百度统计 · 实时只读</p>
-          <h1 id="traffic-page-title">网站流量</h1>
-          <p>查看广拓官网最近 30 天的访客、访问次数和浏览量。</p>
-        </div>
-        <div className={styles.controls}>
-          <span>当前项目</span>
-          <strong>{defaultContext.project?.name}</strong>
+    <main className={styles.page} aria-label="网站流量">
+      <div className={styles.pageActions} aria-label="数据操作">
+        <div className={styles.controlsCompact}>
           <button
             type="button"
             disabled={loading}
@@ -119,11 +108,7 @@ export default function WebsiteTrafficPage() {
             {loading ? '正在读取…' : '刷新网站流量'}
           </button>
         </div>
-      </header>
-
-      <p role="note" className={styles.notice}>
-        网站流量与广告数据仅用于同期联合观察，不构成广告点击、账户或推广计划归因。
-      </p>
+      </div>
 
       {error.message ? (
         <div className={styles.error} role="alert">
@@ -144,7 +129,6 @@ export default function WebsiteTrafficPage() {
         <>
           <section className={styles.ledger} aria-labelledby="traffic-source-heading">
             <div>
-              <p className={styles.kicker}>当前统计站点</p>
               <h2 id="traffic-source-heading">{traffic.site.domain}</h2>
               <p>{traffic.coverage.from} 至 {traffic.coverage.to}</p>
             </div>
@@ -209,11 +193,7 @@ export default function WebsiteTrafficPage() {
 
               <section className={styles.trendSection} aria-labelledby="traffic-trend-heading">
                 <div className={styles.sectionHeading}>
-                  <div>
-                    <p className={styles.kicker}>逐日访客</p>
-                    <h2 id="traffic-trend-heading">网站访问趋势</h2>
-                  </div>
-                  <p>缺失日保持为空，不会补零或连接成虚假趋势。</p>
+                  <h2 id="traffic-trend-heading">网站访问趋势</h2>
                 </div>
                 <div className={styles.bars} aria-hidden="true">
                   {traffic.trend.map((row) => (

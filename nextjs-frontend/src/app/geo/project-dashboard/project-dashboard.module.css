@@ -35,27 +35,10 @@
   margin-bottom: 16px;
 }
 
-.sectionEyebrow {
-  display: block;
-  margin-bottom: 4px;
-  color: #42618d;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
 .sectionTitle {
   margin: 0 !important;
   color: #172b4d !important;
   letter-spacing: -0.02em;
-}
-
-.sectionDescription {
-  display: block;
-  max-width: 720px;
-  margin-top: 4px;
-  color: #66758b;
-  line-height: 1.6;
 }
 
 .coreMetricCard,
@@ -125,9 +108,5 @@
 
   .coreMetricCard :global(.ant-statistic-content) {
     font-size: 27px;
-  }
-
-  .sectionDescription {
-    font-size: 13px;
   }
 }

@@ -2,7 +2,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Tooltip, message } from 'antd';
+import { InfoCircleOutlined } from '@ant-design/icons';
 import axios from '@/lib/axiosConfig';
 import { Column } from '@ant-design/plots';
 import { normalizeSourceContextValues } from '@/utils/sourceDisplay.cjs';
@@ -10,7 +11,6 @@ import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 
-const { Text, Title } = Typography;
 
 const typeColor = {
   自有来源: 'green',
@@ -232,25 +232,16 @@ export default function GeoSourcesPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-      <Card>
-        <Row gutter={[12, 12]} align="middle" justify="space-between">
-          <Col>
-            <Title level={3} style={{ margin: 0 }}>引用来源分析</Title>
-            <Text type="secondary">按周期查看 AI 回答引用来源、竞品来源缺口与可优化页面</Text>
-          </Col>
-          <Col>
-            <Space wrap>
-              <Text strong>{defaultContext.project?.name || '默认项目'}</Text>
-              <Select
-                  value={days}
-                  style={{ width: 120 }}
-                  options={periodOptions}
-                  onChange={handleDaysChange}
-                />
-            </Space>
-          </Col>
-        </Row>
-      </Card>
+      <Row gutter={[12, 12]} align="middle" justify="end">
+        <Col>
+          <Select
+            value={days}
+            style={{ width: 120 }}
+            options={periodOptions}
+            onChange={handleDaysChange}
+          />
+        </Col>
+      </Row>
 
       {defaultContext.errorMessage ? (
         <Alert
@@ -261,20 +252,28 @@ export default function GeoSourcesPage() {
         />
       ) : null}
 
-      <Alert
-        type="info"
-        showIcon
-        title="来源类型口径"
-        description="媒体内容表示域名命中系统维护的媒体域名规则；其他第三方来源表示非自有、非竞品且未命中社区、电商、百科、视频或媒体规则的外部来源。顶部第三方来源总数包含媒体及其他外部类型。"
-      />
-
       <Row gutter={[12, 12]}>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="引用总数" value={summary.total_citations || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="有引用回答" value={summary.cited_responses || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="来源域名" value={summary.source_domain_count || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="自有来源" value={summary.owned_citations || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="竞品来源" value={summary.competitor_citations || 0} loading={sourceLoading} /></Card></Col>
-        <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="全部第三方来源" value={summary.third_party_citations || 0} loading={sourceLoading} /></Card></Col>
+        <Col xs={24} sm={12} lg={4}>
+          <Card size="small">
+            <Statistic
+              title={(
+                <Space size={5}>
+                  <span>全部第三方来源</span>
+                  <Tooltip title="媒体内容表示域名命中系统维护的媒体域名规则；其他第三方来源表示非自有、非竞品且未命中社区、电商、百科、视频或媒体规则的外部来源；第三方来源总数包含媒体及其他外部类型。">
+                    <InfoCircleOutlined tabIndex={0} aria-label="来源类型口径" />
+                  </Tooltip>
+                </Space>
+              )}
+              value={summary.third_party_citations || 0}
+              loading={sourceLoading}
+            />
+          </Card>
+        </Col>
       </Row>
 
       <Row gutter={[12, 12]}>

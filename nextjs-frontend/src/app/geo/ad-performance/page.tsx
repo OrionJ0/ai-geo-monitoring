@@ -177,11 +177,7 @@ export default function AdPerformancePage() {
   }
   if (!marketing.capabilities.adsRead) {
     return (
-      <section className={styles.boundary} aria-labelledby="ad-page-title">
-        <p className={styles.eyebrow}>百度搜索推广 · 只读</p>
-        <h1 id="ad-page-title">广告表现</h1>
-        <p>广告数据能力尚未对当前环境开放，页面不会读取或展示未经验证的数据。</p>
-      </section>
+      <p role="status" className={styles.notice}>广告数据尚未开放</p>
     );
   }
 
@@ -197,21 +193,12 @@ export default function AdPerformancePage() {
   );
 
   return (
-    <main className={styles.page} aria-labelledby="ad-page-title">
+    <main className={styles.page} aria-label="广告表现">
       <div className={styles.liveRegion} aria-live="polite" aria-atomic="true">
         {announcement}
       </div>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>百度搜索推广 · 本地完整快照</p>
-          <h1 id="ad-page-title">广告表现</h1>
-          <p>
-            查看广拓最近一次完整广告快照。任何账户读取失败都不会混入部分新数据。
-          </p>
-        </div>
-        <div className={styles.controls}>
-          <span>当前项目</span>
-          <strong>{defaultContext.project?.name}</strong>
+      <div className={styles.pageActions} aria-label="数据操作">
+        <div className={styles.controlsCompact}>
           <button
             type="button"
             onClick={() => createRefresh('MANUAL')}
@@ -221,13 +208,8 @@ export default function AdPerformancePage() {
             立即刷新
           </button>
         </div>
-      </header>
+      </div>
 
-      {marketing.moduleState === 'PILOT_DATA_READY' ? (
-        <p role="status" className={styles.notice}>
-          当前为白名单真实数据试点，正式导航仍保持隐藏。
-        </p>
-      ) : null}
       {dashboard?.states?.snapshotFreshnessState === 'STALE' ? (
         <p role="status" className={styles.notice}>
           当前展示的是最后一次完整快照；后台刷新完成前不会混入部分新数据。
@@ -258,7 +240,6 @@ export default function AdPerformancePage() {
         <>
           <section className={styles.ledger} aria-labelledby="ad-snapshot-heading">
             <div>
-              <p className={styles.kicker}>30 日观察范围</p>
               <h2 id="ad-snapshot-heading">{dashboard.projectName}</h2>
               <p>
                 {dashboard.coverage
@@ -364,11 +345,7 @@ export default function AdPerformancePage() {
 
               <section className={styles.trendSection} aria-labelledby="ad-trend-heading">
                 <div className={styles.sectionHeading}>
-                  <div>
-                    <p className={styles.kicker}>逐日展现</p>
-                    <h2 id="ad-trend-heading">广告趋势</h2>
-                  </div>
-                  <p>图形只编码展现；点击和消费在等价数据表中独立列出。</p>
+                  <h2 id="ad-trend-heading">广告趋势</h2>
                 </div>
                 {dashboard.trend.length ? (
                   <>
@@ -429,12 +406,9 @@ export default function AdPerformancePage() {
 
               <section className={styles.detailSection} aria-labelledby="campaign-heading">
                 <div className={styles.sectionHeading}>
-                  <div>
-                    <p className={styles.kicker}>账户与推广计划</p>
-                    <h2 id="campaign-heading">完整明细</h2>
-                  </div>
+                  <h2 id="campaign-heading">完整明细</h2>
                   <a href="https://www2.baidu.com/" target="_blank" rel="noreferrer">
-                    前往百度营销（将离开本站）
+                    百度营销
                   </a>
                 </div>
                 <div

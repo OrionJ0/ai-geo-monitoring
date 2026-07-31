@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Breadcrumb, Button, Layout, Menu, message } from 'antd';
+import { Button, Layout, Menu, message } from 'antd';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
@@ -63,16 +63,10 @@ export default function GeoLayout({
     () => resolveGeoLocation(pathname),
     [pathname]
   );
-  const activeGroupKey = useMemo(() => navigation.find((item) => (
-    item.type === 'group'
-    && item.children.some((child) => child.key === location.selectedKey)
-  ))?.key, [location.selectedKey, navigation]);
-  const [openKeys, setOpenKeys] = useState<string[]>(
-    activeGroupKey ? [activeGroupKey] : []
-  );
   const menuItems = useMemo(() => navigation.map((item) => {
     if (item.type === 'group') {
       return {
+        type: 'group' as const,
         key: item.key,
         label: item.label,
         children: item.children.map((child) => ({
@@ -87,28 +81,7 @@ export default function GeoLayout({
     };
   }), [navigation]);
 
-  useEffect(() => {
-    if (activeGroupKey) {
-      setOpenKeys((current) => (
-        current.includes(activeGroupKey)
-          ? current
-          : [...current, activeGroupKey]
-      ));
-    }
-  }, [activeGroupKey]);
-
-  const handleOpenChange = (keys: string[]) => {
-    setOpenKeys(keys);
-  };
-
   const handleSiderToggle = () => {
-    if (collapsed && activeGroupKey) {
-      setOpenKeys((current) => (
-        current.includes(activeGroupKey)
-          ? current
-          : [...current, activeGroupKey]
-      ));
-    }
     setCollapsed(!collapsed);
   };
 
@@ -190,8 +163,6 @@ export default function GeoLayout({
               className="workspace-navigation"
               mode="inline"
               selectedKeys={location.selectedKey ? [location.selectedKey] : []}
-              openKeys={openKeys}
-              onOpenChange={handleOpenChange}
               style={{ minHeight: '100%', borderRight: 0 }}
               items={menuItems}
               onClick={() => {
@@ -203,15 +174,6 @@ export default function GeoLayout({
           </nav>
         </Sider>
         <Content className="geo-content" style={{ padding: 24 }}>
-          <Breadcrumb
-            style={{ margin: '8px 0 16px' }}
-            items={location.breadcrumb.map((item: {
-              href: string;
-              label: string;
-            }) => ({
-              title: <Link href={item.href}>{item.label}</Link>
-            }))}
-          />
           {children}
         </Content>
       </Layout>

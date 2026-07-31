@@ -14,7 +14,7 @@ const MARKET_OVERVIEW = page(
 
 const QUICK_LINKS = page(
   '/quick-links',
-  '快捷导航',
+  '常用网站',
   '/geo/quick-links'
 );
 
@@ -88,16 +88,9 @@ function resolveGeoLocation(pathname, options = {}) {
   const current = matches[0] || visiblePages.find(
     (item) => item.href === resolveGeoDefaultRoute(options)
   ) || visiblePages[0];
-  const defaultRoute = resolveGeoDefaultRoute(options);
   return {
     selectedKey: current?.key || null,
-    current: current || null,
-    breadcrumb: current
-      ? [
-        { href: defaultRoute, label: '广拓数据工作台' },
-        { href: current.href, label: current.label }
-      ]
-      : [{ href: defaultRoute, label: '广拓数据工作台' }]
+    current: current || null
   };
 }
 

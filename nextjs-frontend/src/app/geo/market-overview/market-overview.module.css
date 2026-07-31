@@ -4,11 +4,10 @@
   background: #f6f8fb;
 }
 
-.pageHeader {
+.pageActions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
+  justify-content: flex-end;
   margin-bottom: 16px;
 }
 
@@ -84,25 +83,6 @@
 
 .unavailableCard {
   background: #fbfcfe !important;
-}
-
-.unavailableCard :global(.ant-empty) {
-  min-height: 78px;
-  margin-block: 0;
-}
-
-.unavailableCard :global(.ant-empty-image) {
-  height: 36px;
-}
-
-.unavailableCard :global(.ant-empty-description) {
-  font-size: 13px;
-}
-
-.unavailableCard :global(.ant-typography) {
-  min-height: 42px;
-  margin: 0 0 16px;
-  font-size: 12px;
 }
 
 .trendGrid {
@@ -207,16 +187,6 @@
     padding: 16px 12px 24px;
   }
 
-  .pageHeader {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .pageHeader :global(h2.ant-typography) {
-    font-size: 24px;
-  }
-
   .page section + section {
     margin-top: 20px;
   }
@@ -271,14 +241,6 @@
   .stageMeta :global(.ant-typography:nth-child(3)),
   .stageMeta :global(.ant-typography:nth-child(4)) {
     display: none;
-  }
-
-  .unavailableCard :global(.ant-empty) {
-    min-height: 64px;
-  }
-
-  .unavailableCard :global(.ant-typography) {
-    min-height: 54px;
   }
 
   .trendGrid {

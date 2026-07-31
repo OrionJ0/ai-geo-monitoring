@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Form, Input, Segmented, Spin, Upload, message } from 'antd';
+import { Button, Form, Input, Segmented, Spin, Tooltip, Upload, message } from 'antd';
 import {
   CheckCircleFilled,
   ClockCircleOutlined,
@@ -10,6 +10,7 @@ import {
   GlobalOutlined,
   HistoryOutlined,
   ImportOutlined,
+  InfoCircleOutlined,
   SafetyCertificateOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
@@ -320,11 +321,6 @@ export default function SeoAuditPage() {
             历史报告
           </Button>
         </div>
-        <div className={styles.heroCopy}>
-          <span className={styles.eyebrow}><SearchOutlined /> 技术 SEO 检测</span>
-          <p>从站内链接与 Sitemap 发现同域页面，检查 Google、Bing、百度共同关注的技术基础，并按严重程度和影响范围排出修复顺序。</p>
-        </div>
-
         <div className={styles.modeControl}>
           <span>检测范围</span>
           <Segmented
@@ -337,7 +333,6 @@ export default function SeoAuditPage() {
               { label: '单页检测', value: 'page' },
             ]}
           />
-          <small>{mode === 'site' ? '默认最多检测 200 个同域页面，异步执行' : '只检测输入的精确页面，适合快速复测'}</small>
         </div>
 
         <Form form={form} onFinish={runAudit} initialValues={{ url: 'https://gato.com.cn/' }} className={styles.auditForm}>
@@ -368,16 +363,16 @@ export default function SeoAuditPage() {
         </Form>
         <div className={styles.scopeNote}>
           <SafetyCertificateOutlined aria-hidden="true" />
-          {mode === 'site'
-            ? '只抓取同域页面；单页失败不会中断任务，达到上限会在报告中明确标记。'
-            : '只检测输入页面；额外验证根目录 robots.txt、Sitemap 与首页平台标签。'}
-          {' '}检测请求由后端服务器发出；localhost 指后端所在机器，其他电脑请填写后端可访问的局域网 IP。
-          {' '}
-          {privateTargetsEnabled === true
-            ? '本机与局域网检测已开启。'
+          <span>
+            {privateTargetsEnabled === true
+            ? '本机与局域网检测已开启'
             : privateTargetsEnabled === false
-              ? '当前仅允许检测公网地址。'
-              : '正在确认本机与局域网检测状态。'}
+              ? '当前仅允许检测公网地址'
+              : '正在检查网络范围'}
+          </span>
+          <Tooltip title="检测由后端服务器发出；localhost 指后端所在机器，其他电脑请填写后端可访问的局域网 IP。全站模式只抓取同域页面，单页模式只检测输入页面及必要的站点级文件。">
+            <InfoCircleOutlined tabIndex={0} aria-label="检测范围说明" />
+          </Tooltip>
         </div>
       </section>
 
@@ -391,10 +386,6 @@ export default function SeoAuditPage() {
 
       {report?.auditId && (
         <section className={styles.reportTransfer} aria-label="报告数据导出">
-          <div>
-            <strong>{report.source === 'imported' ? '已导入的标准报告' : '报告与明细数据'}</strong>
-            <span>固定列 CSV 可用 Excel 打开，也可重新导入本系统。</span>
-          </div>
           <Button icon={<ExportOutlined />} loading={exporting} onClick={exportReport}>
             导出标准 CSV
           </Button>
@@ -408,30 +399,7 @@ export default function SeoAuditPage() {
       {loading && !report && mode === 'page' && (
         <section className={styles.loadingPanel} aria-live="polite">
           <Spin size="large" />
-          <div>
-            <strong>正在读取页面并检查关键信号</strong>
-            <span>包括 robots.txt、站点地图、Meta 信息、标题结构和基础响应表现</span>
-          </div>
-        </section>
-      )}
-
-      {!loading && !report && !job && (
-        <section className={styles.startPanel} aria-label="检测范围">
-          <article>
-            <span>01</span>
-            <h2>能否被搜索引擎读取</h2>
-            <p>检查状态码、索引指令、HTTPS、robots.txt 与站点地图。</p>
-          </article>
-          <article>
-            <span>02</span>
-            <h2>页面主题是否表达清楚</h2>
-            <p>检查标题、描述、Canonical、H1 和标题层级。</p>
-          </article>
-          <article>
-            <span>03</span>
-            <h2>结果是否值得点击</h2>
-            <p>检查移动适配、图片替代文本、结构化数据与分享信息。</p>
-          </article>
+          <strong>正在检测</strong>
         </section>
       )}
 

@@ -46,10 +46,7 @@ export default function AdminNoticePage() {
   };
 
   return (
-    <Card title="通知管理" loading={loading}>
-      <Typography.Paragraph type="secondary">
-        在此编辑系统通知，用户可在 GEO 页左侧菜单进入"系统通知"页面查看。
-      </Typography.Paragraph>
+    <Card loading={loading}>
       <Form form={form} layout="vertical" onFinish={handleSave}>
         <Form.Item label="系统通知内容" name="system_notice">
           <TextArea rows={8} placeholder="在这里输入系统通知文本（最多5000字符）" />

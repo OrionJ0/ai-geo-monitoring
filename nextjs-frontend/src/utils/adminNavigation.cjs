@@ -39,14 +39,8 @@ function resolveAdminLocation(pathname) {
     ))
     .sort((left, right) => right.href.length - left.href.length)[0]
     || pages.find((item) => item.key === 'dashboard');
-  const activeGroup = navigation.find((item) => (
-    item.type === 'group'
-    && item.children.some((child) => child.key === current?.key)
-  ));
-
   return {
-    selectedKey: current?.key || 'dashboard',
-    activeGroupKey: activeGroup?.key || null
+    selectedKey: current?.key || 'dashboard'
   };
 }
 

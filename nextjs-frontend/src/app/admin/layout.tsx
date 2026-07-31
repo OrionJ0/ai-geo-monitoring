@@ -81,12 +81,10 @@ export default function AdminLayout({
     () => resolveAdminLocation(pathname),
     [pathname]
   );
-  const [openKeys, setOpenKeys] = useState<string[]>(
-    location.activeGroupKey ? [location.activeGroupKey] : []
-  );
   const menuItems = useMemo(() => navigation.map((item) => {
     if (item.type === 'group') {
       return {
+        type: 'group' as const,
         key: item.key,
         label: item.label,
         children: item.children.map((child) => ({
@@ -101,28 +99,7 @@ export default function AdminLayout({
     };
   }), [navigation]);
 
-  useEffect(() => {
-    if (location.activeGroupKey) {
-      setOpenKeys((current) => (
-        current.includes(location.activeGroupKey)
-          ? current
-          : [...current, location.activeGroupKey]
-      ));
-    }
-  }, [location.activeGroupKey]);
-
-  const handleOpenChange = (keys: string[]) => {
-    setOpenKeys(keys);
-  };
-
   const handleSiderToggle = () => {
-    if (collapsed && location.activeGroupKey) {
-      setOpenKeys((current) => (
-        current.includes(location.activeGroupKey)
-          ? current
-          : [...current, location.activeGroupKey]
-      ));
-    }
     setCollapsed(!collapsed);
   };
 
@@ -185,8 +162,6 @@ export default function AdminLayout({
               className="workspace-navigation"
               mode="inline"
               selectedKeys={[location.selectedKey]}
-              openKeys={openKeys}
-              onOpenChange={handleOpenChange}
               style={{ minHeight: '100%', borderRight: 0 }}
               items={menuItems}
               onClick={() => {

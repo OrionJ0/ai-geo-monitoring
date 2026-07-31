@@ -40,7 +40,7 @@ export default function AdminHealthPage() {
   }
 
   return (
-    <Card title="系统健康" extra={<Button loading={loading} onClick={fetchHealth}>刷新</Button>}>
+    <Card extra={<Button loading={loading} onClick={fetchHealth}>刷新</Button>}>
       <Descriptions column={1} bordered size="small">
         <Descriptions.Item label="后端状态">
           <Badge status={health.status === 'OK' ? 'success' : 'error'} text={health.status} />

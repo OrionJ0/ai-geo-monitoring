@@ -221,11 +221,34 @@ button:focus-visible,
   overscroll-behavior: contain;
 }
 
-.workspace-navigation > .ant-menu-item,
-.workspace-navigation > .ant-menu-submenu > .ant-menu-submenu-title {
-  color: #4b5563;
-  font-size: 15px;
+.workspace-navigation {
+  padding: 6px 0 12px;
+  background: #f3f5f8 !important;
+}
+
+.workspace-navigation > .ant-menu-item {
+  width: calc(100% - 8px);
+  height: 40px;
+  margin: 0 4px 6px;
+  padding-inline: 20px !important;
+  border-radius: 8px;
+  background: transparent;
+  color: #667085;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 40px;
+}
+
+.workspace-navigation > .ant-menu-item-group > .ant-menu-item-group-title {
+  min-height: 40px;
+  margin: 0 4px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  background: transparent;
+  color: #8993a4;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .workspace-navigation > .ant-menu-item > a {
@@ -233,21 +256,40 @@ button:focus-visible,
   font-weight: inherit;
 }
 
-.workspace-navigation > .ant-menu-item-selected,
-.workspace-navigation > .ant-menu-submenu-selected > .ant-menu-submenu-title {
+.workspace-navigation > .ant-menu-item-selected {
   color: #0f4fb8;
+  background: #e6f4ff;
 }
 
-.workspace-navigation .ant-menu-sub .ant-menu-item,
-.workspace-navigation .ant-menu-sub .ant-menu-item > a {
+.workspace-navigation .ant-menu-item-group-list {
+  margin: 2px 0 8px;
+  padding: 0;
+  background: transparent;
+}
+
+.workspace-navigation .ant-menu-item-group-list .ant-menu-item {
+  width: calc(100% - 8px);
+  height: 36px;
+  margin: 0 4px;
+  padding-inline-start: 36px !important;
+  border-radius: 6px;
+  line-height: 36px;
+}
+
+.workspace-navigation .ant-menu-item-group-list .ant-menu-item,
+.workspace-navigation .ant-menu-item-group-list .ant-menu-item > a {
   color: #5f6978;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
 }
 
-.workspace-navigation .ant-menu-sub .ant-menu-item-selected,
-.workspace-navigation .ant-menu-sub .ant-menu-item-selected > a {
+.workspace-navigation .ant-menu-item-group-list .ant-menu-item-selected,
+.workspace-navigation .ant-menu-item-group-list .ant-menu-item-selected > a {
   color: #0f4fb8;
+}
+
+.workspace-navigation .ant-menu-item-group-list .ant-menu-item-selected {
+  background: #e6f4ff;
 }
 
 @media (max-width: 680px) {

@@ -30,7 +30,7 @@ export default function GeoNoticePage() {
 
   return (
     <Space orientation="vertical" size="middle">
-      <Card title="系统通知" extra={<Button onClick={fetchNotice}>刷新</Button>}>
+      <Card extra={<Button onClick={fetchNotice}>刷新</Button>}>
         {loading ? (
           <Skeleton active paragraph={{ rows: 3 }} />
         ) : (

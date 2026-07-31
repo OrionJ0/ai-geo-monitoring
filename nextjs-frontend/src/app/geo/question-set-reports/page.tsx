@@ -924,13 +924,7 @@ export default function QuestionSetReportsPage() {
   return (
     <div className={styles.page}>
       <div className={styles.toolbar}>
-        <div>
-          <Text className={styles.eyebrow}>QUESTION RUNS</Text>
-          <Title level={2} className={styles.pageTitle}>运行报告</Title>
-          <Text type="secondary">单个问题或问题集每次运行独立成档，不与其他运行混合。</Text>
-        </div>
         <Space wrap>
-          <Text strong>{selectedProject?.name || '默认项目未配置'}</Text>
           <Upload accept=".csv,text/csv" showUploadList={false} beforeUpload={importReport}>
             <Button icon={<ImportOutlined />} loading={importing} disabled={!projectId}>导入 CSV</Button>
           </Upload>
@@ -996,7 +990,7 @@ export default function QuestionSetReportsPage() {
             {!report ? (
               <Empty
                 image={<FileSearchOutlined className={styles.emptyIcon} />}
-                description={selectedProject ? '从问题库运行单个问题或问题集后，这里会生成独立报告' : '请选择品牌项目'}
+                description={selectedProject ? '暂无报告' : '默认项目未配置'}
               />
             ) : (
               <>
@@ -1093,11 +1087,7 @@ export default function QuestionSetReportsPage() {
 
                 <section className={styles.metricsSection} aria-label="本次运行指标">
                   <div className={styles.metricsHeading}>
-                    <div>
-                      <Text className={styles.panelKicker}>OUTCOME METRICS</Text>
-                      <Title level={4}>核心指标</Title>
-                    </div>
-                    <Text type="secondary">先确认样本是否充足，再看品牌有没有被提及和推荐</Text>
+                    <Title level={4}>核心指标</Title>
                   </div>
                   <div className={styles.primaryMetrics}>
                     <MetricItem
@@ -1146,9 +1136,6 @@ export default function QuestionSetReportsPage() {
                       label: (
                         <span className={styles.moreMetricsLabel}>
                           <Text strong>更多指标</Text>
-                          <Text type="secondary">
-                            {summary.sov_summary ? '竞品提及占比、引用和执行情况' : '引用和执行情况'}
-                          </Text>
                         </span>
                       ),
                       children: (
@@ -1210,10 +1197,7 @@ export default function QuestionSetReportsPage() {
 
                 <section className={styles.resultsSection} aria-labelledby="run-results-title">
                   <div className={styles.resultsHeading}>
-                    <div>
-                      <Text className={styles.panelKicker}>每个问题 × 全部项目模型</Text>
-                      <Title level={4} id="run-results-title">逐问题结果</Title>
-                    </div>
+                    <Title level={4} id="run-results-title">逐问题结果</Title>
                     <Text type="secondary">有效分析 {summary.valid_analyses || 0} · 引用 {summary.total_citations || 0}</Text>
                   </div>
                   <Table<ReportRow>

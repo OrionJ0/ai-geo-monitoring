@@ -37,22 +37,13 @@ test('administrator navigation uses the approved hierarchy and labels', () => {
   );
 });
 
-test('administrator navigation resolves selected item and active submenu', () => {
-  assert.deepEqual(resolveAdminLocation('/admin'), {
-    selectedKey: 'dashboard',
-    activeGroupKey: null
-  });
-  assert.deepEqual(resolveAdminLocation('/admin/users/42'), {
-    selectedKey: 'users',
-    activeGroupKey: 'accounts'
-  });
-  assert.deepEqual(resolveAdminLocation('/admin/settings'), {
-    selectedKey: 'settings',
-    activeGroupKey: 'system'
-  });
+test('administrator navigation resolves selected item', () => {
+  assert.deepEqual(resolveAdminLocation('/admin'), { selectedKey: 'dashboard' });
+  assert.deepEqual(resolveAdminLocation('/admin/users/42'), { selectedKey: 'users' });
+  assert.deepEqual(resolveAdminLocation('/admin/settings'), { selectedKey: 'settings' });
 });
 
-test('administrator layout shares the dropdown and mobile sidebar behavior', () => {
+test('administrator layout keeps every navigation group visible', () => {
   const source = fs.readFileSync(
     path.join(srcRoot, 'app/admin/layout.tsx'),
     'utf8'
@@ -60,11 +51,10 @@ test('administrator layout shares the dropdown and mobile sidebar behavior', () 
 
   assert.match(source, /buildAdminNavigation/);
   assert.match(source, /resolveAdminLocation/);
-  assert.match(source, /openKeys=\{openKeys\}/);
-  assert.match(source, /onOpenChange=\{handleOpenChange\}/);
-  assert.match(source, /setOpenKeys\(keys\)/);
-  assert.doesNotMatch(source, /keys\.slice\(-1\)/);
-  assert.match(source, /if \(collapsed && location\.activeGroupKey\)/);
+  assert.match(source, /type:\s*'group'\s+as const/);
+  assert.doesNotMatch(source, /openKeys=/);
+  assert.doesNotMatch(source, /onOpenChange=/);
+  assert.doesNotMatch(source, /activeGroupKey/);
   assert.match(source, /onClick=\{handleSiderToggle\}/);
   assert.match(source, /className="geo-sider admin-sider"/);
   assert.match(source, /className="workspace-shell"/);

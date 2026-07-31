@@ -971,41 +971,31 @@ export default function GeoPromptsPage() {
       {defaultContext.errorMessage ? (
         <Alert type="warning" showIcon title={defaultContext.errorMessage} />
       ) : null}
-      <Card title="问题库">
-        <Row gutter={[12, 12]} align="middle">
-          <Col flex="360px">
-            <Text strong>{selectedProject?.name || '默认项目未配置'}</Text>
-          </Col>
-          <Col flex="140px">
-            <Select
-              value={days}
-              style={{ width: '100%' }}
-              options={periodOptions}
-              onChange={setDays}
-            />
-          </Col>
-          <Col flex="auto">
-            <Space wrap>
-              <Button size="small" onClick={() => refreshPromptDataForProject(selectedProjectId)} disabled={!selectedProjectId}>刷新</Button>
-              <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
-                <span>
-                  <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>新建问题</Button>
-                </span>
-              </Tooltip>
-              <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
-                <span>
-                  <Button size="small" onClick={openBatchCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>批量新增</Button>
-                </span>
-              </Tooltip>
-              <Text type="secondary">
-                {selectedProject
-                  ? `当前品牌：${selectedProject.name}｜运行平台由管理员在“AI 平台”中统一启用`
-                  : '请管理员先配置默认项目'}
-              </Text>
-            </Space>
-          </Col>
-        </Row>
-      </Card>
+      <Row gutter={[12, 12]} align="middle" justify="end">
+        <Col flex="140px">
+          <Select
+            value={days}
+            style={{ width: '100%' }}
+            options={periodOptions}
+            onChange={setDays}
+          />
+        </Col>
+        <Col>
+          <Space wrap>
+            <Button size="small" onClick={() => refreshPromptDataForProject(selectedProjectId)} disabled={!selectedProjectId}>刷新</Button>
+            <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
+              <span>
+                <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>新建问题</Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
+              <span>
+                <Button size="small" onClick={openBatchCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>批量新增</Button>
+              </span>
+            </Tooltip>
+          </Space>
+        </Col>
+      </Row>
 
       <Card
         title="问题集"
@@ -1197,12 +1187,6 @@ export default function GeoPromptsPage() {
               options={questionSets.map((item) => ({ label: item.name, value: item.id }))}
             />
           </Form.Item>
-          <Alert
-            type="info"
-            showIcon
-            title="运行平台由管理员在“AI 平台”中统一启用"
-            style={{ marginBottom: 16 }}
-          />
           <Form.Item name="enabled" label="启用" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="停用" />
           </Form.Item>

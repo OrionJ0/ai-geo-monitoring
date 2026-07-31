@@ -105,14 +105,6 @@ export default function GeoProfilePage() {
           <Statistic title="剩余天数" value={remainingDays} suffix={typeof remainingDays === 'number' ? '天' : undefined} />
         </Space>
       </Card>
-
-      <Card title="说明">
-        <div style={{ color: '#666' }}>
-          - 会员等级影响每日与每月检测额度。
-          <br />
-          - 如需提升额度，请在会员中心升级计划或联系管理员。
-        </div>
-      </Card>
     </Space>
   );
 }

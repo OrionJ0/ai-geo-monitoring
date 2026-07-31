@@ -21,7 +21,7 @@ import { formatScaled, groupDigits } from '@/utils/marketingValues.cjs';
 import { buildRelativeSeries } from '@/utils/marketingChartSeries.cjs';
 import styles from './market-overview.module.css';
 
-const { Paragraph, Text, Title } = Typography;
+const { Text, Title } = Typography;
 
 const sourceStatus = {
   AVAILABLE: { label: '数据正常', color: 'success' },
@@ -159,11 +159,7 @@ export default function MarketOverviewPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.pageHeader}>
-        <div>
-          <Title level={2} style={{ marginBottom: 4 }}>市场总览</Title>
-          <Text type="secondary">最近 30 天投入和网站流量，以及需要关注的数据状态。</Text>
-        </div>
+      <div className={styles.pageActions} aria-label="数据操作">
         <Space wrap>
           <Tag color={pageStatus.color}>{pageStatus.label}</Tag>
           <Button
@@ -185,21 +181,9 @@ export default function MarketOverviewPage() {
           description={defaultContext.errorMessage}
         />
       ) : null}
-      {!marketing.loading && !enabled ? (
-        <Alert
-          type="info"
-          showIcon
-          title="市场数据来源尚未正式开放"
-          description="页面结构已开放；百度来源可用后会在对应位置展示真实数据。"
-        />
-      ) : null}
-
       <section aria-labelledby="journey-heading">
         <div className={styles.sectionHeader}>
-          <div>
-            <Title level={4} id="journey-heading">全链路概览</Title>
-            <Text type="secondary">各来源独立观察，不构成跨来源归因。</Text>
-          </div>
+          <Title level={4} id="journey-heading">全链路概览</Title>
         </div>
         <div className={styles.journeyGrid}>
           <Card
@@ -254,12 +238,11 @@ export default function MarketOverviewPage() {
             title="原始咨询"
             extra={<Tag>来源暂不可接入</Tag>}
           >
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="尚无可展示数据"
+            <Statistic
+              title="咨询量"
+              value="—"
+              styles={{ content: { color: '#8a94a3' } }}
             />
-            <Paragraph type="secondary">落地页系统尚未提供稳定 API。</Paragraph>
-            <Link href="/geo/consultations">查看接入说明</Link>
           </Card>
 
           <Card
@@ -268,22 +251,18 @@ export default function MarketOverviewPage() {
             title="订单结果"
             extra={<Tag>来源暂不可接入</Tag>}
           >
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="尚无可展示数据"
+            <Statistic
+              title="签订金额"
+              value="—"
+              styles={{ content: { color: '#8a94a3' } }}
             />
-            <Paragraph type="secondary">销售系统尚未提供稳定 API；未来仅同步订单签订金额。</Paragraph>
-            <Link href="/geo/order-results">查看接入说明</Link>
           </Card>
         </div>
       </section>
 
       <section aria-labelledby="trend-heading">
         <div className={styles.sectionHeader}>
-          <div>
-            <Title level={4} id="trend-heading">投入与流量趋势</Title>
-            <Text type="secondary">广告和网站流量分别展示，不连接、不换算。</Text>
-          </div>
+          <Title level={4} id="trend-heading">投入与流量趋势</Title>
         </div>
         <div className={styles.trendGrid}>
           <Card
@@ -338,10 +317,7 @@ export default function MarketOverviewPage() {
 
       <section aria-labelledby="attention-heading">
         <div className={styles.sectionHeader}>
-          <div>
-            <Title level={4} id="attention-heading">需要关注</Title>
-            <Text type="secondary">当前只提示数据健康；趋势阈值尚未批准。</Text>
-          </div>
+          <Title level={4} id="attention-heading">需要关注</Title>
         </div>
         <Card className={styles.attentionCard}>
           {attentionItems.length ? (

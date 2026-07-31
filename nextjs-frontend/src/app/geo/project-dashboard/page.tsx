@@ -484,13 +484,9 @@ export default function GeoProjectDashboardPage() {
     <div className={styles.page}>
       <Space orientation="vertical" size={16} className={styles.pageStack}>
         <Row align="middle" justify="space-between" gutter={[16, 12]}>
-          <Col>
-            <Title level={3} style={{ margin: 0 }}>AI 搜索表现</Title>
-            <Text type="secondary">按周期查看广拓在中国大陆 AI 搜索中的品牌表现</Text>
-          </Col>
+          <Col flex="auto" />
           <Col>
             <Space wrap>
-              <Text strong>{defaultContext.project?.name || '默认项目'}</Text>
               <Select
                 style={{ width: 120 }}
                 value={days}
@@ -525,9 +521,7 @@ export default function GeoProjectDashboardPage() {
 
         <section aria-labelledby="core-metrics-title" className={`${styles.metricSection} ${styles.coreSection}`}>
           <div className={styles.sectionHeader}>
-            <Text className={styles.sectionEyebrow}>优先查看</Text>
             <Title level={4} id="core-metrics-title" className={styles.sectionTitle}>核心表现</Title>
-            <Text className={styles.sectionDescription}>优先查看品牌在 AI 回答中的整体可见度表现。</Text>
           </div>
           <Row gutter={[12, 12]}>
             <Col xs={24} sm={12} lg={8}>
@@ -544,9 +538,7 @@ export default function GeoProjectDashboardPage() {
 
         <section aria-labelledby="run-quality-title" className={styles.metricSection}>
           <div className={styles.sectionHeader}>
-            <Text className={styles.sectionEyebrow}>数据基础</Text>
             <Title level={4} id="run-quality-title" className={styles.sectionTitle}>运行质量</Title>
-            <Text className={styles.sectionDescription}>用于判断本周期数据是否拥有足够的有效运行基础。</Text>
           </div>
           <Row gutter={[12, 12]}>
             <Col xs={24} sm={6}>
@@ -566,9 +558,7 @@ export default function GeoProjectDashboardPage() {
 
         <section aria-labelledby="source-performance-title" className={styles.metricSection}>
           <div className={styles.sectionHeader}>
-            <Text className={styles.sectionEyebrow}>引用健康</Text>
             <Title level={4} id="source-performance-title" className={styles.sectionTitle}>来源表现</Title>
-            <Text className={styles.sectionDescription}>查看回答是否带有引用，以及自有来源在引用中的覆盖情况。</Text>
           </div>
           <Row gutter={[12, 12]}>
             <Col xs={24} sm={12} lg={6}>
@@ -588,9 +578,7 @@ export default function GeoProjectDashboardPage() {
 
         <section aria-labelledby="diagnosis-title" className={`${styles.metricSection} ${styles.diagnosisSection}`}>
           <div className={styles.sectionHeader}>
-            <Text className={styles.sectionEyebrow}>解释原因</Text>
             <Title level={4} id="diagnosis-title" className={styles.sectionTitle}>变化与诊断</Title>
-            <Text className={styles.sectionDescription}>结合来源变化、平台、问题分类和竞品明细解释核心表现。</Text>
           </div>
           <Row gutter={[12, 12]} className={styles.diagnosticRows}>
             <Col xs={12} sm={8} lg={4}>
@@ -784,9 +772,7 @@ export default function GeoProjectDashboardPage() {
 
         <section aria-labelledby="action-title" className={`${styles.metricSection} ${styles.actionSection}`}>
           <div className={styles.sectionHeader}>
-            <Text className={styles.sectionEyebrow}>安排动作</Text>
             <Title level={4} id="action-title" className={styles.sectionTitle}>行动建议</Title>
-            <Text className={styles.sectionDescription}>根据本周期的低可见度、来源缺口和竞品表现安排下一步优化。</Text>
           </div>
           <Card size="small" title="优化机会" loading={dashboardLoading}>
             <Table

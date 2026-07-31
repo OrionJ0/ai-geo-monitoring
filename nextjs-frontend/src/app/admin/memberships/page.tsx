@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Card, Table, Space, Button, InputNumber, Modal, Form, message, Tag, Alert, Select } from 'antd';
-import Collapsible from '@/components/Collapsible';
+import { Card, Table, Space, Button, InputNumber, Modal, Form, message, Tag, Select } from 'antd';
 import axios from 'axios';
 
 export default function AdminMembershipsPage() {
@@ -105,7 +104,7 @@ export default function AdminMembershipsPage() {
 
   return (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-      <Card title="会员设置" extra={<Space><Button onClick={fetchDefaultLevel}>刷新</Button><Button type="primary" loading={savingDefault} onClick={async () => {
+      <Card extra={<Space><Button onClick={fetchDefaultLevel}>刷新</Button><Button type="primary" loading={savingDefault} onClick={async () => {
         try {
           setSavingDefault(true);
           const values = await defaultForm.validateFields();
@@ -119,32 +118,16 @@ export default function AdminMembershipsPage() {
         finally { setSavingDefault(false); }
       }}>保存</Button></Space>}>
         <Form form={defaultForm} layout="vertical" requiredMark={false}>
-          <Collapsible title="默认会员等级" defaultCollapsed={false} extra={null} className="" style={{}}>
-            <Form.Item name="default_membership_level" label="默认会员等级" rules={[{ required: true, message: '请选择默认会员等级' }]}>
-              <Select options={[{ value: 'free', label: '免费' }, { value: 'pro', label: '专业' }, { value: 'enterprise', label: '企业' }]} />
-            </Form.Item>
-          </Collapsible>
-          <Collapsible title="配额低剩余提示阈值" defaultCollapsed={false} extra={null} className="" style={{}}>
-            <Form.Item name="quota_low_threshold" label="配额低剩余提示阈值" rules={[{ required: true, message: '请输入阈值' }]}>
-              <InputNumber min={0} max={1} step={0.05} style={{ width: 200 }} />
-            </Form.Item>
-          </Collapsible>
+          <Form.Item name="default_membership_level" label="默认会员等级" rules={[{ required: true, message: '请选择默认会员等级' }]}>
+            <Select options={[{ value: 'free', label: '免费' }, { value: 'pro', label: '专业' }, { value: 'enterprise', label: '企业' }]} />
+          </Form.Item>
+          <Form.Item name="quota_low_threshold" label="配额低剩余提示阈值" rules={[{ required: true, message: '请输入阈值' }]}>
+            <InputNumber min={0} max={1} step={0.05} style={{ width: 200 }} />
+          </Form.Item>
         </Form>
       </Card>
 
       <Card title="会员方案" extra={<Space><Button onClick={fetchPlans}>刷新</Button><Button danger onClick={resetAll}>批量重置为默认值</Button></Space>}>
-        <Alert
-          style={{ marginBottom: 12 }}
-          type="info"
-          showIcon
-          title="说明"
-          description={(
-            <div>
-              <div>默认配额：免费(每日10)、专业(每日100)、企业(每日1000)。</div>
-              <div>可调整配额，如需恢复默认，请使用"重置为默认值"。</div>
-            </div>
-          )}
-        />
         <Table rowKey="id" loading={loading} dataSource={plans} columns={columns} pagination={false} />
 
         <Modal title={`编辑配额：${editing?.level || ''}`} open={!!editing} onOk={submitEdit} onCancel={() => setEditing(null)} okText="保存">

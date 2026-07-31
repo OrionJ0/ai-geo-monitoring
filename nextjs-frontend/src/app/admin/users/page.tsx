@@ -202,7 +202,7 @@ export default function AdminUsersPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <Card title="用户管理" styles={{ header: { padding: '8px 12px' }, body: { padding: 12, display: 'flex', flexDirection: 'column', gap: 12 } }} style={{ flex: 1, minHeight: 0, height: '100%' }} extra={(
+      <Card styles={{ header: { padding: '8px 12px' }, body: { padding: 12, display: 'flex', flexDirection: 'column', gap: 12 } }} style={{ flex: 1, minHeight: 0, height: '100%' }} extra={(
           <Space>
             <Space.Compact>
               <Input

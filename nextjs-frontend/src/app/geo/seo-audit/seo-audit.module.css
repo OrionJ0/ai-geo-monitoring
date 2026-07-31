@@ -12,37 +12,14 @@
 
 .hero {
   position: relative;
-  overflow: hidden;
-  padding: 42px 46px 32px;
+  padding: 24px;
   background: #f4f7ff;
   border: 1px solid #d7e1f5;
-  border-top: 4px solid var(--blue);
-}
-
-.hero::after {
-  content: '';
-  position: absolute;
-  width: 220px;
-  height: 220px;
-  right: -70px;
-  top: -90px;
-  border: 32px solid rgba(31, 77, 210, 0.06);
-  border-radius: 50%;
-  pointer-events: none;
-}
-
-.heroCopy {
-  max-width: 760px;
-  position: relative;
-  z-index: 1;
 }
 
 .heroActions {
-  position: absolute;
-  z-index: 2;
-  top: 28px;
-  right: 30px;
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -54,7 +31,6 @@
   box-shadow: none !important;
 }
 
-.eyebrow,
 .sectionKicker {
   display: inline-flex;
   align-items: center;
@@ -67,30 +43,13 @@
   text-transform: uppercase;
 }
 
-.hero h1 {
-  margin: 12px 0 14px;
-  max-width: 680px;
-  color: #111827;
-  font-size: clamp(32px, 4.5vw, 54px);
-  line-height: 1.08;
-  letter-spacing: -0.045em;
-}
-
-.heroCopy p {
-  max-width: 720px;
-  margin: 0;
-  color: #526078;
-  font-size: 16px;
-  line-height: 1.75;
-}
-
 .modeControl {
   position: relative;
   z-index: 1;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 16px;
 }
 
 .modeControl > span {
@@ -110,11 +69,6 @@
   box-shadow: 0 1px 3px rgba(23, 60, 170, 0.12);
 }
 
-.modeControl small {
-  color: var(--muted);
-  font-size: 11px;
-}
-
 .auditForm {
   position: relative;
   z-index: 1;
@@ -122,7 +76,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   max-width: 900px;
-  margin-top: 28px;
+  margin-top: 20px;
   padding: 8px;
   background: #fff;
   border: 1px solid #cfd9e9;
@@ -166,28 +120,8 @@
 .reportTransfer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
+  justify-content: flex-end;
   margin-top: 18px;
-  padding: 16px 20px;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--blue);
-}
-
-.reportTransfer > div {
-  display: grid;
-  gap: 4px;
-}
-
-.reportTransfer strong {
-  color: var(--ink);
-  font-size: 14px;
-}
-
-.reportTransfer span {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .reportTransfer :global(.ant-btn) {
@@ -208,8 +142,7 @@
   border: 0;
 }
 
-.loadingPanel,
-.startPanel {
+.loadingPanel {
   margin-top: 18px;
   background: #fff;
   border: 1px solid var(--line);
@@ -334,39 +267,6 @@
   background: #fef2f2;
   color: #991b1b;
   font-size: 12px;
-}
-
-.startPanel {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.startPanel article {
-  min-height: 176px;
-  padding: 30px;
-}
-
-.startPanel article + article {
-  border-left: 1px solid var(--line);
-}
-
-.startPanel article > span {
-  color: #8aa1d4;
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 12px;
-}
-
-.startPanel h2 {
-  margin: 24px 0 8px;
-  color: var(--ink);
-  font-size: 18px;
-}
-
-.startPanel p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.65;
 }
 
 .report {
@@ -2146,19 +2046,13 @@
   .healthScope > div:nth-child(odd) { border-left: 0; }
   .healthScope > div:nth-child(n + 3) { border-top: 1px solid var(--line); }
 
-  .hero h1 { font-size: 34px; }
-
   .modeControl {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .heroActions {
-    position: relative;
-    top: auto;
-    right: auto;
     flex-wrap: wrap;
-    margin-bottom: 18px;
   }
 
   .reportTransfer {
@@ -2173,15 +2067,6 @@
   }
 
   .auditForm :global(.ant-btn) { width: 100%; }
-
-  .startPanel { grid-template-columns: 1fr; }
-
-  .startPanel article { min-height: auto; }
-
-  .startPanel article + article {
-    border-top: 1px solid var(--line);
-    border-left: 0;
-  }
 
   .reportMeta dl {
     grid-template-columns: repeat(2, 1fr);

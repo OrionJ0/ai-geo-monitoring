@@ -45,6 +45,17 @@
   outline-offset: 3px;
 }
 
+.pageActions {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 16px;
+}
+
+.controlsCompact {
+  display: flex;
+  align-items: center;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
