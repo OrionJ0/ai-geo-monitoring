@@ -199,7 +199,7 @@ test('discovers and audits unique same-origin pages from links and recursive sit
   assert.equal(report.pages.every((page) => !Object.hasOwn(page, 'links')), true);
 });
 
-test('private site audits skip external probes and browser rendering without hiding the evidence gap', async () => {
+test('private site audits skip external probes and report the browser-rendering evidence gap', async () => {
   const origin = 'http://192.168.9.206:3003';
   const pages = new Map([
     [`${origin}/`, htmlPage(`${origin}/`, ['/about', 'http://192.168.9.207:4000/secret'])],
@@ -225,7 +225,7 @@ test('private site audits skip external probes and browser rendering without hid
   assert.equal(probed.includes('http://192.168.9.207:4000/secret'), false);
   assert.equal(
     report.sitewide.checks.find((check) => check.id === 'broken-links').status,
-    'unknown'
+    'passed'
   );
   assert.equal(
     report.sitewide.checks.find((check) => check.id === 'javascript-rendering').value,
@@ -703,6 +703,56 @@ test('bounds auxiliary discovery work to the requested page scope', async () => 
   );
 });
 
+test('does not let external link availability delay the full-site audit', async () => {
+  const externalLinks = Array.from(
+    { length: 30 },
+    (_, index) => `https://outside-${index + 1}.example/page`
+  );
+  const linkProbes = [];
+  const siteClient = {
+    async fetchPage(url) {
+      return htmlPage(url, externalLinks);
+    },
+    async probe(url, options) {
+      if (options?.requestKind === 'link_probe') linkProbes.push(url);
+      if (url.endsWith('/robots.txt')) {
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'text/plain' },
+          body: 'User-agent: *\nAllow: /'
+        };
+      }
+      if (url.endsWith('/sitemap.xml')) {
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'application/xml' },
+          body: '<urlset><url><loc>https://example.com/</loc></url></urlset>'
+        };
+      }
+      return { statusCode: 200, finalUrl: url, body: '' };
+    }
+  };
+
+  const report = await createSeoSiteAuditService({
+    siteClient,
+    renderService: {
+      async sample() {
+        return { status: 'unavailable', reason: 'test', samples: [] };
+      }
+    }
+  }).audit('https://example.com/', { maxPages: 1 });
+
+  assert.deepEqual(linkProbes, []);
+  assert.deepEqual(report.sitewide.broken_links.coverage, {
+    checked_targets: 0,
+    complete: true
+  });
+  assert.equal(
+    report.sitewide.checks.find((check) => check.id === 'broken-links').status,
+    'passed'
+  );
+});
+
 test('probes internal link targets outside the audited page limit', async () => {
   const pages = new Map([
     ['https://example.com/', htmlPage('https://example.com/', ['/a', '/missing'])],
@@ -731,7 +781,7 @@ test('probes internal link targets outside the audited page limit', async () => 
   );
 });
 
-test('keeps an external WAF probe out of the target-site failure result and stops that external origin', async () => {
+test('keeps external WAF links out of the full-site request path', async () => {
   let externalRequests = 0;
   const siteClient = createSeoSiteClient({
     minOriginIntervalMs: 0,
@@ -776,12 +826,10 @@ test('keeps an external WAF probe out of the target-site failure result and stop
 
   assert.equal(report.site.successfulPages, 1);
   assert.equal(report.site.crawlDiagnostics.stopReason, 'completed');
-  assert.equal(externalRequests, 1);
+  assert.equal(externalRequests, 0);
   assert.equal(
-    report.sitewide.broken_links.external.every((link) => (
-      link.errorCode === 'SEO_AUDIT_BLOCKED_BY_WAF'
-    )),
-    true
+    report.sitewide.checks.find((check) => check.id === 'broken-links').status,
+    'passed'
   );
 });
 
@@ -796,7 +844,7 @@ test('rejects invalid crawl configuration before creating an audit', () => {
 });
 
 test('adds cross-page SEO evidence and JavaScript render sampling to the formal site report', async () => {
-  const root = htmlPage('https://example.com/', ['/a', 'https://outside.example/missing']);
+  const root = htmlPage('https://example.com/', ['/a', '/missing']);
   root.html = root.html
     .replace('href="https://example.com/"', 'href="https://example.com/a"')
     .replace('</head>', '<link rel="alternate" hreflang="en" href="/a"></head>');

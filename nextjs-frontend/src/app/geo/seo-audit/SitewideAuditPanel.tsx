@@ -20,7 +20,7 @@ const CHECK_LABELS = {
   'duplicate-descriptions': '重复 Meta 描述',
   'canonical-conflicts': 'Canonical 冲突与聚类',
   redirects: '重定向链与循环',
-  'broken-links': '失效内链与外链',
+  'broken-links': '失效内链',
   'orphan-pages': '疑似孤儿页面',
   'internal-link-quality': '内部链接来源质量',
   'navigation-crawlability': '导航链接可抓取性',

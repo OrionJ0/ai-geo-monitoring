@@ -591,7 +591,7 @@ function createSeoSiteAuditService({
         });
       });
       const eligibleLinkTargets = Array.from(linkTargets.values())
-        .filter((entry) => !privateTarget || entry.internal);
+        .filter((entry) => entry.internal);
       const checkedPageTargets = eligibleLinkTargets.filter((entry) => (
         entry.internal && pageByUrl.has(entry.url)
       ));
@@ -608,10 +608,7 @@ function createSeoSiteAuditService({
         .sort((left, right) => Number(right.internal) - Number(left.internal))
         .slice(0, probeBudget);
       const linkEntries = [...checkedPageTargets, ...probeTargets];
-      const linkInventoryComplete = (
-        eligibleLinkTargets.length <= linkEntries.length
-        && (!privateTarget || eligibleLinkTargets.length === linkTargets.size)
-      );
+      const linkInventoryComplete = eligibleLinkTargets.length <= linkEntries.length;
       const linkChecks = [];
       const probeLink = async (entry) => {
         if (entry.internal) {

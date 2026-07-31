@@ -161,7 +161,7 @@ test('全站报告展示跨页专项审计和本次与上次问题差异', () =>
   assert.match(panelSource, /重复 Meta 描述/);
   assert.match(panelSource, /Canonical 冲突与聚类/);
   assert.match(panelSource, /重定向链与循环/);
-  assert.match(panelSource, /失效内链与外链/);
+  assert.match(panelSource, /失效内链/);
   assert.match(panelSource, /孤儿页面/);
   assert.match(panelSource, /内部链接来源质量/);
   assert.match(panelSource, /导航链接可抓取性/);

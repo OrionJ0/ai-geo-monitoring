@@ -1,5 +1,5 @@
 const defaultSeoAuditRules = Object.freeze({
-  version: '2026-07-31-v6',
+  version: '2026-07-31-v7',
   crawl: Object.freeze({
     pageLimit: 200,
     concurrency: 4,

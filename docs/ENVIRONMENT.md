@@ -124,7 +124,7 @@ BAIDU_MARKETING_REDIRECT_URI=https://<域名>/api/admin/marketing/baidu/oauth/ca
   - 检测另一台电脑时，被测服务必须监听可被局域网访问的地址（通常是 `0.0.0.0`），页面中直接填写该电脑可被后端访问的局域网 URL。
   - 本地 HTTP 服务应输入完整的 `http://主机:端口/`；省略协议会按 HTTPS 处理。
   - 每次任务只允许访问提交 URL 的精确来源（协议、主机和端口均相同）；跳转到其他私网来源会被拒绝。链路本地、云元数据和其他特殊地址始终禁止。
-  - 私网全站检测不会探测站外链接，也不会执行 JavaScript 渲染抽样；报告会把这些项目标成“未检查”，不会伪装成通过。
+  - 所有全站检测都不会探测站外链接；私网全站检测还不会执行 JavaScript 渲染抽样，报告会把私网受限项目标成“未检查”，不会伪装成通过。
 - `SEO_RENDER_BROWSER_EXECUTABLE` 全站 JavaScript 渲染抽样使用的 Chrome/Chromium 可执行文件；macOS 和常见 Linux 路径会自动发现，容器或自定义安装位置需显式配置
 
 ## Next.js 前端

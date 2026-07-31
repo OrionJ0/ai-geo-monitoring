@@ -155,20 +155,20 @@ Authorization: Bearer <token>
   - 判定边界：`robots.txt` 返回普通 4xx 或内容为空表示“未声明抓取限制”，但独立的 `robots-txt` 有效性检查仍会报缺失/空内容；429、5xx、网络失败或非空但无法解析的文件返回“无法判断”。允许状态不能证明真实 UA 已成功访问、收录或引用
   - 响应闸门：页面、robots 和 Sitemap 在解析前按预期类型分类；WAF、429、普通 HTTP 错误或不可分析入口不会生成成功报告。GoodieAI 出口被 WAF 拦截不能据此推断搜索引擎也被拦截
   - 搜索平台标签：固定从站点首页分别检查 Google、Bing、百度 HTML 验证 Meta 标签，但不能据此断言平台后台当前已验证，也不识别 DNS 或验证文件方式
-  - 评分配置：响应包含 `scoreVersion`、`ruleVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前规则版本 `2026-07-31-v6` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7；图片仅在缺少 `alt` 属性时失败，显式 `alt=""` 作为可能的装饰图提示，不直接扣分
+  - 评分配置：响应包含 `scoreVersion`、`ruleVersion` 和 `summary.totalWeight`；规则权重、严重程度、主要阈值和 `crawlerProfiles` 集中在 `backend/config/seoAuditRules.js`；当前规则版本 `2026-07-31-v7` 中 Keywords 权重为 1，Sitemap 和爬虫权限权重均为 7；图片仅在缺少 `alt` 属性时失败，显式 `alt=""` 作为可能的装饰图提示，不直接扣分
   - 保存规则：检测成功后完整报告写入当前用户的 SQLite 历史记录；保存失败时本次请求不返回成功
   - 安全边界：默认拒绝本机和私网目标。内部部署设置 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=true` 后，允许所有已登录用户检测后端 `localhost`、loopback 和 RFC1918 IPv4 字面地址；单次任务只能访问提交 URL 的精确来源。带用户名/密码的网址、链路本地/云元数据等特殊地址始终拒绝
 - `POST /api/seo-audits/site` 创建全站异步检测任务
   - 请求体：`url` 必填；以该 URL 为入口，只发现同源 HTTP/HTTPS 页面
   - 返回：`202 Accepted`，`data.id` 为任务编号，初始 `status` 为 `queued`，`progress.phase` 为 `queued`
   - 发现来源：真实入口 URL、页面内链、根目录 `/sitemap.xml`、robots 声明的 Sitemap；支持 Sitemap index、片段移除，并按重定向后的 resolved URL 合并页面；报告保留 requested URL、final URL 和重定向别名
-  - 抓取限制：默认上限 200 页、页面并发 4、同一 origin 请求启动间隔至少 250ms、最多读取 20 个 Sitemap、递归深度 3；达到页面预算后不再递归更多 Sitemap。链接探活优先检查未覆盖的站内目标，预算为至少 10 个、每个成功页面 2 个、全任务最多 50 个网络探活；已检测页面的状态直接复用，不占探活预算。达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
+  - 抓取限制：默认上限 200 页、页面并发 4、同一 origin 请求启动间隔至少 250ms、最多读取 20 个 Sitemap、递归深度 3；达到页面预算后不再递归更多 Sitemap。主任务只探活未覆盖的站内目标，预算为至少 10 个、每个成功页面 2 个、全任务最多 50 个网络探活；已检测页面的状态直接复用，不占探活预算。站外链接仍保留在逐页链接数据中，但不发出网络请求，也不参与“失效内链”检查。达到上限时任务仍完成，但报告 `site.truncated` 为 `true`
   - 有界预检：递归 Sitemap 与页面循环前依次请求入口、robots 和一个默认 Sitemap；确认 WAF 或 429 后停止本任务对该 origin 的后续请求
   - 请求诊断：成功报告的 `site.crawlDiagnostics` 固定记录页面、robots、Sitemap、链接探活请求数、重定向跳数、逻辑渲染尝试数和完成原因
   - 专项报告：`report.sitewide.version` 当前为 `sitewide-audit-v4`；`sitemap-coverage` 独立比较有效 Sitemap 页面清单与已知可索引页面，没有有效页面地址时返回 `unknown`，疑似孤儿页与内链来源质量也不会误报为通过
   - 导航证据：`navigation_crawlability` 返回无有效 `href` 的 `<a>`、有明确页面跳转证据的非语义化控件及交互后才创建的链接；只有点击样式、`cursor-pointer` 或通用点击事件的 `span`/`div` 不判定为 SEO 链接错误
   - 证据边界：浏览器导航抽样只触发 Header/Nav 控件的 hover/focus，不点击链接或业务按钮；渲染器不可用且静态 HTML 没有确定问题时，导航检查返回 `unknown`，不会伪装为通过
-  - 私网边界：私网全站任务不会探测站外链接，也不会执行 JavaScript 渲染抽样；报告的 `networkPolicy` 会明确标记这两项为 `not_checked`
+  - 网络边界：所有全站任务均不探测站外链接；私网任务还不会执行 JavaScript 渲染抽样。报告的 `networkPolicy` 会明确标记私网任务的这两项为 `not_checked`
   - 容错：单页失败写入逐页账本并继续；所有入口均失败时任务标记 `failed`，且不写入伪成功历史
 - `GET /api/seo-audits/runtime` 获取当前 SEO 检测运行能力
   - `privateTargetsEnabled` 表示后端是否开启本机和局域网检测

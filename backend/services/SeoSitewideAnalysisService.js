@@ -761,19 +761,19 @@ function analyzeSitewideEvidence({
     }),
     evidenceCheck({
       id: 'broken-links',
-      title: '失效内链与外链',
+      title: '失效内链',
       severity: 'high',
-      failed: brokenLinks.internal.length > 0 || brokenLinks.external.length > 0,
-      finding: `${brokenLinks.internal.length} 条失效内链，${brokenLinks.external.length} 条失效外链`,
-      passedFinding: '抽查链接均可访问',
-      value: `${brokenLinks.internal.length + brokenLinks.external.length} 个失效目标`,
-      affectedPages: [...brokenLinks.internal, ...brokenLinks.external]
+      failed: brokenLinks.internal.length > 0,
+      finding: `${brokenLinks.internal.length} 条失效内链`,
+      passedFinding: '抽查内链均可访问',
+      value: `${brokenLinks.internal.length} 个失效内链目标`,
+      affectedPages: brokenLinks.internal
         .flatMap((link) => link.sourcePages || []),
-      details: [...brokenLinks.internal, ...brokenLinks.external],
-      recommendation: '修复或移除失效链接，并将重定向链接更新为最终可访问地址。',
+      details: brokenLinks.internal,
+      recommendation: '修复或移除失效内链，并将重定向链接更新为最终可访问地址。',
       complete: siteInventoryComplete && linkInventoryComplete,
-      unknownFinding: '链接抽查未覆盖完整站点，无法确认没有失效链接',
-      unknownValue: `已检查 ${brokenLinks.coverage.checked_targets} 个唯一目标，证据不完整`
+      unknownFinding: '内链抽查未覆盖完整站点，无法确认没有失效内链',
+      unknownValue: `已检查 ${brokenLinks.coverage.checked_targets} 个唯一内链目标，证据不完整`
     }),
     evidenceCheck({
       id: 'orphan-pages',

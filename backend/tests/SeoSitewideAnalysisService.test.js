@@ -116,7 +116,7 @@ test('reports redirect chains and redirect loops separately', () => {
   assert.equal(result.checks.find((check) => check.id === 'redirects').status, 'failed');
 });
 
-test('separates broken internal and external links with their source pages', () => {
+test('retains external link evidence but only grades broken internal links', () => {
   const result = analyzeSitewideEvidence({
     origin: 'https://example.com',
     pages: [page('https://example.com/')],
@@ -150,7 +150,12 @@ test('separates broken internal and external links with their source pages', () 
   assert.deepEqual(result.broken_links.external.map((link) => link.url), [
     'https://outside.example/report'
   ]);
-  assert.equal(result.checks.find((check) => check.id === 'broken-links').status, 'failed');
+  const brokenLinksCheck = result.checks.find((check) => check.id === 'broken-links');
+  assert.equal(brokenLinksCheck.title, '失效内链');
+  assert.equal(brokenLinksCheck.status, 'failed');
+  assert.deepEqual(brokenLinksCheck.details.map((link) => link.url), [
+    'https://example.com/missing'
+  ]);
 });
 
 test('finds sitemap pages with no incoming internal links as orphan pages', () => {

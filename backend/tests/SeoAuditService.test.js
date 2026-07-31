@@ -199,7 +199,7 @@ test('does not treat empty robots and sitemap responses as healthy', async () =>
   assert.equal(sitemap.severity, 'high');
   assert.equal(sitemap.weight, 7);
   assert.equal(report.scoreVersion, '2026-07-23-v4');
-  assert.equal(report.ruleVersion, '2026-07-31-v6');
+  assert.equal(report.ruleVersion, '2026-07-31-v7');
 });
 
 test('does not parse HTML error pages as robots or sitemap resources', async () => {
