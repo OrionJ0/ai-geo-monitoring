@@ -56,9 +56,8 @@ class DoubaoWebAdapter extends DeepSeekWebAdapter {
 
   isTransientAnswer(text) {
     const normalized = String(text || '').replace(/\s+/g, '').trim();
-    return /^(?:(?:正在)?(?:联网)?搜索(?:中)?|(?:正在)?(?:思考|生成|分析)(?:中)?)[.…·]*$/.test(
-      normalized
-    );
+    return /^(?:(?:正在)?(?:联网)?搜索(?:中)?|(?:正在)?(?:思考|生成|分析)(?:中)?)[.…·]*$/.test(normalized)
+      || /^搜索\d+个关键词[，,]参考\d+篇资料/.test(normalized);
   }
 }
 

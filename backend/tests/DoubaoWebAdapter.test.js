@@ -217,6 +217,15 @@ test('does not persist Doubao search progress as the final answer', async () => 
     .update('正在搜索').digest('hex'));
 });
 
+test('recognizes the Doubao source-search summary as a transient answer block', () => {
+  const adapter = new DoubaoWebAdapter({});
+
+  assert.equal(adapter.isTransientAnswer(
+    '搜索 1 个关键词，参考 6 篇资料\n“上海炎荣 脉冲电子围栏 产品特点 官网”'
+  ), true);
+  assert.equal(adapter.isTransientAnswer('这是包含来源链接的最终回答。'), false);
+});
+
 test('never inserts or sends when Doubao standard mode cannot be verified', async () => {
   const events = [];
   const fakePage = page(events, [
