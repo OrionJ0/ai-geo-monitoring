@@ -399,6 +399,7 @@ function extractIndexedChatCitations(aiResponse) {
 class ProjectRunService {
   constructor(options = {}) {
     this.activeRecordIds = new Set();
+    this.activeQuestionSetRunRevisions = new Set();
     this.recordLeaseOwner = `${os.hostname()}:${process.pid}:project-run`;
     this.acceptingBackgroundRuns = true;
     this.backgroundRuns = new Set();
@@ -1724,6 +1725,12 @@ class ProjectRunService {
     };
   }
 
+  getQuestionSetRunRevisionKey(runId, runRevision = 0) {
+    const normalizedRunId = Number(runId);
+    if (!Number.isInteger(normalizedRunId) || normalizedRunId <= 0) return null;
+    return `${normalizedRunId}:${Number(runRevision) || 0}`;
+  }
+
   async dispatchPendingQuestionSetRuns(options = {}) {
     const RunRepository = options.QuestionSetRun || QuestionSetRun;
     const RecordRepository = options.QuestionRecord || QuestionRecord;
@@ -1741,6 +1748,11 @@ class ProjectRunService {
     });
     let dispatched = 0;
     for (const run of runs) {
+      const runRevisionKey = this.getQuestionSetRunRevisionKey(run.id, run.revision);
+      if (
+        runRevisionKey
+        && this.activeQuestionSetRunRevisions.has(runRevisionKey)
+      ) continue;
       const records = await RecordRepository.findAll({
         where: {
           question_set_run_id: run.id,
@@ -1754,8 +1766,8 @@ class ProjectRunService {
       const context = await this.buildPersistedQuestionSetRunContext(run, records);
       if (!context) continue;
       try {
-        this.schedulePreparedRun(context);
-        dispatched += 1;
+        const execution = this.schedulePreparedRun(context);
+        if (execution !== null) dispatched += 1;
       } catch (error) {
         console.warn('补发问题集运行失败:', {
           question_set_run_id: run.id,
@@ -1827,6 +1839,14 @@ class ProjectRunService {
         error_code: 'project_run_shutdown'
       });
     }
+    const runRevisionKey = this.getQuestionSetRunRevisionKey(
+      context?.questionSetRunId,
+      context?.runRevision
+    );
+    if (runRevisionKey && this.activeQuestionSetRunRevisions.has(runRevisionKey)) {
+      return null;
+    }
+    if (runRevisionKey) this.activeQuestionSetRunRevisions.add(runRevisionKey);
     let execution;
     execution = new Promise((resolve) => {
       setImmediate(async () => {
@@ -1836,6 +1856,7 @@ class ProjectRunService {
           console.error('项目队列分析异常:', this.formatError(error));
         } finally {
           this.backgroundRuns.delete(execution);
+          if (runRevisionKey) this.activeQuestionSetRunRevisions.delete(runRevisionKey);
           resolve();
         }
       });

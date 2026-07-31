@@ -10,6 +10,7 @@ delete process.env.DATABASE_URL;
 
 const AIPlatformService = require('../services/AIPlatformService');
 const ProjectRunService = require('../services/ProjectRunService');
+const ProjectRunServiceClass = ProjectRunService.ProjectRunService;
 const QuestionSetRunService = require('../services/QuestionSetRunService');
 const {
   sequelize,
@@ -384,6 +385,53 @@ test('keeps committed pending records when immediate dispatch fails and later re
     result.data.question_set_run_id
   );
   assert.equal(dispatched[0].runRevision, 0);
+});
+
+test('does not redispatch a run revision that is already scheduled in this process', async () => {
+  const service = new ProjectRunServiceClass();
+  let releaseExecution;
+  const executionGate = new Promise((resolve) => {
+    releaseExecution = resolve;
+  });
+  let executionCalls = 0;
+  service.executePreparedRun = async () => {
+    executionCalls += 1;
+    await executionGate;
+  };
+  service.buildPersistedQuestionSetRunContext = async () => ({
+    questionSetRunId: 77,
+    runRevision: 3
+  });
+  const context = {
+    questionSetRunId: 77,
+    runRevision: 3
+  };
+  let recordQueries = 0;
+
+  const firstExecution = service.schedulePreparedRun(context);
+  const redispatched = await service.dispatchPendingQuestionSetRuns({
+    QuestionSetRun: {
+      findAll: async () => [{ id: 77, revision: 3 }]
+    },
+    QuestionRecord: {
+      findAll: async () => {
+        recordQueries += 1;
+        return [{ id: 901, status: 'pending' }];
+      }
+    }
+  });
+
+  assert.equal(redispatched, 0);
+  assert.equal(recordQueries, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(executionCalls, 1);
+  releaseExecution();
+  await firstExecution;
+
+  const resumedExecution = service.schedulePreparedRun(context);
+  assert.notEqual(resumedExecution, null);
+  await resumedExecution;
+  assert.equal(executionCalls, 2);
 });
 
 test('question-set entry persists DeepSeek Web records with run ownership and adapter config', async () => {
