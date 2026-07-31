@@ -37,13 +37,13 @@ export default function BaiduAuthorizationResultPage() {
   return (
     <Card title="百度搜索推广授权结果" style={{ maxWidth: 720 }}>
       {!result && !error ? <p role="status">正在读取本次授权结果…</p> : null}
-      {error ? <Alert type="error" showIcon message={error} role="alert" /> : null}
+      {error ? <Alert type="error" showIcon title={error} role="alert" /> : null}
       {result ? (
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           <Alert
             type={type}
             showIcon
-            message={message}
+            title={message}
             description={
               result.status === 'OUTCOME_UNKNOWN'
                 ? '系统不会盲目重试一次性授权码。请返回设置中心重新发起授权。'

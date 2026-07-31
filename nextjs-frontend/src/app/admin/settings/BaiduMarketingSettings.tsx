@@ -284,7 +284,7 @@ export default function BaiduMarketingSettings() {
       <Alert
         type={moduleStatus === 'LOADING' ? 'info' : 'warning'}
         showIcon
-        message={moduleStatus === 'LOADING' ? '正在检查营销模块' : '百度营销尚未开放'}
+        title={moduleStatus === 'LOADING' ? '正在检查营销模块' : '百度营销尚未开放'}
         description={
           moduleErrorCode === 'MARKETING_CONTRACT_NOT_VERIFIED'
             ? '真实搜索推广契约尚待获批应用和测试账户核验；当前不会向百度发起请求。'
@@ -297,7 +297,7 @@ export default function BaiduMarketingSettings() {
 
   return (
     <section aria-labelledby="baidu-marketing-settings-title">
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <div>
           <h2 id="baidu-marketing-settings-title">百度搜索推广连接</h2>
           <p>只读取账户、推广计划、展现、点击和消费，不修改投放。</p>
@@ -306,7 +306,7 @@ export default function BaiduMarketingSettings() {
           <Alert
             type="info"
             showIcon
-            message="受限试点模式"
+            title="受限试点模式"
             description="当前只可验证百度授权、Token 和账户目录；项目绑定、报表刷新和调度尚未开放。"
           />
         ) : null}
@@ -314,12 +314,12 @@ export default function BaiduMarketingSettings() {
           <Alert
             type="warning"
             showIcon
-            message="真实数据试点模式"
+            title="真实数据试点模式"
             description="当前只对项目白名单开放搜索账户绑定和最近 30 天只读报表；正式导航、币种与时区口径仍在验收。"
             action={<Button href="/geo/marketing">打开营销监控</Button>}
           />
         ) : null}
-        {error ? <Alert type="error" showIcon message={error} role="alert" /> : null}
+        {error ? <Alert type="error" showIcon title={error} role="alert" /> : null}
         <Space wrap>
           <Button
             type="primary"
@@ -535,7 +535,7 @@ export default function BaiduMarketingSettings() {
         confirmLoading={busy}
         destroyOnHidden
       >
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           <label>
             百度连接
             <br />
@@ -575,7 +575,7 @@ export default function BaiduMarketingSettings() {
             <Alert
               type="info"
               showIcon
-              message={pilotAuthOnly
+              title={pilotAuthOnly
                 ? '当前连接没有可见的只读搜索账户'
                 : '当前连接没有可绑定的只读搜索账户'}
             />
