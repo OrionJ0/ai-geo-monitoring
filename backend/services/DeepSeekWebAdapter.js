@@ -169,6 +169,10 @@ class DeepSeekWebAdapter {
     return { record_id: recordId, user_id: userId, project_id: projectId };
   }
 
+  isTransientAnswer() {
+    return false;
+  }
+
   async waitForFinalTurn(baselineIds, startedAt) {
     let stableText = null;
     let stableSince = null;
@@ -201,7 +205,7 @@ class DeepSeekWebAdapter {
       }
       if (newTurns.length === 1) {
         const text = normalizeText(newTurns[0].text);
-        if (text) {
+        if (text && !this.isTransientAnswer(text)) {
           finalTurn = {
             id: String(newTurns[0].id),
             text,

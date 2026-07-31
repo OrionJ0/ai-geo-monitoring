@@ -169,6 +169,54 @@ test('captures one Doubao answer in standard mode without enabling deep research
   );
 });
 
+test('does not persist Doubao search progress as the final answer', async () => {
+  const events = [];
+  let now = 0;
+  const answer = '这是豆包网页最终回答';
+  const adapter = new DoubaoWebAdapter({
+    page: page(events, [
+      { assistantTurns: [], generationActive: false, busy: false },
+      { assistantTurns: [], generationActive: false, busy: false },
+      {
+        assistantTurns: [{ id: 'message-1', text: '正在搜索' }],
+        generationActive: false,
+        busy: false
+      },
+      {
+        assistantTurns: [{ id: 'message-1', text: '正在搜索' }],
+        generationActive: false,
+        busy: false
+      },
+      {
+        assistantTurns: [{ id: 'message-1', text: answer }],
+        generationActive: false,
+        busy: false
+      },
+      {
+        assistantTurns: [{ id: 'message-1', text: answer }],
+        generationActive: false,
+        busy: false
+      }
+    ]),
+    captureStore: captureStore(events),
+    now: () => now,
+    sleep: async (ms) => { now += ms; },
+    pollMs: 1,
+    stableMs: 1,
+    timeoutMs: 30_000
+  });
+
+  const result = await adapter.capture('测试搜索过渡态', {
+    record_id: 24,
+    user_id: 7,
+    project_id: 4
+  });
+
+  assert.equal(result.text, answer);
+  assert.notEqual(result.web_capture.response_sha256, createHash('sha256')
+    .update('正在搜索').digest('hex'));
+});
+
 test('never inserts or sends when Doubao standard mode cannot be verified', async () => {
   const events = [];
   const fakePage = page(events, [

@@ -395,6 +395,7 @@ function normalizeProviderCitations(value) {
       boundedText(source.title, 500).replace(/\s+/g, ' ').trim()
     );
     const marker = rawTitle.match(/^(?:\[|【)?[-–—]?\s*(\d+)\s*(?:\]|】)?$/);
+    const placeholderTitle = /^(?:auto[-_ ]?link|link|url|website|source|citation|网页|链接|来源|引用)$/i.test(rawTitle);
     const displayIndex = Number.isSafeInteger(Number(source.display_index))
       && Number(source.display_index) > 0
       ? Number(source.display_index)
@@ -403,7 +404,7 @@ function normalizeProviderCitations(value) {
         : null;
     output.push({
       url,
-      title: rawTitle && !marker ? rawTitle : domain,
+      title: rawTitle && !marker && !placeholderTitle ? rawTitle : domain,
       domain,
       source_role: sourceRole,
       ...(boundedText(source.source_origin, 80)

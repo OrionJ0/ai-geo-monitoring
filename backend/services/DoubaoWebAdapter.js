@@ -53,6 +53,13 @@ class DoubaoWebAdapter extends DeepSeekWebAdapter {
   constructor(options) {
     super({ ...options, identity: DOUBAO_WEB_IDENTITY });
   }
+
+  isTransientAnswer(text) {
+    const normalized = String(text || '').replace(/\s+/g, '').trim();
+    return /^(?:(?:正在)?(?:联网)?搜索(?:中)?|(?:正在)?(?:思考|生成|分析)(?:中)?)[.…·]*$/.test(
+      normalized
+    );
+  }
 }
 
 class DoubaoWebPage extends DeepSeekWebPage {

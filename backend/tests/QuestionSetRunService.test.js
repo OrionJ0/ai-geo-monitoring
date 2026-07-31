@@ -565,6 +565,12 @@ test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及
       title: 'ç”µç£æ„ŸçŸ¥ - ä¸Šæµ·å¹¿æ‹“',
       domain: 'retrieval.example.com',
       source_role: 'retrieval_candidate'
+    },
+    {
+      url: 'https://autolink.example.com/c',
+      title: 'autolink',
+      domain: 'autolink.example.com',
+      source_role: 'explicit_citation'
     }
   ];
   await ResultDetail.create({
@@ -589,6 +595,10 @@ test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及
   assert.equal(
     providerCitations[1].title,
     'ç”µç£æ„ŸçŸ¥ - ä¸Šæµ·å¹¿æ‹“'
+  );
+  assert.equal(
+    report.rows[0].provider_citations[2].title,
+    'autolink.example.com'
   );
   assert.equal(report.rows[0].web_capture.selector_version, 'deepseek-web-v1');
   assert.equal(report.rows[0].web_capture.artifact_owner_record_id, record.id);
