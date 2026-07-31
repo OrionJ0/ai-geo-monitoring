@@ -1377,6 +1377,7 @@ test('Web failure stores only bounded failure metadata and never finalizes a met
 
 test('queues a project run without waiting for prepared targets to finish', async () => {
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalGetEnabledPlatforms = AIPlatformService.getEnabledPlatforms;
   const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
   const originalFindCompetitors = BrandCompetitor.findAll;
@@ -1387,6 +1388,7 @@ test('queues a project run without waiting for prepared targets to finish', asyn
   let createEntriesOptions = null;
   let runUpdate = null;
 
+  AIPlatformService.getEnabledPlatforms = async () => ['doubao'];
   AIPlatformService.getPlatformAvailability = async () => [{
     code: 'doubao',
     platform_name: '豆包',
@@ -1452,6 +1454,7 @@ test('queues a project run without waiting for prepared targets to finish', asyn
     });
   } finally {
     AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    AIPlatformService.getEnabledPlatforms = originalGetEnabledPlatforms;
     ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
     ProjectRunService.consumeRunQuota = originalConsumeQuota;
     BrandCompetitor.findAll = originalFindCompetitors;
