@@ -29,7 +29,7 @@ test.after(() => {
   ProjectRunService.analysisConfigService = originalAnalysisConfigService;
 });
 
-test('builds project run targets from enabled prompts and project platforms', () => {
+test('builds project run targets from enabled prompts and globally enabled platforms', () => {
   const targets = ProjectRunService.buildPromptTargets([
     { id: 1, question: '问题一', enabled: true, platforms: ['doubao', 'deepseek', 'kimi'] },
     { id: 2, question: '问题二', enabled: false, platforms: ['doubao'] },
@@ -37,12 +37,14 @@ test('builds project run targets from enabled prompts and project platforms', ()
   ], ['doubao', 'deepseek'], ['deepseek']);
 
   assert.deepEqual(targets, [
+    { prompt: { id: 1, question: '问题一', enabled: true, platforms: ['doubao', 'deepseek', 'kimi'] }, platform: 'doubao' },
     { prompt: { id: 1, question: '问题一', enabled: true, platforms: ['doubao', 'deepseek', 'kimi'] }, platform: 'deepseek' },
+    { prompt: { id: 3, question: '问题三', enabled: true, platforms: [] }, platform: 'doubao' },
     { prompt: { id: 3, question: '问题三', enabled: true, platforms: [] }, platform: 'deepseek' }
   ]);
 });
 
-test('intersects prompt platforms with project platforms when building run targets', () => {
+test('ignores legacy per-prompt platform fields when building run targets', () => {
   const targets = ProjectRunService.buildPromptTargets([
     { id: 1, question: '只跑豆包', enabled: true, platforms: ['doubao'] },
     { id: 2, question: '只跑 DeepSeek', enabled: true, platforms: ['deepseek'] },
@@ -51,18 +53,23 @@ test('intersects prompt platforms with project platforms when building run targe
 
   assert.deepEqual(targets, [
     { prompt: { id: 1, question: '只跑豆包', enabled: true, platforms: ['doubao'] }, platform: 'doubao' },
+    { prompt: { id: 1, question: '只跑豆包', enabled: true, platforms: ['doubao'] }, platform: 'deepseek' },
+    { prompt: { id: 2, question: '只跑 DeepSeek', enabled: true, platforms: ['deepseek'] }, platform: 'doubao' },
     { prompt: { id: 2, question: '只跑 DeepSeek', enabled: true, platforms: ['deepseek'] }, platform: 'deepseek' },
     { prompt: { id: 3, question: '继承项目平台', enabled: true, platforms: [] }, platform: 'doubao' },
     { prompt: { id: 3, question: '继承项目平台', enabled: true, platforms: [] }, platform: 'deepseek' }
   ]);
 });
 
-test('rejects prompt targets outside the selected project platforms', () => {
+test('ignores legacy project platform arguments when building run targets', () => {
   const targets = ProjectRunService.buildPromptTargets([
     { id: 1, question: '只跑豆包', enabled: true, platforms: ['doubao'] }
   ], ['doubao', 'deepseek'], ['deepseek']);
 
-  assert.deepEqual(targets, []);
+  assert.deepEqual(targets, [
+    { prompt: { id: 1, question: '只跑豆包', enabled: true, platforms: ['doubao'] }, platform: 'doubao' },
+    { prompt: { id: 1, question: '只跑豆包', enabled: true, platforms: ['doubao'] }, platform: 'deepseek' }
+  ]);
 });
 
 test('only active projects are runnable', () => {
@@ -91,46 +98,13 @@ test('reports selected prompt availability separately from api key availability'
   const result = await ProjectRunService.runProject({
     project: { id: 1, user_id: 1, status: 'active', platforms: ['deepseek'] },
     prompts: [],
-    platforms: ['deepseek'],
-    user: { id: 1, role: 'user' },
-    promptSelectionExplicit: true
+    user: { id: 1, role: 'user' }
   });
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
   assert.equal(result.message, '问题集中没有启用的问题。');
   assert.equal(result.data.error_code, 'no_enabled_questions');
-});
-
-test('reports prompt and project platform mismatch separately from api key availability', async () => {
-  const result = await ProjectRunService.runProject({
-    project: { id: 1, user_id: 1, status: 'active', platforms: ['deepseek'] },
-    prompts: [{ id: 2, question: '只跑豆包', enabled: true, platforms: ['doubao'] }],
-    platforms: ['deepseek'],
-    user: { id: 1, role: 'user' }
-  });
-
-  assert.equal(result.ok, false);
-  assert.equal(result.status, 400);
-  assert.equal(result.message, '问题选择的平台不在当前项目的监测范围内。');
-  assert.equal(result.data.error_code, 'platform_scope_mismatch');
-});
-
-test('rejects explicit project runs when any selected prompt has no project platform overlap', async () => {
-  const result = await ProjectRunService.runProject({
-    project: { id: 1, user_id: 1, status: 'active', platforms: ['deepseek'] },
-    prompts: [
-      { id: 2, question: 'DeepSeek 可运行', enabled: true, platforms: ['deepseek'] },
-      { id: 3, question: '只跑豆包', enabled: true, platforms: ['doubao'] }
-    ],
-    platforms: ['deepseek'],
-    user: { id: 1, role: 'user' },
-    promptSelectionExplicit: true
-  });
-
-  assert.equal(result.ok, false);
-  assert.equal(result.status, 400);
-  assert.equal(result.message, '问题选择的平台不在当前项目的监测范围内。');
 });
 
 test('blocks project monitoring before platform preflight when analysis API is missing', async () => {
@@ -161,9 +135,7 @@ test('blocks project monitoring before platform preflight when analysis API is m
         enabled: true,
         platforms: ['deepseek-web']
       }],
-      platforms: ['deepseek-web'],
-      user: { id: 1, role: 'user' },
-      promptSelectionExplicit: true
+      user: { id: 1, role: 'user' }
     });
 
     assert.equal(result.ok, false);
@@ -1565,7 +1537,7 @@ test('does not consume quota or create records when every candidate platform is 
   };
 
   try {
-    const result = await ProjectRunService.runProject({
+    const result = await ProjectRunService.enqueueProjectRun({
       project: { id: 2, user_id: 9, status: 'active', platforms: ['deepseek'] },
       prompts: [{ id: 3, question: 'GEO 怎么做', enabled: true, platforms: ['deepseek'] }],
       platforms: ['deepseek'],
@@ -1585,14 +1557,18 @@ test('does not consume quota or create records when every candidate platform is 
   }
 });
 
-test('blocks the whole run when a selected Web platform fails real-time preflight', async () => {
+test('skips an unavailable Web platform while other globally enabled platforms still run', async () => {
+  const originalGetEnabledPlatforms = AIPlatformService.getEnabledPlatforms;
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
   const originalCreateEntries = ProjectRunService.createRunEntries;
+  const originalSchedule = ProjectRunService.schedulePreparedRun;
+  let quotaAmount = 0;
   let quotaCalled = false;
   let recordsCalled = false;
   let availabilityOptions;
 
+  AIPlatformService.getEnabledPlatforms = async () => ['deepseek-web', 'qwen'];
   AIPlatformService.getPlatformAvailability = async (_codes, options) => {
     availabilityOptions = options;
     return [
@@ -1614,17 +1590,19 @@ test('blocks the whole run when a selected Web platform fails real-time prefligh
     }
     ];
   };
-  ProjectRunService.consumeRunQuota = async () => {
+  ProjectRunService.consumeRunQuota = async (_userId, amount) => {
     quotaCalled = true;
+    quotaAmount = amount;
     return { ok: true };
   };
-  ProjectRunService.createRunEntries = async () => {
+  ProjectRunService.createRunEntries = async ({ targets }) => {
     recordsCalled = true;
-    return [];
+    return targets.map((target) => ({ target, record: { id: 41 } }));
   };
+  ProjectRunService.schedulePreparedRun = () => {};
 
   try {
-    const result = await ProjectRunService.runProject({
+    const result = await ProjectRunService.enqueueProjectRun({
       project: { id: 2, user_id: 9, status: 'active', platforms: ['deepseek-web', 'qwen'] },
       prompts: [{
         id: 3,
@@ -1636,24 +1614,28 @@ test('blocks the whole run when a selected Web platform fails real-time prefligh
       user: { id: 9, role: 'user' }
     });
 
-    assert.equal(result.ok, false);
-    assert.equal(result.status, 409);
-    assert.equal(result.data.error_code, 'web_platform_preflight_failed');
-    assert.equal(result.data.settings_url, '/admin/settings');
-    assert.deepEqual(result.data.blocked_platforms, [{
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 202);
+    assert.equal(result.data.total, 1);
+    assert.equal(result.data.results[0].platform, 'qwen');
+    assert.deepEqual(result.data.skipped_platforms, [{
       platform: 'deepseek-web',
       name: 'DeepSeek 网页版',
-      reason_code: 'web_login_required',
+      reason_code: 'PLATFORM_UNAVAILABLE',
+      reason: 'web_login_required',
       message: 'DeepSeek 网页版需要重新人工登录'
     }]);
-    assert.match(result.message, /需要重新人工登录/);
+    assert.match(result.message, /需要重新人工登录，已跳过/);
     assert.deepEqual(availabilityOptions, { forceRuntimeProbe: true });
-    assert.equal(quotaCalled, false);
-    assert.equal(recordsCalled, false);
+    assert.equal(quotaCalled, true);
+    assert.equal(quotaAmount, 1);
+    assert.equal(recordsCalled, true);
   } finally {
+    AIPlatformService.getEnabledPlatforms = originalGetEnabledPlatforms;
     AIPlatformService.getPlatformAvailability = originalGetAvailability;
     ProjectRunService.consumeRunQuota = originalConsumeQuota;
     ProjectRunService.createRunEntries = originalCreateEntries;
+    ProjectRunService.schedulePreparedRun = originalSchedule;
   }
 });
 

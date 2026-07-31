@@ -31,8 +31,8 @@ test('validates optional project website inputs before submit', () => {
   assert.equal(isValidWebsiteInput('来源：竞品资料'), false);
 });
 
-test('geo project forms validate website fields before submit', () => {
-  const page = fs.readFileSync(path.resolve(__dirname, '../app/geo/projects/page.tsx'), 'utf8');
+test('administrator workspace validates brand and competitor website fields before submit', () => {
+  const page = fs.readFileSync(path.resolve(__dirname, '../app/admin/settings/WorkspaceSettings.tsx'), 'utf8');
   assert.match(page, /isValidWebsiteInput/);
   assert.equal((page.match(/name="website" label="官网" rules=\{websiteRules\}/g) || []).length, 2);
 });

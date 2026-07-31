@@ -35,7 +35,6 @@ const { consumeQuotaDirect } = require('../middleware/quota');
 
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
 const RETRY_SCHEDULE_FAILURE_MESSAGE = '失败项重试调度失败，请重新提交';
-const PLATFORM_MISMATCH_MESSAGE = '问题选择的平台不在当前项目的监测范围内。';
 const MIN_RECORD_LEASE_MS = 60 * 1000;
 const RECORD_LEASE_BUFFER_SECONDS = 60;
 
@@ -162,36 +161,6 @@ function skippedPlatformMessage(item) {
     web_shutdown: `${name}服务正在关闭`
   };
   return messages[item?.reason] || `${name}暂不可用`;
-}
-
-function buildWebPreflightFailure(availability) {
-  const blockedPlatforms = (Array.isArray(availability) ? availability : [])
-    .filter((item) => (
-      WebPlatformRegistry.hasDefinition(item.code)
-      && !item.available
-      && (
-        String(item.reason || '').startsWith('web_')
-        || item.reason === 'managed_config_invalid'
-      )
-    ))
-    .map((item) => ({
-      platform: item.code,
-      name: item.platform_name,
-      reason_code: item.reason,
-      message: skippedPlatformMessage(item)
-    }));
-  if (!blockedPlatforms.length) return null;
-  return {
-    ok: false,
-    status: 409,
-    message: `${blockedPlatforms.map((item) => item.message).join('；')}，本次运行未创建任务。`,
-    data: {
-      error_code: 'web_platform_preflight_failed',
-      settings_url: '/admin/settings',
-      blocked_platforms: blockedPlatforms,
-      skipped_platforms: []
-    }
-  };
 }
 
 function countKeywordOccurrences(text, keywords) {
@@ -424,42 +393,12 @@ class ProjectRunService {
     return user;
   }
 
-  buildPromptTargets(prompts, availablePlatforms = [], projectPlatforms = []) {
-    const available = new Set(normalizePlatformCodes(availablePlatforms));
-    const projectPlatformList = normalizePlatformCodes(projectPlatforms);
-
+  buildPromptTargets(prompts, enabledPlatforms = []) {
+    const platformCodes = normalizePlatformCodes(enabledPlatforms);
     const rows = Array.isArray(prompts) ? prompts : [];
     return rows
       .filter((prompt) => prompt && prompt.enabled !== false)
-      .flatMap((prompt) => {
-        const promptPlatformList = Array.isArray(prompt.platforms) && prompt.platforms.length
-          ? prompt.platforms
-          : projectPlatformList;
-        const promptPlatforms = new Set(normalizePlatformCodes(promptPlatformList));
-        return Array.from(new Set(projectPlatformList
-          .filter((item) => available.has(item) && promptPlatforms.has(item))))
-          .map((platform) => ({ prompt, platform }));
-      });
-  }
-
-  hasPromptProjectPlatformOverlap(prompts, projectPlatforms = []) {
-    const projectPlatformList = normalizePlatformCodes(projectPlatforms);
-    const projectPlatformSet = new Set(projectPlatformList);
-    return (Array.isArray(prompts) ? prompts : [])
-      .filter((prompt) => prompt && prompt.enabled !== false)
-      .some((prompt) => {
-        const promptPlatformList = Array.isArray(prompt.platforms) && prompt.platforms.length
-          ? prompt.platforms
-          : projectPlatformList;
-        return normalizePlatformCodes(promptPlatformList).some((item) => projectPlatformSet.has(item));
-      });
-  }
-
-  hasEveryPromptProjectPlatformOverlap(prompts, projectPlatforms = []) {
-    const enabledPrompts = (Array.isArray(prompts) ? prompts : [])
-      .filter((prompt) => prompt && prompt.enabled !== false);
-    if (!enabledPrompts.length) return false;
-    return enabledPrompts.every((prompt) => this.hasPromptProjectPlatformOverlap([prompt], projectPlatforms));
+      .flatMap((prompt) => platformCodes.map((platform) => ({ prompt, platform })));
   }
 
   async getAnalysisReadinessFailure() {
@@ -1278,9 +1217,7 @@ class ProjectRunService {
   async planProjectRun({
     project,
     prompts,
-    platforms,
-    user,
-    promptSelectionExplicit = false
+    user
   }) {
     const projectData = project.toJSON ? project.toJSON() : project;
     const runUser = this.resolveRunUser(projectData, user);
@@ -1297,32 +1234,18 @@ class ProjectRunService {
       };
     }
 
-    let projectPlatforms = normalizePlatformCodes(
-      Array.isArray(platforms) && platforms.length ? platforms : projectData.platforms
-    );
-    if (!projectPlatforms.length) projectPlatforms = await AIPlatformService.getPlatformCodes();
-
-    if (!this.hasPromptProjectPlatformOverlap(enabledPrompts, projectPlatforms)
-      || (promptSelectionExplicit && !this.hasEveryPromptProjectPlatformOverlap(enabledPrompts, projectPlatforms))) {
-      return {
-        ok: false,
-        status: 400,
-        message: PLATFORM_MISMATCH_MESSAGE,
-        data: { error_code: 'platform_scope_mismatch', skipped_platforms: [] }
-      };
-    }
-
     const analysisReadinessFailure = await this.getAnalysisReadinessFailure();
     if (analysisReadinessFailure) return analysisReadinessFailure;
 
-    const candidateTargets = this.buildPromptTargets(enabledPrompts, projectPlatforms, projectPlatforms);
-    const candidateCodes = normalizePlatformCodes(candidateTargets.map((target) => target.platform));
+    const enabledPlatformCodes = await AIPlatformService.getEnabledPlatforms({
+      capability: 'monitoring'
+    });
+    const candidateTargets = this.buildPromptTargets(enabledPrompts, enabledPlatformCodes);
+    const candidateCodes = normalizePlatformCodes(enabledPlatformCodes);
     const availability = await AIPlatformService.getPlatformAvailability(
       candidateCodes,
       { forceRuntimeProbe: true }
     );
-    const webPreflightFailure = buildWebPreflightFailure(availability);
-    if (webPreflightFailure) return webPreflightFailure;
     const availabilityByCode = new Map(availability.map((item) => [item.code, item]));
     const targets = candidateTargets
       .filter((target) => availabilityByCode.get(target.platform)?.available)
@@ -1409,7 +1332,7 @@ class ProjectRunService {
     return { ...plan, quota, entries };
   }
 
-  buildQuestionSetRunFingerprint({ project, questionSet, prompts, platforms, user }) {
+  buildQuestionSetRunFingerprint({ project, questionSet, prompts, user }) {
     const projectData = project?.toJSON ? project.toJSON() : project;
     const questionSetData = questionSet?.toJSON ? questionSet.toJSON() : questionSet;
     const runUser = this.resolveRunUser(projectData, user);
@@ -1421,10 +1344,7 @@ class ProjectRunService {
         id: Number(prompt?.id) || null,
         question: String(prompt?.question || ''),
         enabled: prompt?.enabled !== false
-      })),
-      platforms: normalizePlatformCodes(
-        Array.isArray(platforms) && platforms.length ? platforms : projectData?.platforms
-      )
+      }))
     };
     return sha256(stableSerialize(request));
   }
@@ -1997,28 +1917,14 @@ class ProjectRunService {
         .filter((record) => isAnalysisOnlyRetry(record, detailsByRecordId.get(Number(record.id))))
         .map((record) => Number(record.id))
     );
-    const projectPlatformSet = new Set(normalizePlatformCodes(projectData.platforms));
     const monitoringCandidates = failedRecords.filter((record) => (
       !analysisOnlyIds.has(Number(record.id))
-      && projectPlatformSet.has(String(record.platform || '').trim().toLowerCase())
-    ));
-    const outOfScopeRecords = failedRecords.filter((record) => (
-      !analysisOnlyIds.has(Number(record.id))
-      && !projectPlatformSet.has(String(record.platform || '').trim().toLowerCase())
     ));
     const platformCodes = normalizePlatformCodes(monitoringCandidates.map((record) => record.platform));
     const availability = await AIPlatformService.getPlatformAvailability(
       platformCodes,
       { forceRuntimeProbe: true }
     );
-    const webPreflightFailure = buildWebPreflightFailure(availability);
-    if (webPreflightFailure) {
-      throw runError(
-        webPreflightFailure.message,
-        webPreflightFailure.status,
-        webPreflightFailure.data
-      );
-    }
     const availabilityByCode = new Map(availability.map((item) => [item.code, item]));
     const retryableMonitoringIds = new Set(
       monitoringCandidates
@@ -2028,22 +1934,14 @@ class ProjectRunService {
     const retryableRecords = failedRecords.filter((record) => (
       analysisOnlyIds.has(Number(record.id)) || retryableMonitoringIds.has(Number(record.id))
     ));
-    const skippedPlatforms = [
-      ...outOfScopeRecords.map((record) => ({
-        platform: record.platform,
-        name: record.platform_name || record.platform,
-        reason: 'outside_project_scope',
-        message: `${record.platform_name || record.platform}已不在当前项目监测范围内`
-      })),
-      ...availability
+    const skippedPlatforms = availability
       .filter((item) => !item.available)
       .map((item) => ({
         platform: item.code,
         name: item.platform_name,
         reason: item.reason,
         message: skippedPlatformMessage(item)
-      }))
-    ];
+      }));
     if (!retryableRecords.length) {
       const message = skippedPlatforms.map((item) => item.message).join('；') || '监测平台配置暂不可用';
       throw runError(`${message}；失败项仍保留，但当前无法重新提交`, 400, {
@@ -2644,17 +2542,13 @@ class ProjectRunService {
   async runProject({
     project,
     prompts,
-    platforms,
     user,
-    promptSelectionExplicit = false,
     scheduledExecutionId = null
   }) {
     const prepared = await this.prepareProjectRun({
       project,
       prompts,
-      platforms,
       user,
-      promptSelectionExplicit,
       scheduledExecutionId
     });
     if (!prepared.ok) return prepared;

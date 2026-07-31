@@ -15,6 +15,7 @@ const {
   ScheduledExecution
 } = require('../models');
 const WebCaptureDeletionService = require('./WebCaptureDeletionService');
+const DefaultProjectLifecyclePolicyService = require('./DefaultProjectLifecyclePolicyService');
 
 class ProjectDeletionService {
   normalizeIds(values) {
@@ -27,6 +28,11 @@ class ProjectDeletionService {
     if (!project) {
       return { ok: false, status: 404, message: '品牌项目不存在' };
     }
+    const lifecycleResult = await DefaultProjectLifecyclePolicyService.validate(
+      project,
+      repositories
+    );
+    if (!lifecycleResult.ok) return lifecycleResult;
     if (project.status !== 'archived') {
       return { ok: false, status: 409, message: '请先归档项目后再删除' };
     }

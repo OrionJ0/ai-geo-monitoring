@@ -194,7 +194,7 @@ test('用户可以编辑问题集，删除问题集后其中的单问题仍然�
   assert.equal(remainingQuestions.every((item) => item.prompt_group_id == null), true);
 });
 
-test('问题集和单问题都创建可重试的原子运行报告，单问题仍保留自己的模型范围', async () => {
+test('问题集和单问题都创建可重试的原子运行报告且不再传递模型范围', async () => {
   const questions = await TrackedPrompt.findAll({
     where: { project_id: project.id },
     order: [['id', 'ASC']]
@@ -243,8 +243,9 @@ test('问题集和单问题都创建可重试的原子运行报告，单问题�
     assert.equal(setRunResponse.payload.success, true);
     assert.equal(calls[0].type, 'set');
     assert.deepEqual(calls[0].options.prompts.map((item) => item.id), [questions[0].id]);
-    assert.deepEqual(calls[0].options.prompts[0].platforms, ['doubao', 'deepseek']);
-    assert.equal(calls[0].options.promptSelectionExplicit, true);
+    assert.deepEqual(calls[0].options.prompts[0].platforms, ['doubao']);
+    assert.equal(Object.hasOwn(calls[0].options, 'platforms'), false);
+    assert.equal(Object.hasOwn(calls[0].options, 'promptSelectionExplicit'), false);
     assert.equal(calls[0].options.idempotencyKey, 'question-set-run-key-001');
     assert.ok(Number(setRunResponse.payload.data.question_set_run_id) > 0);
     assert.match(setRunResponse.payload.data.report_url, /\/geo\/question-set-reports\?/);
@@ -263,6 +264,7 @@ test('问题集和单问题都创建可重试的原子运行报告，单问题�
     assert.equal(calls[1].type, 'single');
     assert.deepEqual(calls[1].options.prompts.map((item) => item.id), [questions[0].id]);
     assert.deepEqual(calls[1].options.prompts[0].platforms, ['doubao']);
+    assert.equal(Object.hasOwn(calls[1].options, 'platforms'), false);
     assert.equal(calls[1].options.questionSet.id, null);
     assert.match(calls[1].options.questionSet.name, /问题一/);
     assert.equal(calls[1].options.idempotencyKey, 'single-question-run-key-001');

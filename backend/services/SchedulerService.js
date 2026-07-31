@@ -463,14 +463,9 @@ class SchedulerService {
     const match = rawTime.match(/^(\d{1,2}):(\d{1,2})$/);
     const hh = match ? Math.max(0, Math.min(23, Number(match[1]))) : 9;
     const mm = match ? Math.max(0, Math.min(59, Number(match[2]))) : 0;
-    const platformList = Array.isArray(project?.platforms) ? project.platforms : [];
-    const platforms = Array.from(new Set(platformList
-      .map((item) => String(item || '').trim().toLowerCase())
-      .filter(Boolean)));
     return {
       monitoring_enabled: project?.monitoring_enabled === true || project?.monitoring_enabled === 'true',
-      monitoring_time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
-      platforms
+      monitoring_time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
     };
   }
 
@@ -813,7 +808,6 @@ class SchedulerService {
     const result = await ProjectRunService.runProject({
       project,
       prompts: prompts.map((item) => item.toJSON()),
-      platforms: normalized.platforms,
       user,
       scheduledExecutionId: options.scheduledExecutionId || null
     });

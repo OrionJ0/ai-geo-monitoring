@@ -7,7 +7,6 @@ import {
   Collapse,
   Descriptions,
   Empty,
-  Modal,
   Popconfirm,
   Space,
   Table,
@@ -29,11 +28,9 @@ import {
   QuestionCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import { useRouter } from 'next/navigation';
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
-import { getWebPreflightPrompt } from '@/utils/webPreflightPrompt.cjs';
 import { downloadQuestionSetReportPdf } from '@/utils/downloadQuestionSetReportPdf';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import {
@@ -420,7 +417,6 @@ function MetricItem({
 }
 
 export default function QuestionSetReportsPage() {
-  const router = useRouter();
   const defaultContext = useDefaultProjectContext();
   const projectId = defaultContext.project?.id;
   const [history, setHistory] = useState<RunReport[]>([]);
@@ -760,33 +756,10 @@ export default function QuestionSetReportsPage() {
         loadHistory(projectId, historyPage, historyQuestionSetId),
       ]);
     } catch (error) {
-      const responseBody = axios.isAxiosError(error) ? error.response?.data : null;
-      const webPreflightPrompt = getWebPreflightPrompt(responseBody);
-      if (webPreflightPrompt) {
-        Modal.confirm({
-          title: webPreflightPrompt.title,
-          content: (
-            <Space orientation="vertical" size={8}>
-              <Text>{webPreflightPrompt.message}</Text>
-              {webPreflightPrompt.blockedMessages.length ? (
-                <ul style={{ margin: 0, paddingInlineStart: 20 }}>
-                  {webPreflightPrompt.blockedMessages.map((item: string) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </Space>
-          ),
-          okText: '去设置登录',
-          cancelText: '取消',
-          onOk: () => router.push(webPreflightPrompt.settingsUrl),
-        });
-      } else {
-        message.error(getApiErrorMessage(
-          error,
-          error instanceof Error ? error.message : '重试失败项失败'
-        ));
-      }
+      message.error(getApiErrorMessage(
+        error,
+        error instanceof Error ? error.message : '重试失败项失败'
+      ));
     } finally {
       setRetrying(false);
     }
@@ -998,7 +971,7 @@ export default function QuestionSetReportsPage() {
                     {report.capabilities?.can_retry ? (
                         <Popconfirm
                           title={`重试 ${summary.failed || 0} 条失败项？`}
-                          description="已有完整原回答的分析失败项只会重做结构化分析；其余失败项会使用当前设置中心的监测模型和参数重新调用。任一所选 Web 平台登录或采集能力不可用时，整次重试不会创建新任务。"
+                          description="已有完整原回答的分析失败项只会重做结构化分析；其余失败项会沿用原记录平台，并使用当前设置中心的模型和参数重新调用。当前不可用的平台会跳过，失败项仍会保留。"
                           okText="确认重试"
                           cancelText="取消"
                           onConfirm={retryFailedRows}

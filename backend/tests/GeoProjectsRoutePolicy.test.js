@@ -24,14 +24,12 @@ test('geo project route imports report snapshots used by cleanup helpers', () =>
   assert.match(routeSource, /ReportSnapshot\.destroy\(/);
 });
 
-test('project creation validates supported platforms without requiring an existing project', () => {
+test('project creation stores no project-specific platform scope', () => {
   const block = routeBlock('post', '/');
 
-  assert.match(block, /PlatformSelectionService\.validate\(req\.body\.platforms,\s*\{[\s\S]*availablePlatforms:\s*selectablePlatforms/);
-  assert.match(block, /await AIPlatformService\.getNewProjectPlatformOptions\(\)/);
-  assert.match(block, /defaultPlatforms/);
-  assert.doesNotMatch(block, /defaultPlatforms:\s*selectablePlatforms/);
-  assert.doesNotMatch(block, /validateWithinProject\(req\.body\.platforms/);
+  assert.match(block, /platforms:\s*\[\]/);
+  assert.doesNotMatch(block, /PlatformSelectionService/);
+  assert.doesNotMatch(block, /req\.body\.platforms/);
 });
 
 test('project list includes the latest automatic monitoring execution status', () => {
@@ -41,12 +39,13 @@ test('project list includes the latest automatic monitoring execution status', (
   assert.match(block, /latest_monitoring_execution/);
 });
 
-test('prompt create and update validate platforms within the selected project', () => {
+test('prompt create and update do not accept a per-question platform scope', () => {
   const createBlock = routeBlock('post', '/:projectId/prompts');
   const updateBlock = routeBlock('put', '/:projectId/prompts/:promptId');
 
-  assert.match(createBlock, /validateWithinProject\([\s\S]*req\.body\.platforms,[\s\S]*req\.brandProject\.platforms,[\s\S]*selectablePlatforms/);
-  assert.match(updateBlock, /validateWithinProject\([\s\S]*req\.body\.platforms,[\s\S]*req\.brandProject\.platforms,[\s\S]*selectablePlatforms/);
+  assert.match(createBlock, /platforms:\s*\[\]/);
+  assert.doesNotMatch(createBlock, /req\.body\.platforms/);
+  assert.doesNotMatch(updateBlock, /req\.body\.platforms/);
 });
 
 test('restoring an archived project checks duplicate active project identity first', () => {
@@ -57,7 +56,7 @@ test('restoring an archived project checks duplicate active project identity fir
   assert.match(block, /findDuplicateProjectWebsite\(/);
 });
 
-test('project semantic updates clear old project analysis data', () => {
+test('project semantic updates preserve history and invalidate generated reports', () => {
   const block = routeBlock('put', '/:id');
 
   assert.match(block, /projectAnalysisFieldsChanged/);
@@ -66,8 +65,9 @@ test('project semantic updates clear old project analysis data', () => {
   assert.match(block, /payload\.website/);
   assert.match(block, /payload\.industry/);
   assert.match(block, /payload\.primary_keywords/);
-  assert.match(block, /payload\.platforms/);
-  assert.match(block, /await deleteProjectAnalysisData\(req\.brandProject\.id\)/);
+  assert.doesNotMatch(block, /payload\.platforms/);
+  assert.match(block, /await invalidateGeneratedReports\(req\.brandProject\.id\)/);
+  assert.doesNotMatch(block, /deleteProjectAnalysisData/);
 });
 
 test('project delete route supports explicit permanent deletion for archived projects', () => {
@@ -79,13 +79,12 @@ test('project delete route supports explicit permanent deletion for archived pro
   assert.match(block, /ProjectArchiveService\.archiveProject\(req\.brandProject\)/);
 });
 
-test('project platform updates reconcile existing prompt platform selections', () => {
+test('project updates no longer reconcile legacy prompt platform selections', () => {
   const block = routeBlock('put', '/:id');
 
-  assert.match(block, /if \(platformResult\)/);
-  assert.match(block, /TrackedPrompt\.findAll\(\{[\s\S]*where:\s*\{\s*project_id:\s*req\.brandProject\.id\s*\}[\s\S]*attributes:\s*\[\s*'id',\s*'platforms'\s*\]/);
-  assert.match(block, /PlatformSelectionService\.reconcilePromptPlatforms\(prompt\.platforms,\s*platformResult\.platforms\)/);
-  assert.match(block, /prompt\.update\(\{[\s\S]*platforms:/);
+  assert.doesNotMatch(block, /platformResult/);
+  assert.doesNotMatch(block, /PlatformSelectionService/);
+  assert.doesNotMatch(block, /prompt\.update\(\{[\s\S]*platforms:/);
 });
 
 test('project and competitor routes reject non-empty invalid website input', () => {
@@ -126,7 +125,7 @@ test('prompt semantic updates clear old prompt analysis data', () => {
   assert.match(updateBlock, /analysisFieldsChanged/);
   assert.match(updateBlock, /payload\.question/);
   assert.match(updateBlock, /payload\.tags/);
-  assert.match(updateBlock, /payload\.platforms/);
+  assert.doesNotMatch(updateBlock, /payload\.platforms/);
   assert.match(updateBlock, /await deletePromptAnalysisData\(req\.brandProject\.id,\s*\[prompt\.id\]\)/);
 });
 

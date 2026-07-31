@@ -8,7 +8,7 @@ const { BrandProject, DetectionSchedule, QuestionRecord, TrackedPrompt, User } =
 const ProjectRunService = require('../services/ProjectRunService');
 const SchedulerService = require('../services/SchedulerService');
 
-test('normalizes project monitoring settings for dynamic platform codes', () => {
+test('normalizes project monitoring settings without retaining a platform scope', () => {
   const payload = SchedulerService.normalizeProjectMonitoring({
     monitoring_enabled: true,
     monitoring_time: '8:5',
@@ -17,7 +17,7 @@ test('normalizes project monitoring settings for dynamic platform codes', () => 
 
   assert.equal(payload.monitoring_enabled, true);
   assert.equal(payload.monitoring_time, '08:05');
-  assert.deepEqual(payload.platforms, ['deepseek', 'kimi', 'doubao']);
+  assert.equal(Object.hasOwn(payload, 'platforms'), false);
 });
 
 test('normalizes schedule platforms within the dynamic project platform scope', () => {

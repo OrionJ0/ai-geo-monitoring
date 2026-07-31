@@ -6,7 +6,6 @@ const { validatePlatformUrl } = require('./PlatformUrlPolicyService');
 const ADAPTER_TYPES = new Set(['openai_responses', 'openai_chat_completions']);
 const RESERVED_PLATFORM_CODES = new Set(['deepseek-web', 'doubao-web']);
 const MANAGED_WEB_ADAPTER_TYPES = new Set(['deepseek_web', 'doubao_web']);
-const DEFAULT_PROJECT_PLATFORM_CODES = new Set(['doubao-web', 'deepseek-web']);
 const PLATFORM_DISPLAY_ORDER = new Map([
   ['doubao-web', 0],
   ['deepseek-web', 1],
@@ -237,6 +236,15 @@ function isConfigured(row) {
   );
 }
 
+function assertConfiguredForEnable(row, enabled) {
+  if (!Boolean(enabled) || isConfigured(row)) return;
+  throw new PlatformConfigError(
+    '请先完成平台基础配置，再启用该平台',
+    'platform_not_configured',
+    409
+  );
+}
+
 function getUnavailableReason(row) {
   if (!row || row.archived_at) return 'archived';
   if (!row.enabled) return 'disabled';
@@ -271,8 +279,6 @@ function toCatalogView(row) {
     enabled: Boolean(value.enabled),
     configured: isConfigured(value),
     selectable: unavailableReason === null,
-    default_for_new_project: unavailableReason === null
-      && DEFAULT_PROJECT_PLATFORM_CODES.has(value.code),
     unavailable_reason: unavailableReason,
     web_search_test_status: value.web_search_test_status || 'untested',
     capabilities: getPlatformCapabilities(value)
@@ -433,12 +439,14 @@ class AIPlatformConfigService {
     }
 
     const values = await this.validateEditableFields(payload, { creating: true });
+    const enabled = payload.enabled === undefined ? false : Boolean(payload.enabled);
+    assertConfiguredForEnable({ code, ...values }, enabled);
     let row;
     try {
       row = await this.model.create({
         code,
         ...values,
-        enabled: payload.enabled === undefined ? false : Boolean(payload.enabled),
+        enabled,
         builtin: false,
         test_status: 'untested'
       });
@@ -485,6 +493,11 @@ class AIPlatformConfigService {
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(values, key)) updates[key] = values[key];
     }
+    const currentValues = row?.get ? row.get({ plain: true }) : row;
+    assertConfiguredForEnable(
+      { ...currentValues, ...updates },
+      Object.prototype.hasOwnProperty.call(updates, 'enabled') ? updates.enabled : row.enabled
+    );
 
     const criticalFields = ['adapter_type', 'base_url', 'default_model', 'encrypted_api_key', 'request_options'];
     const criticalChanged = criticalFields.some((key) => (
@@ -503,6 +516,7 @@ class AIPlatformConfigService {
 
   async setEnabled(id, enabled) {
     const row = await this.getPlatform(id);
+    assertConfiguredForEnable(row, enabled);
     await row.update({ enabled: Boolean(enabled) });
     return toAdminView(row);
   }
@@ -513,6 +527,7 @@ class AIPlatformConfigService {
     await row.update({
       encrypted_api_key: null,
       api_key_last4: null,
+      enabled: false,
       ...this.untestedState()
     });
     return toAdminView(row);

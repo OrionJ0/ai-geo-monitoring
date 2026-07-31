@@ -168,7 +168,6 @@ test('returns a non-sensitive platform catalog to authenticated users', async ()
       'capabilities',
       'code',
       'configured',
-      'default_for_new_project',
       'enabled',
       'name',
       'selectable',

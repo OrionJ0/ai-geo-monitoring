@@ -1,10 +1,16 @@
 const { DetectionSchedule, ReportSnapshot } = require('../models');
+const DefaultProjectLifecyclePolicyService = require('./DefaultProjectLifecyclePolicyService');
 
 class ProjectArchiveService {
   async archiveProject(project, repositories = {}) {
     if (!project) {
       return { ok: false, status: 404, message: '品牌项目不存在' };
     }
+    const lifecycleResult = await DefaultProjectLifecyclePolicyService.validate(
+      project,
+      repositories
+    );
+    if (!lifecycleResult.ok) return lifecycleResult;
     const ScheduleRepository = repositories.DetectionSchedule || DetectionSchedule;
     const ReportRepository = repositories.ReportSnapshot || ReportSnapshot;
     await project.update({

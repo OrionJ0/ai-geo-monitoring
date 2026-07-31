@@ -74,8 +74,6 @@ function createService(options = {}) {
           ['deepseek_web', 'doubao_web'].includes(row.adapter_type)
           || Boolean(row.encrypted_api_key)
         ),
-        default_for_new_project: row.enabled
-          && ['deepseek-web', 'doubao-web'].includes(row.code),
         unavailable_reason: ['deepseek_web', 'doubao_web'].includes(row.adapter_type)
           || row.encrypted_api_key
           ? null
@@ -150,15 +148,6 @@ test('reports runnable platforms from database configuration only', async () => 
 
   assert.deepEqual(await service.getAvailablePlatforms(), ['deepseek', 'deepseek-web']);
   assert.deepEqual(await service.getAvailablePlatforms({ capability: 'analysis' }), ['deepseek']);
-});
-
-test('returns selectable and default platform scopes for new projects', async () => {
-  const { service } = createService();
-
-  assert.deepEqual(await service.getNewProjectPlatformOptions(), {
-    selectablePlatforms: ['deepseek', 'deepseek-web'],
-    defaultPlatforms: ['deepseek-web']
-  });
 });
 
 test('resolves detailed availability for requested dynamic platform codes', async () => {

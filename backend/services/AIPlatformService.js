@@ -106,17 +106,11 @@ class AIPlatformService {
       .map((platform) => platform.code);
   }
 
-  async getNewProjectPlatformOptions() {
+  async getEnabledPlatforms({ capability = 'monitoring' } = {}) {
     const catalog = await this.configService.listCatalog();
-    const selectable = catalog.filter((platform) => (
-      platform.selectable && platform.capabilities?.monitoring === true
-    ));
-    return {
-      selectablePlatforms: selectable.map((platform) => platform.code),
-      defaultPlatforms: selectable
-        .filter((platform) => platform.default_for_new_project)
-        .map((platform) => platform.code)
-    };
+    return catalog
+      .filter((platform) => platform.enabled && platform.capabilities?.[capability] === true)
+      .map((platform) => platform.code);
   }
 
   async getPlatformCodes() {

@@ -9,6 +9,8 @@ blocked_by:
 
 # 接入问题集、失败重试与自动监测
 
+> 历史验收说明（2026-07-31）：本 issue 原有项目平台范围及 Web 整批阻断口径已退役。现行运行与重试规则见 `../../closed-2026-07-31-002-single-brand-platform-runtime/`。
+
 ## Parent
 
 - PRD：`../prd.md`

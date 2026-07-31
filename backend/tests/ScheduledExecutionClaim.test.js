@@ -356,7 +356,7 @@ test('project list status lookup returns only the latest monitoring execution pe
   });
 });
 
-test('project automatic monitoring forwards DeepSeek Web through the existing project runner and schedule slot', async () => {
+test('project automatic monitoring delegates platform resolution to the project runner and preserves the schedule slot', async () => {
   const previousPlatforms = project.platforms;
   await project.update({
     platforms: ['deepseek-web'],
@@ -387,7 +387,7 @@ test('project automatic monitoring forwards DeepSeek Web through the existing pr
     });
 
     assert.equal(result.ok, true);
-    assert.deepEqual(runOptions.platforms, ['deepseek-web']);
+    assert.equal(Object.hasOwn(runOptions, 'platforms'), false);
     assert.equal(runOptions.scheduledExecutionId, 712);
     assert.deepEqual(runOptions.prompts.map((item) => item.id), [prompt.id]);
   } finally {
@@ -397,7 +397,7 @@ test('project automatic monitoring forwards DeepSeek Web through the existing pr
   }
 });
 
-test('project automatic monitoring forwards Doubao Web through the existing project runner', async () => {
+test('project automatic monitoring never forwards a legacy project platform scope', async () => {
   const previousPlatforms = project.platforms;
   await project.update({
     platforms: ['doubao-web'],
@@ -428,7 +428,7 @@ test('project automatic monitoring forwards Doubao Web through the existing proj
     });
 
     assert.equal(result.ok, true);
-    assert.deepEqual(runOptions.platforms, ['doubao-web']);
+    assert.equal(Object.hasOwn(runOptions, 'platforms'), false);
     assert.equal(runOptions.scheduledExecutionId, 713);
     assert.deepEqual(runOptions.prompts.map((item) => item.id), [prompt.id]);
   } finally {

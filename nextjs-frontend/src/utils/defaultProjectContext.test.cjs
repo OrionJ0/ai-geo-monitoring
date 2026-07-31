@@ -28,7 +28,7 @@ test('workspace settings saves an exact string projectId and reloads the context
   assert.match(source, /\{\s*projectId:\s*selectedProjectId\s*\}/);
   assert.match(source, /String\(project\.id\)/);
   assert.match(source, /status\s*===\s*['"]active['"]/);
-  assert.match(source, /await loadDefaultContext\(\)/);
+  assert.match(source, /await load\(\)/);
 });
 
 test('administrator settings exposes the workspace configuration as its own tab', () => {

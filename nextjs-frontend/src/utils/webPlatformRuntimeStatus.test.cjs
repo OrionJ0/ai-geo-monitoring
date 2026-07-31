@@ -159,6 +159,6 @@ test('shared component polls only on visible pages and is mounted at both decisi
   assert.match(component, /aria-live="polite"/);
   assert.match(component, /presentation\.actionHref/);
   assert.match(component, /前往设置中心|presentation\.actionLabel/);
-  assert.match(prompts, /<WebPlatformRuntimeStatus\s+platformCodes=\{projectPlatforms\}\s*\/>/);
+  assert.match(prompts, /<WebPlatformRuntimeStatus\s+platformCodes=\{selectableCodes\}\s*\/>/);
   assert.match(reports, /<WebPlatformRuntimeStatus\s+platformCodes=\{relevantWebPlatformCodes\}\s*\/>/);
 });

@@ -346,7 +346,7 @@ test('用户可以在原报告中重试失败项且重复提交不会创建第�
   }
 });
 
-test('完整监测重试在 Web 登录失效时整批阻断且不创建任务', async () => {
+test('完整监测重试在唯一 Web 平台登录失效时保留失败项且不创建任务', async () => {
   const previousPlatforms = project.platforms;
   await project.update({ platforms: ['deepseek-web', 'qwen'] });
   const failedRecord = await QuestionRecord.create({
@@ -408,14 +408,13 @@ test('完整监测重试在 Web 登录失效时整批阻断且不创建任务', 
       body: { idempotency_key: 'retry-web-preflight-001' }
     });
 
-    assert.equal(response.statusCode, 409);
+    assert.equal(response.statusCode, 400);
     assert.equal(response.payload.success, false);
-    assert.equal(response.payload.data.error_code, 'web_platform_preflight_failed');
-    assert.equal(response.payload.data.settings_url, '/admin/settings');
-    assert.deepEqual(response.payload.data.blocked_platforms, [{
+    assert.equal(response.payload.data.error_code, 'all_retry_platforms_unavailable');
+    assert.deepEqual(response.payload.data.skipped_platforms, [{
       platform: 'deepseek-web',
       name: 'DeepSeek 网页版',
-      reason_code: 'web_login_required',
+      reason: 'web_login_required',
       message: 'DeepSeek 网页版需要重新人工登录'
     }]);
     assert.deepEqual(availabilityOptions, { forceRuntimeProbe: true });
@@ -652,7 +651,7 @@ test('重试配额不足时恢复原报告且不留下待处理记录', async ()
   }
 });
 
-test('完整监测重试不会调用已移出当前项目范围的平台', async () => {
+test('完整监测重试沿用原失败记录的平台而不读取旧项目范围', async () => {
   const scopedProject = await BrandProject.create({
     user_id: user.id,
     name: '平台范围测试',
@@ -695,23 +694,48 @@ test('完整监测重试不会调用已移出当前项目范围的平台', async
   });
 
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
+  const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
+  const originalSchedule = ProjectRunService.schedulePreparedRun;
   let quotaCalls = 0;
+  let scheduledContext = null;
+  AIPlatformService.getPlatformAvailability = async (codes) => {
+    assert.deepEqual(codes, ['qwen']);
+    return [{
+      code: 'qwen',
+      platform_name: '千问',
+      model_name: 'qwen-current-model',
+      available: true,
+      reason: null,
+      config: { code: 'qwen', default_model: 'qwen-current-model' }
+    }];
+  };
+  ProjectRunService.getRuntimeSettings = async () => ({ ai_run_concurrency: 2 });
   ProjectRunService.consumeRunQuota = async () => {
     quotaCalls += 1;
     return { ok: true };
   };
+  ProjectRunService.schedulePreparedRun = (context) => {
+    scheduledContext = context;
+  };
 
   try {
     const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
-      params: { projectId: scopedProject.id, runId: nativeRun.id }
+      params: { projectId: scopedProject.id, runId: nativeRun.id },
+      body: { idempotency_key: 'retry-original-platform-001' }
     });
 
-    assert.equal(response.statusCode, 400);
-    assert.equal(response.payload.data.error_code, 'all_retry_platforms_unavailable');
-    assert.equal(response.payload.data.skipped_platforms[0].reason, 'outside_project_scope');
-    assert.equal(quotaCalls, 0);
+    assert.equal(response.statusCode, 202);
+    assert.equal(response.payload.success, true);
+    assert.equal(response.payload.data.full_monitoring_count, 1);
+    assert.equal(response.payload.data.skipped_platforms.length, 0);
+    assert.equal(scheduledContext.entries[0].target.platform, 'qwen');
+    assert.equal(quotaCalls, 1);
   } finally {
     ProjectRunService.consumeRunQuota = originalConsumeQuota;
+    AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
+    ProjectRunService.schedulePreparedRun = originalSchedule;
   }
 });
 

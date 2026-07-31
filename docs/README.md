@@ -54,6 +54,7 @@
 - `blocked-2026-07-29-002-ai-semantic-analysis-quality/`：v4 全实体语义抽取、竞品/排序/情绪原文证据、DeepSeek Pro 基线校准和全入口硬切已完成实现与技术验收，等待 SOV 波动口径和补充情绪人工基线确认
 - `active-2026-07-29-001-marketing-monitoring/`：只读市场数据监控定位下的百度第一期；真实 OAuth、账户目录、搜索推广 30 日分页报表和百度统计站点/趋势响应已用脱敏 fixture 固化，`PILOT_DATA_READY` 仅向项目白名单开放绑定、搜索快照和统计实时读取；页面入口已展示，真实数据仍等待金额/时区、Refresh Token 与完整生产验收
 - `active-2026-07-31-001-market-monitoring-frontend-ia/`：面向市场负责人和管理层的工作台信息架构、默认项目、市场总览、广告表现、网站流量及现有 GEO 页面自动上下文改造；当前正式导航仍保持 GEO 主入口，市场总览等待视觉确认、异常规则校准和百度 `VERIFIED` 后再切流
+- `closed-2026-07-31-002-single-brand-platform-runtime/`：已完成的单品牌管理员工作台、全局启用平台运行范围、不可用平台部分跳过、原始失败快照重试，以及默认品牌和历史监测数据保护
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 - `closed-2026-07-30-001-seo-audit-response-safety/`：响应可信度分类、WAF/429 止损、同域节流、有界预检和 resolved URL 去重的 PRD、技术方案与验收 issues

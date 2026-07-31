@@ -174,7 +174,7 @@ test('treats both managed Web presets as configured without API keys and derives
   assert.equal(api.web_search_test_status, 'untested');
 });
 
-test('catalog marks only selectable managed Web platforms as new-project defaults', async () => {
+test('catalog no longer exposes a new-project platform default', async () => {
   const service = createService();
   await service.ensurePresets();
   const deepseekWeb = await AIPlatformConfig.findOne({ where: { code: 'deepseek-web' } });
@@ -183,15 +183,7 @@ test('catalog marks only selectable managed Web platforms as new-project default
   await service.setEnabled(doubaoWeb.id, true);
 
   const catalog = await service.listCatalog();
-  assert.deepEqual(
-    catalog.filter((item) => item.default_for_new_project).map((item) => item.code).sort(),
-    ['deepseek-web', 'doubao-web']
-  );
-  assert.equal(
-    catalog.filter((item) => !['deepseek-web', 'doubao-web'].includes(item.code))
-      .every((item) => item.default_for_new_project === false),
-    true
-  );
+  assert.equal(catalog.every((item) => !Object.hasOwn(item, 'default_for_new_project')), true);
 });
 
 test('lists presets in the fixed Web-first product order regardless of database ids', async () => {

@@ -30,6 +30,7 @@ let questionSet;
 let otherQuestionSet;
 let prompts;
 const originalGetPlatformAvailability = AIPlatformService.getPlatformAvailability;
+const originalGetEnabledPlatforms = AIPlatformService.getEnabledPlatforms;
 const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
 const originalSchedulePreparedRun = ProjectRunService.schedulePreparedRun;
 const originalAnalysisConfigService = ProjectRunService.analysisConfigService;
@@ -42,9 +43,7 @@ function startOptions(overrides = {}) {
       ...prompt.toJSON(),
       platforms: project.platforms
     })),
-    platforms: project.platforms,
     user,
-    promptSelectionExplicit: true,
     idempotencyKey: 'launch-key-0001',
     ...overrides
   };
@@ -109,6 +108,9 @@ test.beforeEach(async () => {
   await QuestionRecord.destroy({ where: {} });
   await QuestionSetRun.destroy({ where: {} });
   await UsageCounter.destroy({ where: {} });
+  AIPlatformService.getEnabledPlatforms = async () => (
+    Array.isArray(project?.platforms) ? project.platforms : []
+  );
   AIPlatformService.getPlatformAvailability = async () => [
     {
       code: 'doubao',
@@ -134,6 +136,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
+  AIPlatformService.getEnabledPlatforms = originalGetEnabledPlatforms;
   AIPlatformService.getPlatformAvailability = originalGetPlatformAvailability;
   ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
   ProjectRunService.schedulePreparedRun = originalSchedulePreparedRun;
@@ -538,7 +541,7 @@ test('question-set entry persists Doubao Web records through the same prepared-r
   }
 });
 
-test('mixed question-set run blocks every platform before quota when one Web login is unavailable', async () => {
+test('mixed question-set run skips an unavailable Web platform and queues the remaining platform', async () => {
   const previousPlatforms = project.platforms;
   await project.update({ platforms: ['doubao', 'deepseek-web'] });
   AIPlatformService.getPlatformAvailability = async () => [{
@@ -572,16 +575,20 @@ test('mixed question-set run blocks every platform before quota when one Web log
       idempotencyKey: 'mixed-web-unavailable-entry'
     }));
 
-    assert.equal(result.ok, false);
-    assert.equal(result.status, 409);
-    assert.equal(result.data.error_code, 'web_platform_preflight_failed');
-    assert.equal(result.data.blocked_platforms[0].platform, 'deepseek-web');
-    assert.equal(result.data.blocked_platforms[0].reason_code, 'web_login_required');
-    assert.deepEqual(result.data.skipped_platforms, []);
-    assert.equal(await QuestionSetRun.count(), 0);
-    assert.equal(await QuestionRecord.count(), 0);
-    assert.equal(await UsageCounter.count(), 0);
-    assert.equal(scheduled, false);
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 202);
+    assert.deepEqual(result.data.planned_platforms, ['doubao']);
+    assert.deepEqual(result.data.skipped_platforms, [{
+      platform: 'deepseek-web',
+      name: 'DeepSeek 网页版',
+      reason_code: 'PLATFORM_UNAVAILABLE',
+      reason: 'web_login_required',
+      message: 'DeepSeek 网页版需要重新人工登录'
+    }]);
+    assert.equal(await QuestionSetRun.count(), 1);
+    assert.equal(await QuestionRecord.count(), prompts.length);
+    assert.equal(await UsageCounter.count(), 1);
+    assert.equal(scheduled, true);
   } finally {
     await project.update({ platforms: previousPlatforms });
   }

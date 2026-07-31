@@ -16,6 +16,9 @@ test('permanently deletes archived project data before deleting the project row'
   const whereByModel = {};
   const project = { id: 7, status: 'archived' };
   const repositories = {
+    Setting: {
+      findOne: async () => null
+    },
     WebCaptureDeletionService: {
       deleteRecords: async (recordIds, work) => {
         calls.push('evidence:quarantine');
@@ -161,13 +164,42 @@ test('permanently deletes archived project data before deleting the project row'
 });
 
 test('refuses to permanently delete active projects', async () => {
-  const result = await ProjectDeletionService.deleteArchivedProject({ id: 7, status: 'active' }, {});
+  const result = await ProjectDeletionService.deleteArchivedProject(
+    { id: 7, status: 'active' },
+    { Setting: { findOne: async () => null } }
+  );
 
   assert.deepEqual(result, {
     ok: false,
     status: 409,
     message: '请先归档项目后再删除'
   });
+});
+
+test('refuses to permanently delete the configured default project before cascade work starts', async () => {
+  let cascadeStarted = false;
+  const result = await ProjectDeletionService.deleteArchivedProject(
+    { id: 7, status: 'archived' },
+    {
+      Setting: {
+        findOne: async () => ({ value: 7 })
+      },
+      QuestionRecord: {
+        findAll: async () => {
+          cascadeStarted = true;
+          return [];
+        }
+      }
+    }
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    status: 409,
+    code: 'default_project_lifecycle_protected',
+    message: '默认品牌不能归档或删除'
+  });
+  assert.equal(cascadeStarted, false);
 });
 
 test('permanent project deletion physically removes every project record evidence directory', async (t) => {
@@ -184,6 +216,9 @@ test('permanent project deletion physically removes every project record evidenc
   });
   const repository = { destroy: async () => 1 };
   const repositories = {
+    Setting: {
+      findOne: async () => null
+    },
     WebCaptureDeletionService: deletionService,
     QuestionRecord: {
       findAll: async () => [{ id: 41 }, { id: 42 }],

@@ -28,13 +28,13 @@ const BrandCompetitorService = require('../services/BrandCompetitorService');
 const BrandProjectService = require('../services/BrandProjectService');
 const AlertEvaluationService = require('../services/AlertEvaluationService');
 const ReportSnapshotService = require('../services/ReportSnapshotService');
-const PlatformSelectionService = require('../services/PlatformSelectionService');
 const PromptAnalysisCleanupService = require('../services/PromptAnalysisCleanupService');
 const ProjectArchiveService = require('../services/ProjectArchiveService');
 const ProjectDeletionService = require('../services/ProjectDeletionService');
 const WebCaptureDeletionService = require('../services/WebCaptureDeletionService');
 const ProjectLifecycleService = require('../services/ProjectLifecycleService');
 const ProjectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
+const ProjectAdministrationPolicyService = require('../services/ProjectAdministrationPolicyService');
 const QuestionSetRunService = require('../services/QuestionSetRunService');
 const CitationMetricSemanticsService = require('../services/CitationMetricSemanticsService');
 const { CURRENT_METRIC_SEMANTICS } = require('../services/GeoMetricSemanticsService');
@@ -81,36 +81,19 @@ function asArray(value) {
   return ProjectFieldNormalizationService.normalizeList(value);
 }
 
-function cleanPlatforms(value) {
-  return PlatformSelectionService.normalize(value);
-}
-
-async function getSelectablePlatformCodes() {
-  return AIPlatformService.getAvailablePlatforms();
-}
-
-function cleanMonitoringPayload(body, existing = {}, normalizedPlatforms = null) {
+function cleanMonitoringPayload(body, existing = {}) {
   const hasEnabled = body.monitoring_enabled !== undefined;
   const hasTime = body.monitoring_time !== undefined;
   if (!hasEnabled && !hasTime) return {};
   const normalized = SchedulerService.normalizeProjectMonitoring({
     monitoring_enabled: hasEnabled ? body.monitoring_enabled : existing.monitoring_enabled,
-    monitoring_time: hasTime ? body.monitoring_time : existing.monitoring_time,
-    platforms: body.platforms !== undefined ? (normalizedPlatforms || cleanPlatforms(body.platforms)) : existing.platforms
+    monitoring_time: hasTime ? body.monitoring_time : existing.monitoring_time
   });
   return {
     monitoring_enabled: normalized.monitoring_enabled,
     monitoring_time: normalized.monitoring_time,
     monitoring_next_run_at: normalized.monitoring_enabled ? SchedulerService.nextProjectRunAt(normalized.monitoring_time) : null
   };
-}
-
-function platformValidationError(res, result) {
-  return res.status(400).json({
-    success: false,
-    message: result.message,
-    data: { invalid_platforms: result.invalid_platforms }
-  });
 }
 
 function unavailablePlatformMessage(item) {
@@ -156,6 +139,16 @@ function rejectArchivedProjectMutation(req, res, message) {
   const guard = ProjectLifecycleService.validateActiveProject(req.brandProject, message);
   if (guard.ok) return null;
   return res.status(guard.status).json({ success: false, message: guard.message });
+}
+
+function rejectNonAdminProjectMutation(req, res) {
+  const authorization = ProjectAdministrationPolicyService.authorize(req.user);
+  if (authorization.ok) return null;
+  return res.status(authorization.status).json({
+    success: false,
+    message: authorization.message,
+    error: { code: authorization.code }
+  });
 }
 
 function readRequiredIdempotencyKey(req) {
@@ -346,6 +339,8 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
+    const authorizationResponse = rejectNonAdminProjectMutation(req, res);
+    if (authorizationResponse) return authorizationResponse;
     const invalidWebsiteResponse = rejectInvalidWebsiteInput(req, res);
     if (invalidWebsiteResponse) return invalidWebsiteResponse;
     const projectFields = ProjectFieldNormalizationService.normalizeProjectPayload({
@@ -356,18 +351,6 @@ router.post('/', async (req, res) => {
       primary_keywords: req.body.primary_keywords
     });
     if (!projectFields.name) return res.status(400).json({ success: false, message: '品牌名称不能为空' });
-    const {
-      selectablePlatforms,
-      defaultPlatforms
-    } = await AIPlatformService.getNewProjectPlatformOptions();
-    const platformResult = PlatformSelectionService.validate(req.body.platforms, {
-      availablePlatforms: selectablePlatforms,
-      defaultPlatforms
-    });
-    if (!platformResult.platforms.length && platformResult.ok) {
-      return res.status(400).json({ success: false, message: '当前没有可选择的监测平台，请联系管理员配置。' });
-    }
-    if (!platformResult.ok) return platformValidationError(res, platformResult);
     const duplicate = await BrandProjectService.findDuplicateProject(req.user.id, {
       name: projectFields.name,
       aliases: projectFields.aliases || []
@@ -388,8 +371,8 @@ router.post('/', async (req, res) => {
       website: projectFields.website,
       industry: projectFields.industry,
       primary_keywords: projectFields.primary_keywords || [],
-      platforms: platformResult.platforms,
-      ...cleanMonitoringPayload(req.body, { monitoring_enabled: false, monitoring_time: '09:00', platforms: platformResult.platforms }, platformResult.platforms),
+      platforms: [],
+      ...cleanMonitoringPayload(req.body, { monitoring_enabled: false, monitoring_time: '09:00' }),
       status: req.body.status === 'archived' ? 'archived' : 'active'
     });
     res.json({ success: true, message: '品牌项目已创建', data: project });
@@ -442,6 +425,8 @@ router.get('/:id', loadProject, async (req, res) => {
 
 router.put('/:id', loadProject, async (req, res) => {
   try {
+    const authorizationResponse = rejectNonAdminProjectMutation(req, res);
+    if (authorizationResponse) return authorizationResponse;
     const invalidWebsiteResponse = rejectInvalidWebsiteInput(req, res);
     if (invalidWebsiteResponse) return invalidWebsiteResponse;
     const lifecycleGuard = ProjectLifecycleService.validateProjectUpdate(req.brandProject, req.body || {});
@@ -501,19 +486,19 @@ router.put('/:id', loadProject, async (req, res) => {
     if (req.body.primary_keywords != null) {
       payload.primary_keywords = ProjectFieldNormalizationService.normalizeList(req.body.primary_keywords, { exclude: [candidateName] });
     }
-    let platformResult = null;
-    if (req.body.platforms !== undefined) {
-      const selectablePlatforms = await getSelectablePlatformCodes();
-      platformResult = PlatformSelectionService.validateProjectUpdate(
-        req.body.platforms,
-        req.brandProject.platforms,
-        selectablePlatforms
-      );
-      if (!platformResult.ok) return platformValidationError(res, platformResult);
-      payload.platforms = platformResult.platforms;
-    }
-    Object.assign(payload, cleanMonitoringPayload(req.body, req.brandProject.toJSON(), platformResult?.platforms));
+    Object.assign(payload, cleanMonitoringPayload(req.body, req.brandProject.toJSON()));
     const archiveRequested = req.body.status === 'archived';
+    if (archiveRequested) {
+      const result = await ProjectArchiveService.archiveProject(req.brandProject);
+      if (!result.ok) {
+        return res.status(result.status || 400).json({
+          success: false,
+          message: result.message,
+          error: result.code ? { code: result.code } : undefined
+        });
+      }
+      return res.json({ success: true, message: '品牌项目已归档', data: req.brandProject });
+    }
     const restoreRequested = req.body.status === 'active' && req.brandProject.status === 'archived';
     if (restoreRequested) {
       const duplicate = await BrandProjectService.findDuplicateProject(
@@ -533,29 +518,16 @@ router.put('/:id', loadProject, async (req, res) => {
         return res.status(409).json({ success: false, message: '已存在相同品牌官网项目', data: { duplicate_id: websiteDuplicate.id } });
       }
     }
-    if (req.body.status != null) payload.status = archiveRequested ? 'archived' : 'active';
+    if (req.body.status != null) payload.status = 'active';
     const projectAnalysisFieldsChanged = (
       (Object.prototype.hasOwnProperty.call(payload, 'name') && payload.name !== req.brandProject.name) ||
       (Object.prototype.hasOwnProperty.call(payload, 'aliases') && JSON.stringify(payload.aliases || []) !== JSON.stringify(asArray(req.brandProject.aliases))) ||
       (Object.prototype.hasOwnProperty.call(payload, 'website') && payload.website !== req.brandProject.website) ||
       (Object.prototype.hasOwnProperty.call(payload, 'industry') && payload.industry !== req.brandProject.industry) ||
-      (Object.prototype.hasOwnProperty.call(payload, 'primary_keywords') && JSON.stringify(payload.primary_keywords || []) !== JSON.stringify(asArray(req.brandProject.primary_keywords))) ||
-      (Object.prototype.hasOwnProperty.call(payload, 'platforms') && JSON.stringify(payload.platforms || []) !== JSON.stringify(cleanPlatforms(req.brandProject.platforms)))
+      (Object.prototype.hasOwnProperty.call(payload, 'primary_keywords') && JSON.stringify(payload.primary_keywords || []) !== JSON.stringify(asArray(req.brandProject.primary_keywords)))
     );
     await req.brandProject.update(payload);
-    if (platformResult) {
-      const promptRows = await TrackedPrompt.findAll({
-        where: { project_id: req.brandProject.id },
-        attributes: ['id', 'platforms']
-      });
-      await Promise.all(promptRows.map((prompt) => prompt.update({
-        platforms: PlatformSelectionService.reconcilePromptPlatforms(prompt.platforms, platformResult.platforms)
-      })));
-    }
-    if (archiveRequested) {
-      await ProjectArchiveService.archiveProject(req.brandProject);
-    }
-    if (projectAnalysisFieldsChanged) await deleteProjectAnalysisData(req.brandProject.id);
+    if (projectAnalysisFieldsChanged) await invalidateGeneratedReports(req.brandProject.id);
     res.json({ success: true, message: '品牌项目已更新', data: req.brandProject });
   } catch (error) {
     cleanupAwareError(res, error, '更新品牌项目失败');
@@ -564,15 +536,28 @@ router.put('/:id', loadProject, async (req, res) => {
 
 router.delete('/:id', loadProject, async (req, res) => {
   try {
+    const authorizationResponse = rejectNonAdminProjectMutation(req, res);
+    if (authorizationResponse) return authorizationResponse;
     const permanent = req.query.permanent === 'true' || req.query.permanent === '1';
     if (permanent) {
       const result = await ProjectDeletionService.deleteArchivedProject(req.brandProject);
       if (!result.ok) {
-        return res.status(result.status || 400).json({ success: false, message: result.message });
+        return res.status(result.status || 400).json({
+          success: false,
+          message: result.message,
+          error: result.code ? { code: result.code } : undefined
+        });
       }
       return res.json({ success: true, message: '品牌项目已删除', data: result.deleted });
     }
-    await ProjectArchiveService.archiveProject(req.brandProject);
+    const result = await ProjectArchiveService.archiveProject(req.brandProject);
+    if (!result.ok) {
+      return res.status(result.status || 400).json({
+        success: false,
+        message: result.message,
+        error: result.code ? { code: result.code } : undefined
+      });
+    }
     return res.json({ success: true, message: '品牌项目已归档' });
   } catch (error) {
     return cleanupAwareError(res, error, '处理品牌项目失败');
@@ -581,6 +566,8 @@ router.delete('/:id', loadProject, async (req, res) => {
 
 router.post('/:projectId/competitors', loadProject, async (req, res) => {
   try {
+    const authorizationResponse = rejectNonAdminProjectMutation(req, res);
+    if (authorizationResponse) return authorizationResponse;
     const invalidWebsiteResponse = rejectInvalidWebsiteInput(req, res);
     if (invalidWebsiteResponse) return invalidWebsiteResponse;
     const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改竞品');
@@ -619,6 +606,8 @@ router.post('/:projectId/competitors', loadProject, async (req, res) => {
 
 router.put('/:projectId/competitors/:competitorId', loadProject, async (req, res) => {
   try {
+    const authorizationResponse = rejectNonAdminProjectMutation(req, res);
+    if (authorizationResponse) return authorizationResponse;
     const invalidWebsiteResponse = rejectInvalidWebsiteInput(req, res);
     if (invalidWebsiteResponse) return invalidWebsiteResponse;
     const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改竞品');
@@ -673,6 +662,8 @@ router.put('/:projectId/competitors/:competitorId', loadProject, async (req, res
 
 router.delete('/:projectId/competitors/:competitorId', loadProject, async (req, res) => {
   try {
+    const authorizationResponse = rejectNonAdminProjectMutation(req, res);
+    if (authorizationResponse) return authorizationResponse;
     const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能修改竞品');
     if (archivedResponse) return archivedResponse;
     const deleted = await BrandCompetitor.destroy({ where: { id: req.params.competitorId, project_id: req.brandProject.id } });
@@ -859,18 +850,11 @@ router.post('/:projectId/question-sets/:questionSetId/run', loadProject, async (
         data: { error_code: 'no_enabled_questions', skipped_platforms: [] }
       });
     }
-    const projectPlatforms = cleanPlatforms(req.brandProject.platforms);
-
     const result = await ProjectRunService.startQuestionSetRun({
       project: req.brandProject,
       questionSet: group,
-      prompts: questions.map((item) => ({
-        ...item.toJSON(),
-        platforms: projectPlatforms
-      })),
-      platforms: projectPlatforms,
+      prompts: questions.map((item) => item.toJSON()),
       user: req.user,
-      promptSelectionExplicit: true,
       idempotencyKey: idempotency.value
     });
     if (!result.ok) {
@@ -1149,10 +1133,9 @@ router.post('/:projectId/prompts/generate', loadProject, async (req, res) => {
     const archivedResponse = rejectArchivedProjectMutation(req, res, '归档项目不能生成问题建议');
     if (archivedResponse) return archivedResponse;
     const projectData = req.brandProject.toJSON();
-    const projectPlatformCodes = cleanPlatforms(projectData.platforms);
-    const candidateCodes = projectPlatformCodes.length
-      ? projectPlatformCodes
-      : await AIPlatformService.getPlatformCodes();
+    const candidateCodes = await AIPlatformService.getAvailablePlatforms({
+      capability: 'prompt_generation'
+    });
     const availability = await AIPlatformService.getPlatformAvailability(candidateCodes, {
       capability: 'prompt_generation'
     });
@@ -1235,20 +1218,13 @@ router.post('/:projectId/prompts', loadProject, async (req, res) => {
       : req.body.prompt_group_id;
     const groupResult = await normalizePromptGroupId(req.brandProject.id, questionSetId);
     if (groupResult.error) return res.status(400).json({ success: false, message: groupResult.error });
-    const selectablePlatforms = await getSelectablePlatformCodes();
-    const platformResult = PlatformSelectionService.validateWithinProject(
-      req.body.platforms,
-      req.brandProject.platforms,
-      selectablePlatforms
-    );
-    if (!platformResult.ok) return platformValidationError(res, platformResult);
     const prompt = await TrackedPrompt.create({
       project_id: req.brandProject.id,
       prompt_group_id: groupResult.value,
       user_id: projectScopedUser(req).id,
       question,
       tags: asArray(req.body.tags),
-      platforms: platformResult.platforms,
+      platforms: [],
       enabled: req.body.enabled !== false
     });
     await invalidateGeneratedReports(req.brandProject.id);
@@ -1283,14 +1259,6 @@ router.post('/:projectId/prompts/batch', loadProject, async (req, res) => {
     const groupResult = await normalizePromptGroupId(req.brandProject.id, questionSetId);
     if (groupResult.error) return res.status(400).json({ success: false, message: groupResult.error });
 
-    const selectablePlatforms = await getSelectablePlatformCodes();
-    const platformResult = PlatformSelectionService.validateWithinProject(
-      req.body.platforms,
-      req.brandProject.platforms,
-      selectablePlatforms
-    );
-    if (!platformResult.ok) return platformValidationError(res, platformResult);
-
     const existingRows = await TrackedPrompt.findAll({
       where: { project_id: req.brandProject.id },
       attributes: ['id', 'question'],
@@ -1306,7 +1274,7 @@ router.post('/:projectId/prompts/batch', loadProject, async (req, res) => {
           user_id: projectScopedUser(req).id,
           question,
           tags: asArray(req.body.tags),
-          platforms: platformResult.platforms,
+          platforms: [],
           enabled: req.body.enabled !== false
         })),
         { transaction }
@@ -1356,21 +1324,10 @@ router.put('/:projectId/prompts/:promptId', loadProject, async (req, res) => {
       payload.prompt_group_id = groupResult.value;
     }
     if (req.body.tags != null) payload.tags = asArray(req.body.tags);
-    if (req.body.platforms !== undefined) {
-      const selectablePlatforms = await getSelectablePlatformCodes();
-      const platformResult = PlatformSelectionService.validateWithinProject(
-        req.body.platforms,
-        req.brandProject.platforms,
-        selectablePlatforms
-      );
-      if (!platformResult.ok) return platformValidationError(res, platformResult);
-      payload.platforms = platformResult.platforms;
-    }
     if (req.body.enabled != null) payload.enabled = !!req.body.enabled;
     const analysisFieldsChanged = (
       (Object.prototype.hasOwnProperty.call(payload, 'question') && payload.question !== prompt.question) ||
-      (Object.prototype.hasOwnProperty.call(payload, 'tags') && JSON.stringify(payload.tags || []) !== JSON.stringify(asArray(prompt.tags))) ||
-      (Object.prototype.hasOwnProperty.call(payload, 'platforms') && JSON.stringify(payload.platforms || []) !== JSON.stringify(cleanPlatforms(prompt.platforms)))
+      (Object.prototype.hasOwnProperty.call(payload, 'tags') && JSON.stringify(payload.tags || []) !== JSON.stringify(asArray(prompt.tags)))
     );
     const promptVisibilityChanged = Object.prototype.hasOwnProperty.call(payload, 'enabled') && payload.enabled !== prompt.enabled;
     await prompt.update(payload);
@@ -1426,9 +1383,7 @@ router.post('/:projectId/prompts/:promptId/run', loadProject, async (req, res) =
         name: `单问题：${String(promptData.question || '').trim()}`.slice(0, 120)
       },
       prompts: [promptData],
-      platforms: cleanPlatforms(req.brandProject.platforms),
       user: req.user,
-      promptSelectionExplicit: true,
       idempotencyKey: idempotency.value
     });
     if (!result.ok) {

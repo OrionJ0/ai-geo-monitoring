@@ -16,19 +16,13 @@ import { formatHistoryErrorMessage, formatHistoryParsingErrorMessage } from '@/u
 import { getRunResultNotice } from '@/utils/runResultMessage.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { getApiRunResultData } from '@/utils/apiRunResult.cjs';
-import { getWebPreflightPrompt } from '@/utils/webPreflightPrompt.cjs';
 import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
 import { formatOptionalDateTimeShort } from '@/utils/dateTimeDisplay.cjs';
-import {
-  describeSelectedPlatforms,
-  formatUnavailablePlatformSummary
-} from '@/utils/platformSelectionStatus.cjs';
 import {
   shouldClearGeneratedPromptSuggestions,
   shouldResetPromptListFilters,
   shouldResetPromptSelection
 } from '@/utils/promptSelection.cjs';
-import { getProjectPromptRunBlockReason } from '@/utils/projectPromptSummary.cjs';
 import { filterPromptRows } from '@/utils/promptListFilters.cjs';
 import { parseBatchQuestions } from '@/utils/questionBatchParser.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
@@ -55,11 +49,6 @@ const periodOptions = [
   { label: '近 30 天', value: 30 },
   { label: '近 90 天', value: 90 },
 ];
-
-const promptRunBlockMessages = {
-  no_enabled_prompt: '问题已停用，启用后才能运行',
-  platform_mismatch: '问题的监测平台与项目监测平台不一致，请检查品牌项目监测平台设置'
-};
 
 const percent = (value) => {
   const n = Number(value || 0);
@@ -92,7 +81,6 @@ export default function GeoPromptsPage() {
   const selectedProjectId = defaultContext.project?.id;
   const selectedProject = defaultContext.project;
   const {
-    platforms: platformCatalog,
     labels: platformLabels,
     selectableCodes,
     loading: platformCatalogLoading,
@@ -114,7 +102,6 @@ export default function GeoPromptsPage() {
   const [selectedPromptIds, setSelectedPromptIds] = useState([]);
   const [promptSearch, setPromptSearch] = useState('');
   const [promptStatusFilter, setPromptStatusFilter] = useState('all');
-  const [promptPlatformFilter, setPromptPlatformFilter] = useState('all');
   const [promptCategoryFilter, setPromptCategoryFilter] = useState('all');
   const [days, setDays] = useState(30);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -138,26 +125,6 @@ export default function GeoPromptsPage() {
 
   const showRunError = (error, fallbackMessage) => {
     const errorMessage = getApiErrorMessage(error, fallbackMessage);
-    const webPreflightPrompt = getWebPreflightPrompt(error?.response?.data);
-    if (webPreflightPrompt) {
-      Modal.confirm({
-        title: webPreflightPrompt.title,
-        content: (
-          <Space orientation="vertical" size={8}>
-            <Text>{webPreflightPrompt.message}</Text>
-            {webPreflightPrompt.blockedMessages.length ? (
-              <ul style={{ margin: 0, paddingInlineStart: 20 }}>
-                {webPreflightPrompt.blockedMessages.map((item) => <li key={item}>{item}</li>)}
-              </ul>
-            ) : null}
-          </Space>
-        ),
-        okText: '去设置登录',
-        cancelText: '取消',
-        onOk: () => router.push(webPreflightPrompt.settingsUrl),
-      });
-      return;
-    }
     const settingsUrl = error?.response?.data?.data?.settings_url === '/admin/settings'
       ? '/admin/settings'
       : null;
@@ -182,44 +149,18 @@ export default function GeoPromptsPage() {
     ? value.map((item) => String(item || '').trim()).filter(Boolean)
     : [];
 
-  const projectPlatforms = useMemo(() => {
-    return Array.from(new Set(normalizeList(selectedProject?.platforms)));
-  }, [selectedProject]);
-
-  const selectableProjectPlatforms = useMemo(
-    () => projectPlatforms.filter((item) => selectableCodes.includes(item)),
-    [projectPlatforms, selectableCodes]
-  );
-
-  const projectPlatformStatuses = useMemo(
-    () => describeSelectedPlatforms(projectPlatforms, platformCatalog, {
-      catalogReady: !platformCatalogLoading && !platformCatalogError
-    }),
-    [projectPlatforms, platformCatalog, platformCatalogLoading, platformCatalogError]
-  );
-
-  const unavailableProjectPlatformSummary = useMemo(
-    () => formatUnavailablePlatformSummary(projectPlatformStatuses),
-    [projectPlatformStatuses]
-  );
-
   const batchPreview = useMemo(
     () => parseBatchQuestions(batchText || ''),
     [batchText]
   );
 
-  const getProjectPlatforms = () => projectPlatforms;
-
   const filteredPrompts = useMemo(() => {
     return filterPromptRows(prompts, {
       search: promptSearch,
       status: promptStatusFilter,
-      platform: promptPlatformFilter,
-      category: promptCategoryFilter,
-      projectPlatforms,
-      platformLabels
+      category: promptCategoryFilter
     });
-  }, [prompts, promptSearch, promptStatusFilter, promptPlatformFilter, promptCategoryFilter, projectPlatforms, platformLabels]);
+  }, [prompts, promptSearch, promptStatusFilter, promptCategoryFilter]);
 
   const selectedFilteredCount = useMemo(() => {
     const selected = new Set(selectedPromptIds);
@@ -238,19 +179,11 @@ export default function GeoPromptsPage() {
     ];
   }, [prompts]);
 
-  const getPromptPlatforms = (row) => {
-    const list = normalizeList(row?.platforms);
-    return list.length ? list : getProjectPlatforms();
-  };
-
   const getPromptRunDisabledReason = (row) => {
-    const reason = getProjectPromptRunBlockReason([row], getProjectPlatforms());
-    if (reason) return promptRunBlockMessages[reason];
-    const hasSelectablePlatform = getPromptPlatforms(row)
-      .some((item) => selectableProjectPlatforms.includes(item));
-    return hasSelectablePlatform
+    if (row?.enabled === false) return '问题已停用，启用后才能运行';
+    return selectableCodes.length
       ? ''
-      : '当前问题没有已配置且启用的监测平台，请联系管理员处理';
+      : '当前没有已启用且配置完整的监测平台，请联系管理员处理';
   };
 
   const getBrandKeywords = (row) => {
@@ -456,7 +389,6 @@ export default function GeoPromptsPage() {
     if (shouldResetPromptListFilters(previousProjectIdRef.current, selectedProjectId)) {
       setPromptSearch('');
       setPromptStatusFilter('all');
-      setPromptPlatformFilter('all');
       setPromptCategoryFilter('all');
     }
     if (shouldClearGeneratedPromptSuggestions(previousProjectIdRef.current, selectedProjectId)) {
@@ -488,8 +420,8 @@ export default function GeoPromptsPage() {
   }, [selectedProjectId, days, fetchPrompts, fetchQuestionSets, form, batchForm, questionSetForm]);
 
   const openCreate = () => {
-    if (!selectableProjectPlatforms.length) {
-      message.warning('当前项目没有已配置且启用的监测平台，请联系管理员处理');
+    if (!selectableCodes.length) {
+      message.warning('当前没有已启用且配置完整的监测平台，请联系管理员处理');
       return;
     }
     setEditingPrompt(null);
@@ -497,29 +429,25 @@ export default function GeoPromptsPage() {
       question: '',
       tags: [],
       question_set_id: null,
-      platforms: selectableProjectPlatforms,
       enabled: true,
     });
     setModalOpen(true);
   };
 
   const openEdit = (record) => {
-    const currentPlatforms = getPromptPlatforms(record)
-      .filter((item) => selectableProjectPlatforms.includes(item));
     setEditingPrompt(record);
     form.setFieldsValue({
       question: record.question || '',
       tags: normalizeList(record.tags),
       question_set_id: record.question_set_id || null,
-      platforms: currentPlatforms.length ? currentPlatforms : selectableProjectPlatforms,
       enabled: record.enabled !== false,
     });
     setModalOpen(true);
   };
 
   const openBatchCreate = () => {
-    if (!selectableProjectPlatforms.length) {
-      message.warning('当前项目没有已配置且启用的监测平台，请联系管理员处理');
+    if (!selectableCodes.length) {
+      message.warning('当前没有已启用且配置完整的监测平台，请联系管理员处理');
       return;
     }
     batchForm.setFieldsValue({
@@ -543,7 +471,6 @@ export default function GeoPromptsPage() {
         question: String(values.question || '').trim(),
         tags: normalizeList(values.tags),
         question_set_id: values.question_set_id || null,
-        platforms: normalizeList(values.platforms),
         enabled: values.enabled !== false,
       };
       if (editingPrompt?.id) {
@@ -589,7 +516,6 @@ export default function GeoPromptsPage() {
         questions: parsed.questions,
         tags: normalizeList(values.tags),
         question_set_id: values.question_set_id || null,
-        platforms: selectableProjectPlatforms,
         enabled: values.enabled !== false
       });
       if (!(batchRequestRef.current === requestId && isCurrentPromptProject(mutationProjectId))) return;
@@ -914,22 +840,6 @@ export default function GeoPromptsPage() {
       ),
     },
     {
-      title: '监测平台',
-      key: 'platforms',
-      width: 140,
-      render: (_, row) => (
-        <Space wrap size={[4, 4]}>
-          {describeSelectedPlatforms(getPromptPlatforms(row), platformCatalog, {
-            catalogReady: !platformCatalogLoading && !platformCatalogError
-          }).map((item) => (
-            <Tag color={item.selectable ? 'processing' : 'error'} key={item.code}>
-              {item.displayLabel}
-            </Tag>
-          ))}
-        </Space>
-      ),
-    },
-    {
       title: `近 ${days} 天`,
       dataIndex: ['performance', 'valid_answers'],
       key: 'valid_answers',
@@ -1048,16 +958,16 @@ export default function GeoPromptsPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       {platformCatalogError ? <Alert type="error" showIcon title={platformCatalogError} /> : null}
-      {unavailableProjectPlatformSummary ? (
+      {!platformCatalogLoading && !platformCatalogError && !selectableCodes.length ? (
         <Alert
           type="warning"
           showIcon
-          title="当前项目包含暂不可用的监测平台"
-          description={`${unavailableProjectPlatformSummary}。这些平台不会参与新运行，请启用平台或编辑项目将其移除。`}
+          title="当前没有可运行的 AI 平台"
+          description="请管理员先在设置中心的“AI 平台”页签完成配置并启用至少一个监测平台。"
           action={<Button size="small" onClick={() => router.push('/admin/settings')}>前往设置中心</Button>}
         />
       ) : null}
-      <WebPlatformRuntimeStatus platformCodes={projectPlatforms} />
+      <WebPlatformRuntimeStatus platformCodes={selectableCodes} />
       {defaultContext.errorMessage ? (
         <Alert type="warning" showIcon title={defaultContext.errorMessage} />
       ) : null}
@@ -1077,19 +987,19 @@ export default function GeoPromptsPage() {
           <Col flex="auto">
             <Space wrap>
               <Button size="small" onClick={() => refreshPromptDataForProject(selectedProjectId)} disabled={!selectedProjectId}>刷新</Button>
-              <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : ''}>
+              <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
                 <span>
-                  <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableProjectPlatforms.length}>新建问题</Button>
+                  <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>新建问题</Button>
                 </span>
               </Tooltip>
-              <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : ''}>
+              <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
                 <span>
-                  <Button size="small" onClick={openBatchCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableProjectPlatforms.length}>批量新增</Button>
+                  <Button size="small" onClick={openBatchCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>批量新增</Button>
                 </span>
               </Tooltip>
               <Text type="secondary">
                 {selectedProject
-                  ? `当前项目：${selectedProject.name}｜监测平台：${projectPlatformStatuses.map((item) => item.displayLabel).join('、') || '未配置'}`
+                  ? `当前品牌：${selectedProject.name}｜运行平台由管理员在“AI 平台”中统一启用`
                   : '请管理员先配置默认项目'}
               </Text>
             </Space>
@@ -1154,7 +1064,7 @@ export default function GeoPromptsPage() {
                     <Tooltip title={
                       Number(questionSet.enabled_question_count || 0) <= 0
                         ? '问题集中没有启用的问题'
-                        : (!selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : '')
+                        : (!selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : '')
                     }>
                       <span>
                         <Button
@@ -1162,7 +1072,7 @@ export default function GeoPromptsPage() {
                           loading={runningQuestionSetId === questionSet.id}
                           disabled={
                             Number(questionSet.enabled_question_count || 0) <= 0
-                            || !selectableProjectPlatforms.length
+                            || !selectableCodes.length
                           }
                           onClick={() => runQuestionSet(questionSet)}
                         >
@@ -1194,19 +1104,10 @@ export default function GeoPromptsPage() {
               <Space wrap>
                 <Input.Search
                   allowClear
-                  placeholder="搜索问题、标签或平台"
+                  placeholder="搜索问题或标签"
                   style={{ width: 260 }}
                   value={promptSearch}
                   onChange={(event) => setPromptSearch(event.target.value)}
-                />
-                <Select
-                  value={promptPlatformFilter}
-                  style={{ width: 130 }}
-                  onChange={setPromptPlatformFilter}
-                  options={[
-                    { label: '全部平台', value: 'all' },
-                    ...platformCatalog.map((item) => ({ label: item.name || item.code, value: item.code })),
-                  ]}
                 />
                 <Select
                   value={promptCategoryFilter}
@@ -1296,21 +1197,12 @@ export default function GeoPromptsPage() {
               options={questionSets.map((item) => ({ label: item.name, value: item.id }))}
             />
           </Form.Item>
-          <Form.Item
-            name="platforms"
-            label="监测平台"
-            extra="只影响单问题独立运行；运行问题集时仍会覆盖项目的全部可用模型。"
-            rules={[{ required: true, message: '请至少选择一个监测平台' }]}
-          >
-            <Select
-              mode="multiple"
-              placeholder="选择该问题独立运行时使用的平台"
-              options={selectableProjectPlatforms.map((item) => ({
-                label: platformLabels[item] || item,
-                value: item
-              }))}
-            />
-          </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            title="运行平台由管理员在“AI 平台”中统一启用"
+            style={{ marginBottom: 16 }}
+          />
           <Form.Item name="enabled" label="启用" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="停用" />
           </Form.Item>

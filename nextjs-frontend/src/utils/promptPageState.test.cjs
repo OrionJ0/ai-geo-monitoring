@@ -55,7 +55,6 @@ test('prompt page clears stale editors and filters when default context changes'
   assert.match(source, /shouldResetPromptListFilters/);
   assert.match(source, /setPromptSearch\(''\)/);
   assert.match(source, /setPromptStatusFilter\('all'\)/);
-  assert.match(source, /setPromptPlatformFilter\('all'\)/);
   assert.match(source, /setPromptCategoryFilter\('all'\)/);
   assert.match(source, /setModalOpen\(false\)/);
   assert.match(source, /setEditingPrompt\(null\)/);
@@ -77,21 +76,14 @@ test('opening or cancelling a question-set editor starts from an idle save state
   assert.match(source.slice(modalStart, modalEnd), /onCancel=\{\(\) => \{[\s\S]*setSavingQuestionSet\(false\)/);
 });
 
-test('question library disables single-question runs when project and question platforms do not overlap', () => {
-  assert.match(source, /getProjectPromptRunBlockReason/);
-  assert.match(source, /问题的监测平台与项目监测平台不一致/);
-  assert.match(source, /请检查品牌项目监测平台设置/);
+test('question library disables single-question runs only when the question or global platform scope is unavailable', () => {
   assert.match(source, /getPromptRunDisabledReason\(row\)/);
+  assert.match(source, /问题已停用，启用后才能运行/);
+  assert.match(source, /当前没有已启用且配置完整的监测平台/);
   assert.match(source, /disabled=\{!!getPromptRunDisabledReason\(row\)\}/);
 });
 
-test('prompt page shows each prompt monitoring platform scope', () => {
-  assert.match(source, /title:\s*'监测平台'/);
-  assert.match(source, /getPromptPlatforms\(row\)/);
-  assert.match(source, /platformLabels\[item\]/);
-});
-
-test('single prompt editor can update monitoring platforms within the current project scope', () => {
+test('single prompt editor does not expose or submit a per-question platform scope', () => {
   const openEditStart = source.indexOf('const openEdit');
   const openEditEnd = source.indexOf('const openBatchCreate', openEditStart);
   const savePromptStart = source.indexOf('const savePrompt');
@@ -102,12 +94,9 @@ test('single prompt editor can update monitoring platforms within the current pr
   assert.ok(openEditStart >= 0 && openEditEnd > openEditStart, '应找到单问题编辑初始化');
   assert.ok(savePromptStart >= 0 && savePromptEnd > savePromptStart, '应找到单问题保存逻辑');
   assert.ok(editorStart >= 0 && editorEnd > editorStart, '应找到单问题编辑弹窗');
-  assert.match(source.slice(openEditStart, openEditEnd), /platforms:/);
-  assert.match(source.slice(savePromptStart, savePromptEnd), /platforms:\s*normalizeList\(values\.platforms\)/);
-  assert.match(source.slice(editorStart, editorEnd), /name="platforms"/);
-  assert.match(source.slice(editorStart, editorEnd), /label="监测平台"/);
-  assert.match(source.slice(editorStart, editorEnd), /mode="multiple"/);
-  assert.match(source.slice(editorStart, editorEnd), /selectableProjectPlatforms\.map/);
+  assert.doesNotMatch(source.slice(openEditStart, openEditEnd), /platforms:/);
+  assert.doesNotMatch(source.slice(savePromptStart, savePromptEnd), /platforms:/);
+  assert.doesNotMatch(source.slice(editorStart, editorEnd), /name="platforms"/);
 });
 
 test('prompt page offers parsed text batch creation instead of generated suggestions', () => {

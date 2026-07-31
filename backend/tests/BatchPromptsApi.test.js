@@ -94,7 +94,6 @@ test('批量新增在一个请求内创建问题并跳过库内及批次内重�
       questions: ['新问题一', '已经存在的问题？', '新问题一', '新问题二'],
       question_set_id: group.id,
       tags: ['批量'],
-      platforms: ['qwen'],
       enabled: true
     }
   });
@@ -112,7 +111,7 @@ test('批量新增在一个请求内创建问题并跳过库内及批次内重�
     order: [['id', 'ASC']]
   });
   assert.deepEqual(stored.map((item) => item.question), ['新问题一', '新问题二']);
-  assert.equal(stored.every((item) => item.enabled && item.platforms.includes('qwen')), true);
+  assert.equal(stored.every((item) => item.enabled && item.platforms.length === 0), true);
 });
 
 test('批量新增拒绝超过一百条问题且不产生部分写入', async () => {

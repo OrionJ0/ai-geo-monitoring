@@ -21,19 +21,17 @@ test('AI platform catalog hook reads the authenticated database catalog', () => 
   assert.match(hook, /capabilities\?:\s*AIPlatformCapabilities/);
 });
 
-test('new projects default only to catalog-marked platforms', () => {
+test('retired project page has no project-specific platform defaults', () => {
   const hook = source('../lib/useAIPlatformCatalog.ts');
   const projectsPage = source('../app/geo/projects/page.tsx');
 
-  assert.match(hook, /default_for_new_project:\s*boolean/);
-  assert.match(hook, /const defaultCodes = useMemo/);
-  assert.match(projectsPage, /platforms:\s*defaultCodes/);
-  assert.doesNotMatch(projectsPage, /platforms:\s*selectableCodes/);
+  assert.doesNotMatch(hook, /const defaultCodes = useMemo/);
+  assert.match(projectsPage, /redirect\('\/admin\/settings#workspace'\)/);
+  assert.doesNotMatch(projectsPage, /platforms/);
 });
 
-test('project and reporting screens use the shared platform catalog', () => {
+test('question and reporting screens use the shared platform catalog', () => {
   for (const relativePath of [
-    '../app/geo/projects/page.tsx',
     '../app/geo/prompts/page.tsx',
     '../app/geo/project-dashboard/page.tsx',
     '../app/geo/reports/page.tsx',
@@ -68,25 +66,10 @@ test('platform settings warn before disabling the API used for structural analys
   assert.match(platformSettings, /所有监测运行都会在创建任务前被阻断/);
 });
 
-test('project edits preserve an existing platform that was temporarily disabled', () => {
-  const page = source('../app/geo/projects/page.tsx');
-  assert.match(page, /platforms:\s*normalizeList\(record\.platforms\)/);
-  assert.match(page, /normalizeList\(editingProject\?\.platforms\)\.includes\(item\)/);
-});
-
-test('project and prompt screens label selected platforms that became unavailable', () => {
-  const projectsPage = source('../app/geo/projects/page.tsx');
+test('question screen reports globally enabled platforms that are currently unavailable', () => {
   const promptsPage = source('../app/geo/prompts/page.tsx');
 
-  assert.match(projectsPage, /describeSelectedPlatforms/);
-  assert.match(projectsPage, /displayLabel/);
-  assert.match(promptsPage, /describeSelectedPlatforms/);
-  assert.match(promptsPage, /当前项目包含暂不可用的监测平台/);
+  assert.match(promptsPage, /platformCatalogError/);
+  assert.match(promptsPage, /当前没有可运行的 AI 平台/);
   assert.match(promptsPage, /前往设置中心/);
-});
-
-test('project platform selector exposes its full small option list to assistive technology', () => {
-  const projectsPage = source('../app/geo/projects/page.tsx');
-  assert.match(projectsPage, /aria-label="监测平台"/);
-  assert.match(projectsPage, /virtual=\{false\}/);
 });

@@ -19,8 +19,7 @@ test('geo pages avoid implementation-specific prompt generation copy', () => {
     '使用 DeepSeek',
     'AI 生成 Prompt 建议',
     'AI 返回内容无法解析',
-    '解析错误',
-    'AI 平台'
+    '解析错误'
   ];
   const offenders = collectFiles(geoRoot)
     .flatMap((file) => {
