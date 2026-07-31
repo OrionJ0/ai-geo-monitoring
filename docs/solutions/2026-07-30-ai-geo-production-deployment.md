@@ -26,6 +26,7 @@ Web 采集全部可用。百度营销仍缺真实权限和账户，不能认定�
 - systemd 提交：`93229d9bda28f23822adeb7337413a1f9f5c0318`
 - 受信代理提交：`e29166e0b0ce2a6420aeda177972d31f718ced0d`
 - 平台安全默认值与分析参数提交：`4aa58122dcb286073f19d9b907db5c3abc2c3b3b`
+- 真实 Web 回答结构化测试样例提交：`85bb9b7c0663e479329938094d64c9559187f262`
 - 明确排除：广拓官网、`gato-test-*` 容器及其配置；本次未检查、修改或重启。
 
 ## 服务器修改台账
@@ -38,6 +39,7 @@ Web 采集全部可用。百度营销仍缺真实权限和账户，不能认定�
 | `/etc/systemd/system/multi-user.target.wants/ai-geo-*.service` | AI-GEO 开机启动 | `systemctl enable` 创建两个启用链接 | 两个单元 `is-enabled=enabled` | 只对这两个 AI-GEO 单元执行 `systemctl disable`；不得操作 Nginx |
 | `/opt/ai-geo-monitoring` Git 工作树与依赖/构建产物 | AI-GEO 全栈 | 先后快进部署到 `93229d9`、`e29166e`，完成 systemd 与受信代理切换 | 标准 `npm run deploy` 两次完成 10/10 阶段；对应阶段 `git rev-parse HEAD` 为 `e29166e…` | 对目标提交执行 `git revert` 并重新运行标准部署；不得使用 `git reset --hard` |
 | `/opt/ai-geo-monitoring` 平台默认值、分析参数和前端产物 | AI-GEO 全栈 | 标准部署到 `4aa5812`；新增平台默认停用、固定平台顺序、DeepSeek 思考模式默认关闭、分析附加参数及二次确认；保留生产数据库中已有启停状态 | 生产部署后后端 906/906、营销后端 91/91、前端营销 11/11、Playwright 2/2，lint 和 Next.js 生产构建通过；公网 UI 和真实结构化请求通过 | 对 `4aa5812` 执行 `git revert`，推送后重新运行标准 `npm run deploy`；不得使用 `git reset --hard` |
+| `/opt/ai-geo-monitoring` 真实 Web 回答测试样例与前端产物 | AI-GEO 前端及分析测试入口 | 标准部署到 `85bb9b7`；把原三行候选列表替换为生产问题集中成功采集的 1227 字 DeepSeek Web 回答，保留多厂商对比、选型建议和页面引用标记 | 部署后后端 910/910、营销后端 91/91、前端营销 11/11、Playwright 2/2，lint 和 Next.js 构建通过；公网默认样例和结构化测试成功 | 对 `85bb9b7` 执行 `git revert`，推送后重新运行标准 `npm run deploy`；SQLite 无需数据回滚 |
 | `/opt/ai-geo-monitoring/backend/database.latest.sqlite` | SQLite 最新备份 | 每次标准部署前更新唯一最新快照；生产数据库未删除 | 各次迁移前后审计均为 `quick_check=ok`，无缺列、无待迁移 GEO 语义记录 | 该文件是滚动“最新备份”，不单独回退；如业务数据库异常，停止服务后按 SQLite 恢复流程使用此快照 |
 | Git `origin` 与 `/tmp/ai-geo-systemd-93229d9.bundle` | 仅首次代码拉取 | GitHub TLS 首次超时后，临时把 `origin` 指向校验过的增量 bundle 完成同一标准部署；随即恢复正式 GitHub 地址，临时 bundle 已从本机和服务器删除 | bundle 两端 SHA-256 一致；最终 `git remote get-url origin` 为正式 GitHub 地址 | 无需回滚；bundle 只含 Git 代码，可从相同提交重新生成 |
 | 后端受管 DeepSeek/豆包 Chrome 运行态 | AI-GEO 后端 Web 会话 | 通过正式管理员入口执行两次“验证登录”，分别启动并保留专用会话；未修改服务器配置文件、数据库或服务单元 | 两个平台均显示“网页登录已验证”；资源、ready、systemd 和 OOM 结果见下文 | 受管会话会随 `ai-geo-backend.service` 停止而关闭；当前不需要回滚，未为释放内存擅自重启服务 |
@@ -90,6 +92,16 @@ Web 采集全部可用。百度营销仍缺真实权限和账户，不能认定�
 - 正式“测试结构化”在约 10 秒内成功，使用
   `deepseek/deepseek-v4-pro`，`analysis_attempts=1`，返回实体、竞品关系、
   候选顺序、事实声明和情绪的有效结构。
+- 2026-07-30 20:59 CST 再次从公网正式入口验收：临时结构化测试默认加载
+  生产问题集成功记录中的真实 DeepSeek Web 回答，共 1227 字；页面明确标注
+  事实声明仍需核验。该回答包含表格式多厂商对比、复杂选型说明和被页面采集
+  拆分的引用标记，不再是三行人工示例。
+- 新真实样例约 28 秒后结构化成功，识别 9 个实体、目标品牌 2 次提及、
+  8 个竞品关系、两个无序候选集合和正向情绪；思考模式仍为关闭。本次
+  `analysis_attempts=2`，说明第一次模型输出仍未通过严格校验，重试后才成功。
+- 部署与测试结束后，前后端均为 `active/enabled`、运行用户为 `ubuntu`、
+  `NRestarts=0`；公网 `/api/ready` 为 HTTP 200，约 59 ms。后端和前端
+  当前内存分别约 63 MiB、52 MiB；本次部署重启关闭了此前常驻的 Web Chrome。
 
 ### DeepSeek 与豆包 Web
 
@@ -162,9 +174,10 @@ DeepSeek API 结构化分析 → 独立运行报告”链路已由 4 个样本�
 1. `P1`：豆包 Web 登录状态检查通过，但正式发问仍触发平台人机验证。需要
    在服务器图形桌面的专用豆包 Chrome 完成验证，再只重试失败项；重试后仍
    应检查 5 条回答、引用和结构化分析，不能只重新点“验证登录”。
-2. `P1`：DeepSeek 分析输出 1/5 因空 `surface_forms` 被正确拒绝。应先增加
-   该失败样本的回归测试，再决定是提示词强化还是对可安全修复的空数组做受控
-   规范化；不得直接放宽全部结构校验。
+2. `P1`：DeepSeek 分析输出 1/5 因空 `surface_forms` 被正确拒绝；新增的
+   真实长回答健康测试也需要第二次尝试才通过，证明结构化输出稳定性仍有问题。
+   应先增加失败样本回归测试，再决定是提示词强化还是对可安全修复的空数组做
+   受控规范化；不得直接放宽全部结构校验。
 3. `P1`：百度营销缺真实 App 权限、账户和生产数据。继续按 issue 009/010
    验收，全部通过前不得把需求目录改为 `closed-*`。
 4. `P2`：后端浏览器双会话常驻约占 0.72 GiB，峰值约 0.79 GiB，当前 3.57
@@ -174,6 +187,11 @@ DeepSeek API 结构化分析 → 独立运行报告”链路已由 4 个样本�
 6. `P2`：前端依赖安装报告 9 个 high 风险，GitHub 默认分支同时提示
    1 critical、1 high。二者可能不是同一集合，需另建依赖审计任务逐项确认；
    本次未执行 `npm audit fix --force`。
+7. `P2`：前端全量静态测试 250 条中有 2 条既存失败，均来自百度营销页面
+   继续使用 Ant Design 已弃用的 `Space direction` 和 `Alert message`；
+   本次目标测试、lint 和生产构建通过，未把无关营销重构混入当前提交。
+8. `P2`：服务器登录提示存在 3 个可更新软件包且需要系统重启。未取得维护
+   窗口授权，因此没有升级或重启；应单独安排补丁窗口和回滚/健康检查方案。
 
 ## 最终决策
 
