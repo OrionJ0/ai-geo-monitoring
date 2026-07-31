@@ -4,6 +4,9 @@ const {
   loadBaiduContract
 } = require('./contracts/baidu/loadBaiduContract');
 const {
+  withMarketingCapabilities
+} = require('./marketingCapabilities');
+const {
   createMarketingStatusRouter
 } = require('./routes/marketingStatusRoutes');
 const {
@@ -76,46 +79,46 @@ function createMarketingModule({
 
   async function getStatus({ includeAdminDetails = false } = {}) {
     if (configAudit.moduleState === 'DISABLED') {
-      return {
+      return withMarketingCapabilities({
         moduleState: 'DISABLED',
         errorCode: null
-      };
+      });
     }
 
     if (configAudit.moduleState === 'MISCONFIGURED') {
-      return {
+      return withMarketingCapabilities({
         moduleState: 'MISCONFIGURED',
         errorCode: configAudit.errorCode,
         ...(includeAdminDetails
           ? { missingKeys: [...configAudit.missingKeys] }
           : {})
-      };
+      });
     }
 
     if (runtimeErrorCode) {
-      return {
+      return withMarketingCapabilities({
         moduleState: 'RECOVERY_FAILED',
         errorCode: runtimeErrorCode
-      };
+      });
     }
 
     try {
       const schema = await schemaAuditor.audit();
       if (!schema.ready) {
-        return {
+        return withMarketingCapabilities({
           moduleState: 'SCHEMA_MISSING',
           errorCode: 'MARKETING_SCHEMA_MISSING'
-        };
+        });
       }
-      return {
+      return withMarketingCapabilities({
         moduleState: configuredOperationalState,
         errorCode: null
-      };
+      });
     } catch {
-      return {
+      return withMarketingCapabilities({
         moduleState: 'SCHEMA_MISSING',
         errorCode: 'MARKETING_SCHEMA_AUDIT_FAILED'
-      };
+      });
     }
   }
 

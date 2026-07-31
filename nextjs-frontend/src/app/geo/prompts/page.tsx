@@ -24,8 +24,6 @@ import {
   formatUnavailablePlatformSummary
 } from '@/utils/platformSelectionStatus.cjs';
 import {
-  getSelectablePromptProjects,
-  resolveSelectedPromptProjectId,
   shouldClearGeneratedPromptSuggestions,
   shouldResetPromptListFilters,
   shouldResetPromptSelection
@@ -34,6 +32,7 @@ import { getProjectPromptRunBlockReason } from '@/utils/projectPromptSummary.cjs
 import { filterPromptRows } from '@/utils/promptListFilters.cjs';
 import { parseBatchQuestions } from '@/utils/questionBatchParser.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
+import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import WebCaptureEvidence from '@/components/WebCaptureEvidence';
 import WebPlatformRuntimeStatus from '@/components/WebPlatformRuntimeStatus';
 
@@ -89,6 +88,9 @@ const formatSovSummary = (summary) => {
 
 export default function GeoPromptsPage() {
   const router = useRouter();
+  const defaultContext = useDefaultProjectContext();
+  const selectedProjectId = defaultContext.project?.id;
+  const selectedProject = defaultContext.project;
   const {
     platforms: platformCatalog,
     labels: platformLabels,
@@ -96,11 +98,8 @@ export default function GeoPromptsPage() {
     loading: platformCatalogLoading,
     error: platformCatalogError
   } = useAIPlatformCatalog();
-  const [projects, setProjects] = useState([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [prompts, setPrompts] = useState([]);
   const [questionSets, setQuestionSets] = useState([]);
-  const [projectsLoading, setProjectsLoading] = useState(false);
   const [promptsLoading, setPromptsLoading] = useState(false);
   const [questionSetsLoading, setQuestionSetsLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -178,11 +177,6 @@ export default function GeoPromptsPage() {
       duration: 8,
     });
   };
-
-  const selectedProject = useMemo(
-    () => projects.find((item) => item.id === selectedProjectId) || null,
-    [projects, selectedProjectId]
-  );
 
   const normalizeList = (value) => Array.isArray(value)
     ? value.map((item) => String(item || '').trim()).filter(Boolean)
@@ -400,23 +394,6 @@ export default function GeoPromptsPage() {
     );
   };
 
-  const fetchProjects = useCallback(async () => {
-    setProjectsLoading(true);
-    try {
-      const res = await axios.get('/api/geo-projects');
-      const list = Array.isArray(res?.data?.data) ? res.data.data : [];
-      const selectableProjects = getSelectablePromptProjects(list);
-      setProjects(selectableProjects);
-      setSelectedProjectId((prev) => {
-        return resolveSelectedPromptProjectId(selectableProjects, prev);
-      });
-    } catch (error) {
-      message.error(getApiErrorMessage(error, '获取品牌项目失败'));
-    } finally {
-      setProjectsLoading(false);
-    }
-  }, []);
-
   const fetchPrompts = useCallback(async (projectId = selectedProjectId, targetDays = days) => {
     const requestId = promptsRequestRef.current + 1;
     promptsRequestRef.current = requestId;
@@ -469,29 +446,7 @@ export default function GeoPromptsPage() {
     if (!isCurrentPromptProject(projectId)) return;
     fetchPrompts(projectId);
     fetchQuestionSets(projectId);
-    fetchProjects();
   };
-
-  const handleProjectChange = (nextProjectId) => {
-    setSelectedProjectId(nextProjectId);
-    setSelectedPromptIds([]);
-    setModalOpen(false);
-    setEditingPrompt(null);
-    setBatchModalOpen(false);
-    setSavingBatch(false);
-    setQuestionSetModalOpen(false);
-    setEditingQuestionSet(null);
-    setSavingQuestionSet(false);
-    setRunningPromptId(null);
-    setRunningQuestionSetId(null);
-    form.resetFields();
-    batchForm.resetFields();
-    questionSetForm.resetFields();
-  };
-
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
 
   useEffect(() => {
     currentProjectIdRef.current = selectedProjectId;
@@ -505,6 +460,14 @@ export default function GeoPromptsPage() {
       setPromptCategoryFilter('all');
     }
     if (shouldClearGeneratedPromptSuggestions(previousProjectIdRef.current, selectedProjectId)) {
+      setModalOpen(false);
+      setEditingPrompt(null);
+      setBatchModalOpen(false);
+      setQuestionSetModalOpen(false);
+      setEditingQuestionSet(null);
+      form.resetFields();
+      batchForm.resetFields();
+      questionSetForm.resetFields();
       batchRequestRef.current += 1;
       historyRequestRef.current += 1;
       runRequestRef.current += 1;
@@ -522,7 +485,7 @@ export default function GeoPromptsPage() {
     previousProjectIdRef.current = selectedProjectId;
     fetchPrompts(selectedProjectId, days);
     fetchQuestionSets(selectedProjectId);
-  }, [selectedProjectId, days, fetchPrompts, fetchQuestionSets]);
+  }, [selectedProjectId, days, fetchPrompts, fetchQuestionSets, form, batchForm, questionSetForm]);
 
   const openCreate = () => {
     if (!selectableProjectPlatforms.length) {
@@ -570,7 +533,7 @@ export default function GeoPromptsPage() {
 
   const savePrompt = async () => {
     if (!selectedProjectId) {
-      message.warning('请先选择品牌项目');
+      message.warning('默认项目不可用，请联系管理员');
       return;
     }
     const mutationProjectId = selectedProjectId;
@@ -604,7 +567,7 @@ export default function GeoPromptsPage() {
 
   const saveBatchPrompts = async () => {
     if (!selectedProjectId) {
-      message.warning('请先选择品牌项目');
+      message.warning('默认项目不可用，请联系管理员');
       return;
     }
     const mutationProjectId = selectedProjectId;
@@ -676,7 +639,7 @@ export default function GeoPromptsPage() {
 
   const saveQuestionSet = async () => {
     if (!selectedProjectId) {
-      message.warning('请先选择品牌项目');
+      message.warning('默认项目不可用，请联系管理员');
       return;
     }
     const mutationProjectId = selectedProjectId;
@@ -756,7 +719,7 @@ export default function GeoPromptsPage() {
           message[notice.type](notice.text);
         }
         const reportUrl = data.report_url || (data.question_set_run_id
-          ? `/geo/question-set-reports?project_id=${runProjectId}&run_id=${data.question_set_run_id}`
+          ? `/geo/question-set-reports?run_id=${data.question_set_run_id}`
           : null);
         if (reportUrl) router.push(reportUrl);
       }
@@ -868,7 +831,7 @@ export default function GeoPromptsPage() {
           message[notice.type](notice.text);
         }
         const reportUrl = data.report_url || (data.question_set_run_id
-          ? `/geo/question-set-reports?project_id=${runProjectId}&run_id=${data.question_set_run_id}`
+          ? `/geo/question-set-reports?run_id=${data.question_set_run_id}`
           : null);
         if (reportUrl) router.push(reportUrl);
       }
@@ -1095,19 +1058,13 @@ export default function GeoPromptsPage() {
         />
       ) : null}
       <WebPlatformRuntimeStatus platformCodes={projectPlatforms} />
+      {defaultContext.errorMessage ? (
+        <Alert type="warning" showIcon title={defaultContext.errorMessage} />
+      ) : null}
       <Card title="问题库">
         <Row gutter={[12, 12]} align="middle">
           <Col flex="360px">
-            <Select
-              value={selectedProjectId}
-              loading={projectsLoading}
-              placeholder="选择品牌项目"
-              style={{ width: '100%' }}
-              showSearch
-              optionFilterProp="label"
-              onChange={handleProjectChange}
-              options={projects.map((item) => ({ label: item.name, value: item.id }))}
-            />
+            <Text strong>{selectedProject?.name || '默认项目未配置'}</Text>
           </Col>
           <Col flex="140px">
             <Select
@@ -1120,12 +1077,12 @@ export default function GeoPromptsPage() {
           <Col flex="auto">
             <Space wrap>
               <Button size="small" onClick={() => refreshPromptDataForProject(selectedProjectId)} disabled={!selectedProjectId}>刷新</Button>
-              <Tooltip title={!selectedProjectId ? '请先选择品牌项目' : !selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : ''}>
+              <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : ''}>
                 <span>
                   <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableProjectPlatforms.length}>新建问题</Button>
                 </span>
               </Tooltip>
-              <Tooltip title={!selectedProjectId ? '请先选择品牌项目' : !selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : ''}>
+              <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableProjectPlatforms.length ? '当前项目没有已配置且启用的监测平台' : ''}>
                 <span>
                   <Button size="small" onClick={openBatchCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableProjectPlatforms.length}>批量新增</Button>
                 </span>
@@ -1133,7 +1090,7 @@ export default function GeoPromptsPage() {
               <Text type="secondary">
                 {selectedProject
                   ? `当前项目：${selectedProject.name}｜监测平台：${projectPlatformStatuses.map((item) => item.displayLabel).join('、') || '未配置'}`
-                  : '请先在品牌项目中创建项目'}
+                  : '请管理员先配置默认项目'}
               </Text>
             </Space>
           </Col>
@@ -1226,7 +1183,7 @@ export default function GeoPromptsPage() {
             ]}
           />
         ) : (
-          <Empty description="请先选择品牌项目" />
+          <Empty description="默认项目不可用" />
         )}
       </Card>
 
@@ -1311,7 +1268,7 @@ export default function GeoPromptsPage() {
             />
           </Space>
         ) : (
-          <Empty description="暂无可用品牌项目" />
+          <Empty description="默认项目不可用" />
         )}
       </Card>
 

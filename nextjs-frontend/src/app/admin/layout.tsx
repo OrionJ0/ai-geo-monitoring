@@ -1,14 +1,32 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Layout, Button, Menu, message } from 'antd';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import Login from '@/components/Login';
 import { setAuthToken, clearAuth } from '@/lib/axiosConfig';
+import {
+  buildAdminNavigation,
+  resolveAdminLocation
+} from '@/utils/adminNavigation.cjs';
 
 const { Header, Sider, Content } = Layout;
+
+type NavigationPage = {
+  type: 'item';
+  key: string;
+  label: string;
+  href: string;
+};
+
+type NavigationGroup = {
+  type: 'group';
+  key: string;
+  label: string;
+  children: NavigationPage[];
+};
 
 export default function AdminLayout({
   children,
@@ -54,31 +72,59 @@ export default function AdminLayout({
     message.success('已退出登录');
   };
 
-  // 获取当前选中的菜单项
   const pathname = usePathname();
-
-  // 使用 <Link> 替代 router.push()，让 Next.js 在菜单可见时就预编译目标路由
-  const menuItems = [
-    { key: 'dashboard', label: <Link href="/admin">数据仪表</Link> },
-    { key: 'history', label: <Link href="/admin/history">历史记录</Link> },
-    { key: 'users', label: <Link href="/admin/users">用户管理</Link> },
-    { key: 'memberships', label: <Link href="/admin/memberships">会员设置</Link> },
-    { key: 'settings', label: <Link href="/admin/settings">设置中心</Link> },
-    { key: 'notice', label: <Link href="/admin/notice">通知管理</Link> },
-    { key: 'health', label: <Link href="/admin/health">系统健康</Link> },
-  ];
-
-  let selectedKey = 'dashboard';
-
-  if (pathname.startsWith('/admin/')) {
-    const pathWithoutPrefix = pathname.replace('/admin/', '');
-    const firstSegment = pathWithoutPrefix.split('/')[0];
-    if (firstSegment && menuItems.some(item => item.key === firstSegment)) {
-      selectedKey = firstSegment;
+  const navigation = useMemo(
+    () => buildAdminNavigation(),
+    []
+  ) as Array<NavigationPage | NavigationGroup>;
+  const location = useMemo(
+    () => resolveAdminLocation(pathname),
+    [pathname]
+  );
+  const [openKeys, setOpenKeys] = useState<string[]>(
+    location.activeGroupKey ? [location.activeGroupKey] : []
+  );
+  const menuItems = useMemo(() => navigation.map((item) => {
+    if (item.type === 'group') {
+      return {
+        key: item.key,
+        label: item.label,
+        children: item.children.map((child) => ({
+          key: child.key,
+          label: <Link href={child.href}>{child.label}</Link>
+        }))
+      };
     }
-  } else if (pathname === '/admin') {
-    selectedKey = 'dashboard';
-  }
+    return {
+      key: item.key,
+      label: <Link href={item.href}>{item.label}</Link>
+    };
+  }), [navigation]);
+
+  useEffect(() => {
+    if (location.activeGroupKey) {
+      setOpenKeys((current) => (
+        current.includes(location.activeGroupKey)
+          ? current
+          : [...current, location.activeGroupKey]
+      ));
+    }
+  }, [location.activeGroupKey]);
+
+  const handleOpenChange = (keys: string[]) => {
+    setOpenKeys(keys);
+  };
+
+  const handleSiderToggle = () => {
+    if (collapsed && location.activeGroupKey) {
+      setOpenKeys((current) => (
+        current.includes(location.activeGroupKey)
+          ? current
+          : [...current, location.activeGroupKey]
+      ));
+    }
+    setCollapsed(!collapsed);
+  };
 
   // 加载中
   if (loading) {
@@ -104,32 +150,54 @@ export default function AdminLayout({
           <Button
             type="text"
             aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
+            aria-expanded={!collapsed}
             icon={collapsed ? <MenuUnfoldOutlined style={{ color: '#fff' }} /> : <MenuFoldOutlined style={{ color: '#fff' }} />}
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={handleSiderToggle}
           />
           <span>管理员后台</span>
         </div>
         <Button onClick={handleLogout}>退出登录</Button>
       </Header>
-      <Layout style={{ marginTop: 64 }}>
+      <Layout className="workspace-shell">
+        {!collapsed ? (
+          <button
+            type="button"
+            className="geo-sider-backdrop"
+            aria-label="关闭侧栏"
+            onClick={() => setCollapsed(true)}
+          />
+        ) : null}
         <Sider
-          width={200}
+          className="geo-sider admin-sider"
+          width={224}
           collapsedWidth={0}
+          breakpoint="md"
           theme="light"
           collapsible
           collapsed={collapsed}
+          onBreakpoint={setCollapsed}
           onCollapse={(val) => setCollapsed(val)}
           trigger={null}
           style={{ background: '#fff' }}
         >
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedKey]}
-            style={{ height: '100%', borderRight: 0 }}
-            items={menuItems}
-          />
+          <nav aria-label="管理员后台主导航">
+            <Menu
+              className="workspace-navigation"
+              mode="inline"
+              selectedKeys={[location.selectedKey]}
+              openKeys={openKeys}
+              onOpenChange={handleOpenChange}
+              style={{ minHeight: '100%', borderRight: 0 }}
+              items={menuItems}
+              onClick={() => {
+                if (window.innerWidth < 768) {
+                  window.setTimeout(() => setCollapsed(true), 0);
+                }
+              }}
+            />
+          </nav>
         </Sider>
-        <Content style={{ padding: 24 }}>
+        <Content className="geo-content" style={{ padding: 24 }}>
           {children}
         </Content>
       </Layout>

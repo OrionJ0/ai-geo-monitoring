@@ -32,13 +32,17 @@ test('marketing page skeleton states the integration boundary without fake funne
   assert.doesNotMatch(source, /订单(?:数|量)[：:]\s*\d/u);
 });
 
-test('unverified marketing skeleton is not added to the production workspace navigation', () => {
-  const layout = fs.readFileSync(
-    path.join(frontendDirectory, 'src/app/geo/layout.tsx'),
+test('workspace navigation exposes the new pages even before sources have data', () => {
+  const navigation = fs.readFileSync(
+    path.join(frontendDirectory, 'src/utils/geoNavigation.cjs'),
     'utf8'
   );
 
-  assert.doesNotMatch(layout, /\/geo\/marketing/);
+  assert.match(navigation, /\/geo\/market-overview/);
+  assert.match(navigation, /\/geo\/ad-performance/);
+  assert.match(navigation, /\/geo\/website-traffic/);
+  assert.match(navigation, /\/geo\/consultations/);
+  assert.match(navigation, /\/geo\/order-results/);
 });
 
 test('pilot marketing page reads Baidu Tongji separately from the local ad snapshot', () => {

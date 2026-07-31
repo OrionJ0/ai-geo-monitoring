@@ -1,14 +1,14 @@
 // @ts-nocheck
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
-import axios from 'axios';
+import axios from '@/lib/axiosConfig';
 import { Column } from '@ant-design/plots';
-import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import { normalizeSourceContextValues } from '@/utils/sourceDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
+import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 
 const { Text, Title } = Typography;
 
@@ -31,11 +31,6 @@ const periodOptions = [
   { label: '近 90 天', value: 90 },
 ];
 
-function extractList(res) {
-  const data = res?.data?.data ?? res?.data ?? [];
-  return Array.isArray(data) ? data : [];
-}
-
 function formatDate(value) {
   if (!value) return '-';
   const d = new Date(value);
@@ -55,9 +50,8 @@ function renderTags(values, fallbackMap = {}) {
 
 export default function GeoSourcesPage() {
   const { labels: platformLabel } = useAIPlatformCatalog();
-  const [projects, setProjects] = useState([]);
-  const [projectId, setProjectId] = useState();
-  const [projectLoading, setProjectLoading] = useState(false);
+  const defaultContext = useDefaultProjectContext();
+  const projectId = defaultContext.project?.id;
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sources, setSources] = useState(null);
   const [days, setDays] = useState(30);
@@ -67,33 +61,12 @@ export default function GeoSourcesPage() {
     sourceRequestRef.current += 1;
   };
 
-  const handleProjectChange = (value) => {
-    invalidateSourceRequest();
-    setProjectId(value);
-    setSources(null);
-    setSourceLoading(false);
-  };
-
   const handleDaysChange = (value) => {
     invalidateSourceRequest();
     setDays(value);
     setSources(null);
     setSourceLoading(false);
   };
-
-  const fetchProjects = useCallback(async () => {
-    setProjectLoading(true);
-    try {
-      const res = await axios.get('/api/geo-projects');
-      const rows = getSelectableProjects(extractList(res));
-      setProjects(rows);
-      setProjectId((current) => resolveSelectedProjectId(rows, current));
-    } catch (error) {
-      message.error(getApiErrorMessage(error, '获取品牌项目失败'));
-    } finally {
-      setProjectLoading(false);
-    }
-  }, []);
 
   const fetchSources = useCallback(async (id, targetDays) => {
     const requestId = sourceRequestRef.current + 1;
@@ -110,17 +83,16 @@ export default function GeoSourcesPage() {
       if (sourceRequestRef.current === requestId) setSources(res?.data?.data || null);
     } catch (error) {
       if (sourceRequestRef.current === requestId) {
-        message.error(getApiErrorMessage(error, '获取来源分析失败'));
+        message.error(getApiErrorMessage(error, '获取引用来源分析失败'));
       }
     } finally {
       if (sourceRequestRef.current === requestId) setSourceLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchProjects(); }, [fetchProjects]);
   useEffect(() => { fetchSources(projectId, days); }, [projectId, days, fetchSources]);
 
-  const selectedProject = useMemo(() => projects.find((item) => item.id === projectId), [projects, projectId]);
+  const selectedProject = defaultContext.project;
   const summary = sources?.summary || {};
   const sourceTypes = Array.isArray(sources?.source_types) ? sources.source_types : [];
   const domains = Array.isArray(sources?.domains) ? sources.domains : [];
@@ -263,19 +235,12 @@ export default function GeoSourcesPage() {
       <Card>
         <Row gutter={[12, 12]} align="middle" justify="space-between">
           <Col>
-            <Title level={3} style={{ margin: 0 }}>来源分析</Title>
+            <Title level={3} style={{ margin: 0 }}>引用来源分析</Title>
             <Text type="secondary">按周期查看 AI 回答引用来源、竞品来源缺口与可优化页面</Text>
           </Col>
           <Col>
             <Space wrap>
-              <Select
-                loading={projectLoading}
-                  value={projectId}
-                  style={{ width: 260 }}
-                  placeholder="选择品牌项目"
-                  onChange={handleProjectChange}
-                  options={projects.map((item) => ({ value: item.id, label: item.name }))}
-                />
+              <Text strong>{defaultContext.project?.name || '默认项目'}</Text>
               <Select
                   value={days}
                   style={{ width: 120 }}
@@ -287,8 +252,13 @@ export default function GeoSourcesPage() {
         </Row>
       </Card>
 
-      {!projectLoading && !projects.length ? (
-        <Card><Empty description="请先创建品牌项目后查看来源分析" /></Card>
+      {defaultContext.errorMessage ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="无法读取默认监控项目"
+          description={defaultContext.errorMessage}
+        />
       ) : null}
 
       <Alert

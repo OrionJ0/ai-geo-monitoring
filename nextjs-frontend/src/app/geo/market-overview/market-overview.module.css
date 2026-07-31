@@ -1,0 +1,296 @@
+.page {
+  min-height: 100%;
+  padding: 24px;
+  background: #f6f8fb;
+}
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.page > :global(.ant-alert) {
+  margin-bottom: 16px;
+}
+
+.page section + section {
+  margin-top: 24px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.sectionHeader :global(.ant-typography) {
+  margin: 0;
+}
+
+.sectionHeader :global(h4.ant-typography) {
+  color: #172b4d;
+}
+
+.journeyGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stageCard {
+  min-width: 0;
+  height: 100%;
+}
+
+.stageCard :global(.ant-card-head) {
+  min-height: 46px;
+}
+
+.stageCard :global(.ant-card-head-title) {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.stageCard :global(.ant-card-extra) {
+  margin-inline-start: 8px;
+}
+
+.stageCard :global(.ant-statistic) {
+  min-height: 78px;
+}
+
+.stageCard :global(.ant-statistic-content) {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.stageMeta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 10px;
+  min-height: 68px;
+  margin: 12px 0 16px;
+  font-size: 12px;
+}
+
+.stageMeta :global(.ant-typography) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.unavailableCard {
+  background: #fbfcfe !important;
+}
+
+.unavailableCard :global(.ant-empty) {
+  min-height: 78px;
+  margin-block: 0;
+}
+
+.unavailableCard :global(.ant-empty-image) {
+  height: 36px;
+}
+
+.unavailableCard :global(.ant-empty-description) {
+  font-size: 13px;
+}
+
+.unavailableCard :global(.ant-typography) {
+  min-height: 42px;
+  margin: 0 0 16px;
+  font-size: 12px;
+}
+
+.trendGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trendCard {
+  min-width: 0;
+}
+
+.miniBars {
+  display: flex;
+  align-items: end;
+  gap: 6px;
+  height: 180px;
+  padding: 20px 12px 0;
+  border-bottom: 1px solid #d9e0ea;
+  background: linear-gradient(180deg, #f7f9fc 0%, #ffffff 100%);
+}
+
+.miniBars > div {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  align-items: end;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+}
+
+.miniBars i {
+  display: block;
+  min-height: 2px;
+  border-radius: 3px 3px 0 0;
+  background: #2f6bff;
+}
+
+.miniBars[data-source="traffic"] i {
+  background: #24877f;
+}
+
+.miniBars span {
+  overflow: hidden;
+  color: #66758b;
+  font-size: 11px;
+  text-align: center;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.dataDetails {
+  margin-top: 14px;
+}
+
+.dataDetails summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #0f4fb8;
+}
+
+.tableScroller {
+  max-width: 100%;
+  margin-top: 10px;
+  overflow-x: auto;
+  border: 1px solid #e1e8f2;
+  border-radius: 8px;
+}
+
+.tableScroller table {
+  width: 100%;
+  min-width: 360px;
+  border-collapse: collapse;
+  background: #ffffff;
+}
+
+.tableScroller caption,
+.tableScroller th,
+.tableScroller td {
+  padding: 9px 12px;
+  text-align: left;
+}
+
+.tableScroller th,
+.tableScroller td {
+  border-top: 1px solid #e8edf4;
+}
+
+.attentionCard :global(.ant-card-body) {
+  padding: 16px;
+}
+
+@media (max-width: 980px) {
+  .journeyGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .page {
+    padding: 16px 12px 24px;
+  }
+
+  .pageHeader {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .pageHeader :global(h2.ant-typography) {
+    font-size: 24px;
+  }
+
+  .page section + section {
+    margin-top: 20px;
+  }
+
+  .journeyGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .stageCard :global(.ant-card-head) {
+    align-items: flex-start;
+    padding-inline: 12px;
+  }
+
+  .stageCard :global(.ant-card-head-wrapper) {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    padding-block: 10px;
+  }
+
+  .stageCard :global(.ant-card-extra) {
+    margin-inline-start: 0;
+  }
+
+  .stageCard :global(.ant-card-body) {
+    padding: 12px;
+  }
+
+  .stageCard :global(.ant-statistic-title) {
+    min-height: 40px;
+    font-size: 13px !important;
+  }
+
+  .stageCard :global(.ant-statistic-content) {
+    font-size: 21px !important;
+    line-height: 1.25;
+  }
+
+  .stageCard:first-child :global(.ant-statistic-content) {
+    font-size: 17px !important;
+  }
+
+  .stageMeta {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 2px;
+    margin: 10px 0 12px;
+  }
+
+  .stageMeta :global(.ant-typography:nth-child(3)),
+  .stageMeta :global(.ant-typography:nth-child(4)) {
+    display: none;
+  }
+
+  .unavailableCard :global(.ant-empty) {
+    min-height: 64px;
+  }
+
+  .unavailableCard :global(.ant-typography) {
+    min-height: 54px;
+  }
+
+  .trendGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .miniBars {
+    height: 150px;
+    padding-inline: 6px;
+  }
+
+  .attentionCard :global(.ant-card-body) {
+    padding: 12px;
+  }
+}

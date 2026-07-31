@@ -9,7 +9,6 @@ import {
   Empty,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Table,
   Tag,
@@ -36,7 +35,7 @@ import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
 import { getWebPreflightPrompt } from '@/utils/webPreflightPrompt.cjs';
 import { downloadQuestionSetReportPdf } from '@/utils/downloadQuestionSetReportPdf';
-import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
+import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import {
   PDF_COLUMN_WIDTHS,
   formatSkippedPlatforms,
@@ -51,13 +50,6 @@ import styles from './question-set-reports.module.css';
 
 const { Paragraph, Text, Title } = Typography;
 
-type Project = {
-  id: number;
-  name: string;
-  status?: string;
-  website?: string;
-  platforms?: string[];
-};
 type CitationSource = {
   url?: string;
   domain?: string;
@@ -429,8 +421,8 @@ function MetricItem({
 
 export default function QuestionSetReportsPage() {
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState<number>();
+  const defaultContext = useDefaultProjectContext();
+  const projectId = defaultContext.project?.id;
   const [history, setHistory] = useState<RunReport[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
@@ -438,7 +430,6 @@ export default function QuestionSetReportsPage() {
   const [historyQuestionSetId, setHistoryQuestionSetId] = useState<number>();
   const [runId, setRunId] = useState<number>();
   const [report, setReport] = useState<RunReport | null>(null);
-  const [projectLoading, setProjectLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -451,35 +442,19 @@ export default function QuestionSetReportsPage() {
   const questionSetRequest = useRef(0);
   const reportRequest = useRef(0);
   const reportSheetRef = useRef<HTMLElement>(null);
-  const preferredIds = useRef<{ projectId?: number; runId?: number }>({});
+  const preferredIds = useRef<{ runId?: number }>({});
   const previousReportState = useRef<{ id: number; status: RunReport['status'] } | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const preferredProjectId = Number(params.get('project_id'));
     const preferredRunId = Number(params.get('run_id'));
     preferredIds.current = {
-      projectId: Number.isInteger(preferredProjectId) && preferredProjectId > 0 ? preferredProjectId : undefined,
       runId: Number.isInteger(preferredRunId) && preferredRunId > 0 ? preferredRunId : undefined,
     };
   }, []);
 
-  const loadProjects = useCallback(async () => {
-    setProjectLoading(true);
-    try {
-      const response = await axios.get('/api/geo-projects');
-      const rows = getSelectableProjects(extractList(response)) as Project[];
-      setProjects(rows);
-      setProjectId((current) => resolveSelectedProjectId(rows, current, preferredIds.current.projectId));
-    } catch (error) {
-      message.error(getApiErrorMessage(error, '获取品牌项目失败'));
-    } finally {
-      setProjectLoading(false);
-    }
-  }, []);
-
   const loadHistory = useCallback(async (
-    targetProjectId?: number,
+    targetProjectId?: string,
     targetPage = 1,
     targetQuestionSetId?: number,
     preferredRunId?: number,
@@ -525,7 +500,7 @@ export default function QuestionSetReportsPage() {
     }
   }, []);
 
-  const loadQuestionSets = useCallback(async (targetProjectId?: number) => {
+  const loadQuestionSets = useCallback(async (targetProjectId?: string) => {
     const requestId = questionSetRequest.current + 1;
     questionSetRequest.current = requestId;
     if (!targetProjectId) {
@@ -544,7 +519,7 @@ export default function QuestionSetReportsPage() {
     }
   }, []);
 
-  const loadReport = useCallback(async (targetProjectId?: number, targetRunId?: number, quiet = false) => {
+  const loadReport = useCallback(async (targetProjectId?: string, targetRunId?: number, quiet = false) => {
     const requestId = reportRequest.current + 1;
     reportRequest.current = requestId;
     if (!targetProjectId || !targetRunId) {
@@ -568,8 +543,6 @@ export default function QuestionSetReportsPage() {
     }
   }, []);
 
-  useEffect(() => { loadProjects(); }, [loadProjects]);
-
   useEffect(() => {
     setReport(null);
     setHistoryPage(1);
@@ -586,7 +559,7 @@ export default function QuestionSetReportsPage() {
   useEffect(() => {
     if (!projectId || !runId) return;
     const params = new URLSearchParams(window.location.search);
-    params.set('project_id', String(projectId));
+    params.delete('project_id');
     params.set('run_id', String(runId));
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
   }, [projectId, runId]);
@@ -656,10 +629,7 @@ export default function QuestionSetReportsPage() {
     report,
   ]);
 
-  const selectedProject = useMemo(
-    () => projects.find((item) => item.id === projectId),
-    [projects, projectId],
-  );
+  const selectedProject = defaultContext.project;
   const relevantWebPlatformCodes = useMemo(() => {
     const reportPlatforms = (report?.rows || [])
       .map((row) => row.platform)
@@ -938,14 +908,7 @@ export default function QuestionSetReportsPage() {
           <Text type="secondary">单个问题或问题集每次运行独立成档，不与其他运行混合。</Text>
         </div>
         <Space wrap>
-          <Select
-            loading={projectLoading}
-            placeholder="选择品牌项目"
-            value={projectId}
-            style={{ width: 240 }}
-            options={projects.map((item) => ({ value: item.id, label: item.name }))}
-            onChange={(value) => setProjectId(value)}
-          />
+          <Text strong>{selectedProject?.name || '默认项目未配置'}</Text>
           <Upload accept=".csv,text/csv" showUploadList={false} beforeUpload={importReport}>
             <Button icon={<ImportOutlined />} loading={importing} disabled={!projectId}>导入 CSV</Button>
           </Upload>
@@ -972,6 +935,10 @@ export default function QuestionSetReportsPage() {
           </Button>
         </Space>
       </div>
+
+      {defaultContext.errorMessage ? (
+        <Alert type="warning" showIcon title={defaultContext.errorMessage} />
+      ) : null}
 
       <WebPlatformRuntimeStatus platformCodes={relevantWebPlatformCodes} />
 

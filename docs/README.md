@@ -1,6 +1,24 @@
 # 文档总览
 
-本目录包含项目的使用说明、接口文档、环境变量与部署指南。
+本目录包含项目的使用说明、接口文档、环境变量、部署指南，以及只读市场数据监控系统的需求与技术方案。
+
+## 系统定位
+
+- 现行产品定位：本项目是只读市场数据监控系统，不是单一 GEO/SEO 监测系统；当前能力范围不能反向覆盖产品定位。
+- 当前正式工作流：GEO、AI 搜索可见度与技术 SEO 监测。
+- 当前受限试点：百度搜索推广账户、近 30 日展现/点击/消费快照，以及单独呈现的百度统计流量。
+- 最终目标：在项目维度联合观察 GEO/SEO、付费广告、网站访问、原始咨询和订单签订金额。
+- 当前缺口：落地页和销售系统尚无 API，原始咨询、最小订单标识、订单签订金额与人工对应关系均未接入；订单签订金额是销售系统侧唯一必须同步的业务指标，有效线索和销售机会只解释业务过程。
+- 操作边界：本系统只读监控，调整投放、处理咨询和维护订单仍在来源系统完成。
+
+详细业务口径见[根 README](../README.md)与[项目上下文](../CONTEXT.md)；营销第一期的现役需求和技术边界见[营销监控需求目录](active-2026-07-29-001-marketing-monitoring/)。
+
+## 当前生产入口
+
+- 唯一支持的正式地址：`https://insight.guangtuo.com`
+- 已退役历史域名：`insight.gato.com.cn`
+- `http://182.254.140.163/` 是 Nginx 默认站点，不是本应用；不要把直接 IP 当作应用入口或健康检查依据
+- 当前 Nginx、证书、环境变量、百度 callback、版本判断与验证命令统一见[部署与运维](DEPLOYMENT.md#当前正式单机实例)
 
 ## 快速开始
 
@@ -24,6 +42,7 @@
 - `API.md`：后端接口说明（路径、参数、返回示例）
 - `ENVIRONMENT.md`：环境变量与敏感信息管理
 - `DEPLOYMENT.md`：部署与运维建议
+- `SINGLE_HOST_DEPLOYMENT.md`：Ubuntu/macOS 单机原地部署、systemd 与 Web 图形会话边界
 - `SECURITY.md`：安全加固说明与最佳实践
 - `closed-2026-07-23-002-ai-platform-settings/`：全局 AI 平台设置中心、临时模型目录、分析结构化协议与 OpenAI 兼容协议收敛的已完成需求
 - `active-2026-07-23-004-question-set-run-reports/`：单问题与问题集独立运行报告、AI 实体/关系结构化指标、失败重试可靠性、标准 CSV 往返与 A4 竖版 PDF 的当前修复需求
@@ -33,11 +52,12 @@
 - `active-2026-07-27-002-doubao-web-monitoring/`：豆包 Web 注册表、隔离运行时、可信采集、设置页账号管理、双平台状态与正式任务链路已完成本地实现；2026-07-30 起新安装的全部平台预置默认停用，由管理员主动启用；本地真实单问题采集已通过，仍需目标虚拟机完成问题集、自动监测和双浏览器资源验收
 - `blocked-2026-07-28-001-geo-entity-share-metrics/`：回答内竞品提及占比（SOV）的版本边界、v3 完整输入分析、回答级等权聚合、分析失败隔离、平台视图、历史兼容和人工基线；Issue 008 人工基线已关闭，等待 Issue 009 的真实入口验收
 - `blocked-2026-07-29-002-ai-semantic-analysis-quality/`：v4 全实体语义抽取、竞品/排序/情绪原文证据、DeepSeek Pro 基线校准和全入口硬切已完成实现与技术验收，等待 SOV 波动口径和补充情绪人工基线确认
-- `active-2026-07-29-001-marketing-monitoring/`：轻量只读营销监控；真实 OAuth、账户目录、搜索推广 30 日分页报表和百度统计站点/趋势响应已用脱敏 fixture 固化，`PILOT_DATA_READY` 仅向项目白名单开放绑定、搜索快照和统计实时读取；正式导航仍隐藏，等待金额/时区、Refresh Token 与完整生产验收
+- `active-2026-07-29-001-marketing-monitoring/`：只读市场数据监控定位下的百度第一期；真实 OAuth、账户目录、搜索推广 30 日分页报表和百度统计站点/趋势响应已用脱敏 fixture 固化，`PILOT_DATA_READY` 仅向项目白名单开放绑定、搜索快照和统计实时读取；页面入口已展示，真实数据仍等待金额/时区、Refresh Token 与完整生产验收
+- `active-2026-07-31-001-market-monitoring-frontend-ia/`：面向市场负责人和管理层的工作台信息架构、默认项目、市场总览、广告表现、网站流量及现有 GEO 页面自动上下文改造；当前正式导航仍保持 GEO 主入口，市场总览等待视觉确认、异常规则校准和百度 `VERIFIED` 后再切流
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 - `closed-2026-07-30-001-seo-audit-response-safety/`：响应可信度分类、WAF/429 止损、同域节流、有界预检和 resolved URL 去重的 PRD、技术方案与验收 issues
-- `solutions/2026-07-30-ai-geo-production-deployment.md`：AI-GEO systemd、受信代理、生产验证、服务器修改台账与回滚记录
+- `solutions/2026-07-30-ai-geo-production-deployment.md`：AI-GEO systemd、受信代理、生产验证、2026-07-31 正式域名切换、服务器修改台账与回滚记录
 
 ## 重要约定
 

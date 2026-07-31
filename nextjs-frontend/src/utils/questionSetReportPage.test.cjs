@@ -8,9 +8,22 @@ const pagePath = path.resolve(__dirname, '../app/geo/question-set-reports/page.t
 const historyDrawerPath = path.resolve(__dirname, '../app/geo/question-set-reports/QuestionSetRunHistoryDrawer.tsx');
 const reportCssPath = path.resolve(__dirname, '../app/geo/question-set-reports/question-set-reports.module.css');
 const presentationPath = path.resolve(__dirname, 'questionSetRunPresentation.cjs');
-const layoutPath = path.resolve(__dirname, '../app/geo/layout.tsx');
+const navigationPath = path.resolve(__dirname, 'geoNavigation.cjs');
 const promptPagePath = path.resolve(__dirname, '../app/geo/prompts/page.tsx');
 const dashboardCssPath = path.resolve(__dirname, '../app/geo/project-dashboard/project-dashboard.module.css');
+
+test('运行报告只使用默认项目，并保留 run_id 深链', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /useDefaultProjectContext/);
+  assert.match(source, /const projectId = defaultContext\.project\?\.id/);
+  assert.match(source, /params\.get\('run_id'\)/);
+  assert.match(source, /params\.set\('run_id', String\(runId\)\)/);
+  assert.doesNotMatch(source, /params\.get\('project_id'\)/);
+  assert.doesNotMatch(source, /params\.set\('project_id'/);
+  assert.doesNotMatch(source, /axios\.get\('\/api\/geo-projects'\)/);
+  assert.doesNotMatch(source, /placeholder="选择品牌项目"/);
+});
 
 test('运行报告页面以运行历史和单次逐条结果为中心', () => {
   assert.equal(fs.existsSync(pagePath), true, '运行报告页面应存在');
@@ -268,32 +281,27 @@ test('运行中的报告和逐模型结果使用旋转图标提示仍在处理',
 });
 
 test('运行报告成为问题库后的主入口，旧汇总入口下沉且运行后进入独立报告', () => {
-  const layout = fs.readFileSync(layoutPath, 'utf8');
+  const navigation = fs.readFileSync(navigationPath, 'utf8');
   const prompts = fs.readFileSync(promptPagePath, 'utf8');
   const questionSetRunStart = prompts.indexOf('const runQuestionSet');
   const questionSetRunEnd = prompts.indexOf('const deletePrompt', questionSetRunStart);
   const questionSetRunBlock = prompts.slice(questionSetRunStart, questionSetRunEnd);
   const dashboardCss = fs.readFileSync(dashboardCssPath, 'utf8');
-  const promptIndex = layout.indexOf("key: '/prompts'");
-  const reportIndex = layout.indexOf("key: '/question-set-reports'");
-  const projectIndex = layout.indexOf("key: '/projects'");
-  const seoIndex = layout.indexOf("key: '/seo-audit'");
-  const sourceIndex = layout.indexOf("key: '/sources'");
-  const dashboardIndex = layout.indexOf("key: '/project-dashboard'");
-  const secondaryIndex = layout.indexOf("label: '其他'");
-  const alertsIndex = layout.indexOf("key: '/alerts'");
-  const noticeIndex = layout.indexOf("key: '/notice'");
-  const profileIndex = layout.indexOf("key: '/profile'");
+  const dashboardIndex = navigation.indexOf("page('/project-dashboard'");
+  const sourceIndex = navigation.indexOf("page('/sources'");
+  const seoIndex = navigation.indexOf("page('/seo-audit'");
+  const promptIndex = navigation.indexOf("page('/prompts'");
+  const reportIndex = navigation.indexOf("page('/question-set-reports'");
+  const noticeIndex = navigation.indexOf("page('/notice'");
+  const profileIndex = navigation.indexOf("page('/profile'");
 
-  assert.ok(projectIndex >= 0, '品牌项目入口应存在');
   assert.ok(promptIndex >= 0, '问题库入口应存在');
   assert.ok(questionSetRunStart >= 0 && questionSetRunEnd > questionSetRunStart, '应找到问题集运行处理函数');
-  assert.ok(seoIndex > projectIndex && promptIndex > seoIndex, 'SEO 检测应位于品牌项目和问题库之间');
+  assert.ok(sourceIndex > dashboardIndex, '引用来源分析应位于 AI 搜索表现之后');
+  assert.ok(seoIndex > sourceIndex && promptIndex > seoIndex, '网站诊断应位于 AI 品牌监测和监测任务之间');
   assert.ok(reportIndex > promptIndex, '运行报告应位于问题库之后');
-  assert.ok(sourceIndex > reportIndex && dashboardIndex > sourceIndex, '来源分析和项目看板应按顺序位于运行报告之后');
-  assert.ok(secondaryIndex > dashboardIndex, '其他分组应位于分析入口之后');
-  assert.ok(alertsIndex > secondaryIndex && noticeIndex > alertsIndex && profileIndex > noticeIndex, '其他分组内顺序应正确');
-  assert.doesNotMatch(layout.slice(layout.indexOf('const menuItems'), layout.indexOf('// 未登录')), /\/geo\/reports/);
+  assert.ok(noticeIndex > reportIndex && profileIndex > noticeIndex, '系统分组应位于监测任务之后');
+  assert.doesNotMatch(navigation, /\/geo\/reports/);
   assert.match(questionSetRunBlock, /data\.report_url/);
   assert.match(prompts, /const questionSetRunIdempotencyRef = useRef\(new Map\(\)\)/);
   assert.match(questionSetRunBlock, /questionSetRunIdempotencyRef\.current\.get\(idempotencyScope\)/);

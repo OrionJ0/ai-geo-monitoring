@@ -3,6 +3,7 @@ const router = express.Router();
 const { Op } = require('sequelize');
 const {
   sequelize,
+  Setting,
   BrandProject,
   BrandCompetitor,
   DetectionSchedule,
@@ -39,6 +40,30 @@ const CitationMetricSemanticsService = require('../services/CitationMetricSemant
 const { CURRENT_METRIC_SEMANTICS } = require('../services/GeoMetricSemanticsService');
 const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
 const { CsvValidationError } = require('../services/QuestionSetRunCsvService');
+const {
+  DefaultProjectContextError,
+  DefaultProjectContextService: DefaultProjectContextServiceClass
+} = require('../services/DefaultProjectContextService');
+
+const DefaultProjectContextService = new DefaultProjectContextServiceClass({
+  Setting,
+  BrandProject
+});
+
+function defaultProjectContextErrorResponse(res, error) {
+  if (error instanceof DefaultProjectContextError) {
+    return res.status(error.status).json({
+      success: false,
+      message: error.message,
+      error: { code: error.code }
+    });
+  }
+  return res.status(503).json({
+    success: false,
+    message: '默认监控项目暂时无法读取，请稍后重试',
+    error: { code: 'DEFAULT_PROJECT_READ_FAILED' }
+  });
+}
 
 function cleanupAwareError(res, error, fallbackMessage) {
   if (error?.code === 'web_capture_cleanup_incomplete') {
@@ -370,6 +395,32 @@ router.post('/', async (req, res) => {
     res.json({ success: true, message: '品牌项目已创建', data: project });
   } catch (error) {
     res.status(500).json({ success: false, message: '创建品牌项目失败' });
+  }
+});
+
+router.get('/default-context', async (req, res) => {
+  try {
+    const context = await DefaultProjectContextService.getForUser(req.user);
+    return res.json({ success: true, data: context });
+  } catch (error) {
+    return defaultProjectContextErrorResponse(res, error);
+  }
+});
+
+router.put('/default-context', async (req, res) => {
+  try {
+    const keys = Object.keys(req.body || {});
+    if (keys.length !== 1 || keys[0] !== 'projectId') {
+      return res.status(400).json({
+        success: false,
+        message: '请求内容仅支持 projectId',
+        error: { code: 'INVALID_DEFAULT_PROJECT_PAYLOAD' }
+      });
+    }
+    const context = await DefaultProjectContextService.setForUser(req.user, req.body.projectId);
+    return res.json({ success: true, data: context });
+  } catch (error) {
+    return defaultProjectContextErrorResponse(res, error);
   }
 });
 

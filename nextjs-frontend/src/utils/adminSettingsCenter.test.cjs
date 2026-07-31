@@ -8,6 +8,7 @@ const settingsSource = fs.readFileSync(path.resolve(__dirname, '../app/admin/set
 const platformSource = fs.readFileSync(path.resolve(__dirname, '../app/admin/settings/AIPlatformSettings.tsx'), 'utf8');
 const analysisSource = fs.readFileSync(path.resolve(__dirname, '../app/admin/settings/AIAnalysisSettings.tsx'), 'utf8');
 const layoutSource = fs.readFileSync(path.resolve(__dirname, '../app/admin/layout.tsx'), 'utf8');
+const navigationSource = fs.readFileSync(path.resolve(__dirname, './adminNavigation.cjs'), 'utf8');
 const analysisSamplePath = path.resolve(
   __dirname,
   '../fixtures/ai-analysis-real-response-sample.json',
@@ -26,8 +27,8 @@ test('admin settings is the single settings center with an analysis API tab', ()
     'inactive form tabs must stay mounted before setFieldsValue runs',
   );
   assert.match(
-    layoutSource,
-    /key: 'settings', label: <Link href="\/admin\/settings">设置中心<\/Link>/,
+    navigationSource,
+    /page\('settings', '设置中心', '\/admin\/settings'\)/,
   );
   assert.match(settingsSource, /刷新全部设置/);
   assert.doesNotMatch(layoutSource, /key: 'platforms'|平台自检/);

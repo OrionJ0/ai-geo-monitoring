@@ -6,16 +6,14 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../app/geo/project-dashboard/page.tsx'), 'utf8');
 
-test('project dashboard ignores stale async dashboard responses after project or period changes', () => {
+test('AI search performance ignores stale async responses after period or platform changes', () => {
   assert.match(source, /useRef/);
   assert.match(source, /const dashboardRequestRef = useRef\(0\)/);
   assert.match(source, /const invalidateDashboardRequest = \(\) =>/);
   assert.match(source, /dashboardRequestRef\.current \+= 1/);
-  assert.match(source, /const handleProjectChange = \(value\) =>/);
   assert.match(source, /const handleDaysChange = \(value\) =>/);
   assert.match(source, /const \[platform, setPlatform\] = useState\('all'\)/);
   assert.match(source, /const handlePlatformChange = \(value\) =>/);
-  assert.match(source, /onChange=\{handleProjectChange\}/);
   assert.match(source, /onChange=\{handleDaysChange\}/);
   assert.match(source, /onChange=\{handlePlatformChange\}/);
   assert.match(source, /const requestId = dashboardRequestRef\.current \+ 1/);
@@ -40,10 +38,16 @@ test('project dashboard defaults to merged platforms and renders versioned answe
   assert.doesNotMatch(source, /dataIndex:\s*'share_of_voice'/);
 });
 
-test('project dashboard uses shared active-project selection rules', () => {
-  assert.match(source, /getSelectableProjects/);
-  assert.match(source, /resolveSelectedProjectId/);
-  assert.doesNotMatch(source, /filter\(\(item\) => item\?\.status !== 'archived'\)/);
+test('AI search performance uses only the explicit default project context', () => {
+  assert.match(source, /useDefaultProjectContext/);
+  assert.match(source, /defaultContext\.project\?\.id/);
+  assert.match(source, /defaultContext\.errorMessage/);
+  assert.doesNotMatch(source, /getSelectableProjects/);
+  assert.doesNotMatch(source, /resolveSelectedProjectId/);
+  assert.doesNotMatch(source, /axios\.get\(['"]\/api\/geo-projects['"]\)/);
+  assert.doesNotMatch(source, /project_id/);
+  assert.doesNotMatch(source, /placeholder="选择品牌项目"/);
+  assert.match(source, /AI 搜索表现/);
 });
 
 test('project dashboard recent metrics expose prompt question context', () => {
@@ -112,4 +116,15 @@ test('project dashboard gives each metric level a distinct responsive visual tre
   assert.match(css, /\.supportMetricCard/);
   assert.match(css, /\.diagnosticMetricCard/);
   assert.match(css, /@media \(max-width: 640px\)/);
+});
+
+test('project dashboard sections avoid decorative pseudo-element rails', () => {
+  const styles = fs.readFileSync(
+    path.resolve(__dirname, '../app/geo/project-dashboard/project-dashboard.module.css'),
+    'utf8',
+  );
+
+  assert.doesNotMatch(styles, /\.metricSection::before/);
+  assert.doesNotMatch(styles, /\.coreSection::before/);
+  assert.doesNotMatch(styles, /\.actionSection::before/);
 });

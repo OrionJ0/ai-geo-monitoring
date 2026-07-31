@@ -8,8 +8,19 @@ const {
   createMarketingModule
 } = require('../../modules/marketing');
 const {
+  buildMarketingCapabilities
+} = require('../../modules/marketing/marketingCapabilities');
+const {
   createMarketingTestDatabase
 } = require('./helpers/createMarketingTestDatabase');
+
+function expectedStatus(moduleState, errorCode = null) {
+  return {
+    moduleState,
+    errorCode,
+    capabilities: buildMarketingCapabilities(moduleState)
+  };
+}
 
 function enabledConfig(overrides = {}) {
   return {
@@ -94,10 +105,7 @@ test('disabled module never audits marketing schema', async () => {
     }
   });
 
-  assert.deepEqual(await module.getStatus(), {
-    moduleState: 'DISABLED',
-    errorCode: null
-  });
+  assert.deepEqual(await module.getStatus(), expectedStatus('DISABLED'));
   assert.equal(auditCalls, 0);
 });
 
@@ -113,10 +121,10 @@ test('status route reveals missing config key names only to administrators', asy
   const adminResponse = await callStatusRoute(module, 'admin');
 
   assert.equal(userResponse.statusCode, 200);
-  assert.deepEqual(userResponse.payload, {
-    moduleState: 'MISCONFIGURED',
-    errorCode: 'MARKETING_CONFIG_INCOMPLETE'
-  });
+  assert.deepEqual(
+    userResponse.payload,
+    expectedStatus('MISCONFIGURED', 'MARKETING_CONFIG_INCOMPLETE')
+  );
   assert.ok(adminResponse.payload.missingKeys.length > 0);
   assert.doesNotMatch(JSON.stringify(userResponse.payload), /module-secret-canary/);
   assert.doesNotMatch(JSON.stringify(adminResponse.payload), /module-secret-canary/);
@@ -143,14 +151,11 @@ test('enabled module distinguishes missing schema from a ready migration ledger'
     }
   });
 
-  assert.deepEqual(await missing.getStatus(), {
-    moduleState: 'SCHEMA_MISSING',
-    errorCode: 'MARKETING_SCHEMA_MISSING'
-  });
-  assert.deepEqual(await ready.getStatus(), {
-    moduleState: 'READY',
-    errorCode: null
-  });
+  assert.deepEqual(
+    await missing.getStatus(),
+    expectedStatus('SCHEMA_MISSING', 'MARKETING_SCHEMA_MISSING')
+  );
+  assert.deepEqual(await ready.getStatus(), expectedStatus('READY'));
 });
 
 test('pilot module exposes OAuth callback parsing but blocks dashboard runtime', async (t) => {
@@ -164,14 +169,8 @@ test('pilot module exposes OAuth callback parsing but blocks dashboard runtime',
     }),
     sequelize: database.sequelize
   });
-  assert.deepEqual(await module.getStatus(), {
-    moduleState: 'PILOT_READY',
-    errorCode: null
-  });
-  assert.deepEqual(await module.start(), {
-    moduleState: 'PILOT_READY',
-    errorCode: null
-  });
+  assert.deepEqual(await module.getStatus(), expectedStatus('PILOT_READY'));
+  assert.deepEqual(await module.start(), expectedStatus('PILOT_READY'));
 
   const app = express();
   app.use('/api/admin/marketing/baidu', module.authorizationRouter);
@@ -215,14 +214,14 @@ test('pilot data module mounts allowlisted binding and dashboard routes', async 
     sequelize: database.sequelize
   });
 
-  assert.deepEqual(await module.getStatus(), {
-    moduleState: 'PILOT_DATA_READY',
-    errorCode: null
-  });
-  assert.deepEqual(await module.start(), {
-    moduleState: 'PILOT_DATA_READY',
-    errorCode: null
-  });
+  assert.deepEqual(
+    await module.getStatus(),
+    expectedStatus('PILOT_DATA_READY')
+  );
+  assert.deepEqual(
+    await module.start(),
+    expectedStatus('PILOT_DATA_READY')
+  );
 
   const app = express();
   app.use((req, _res, next) => {

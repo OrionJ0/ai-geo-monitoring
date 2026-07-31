@@ -91,7 +91,16 @@ h1 {
 }
 
 .layout {
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
+}
+
+.workspace-shell {
+  height: calc(100vh - 64px);
+  min-height: 0;
+  margin-top: 64px;
+  overflow: hidden;
 }
 
 .page-container {
@@ -170,6 +179,14 @@ h1 {
   color: #4b5563 !important;
 }
 
+a:focus-visible,
+button:focus-visible,
+.ant-menu-item:focus-visible,
+.ant-select-selector:focus-visible {
+  outline: 3px solid rgba(31, 77, 210, 0.42);
+  outline-offset: 2px;
+}
+
 .app-header {
   background: linear-gradient(135deg, #162b6f 0%, #1f4dd2 45%, #5b8cff 100%);
   color: #fff;
@@ -185,6 +202,52 @@ h1 {
 
 .app-header .logo {
   min-width: 0;
+}
+
+.geo-sider-backdrop {
+  display: none;
+}
+
+.geo-sider {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.geo-content {
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.workspace-navigation > .ant-menu-item,
+.workspace-navigation > .ant-menu-submenu > .ant-menu-submenu-title {
+  color: #4b5563;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.workspace-navigation > .ant-menu-item > a {
+  color: inherit;
+  font-weight: inherit;
+}
+
+.workspace-navigation > .ant-menu-item-selected,
+.workspace-navigation > .ant-menu-submenu-selected > .ant-menu-submenu-title {
+  color: #0f4fb8;
+}
+
+.workspace-navigation .ant-menu-sub .ant-menu-item,
+.workspace-navigation .ant-menu-sub .ant-menu-item > a {
+  color: #5f6978;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.workspace-navigation .ant-menu-sub .ant-menu-item-selected,
+.workspace-navigation .ant-menu-sub .ant-menu-item-selected > a {
+  color: #0f4fb8;
 }
 
 @media (max-width: 680px) {
@@ -214,7 +277,39 @@ h1 {
   }
 
   .geo-content {
-    min-width: 0;
     padding: 12px !important;
+  }
+
+  .geo-sider {
+    position: fixed !important;
+    z-index: 9;
+    top: 64px;
+    bottom: 0;
+    left: 0;
+    height: auto;
+    width: 260px !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+    flex: 0 0 260px !important;
+    overflow-y: auto;
+    box-shadow: 8px 0 24px rgba(23, 43, 77, 0.18);
+  }
+
+  .geo-sider-backdrop {
+    display: block;
+    position: fixed;
+    z-index: 8;
+    inset: 64px 0 0;
+    padding: 0;
+    border: 0;
+    background: rgba(11, 18, 32, 0.28);
+  }
+
+  .geo-sider.ant-layout-sider-collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    flex-basis: 0 !important;
+    box-shadow: none;
   }
 }

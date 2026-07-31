@@ -40,21 +40,26 @@ test('prompt page guards async list, batch creation and history responses from s
   assert.doesNotMatch(source, /router\.push\(`\/geo\/project-dashboard\?project_id=\$\{runProjectId\}`\)/);
 });
 
-test('prompt page closes stale prompt editor when switching projects', () => {
-  assert.match(source, /const handleProjectChange = \(nextProjectId\) =>/);
-  assert.match(source, /setSelectedProjectId\(nextProjectId\)/);
-  assert.match(source, /setModalOpen\(false\)/);
-  assert.match(source, /setEditingPrompt\(null\)/);
-  assert.match(source, /form\.resetFields\(\)/);
-  assert.match(source, /onChange=\{handleProjectChange\}/);
+test('prompt page uses only the explicit default project context', () => {
+  assert.match(source, /useDefaultProjectContext/);
+  assert.match(source, /const selectedProjectId = defaultContext\.project\?\.id/);
+  assert.match(source, /const selectedProject = defaultContext\.project/);
+  assert.doesNotMatch(source, /axios\.get\('\/api\/geo-projects'\)/);
+  assert.doesNotMatch(source, /getSelectablePromptProjects/);
+  assert.doesNotMatch(source, /resolveSelectedPromptProjectId/);
+  assert.doesNotMatch(source, /placeholder="选择品牌项目"/);
+  assert.doesNotMatch(source, /project_id=/);
 });
 
-test('prompt page resets list filters when switching projects', () => {
+test('prompt page clears stale editors and filters when default context changes', () => {
   assert.match(source, /shouldResetPromptListFilters/);
   assert.match(source, /setPromptSearch\(''\)/);
   assert.match(source, /setPromptStatusFilter\('all'\)/);
   assert.match(source, /setPromptPlatformFilter\('all'\)/);
   assert.match(source, /setPromptCategoryFilter\('all'\)/);
+  assert.match(source, /setModalOpen\(false\)/);
+  assert.match(source, /setEditingPrompt\(null\)/);
+  assert.match(source, /form\.resetFields\(\)/);
 });
 
 test('opening or cancelling a question-set editor starts from an idle save state', () => {
@@ -118,7 +123,7 @@ test('prompt page refreshes prompt data only for the current project after mutat
   assert.match(source, /if \(!isCurrentPromptProject\(projectId\)\) return/);
   assert.match(source, /if \(!isCurrentPromptProject\(mutationProjectId\)\) return/);
   assert.match(source, /refreshPromptDataForProject\(mutationProjectId\)/);
-  assert.doesNotMatch(source, /fetchPrompts\(selectedProjectId\);\s*fetchProjects\(\);/);
+  assert.doesNotMatch(source, /fetchProjects/);
 });
 
 test('问题列表加载期间不显示有业务含义的 0 / 0 假空态', () => {

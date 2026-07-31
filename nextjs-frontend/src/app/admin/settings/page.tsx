@@ -7,6 +7,7 @@ import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import AIPlatformSettings from './AIPlatformSettings';
 import AIAnalysisSettings from './AIAnalysisSettings';
 import BaiduMarketingSettings from './BaiduMarketingSettings';
+import WorkspaceSettings from './WorkspaceSettings';
 import OwnedSeoDomainsSettings from './OwnedSeoDomainsSettings';
 
 type SettingsResponse = {
@@ -60,6 +61,7 @@ export default function AdminSettingsPage() {
     if ([
       'ai-platforms',
       'ai-analysis',
+      'workspace',
       'marketing',
       'runtime',
       'seo',
@@ -183,6 +185,7 @@ export default function AdminSettingsPage() {
           );
         }}
         items={[
+          { key: 'workspace', label: '工作台', children: <WorkspaceSettings />, destroyOnHidden: false },
           { key: 'ai-platforms', label: 'AI 平台', children: <AIPlatformSettings refreshSignal={refreshSignal} />, destroyOnHidden: false },
           { key: 'ai-analysis', label: 'AI 分析 API', children: <AIAnalysisSettings />, destroyOnHidden: false },
           { key: 'marketing', label: '营销监控', children: <BaiduMarketingSettings />, destroyOnHidden: false },

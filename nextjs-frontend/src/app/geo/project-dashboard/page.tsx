@@ -4,13 +4,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import axios from '@/lib/axiosConfig';
 import { Column, Line } from '@ant-design/plots';
 import { shouldRenderMetricChart } from '@/utils/dashboardChartState.cjs';
 import { getBrandSentimentDisplay } from '@/utils/historyAnalysisDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
-import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
+import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import styles from './project-dashboard.module.css';
 
 const { Text, Title } = Typography;
@@ -32,11 +32,6 @@ const periodOptions = [
   { label: '近 30 天', value: 30 },
   { label: '近 90 天', value: 90 },
 ];
-
-function extractList(res) {
-  const data = res?.data?.data ?? res?.data ?? [];
-  return Array.isArray(data) ? data : [];
-}
 
 function percent(value) {
   const n = Number(value || 0);
@@ -104,10 +99,9 @@ function metricTitle(label, explanation) {
 
 export default function GeoProjectDashboardPage() {
   const { labels: platformLabel } = useAIPlatformCatalog();
-  const [projects, setProjects] = useState([]);
-  const [projectId, setProjectId] = useState();
+  const defaultContext = useDefaultProjectContext();
+  const projectId = defaultContext.project?.id;
   const [dashboard, setDashboard] = useState(null);
-  const [projectLoading, setProjectLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [days, setDays] = useState(30);
   const [platform, setPlatform] = useState('all');
@@ -115,14 +109,6 @@ export default function GeoProjectDashboardPage() {
 
   const invalidateDashboardRequest = () => {
     dashboardRequestRef.current += 1;
-  };
-
-  const handleProjectChange = (value) => {
-    invalidateDashboardRequest();
-    setProjectId(value);
-    setPlatform('all');
-    setDashboard(null);
-    setDashboardLoading(false);
   };
 
   const handleDaysChange = (value) => {
@@ -138,23 +124,6 @@ export default function GeoProjectDashboardPage() {
     setDashboard(null);
     setDashboardLoading(false);
   };
-
-  const fetchProjects = useCallback(async () => {
-    setProjectLoading(true);
-    try {
-      const res = await axios.get('/api/geo-projects');
-      const rows = getSelectableProjects(extractList(res));
-      setProjects(rows);
-      const queryProjectId = typeof window !== 'undefined'
-        ? Number(new URLSearchParams(window.location.search).get('project_id') || 0)
-        : 0;
-      setProjectId((current) => resolveSelectedProjectId(rows, current, queryProjectId));
-    } catch (error) {
-      message.error(getApiErrorMessage(error, '获取品牌项目失败'));
-    } finally {
-      setProjectLoading(false);
-    }
-  }, []);
 
   const fetchDashboard = useCallback(async (id, targetDays, targetPlatform) => {
     const requestId = dashboardRequestRef.current + 1;
@@ -173,14 +142,13 @@ export default function GeoProjectDashboardPage() {
       if (dashboardRequestRef.current === requestId) setDashboard(res?.data?.data || null);
     } catch (error) {
       if (dashboardRequestRef.current === requestId) {
-        message.error(getApiErrorMessage(error, '获取项目看板失败'));
+        message.error(getApiErrorMessage(error, '获取 AI 搜索表现失败'));
       }
     } finally {
       if (dashboardRequestRef.current === requestId) setDashboardLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchProjects(); }, [fetchProjects]);
   useEffect(() => { fetchDashboard(projectId, days, platform); }, [fetchDashboard, projectId, days, platform]);
 
   const summary = useMemo(() => dashboard?.summary || {}, [dashboard]);
@@ -517,19 +485,12 @@ export default function GeoProjectDashboardPage() {
       <Space orientation="vertical" size={16} className={styles.pageStack}>
         <Row align="middle" justify="space-between" gutter={[16, 12]}>
           <Col>
-            <Title level={3} style={{ margin: 0 }}>项目可见度看板</Title>
-            <Text type="secondary">按周期查看中国大陆 GEO 项目表现</Text>
+            <Title level={3} style={{ margin: 0 }}>AI 搜索表现</Title>
+            <Text type="secondary">按周期查看广拓在中国大陆 AI 搜索中的品牌表现</Text>
           </Col>
           <Col>
             <Space wrap>
-              <Select
-                loading={projectLoading}
-                placeholder="选择品牌项目"
-                style={{ width: 280 }}
-                value={projectId}
-                onChange={handleProjectChange}
-                options={projects.map((item) => ({ label: item.name, value: item.id }))}
-              />
+              <Text strong>{defaultContext.project?.name || '默认项目'}</Text>
               <Select
                 style={{ width: 120 }}
                 value={days}
@@ -553,8 +514,13 @@ export default function GeoProjectDashboardPage() {
           </Col>
         </Row>
 
-        {!projectLoading && !projects.length ? (
-          <Alert type="info" showIcon title="暂无品牌项目" description="请先创建品牌项目后查看项目可见度看板。" />
+        {defaultContext.errorMessage ? (
+          <Alert
+            type="warning"
+            showIcon
+            title="无法读取默认监控项目"
+            description={defaultContext.errorMessage}
+          />
         ) : null}
 
         <section aria-labelledby="core-metrics-title" className={`${styles.metricSection} ${styles.coreSection}`}>

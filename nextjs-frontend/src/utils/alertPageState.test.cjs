@@ -30,11 +30,14 @@ test('alert rule mutations only refresh the current project rules', () => {
   assert.doesNotMatch(source, /message\.success\([\s\S]{0,200}fetchRules\(projectId\)/);
 });
 
-test('alert rules page closes stale rule editor when switching projects', () => {
-  assert.match(source, /const handleProjectChange = \(nextProjectId\) =>/);
-  assert.match(source, /setProjectId\(nextProjectId\)/);
+test('alert rules page uses default context and closes stale editors when it changes', () => {
+  assert.match(source, /useDefaultProjectContext/);
+  assert.match(source, /const projectId = defaultContext\.project\?\.id/);
+  assert.doesNotMatch(source, /axios\.get\('\/api\/geo-projects'\)/);
+  assert.doesNotMatch(source, /getSelectableProjects/);
+  assert.doesNotMatch(source, /resolveSelectedProjectId/);
+  assert.doesNotMatch(source, /placeholder="选择品牌项目"/);
   assert.match(source, /setModalOpen\(false\)/);
   assert.match(source, /setEditingRule\(null\)/);
   assert.match(source, /form\.resetFields\(\)/);
-  assert.match(source, /onChange=\{handleProjectChange\}/);
 });

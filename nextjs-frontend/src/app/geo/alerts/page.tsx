@@ -1,12 +1,12 @@
 // @ts-nocheck
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Col, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
-import axios from 'axios';
-import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
+import axios from '@/lib/axiosConfig';
 import { defaultThresholdForType, isCountThreshold, normalizeThresholdInput, thresholdMin, thresholdUnit } from '@/utils/alertRuleDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 
 const { Text, Title } = Typography;
 
@@ -37,10 +37,9 @@ function ruleTypeMeta(type) {
 }
 
 export default function GeoAlertsPage() {
-  const [projects, setProjects] = useState([]);
-  const [projectId, setProjectId] = useState();
+  const defaultContext = useDefaultProjectContext();
+  const projectId = defaultContext.project?.id;
   const [rules, setRules] = useState([]);
-  const [projectLoading, setProjectLoading] = useState(false);
   const [ruleLoading, setRuleLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
@@ -52,20 +51,6 @@ export default function GeoAlertsPage() {
   const invalidateRulesRequest = () => {
     rulesRequestRef.current += 1;
   };
-
-  const fetchProjects = useCallback(async () => {
-    setProjectLoading(true);
-    try {
-      const res = await axios.get('/api/geo-projects');
-      const rows = getSelectableProjects(extractList(res));
-      setProjects(rows);
-      setProjectId((current) => resolveSelectedProjectId(rows, current));
-    } catch (error) {
-      message.error(getApiErrorMessage(error, '获取品牌项目失败'));
-    } finally {
-      setProjectLoading(false);
-    }
-  }, []);
 
   const fetchRules = useCallback(async (id) => {
     const requestId = rulesRequestRef.current + 1;
@@ -89,27 +74,18 @@ export default function GeoAlertsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchProjects(); }, [fetchProjects]);
   useEffect(() => {
+    invalidateRulesRequest();
     currentProjectIdRef.current = projectId;
+    setModalOpen(false);
+    setEditingRule(null);
+    form.resetFields();
     fetchRules(projectId);
-  }, [fetchRules, projectId]);
-
-  const selectedProject = useMemo(() => projects.find((item) => item.id === projectId), [projects, projectId]);
+  }, [fetchRules, form, projectId]);
 
   const refreshRulesForProject = (targetProjectId) => {
     if (currentProjectIdRef.current !== targetProjectId) return;
     fetchRules(targetProjectId);
-  };
-
-  const handleProjectChange = (nextProjectId) => {
-    invalidateRulesRequest();
-    setProjectId(nextProjectId);
-    setRules([]);
-    setRuleLoading(false);
-    setModalOpen(false);
-    setEditingRule(null);
-    form.resetFields();
   };
 
   const openCreate = () => {
@@ -254,22 +230,19 @@ export default function GeoAlertsPage() {
         <Row align="middle" justify="space-between" gutter={[16, 12]}>
           <Col>
             <Title level={3} style={{ margin: 0 }}>告警规则</Title>
-            <Text type="secondary">为 {selectedProject?.name || '品牌项目'} 配置 GEO 可见度监控规则</Text>
+            <Text type="secondary">为 {defaultContext.project?.name || '默认项目'} 配置 GEO 可见度监控规则</Text>
           </Col>
           <Col>
             <Space wrap>
-              <Select
-                loading={projectLoading}
-                placeholder="选择品牌项目"
-                style={{ width: 280 }}
-                value={projectId}
-                onChange={handleProjectChange}
-                options={projects.map((item) => ({ label: item.name, value: item.id }))}
-              />
+              <Text strong>{defaultContext.project?.name || '默认项目未配置'}</Text>
               <Button type="primary" disabled={!projectId} onClick={openCreate}>新建规则</Button>
             </Space>
           </Col>
         </Row>
+
+        {defaultContext.errorMessage ? (
+          <Alert type="warning" showIcon title={defaultContext.errorMessage} />
+        ) : null}
 
         <Row gutter={[12, 12]}>
           {ruleTypes.map((item) => (

@@ -11,20 +11,10 @@
 }
 
 .metricSection {
-  position: relative;
-  overflow: hidden;
   padding: 20px;
   border: 1px solid #e1e8f2;
   border-radius: 14px;
   background: #ffffff;
-}
-
-.metricSection::before {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 4px;
-  background: #cbd7e8;
-  content: '';
 }
 
 .coreSection {
@@ -33,21 +23,12 @@
   box-shadow: 0 12px 32px rgba(28, 64, 125, 0.08);
 }
 
-.coreSection::before {
-  width: 6px;
-  background: #2f6bff;
-}
-
 .diagnosisSection {
   background: #f8fafc;
 }
 
 .actionSection {
   border-color: #d8e3f5;
-}
-
-.actionSection::before {
-  background: #6487bd;
 }
 
 .sectionHeader {

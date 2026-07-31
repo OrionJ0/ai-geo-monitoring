@@ -1,15 +1,37 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Layout, Menu, Breadcrumb, Button } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Breadcrumb, Button, Layout, Menu, message } from 'antd';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import Login from '@/components/Login';
-import { message } from 'antd';
-import { setAuthToken, clearAuth } from '@/lib/axiosConfig';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import Login from '@/components/Login';
+import { clearAuth, setAuthToken } from '@/lib/axiosConfig';
+import {
+  buildGeoNavigation,
+  resolveGeoLocation
+} from '@/utils/geoNavigation.cjs';
 
 const { Header, Content, Sider } = Layout;
+
+type WorkspaceUser = {
+  id?: string | number;
+  role?: string;
+};
+
+type NavigationPage = {
+  type: 'item';
+  key: string;
+  label: string;
+  href: string;
+};
+
+type NavigationGroup = {
+  type: 'group';
+  key: string;
+  label: string;
+  children: NavigationPage[];
+};
 
 export default function GeoLayout({
   children,
@@ -21,26 +43,87 @@ export default function GeoLayout({
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // 从 localStorage 读取用户信息
   useEffect(() => {
     const storedToken = localStorage.getItem('agd_token') || '';
     setToken(storedToken);
     setLoading(false);
   }, []);
 
-  // 设置页面 title（必须在所有条件返回之前）
   useEffect(() => {
     if (pathname.startsWith('/geo')) {
-      document.title = 'Goodie AI - GEO 项目工作台';
+      document.title = '广拓数据工作台';
     }
   }, [pathname]);
 
-  const handleLogin = ({ token: tk, user }: { token: string; user: any }) => {
-    setToken(tk);
-    localStorage.setItem('agd_token', tk);
+  const navigation = useMemo(
+    () => buildGeoNavigation(),
+    []
+  ) as Array<NavigationPage | NavigationGroup>;
+  const location = useMemo(
+    () => resolveGeoLocation(pathname),
+    [pathname]
+  );
+  const activeGroupKey = useMemo(() => navigation.find((item) => (
+    item.type === 'group'
+    && item.children.some((child) => child.key === location.selectedKey)
+  ))?.key, [location.selectedKey, navigation]);
+  const [openKeys, setOpenKeys] = useState<string[]>(
+    activeGroupKey ? [activeGroupKey] : []
+  );
+  const menuItems = useMemo(() => navigation.map((item) => {
+    if (item.type === 'group') {
+      return {
+        key: item.key,
+        label: item.label,
+        children: item.children.map((child) => ({
+          key: child.key,
+          label: <Link href={child.href}>{child.label}</Link>
+        }))
+      };
+    }
+    return {
+      key: item.key,
+      label: <Link href={item.href}>{item.label}</Link>
+    };
+  }), [navigation]);
+
+  useEffect(() => {
+    if (activeGroupKey) {
+      setOpenKeys((current) => (
+        current.includes(activeGroupKey)
+          ? current
+          : [...current, activeGroupKey]
+      ));
+    }
+  }, [activeGroupKey]);
+
+  const handleOpenChange = (keys: string[]) => {
+    setOpenKeys(keys);
+  };
+
+  const handleSiderToggle = () => {
+    if (collapsed && activeGroupKey) {
+      setOpenKeys((current) => (
+        current.includes(activeGroupKey)
+          ? current
+          : [...current, activeGroupKey]
+      ));
+    }
+    setCollapsed(!collapsed);
+  };
+
+  const handleLogin = ({
+    token: nextToken,
+    user
+  }: {
+    token: string;
+    user: WorkspaceUser;
+  }) => {
+    setToken(nextToken);
+    localStorage.setItem('agd_token', nextToken);
     localStorage.setItem('agd_user', JSON.stringify(user || null));
     if (user?.id) localStorage.setItem('agd_user_id', String(user.id));
-    setAuthToken(tk);
+    setAuthToken(nextToken);
   };
 
   const handleLogout = () => {
@@ -49,98 +132,84 @@ export default function GeoLayout({
     message.success('已退出登录');
   };
 
-  // 根据当前路径确定选中的菜单项和面包屑
-  const selectedKey = pathname.replace('/geo', '') || '/';
-  const basePath = '/geo';
-
-  // 面包屑配置
-  const breadcrumbMap: Record<string, { path: string; label: string }> = {
-    '/projects': { path: `${basePath}/projects`, label: '品牌项目' },
-    '/prompts': { path: `${basePath}/prompts`, label: '问题库' },
-    '/question-set-reports': { path: `${basePath}/question-set-reports`, label: '运行报告' },
-    '/project-dashboard': { path: `${basePath}/project-dashboard`, label: '项目看板' },
-    '/seo-audit': { path: `${basePath}/seo-audit`, label: 'SEO检测' },
-    '/sources': { path: `${basePath}/sources`, label: '来源分析' },
-    '/reports': { path: `${basePath}/reports`, label: '报告中心' },
-    '/alerts': { path: `${basePath}/alerts`, label: '告警设置' },
-    '/notice': { path: `${basePath}/notice`, label: '系统通知' },
-    '/profile': { path: `${basePath}/profile`, label: '个人中心' },
-  };
-
-  // 构建面包屑数组
-  const workspaceCrumb = { path: `${basePath}/projects`, label: 'GEO 工作台' };
-  const breadcrumbItems = [
-    workspaceCrumb,
-    selectedKey === '/projects' ? null : breadcrumbMap[selectedKey]
-  ].filter(Boolean);
-
-  // 菜单项配置
-  const menuItems = [
-    { key: '/projects', label: <Link href="/geo/projects">品牌项目</Link> },
-    { key: '/seo-audit', label: <Link href="/geo/seo-audit">SEO检测</Link> },
-    { key: '/prompts', label: <Link href="/geo/prompts">问题库</Link> },
-    { key: '/question-set-reports', label: <Link href="/geo/question-set-reports">运行报告</Link> },
-    { key: '/sources', label: <Link href="/geo/sources">来源分析</Link> },
-    { key: '/project-dashboard', label: <Link href="/geo/project-dashboard">项目看板</Link> },
-    {
-      key: 'other',
-      label: '其他',
-      children: [
-        { key: '/alerts', label: <Link href="/geo/alerts">告警设置</Link> },
-        { key: '/notice', label: <Link href="/geo/notice">系统通知</Link> },
-        { key: '/profile', label: <Link href="/geo/profile">个人中心</Link> },
-      ],
-    },
-  ];
-
-  // 未登录时显示登录页面（条件渲染必须在所有 Hooks 之后）
   if (loading) {
     return <div style={{ textAlign: 'center', padding: '100px 0' }}>加载中...</div>;
   }
-
   if (!token) {
     return <Login onLogin={handleLogin} />;
   }
 
   return (
     <Layout className="layout">
-      <Header className="app-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <Header
+        className="app-header"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}
+      >
         <div className="logo" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Button
             type="text"
             aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
-            icon={collapsed ? <MenuUnfoldOutlined style={{ color: '#fff' }} /> : <MenuFoldOutlined style={{ color: '#fff' }} />}
-            onClick={() => setCollapsed(!collapsed)}
+            aria-expanded={!collapsed}
+            icon={collapsed
+              ? <MenuUnfoldOutlined style={{ color: '#fff' }} />
+              : <MenuFoldOutlined style={{ color: '#fff' }} />}
+            onClick={handleSiderToggle}
           />
-          <span>GEO 项目工作台</span>
+          <span>广拓数据工作台</span>
         </div>
         <Button onClick={handleLogout}>退出登录</Button>
       </Header>
-      <Layout style={{ marginTop: 64 }}>
+      <Layout className="workspace-shell">
+        {!collapsed ? (
+          <button
+            type="button"
+            className="geo-sider-backdrop"
+            aria-label="关闭侧栏"
+            onClick={() => setCollapsed(true)}
+          />
+        ) : null}
         <Sider
-          width={220}
+          className="geo-sider"
+          width={224}
           collapsedWidth={0}
           breakpoint="md"
           theme="light"
           collapsible
           collapsed={collapsed}
-          onBreakpoint={(broken) => setCollapsed(broken)}
-          onCollapse={(val) => setCollapsed(val)}
+          onBreakpoint={setCollapsed}
+          onCollapse={setCollapsed}
           trigger={null}
           style={{ background: '#fff' }}
         >
-          <Menu
-            mode="inline"
-            selectedKeys={[breadcrumbMap[selectedKey] ? selectedKey : '/projects']}
-            style={{ height: '100%', borderRight: 0 }}
-            items={menuItems}
-          />
+          <nav aria-label="工作台主导航">
+            <Menu
+              className="workspace-navigation"
+              mode="inline"
+              selectedKeys={location.selectedKey ? [location.selectedKey] : []}
+              openKeys={openKeys}
+              onOpenChange={handleOpenChange}
+              style={{ minHeight: '100%', borderRight: 0 }}
+              items={menuItems}
+              onClick={() => {
+                if (window.innerWidth < 768) {
+                  window.setTimeout(() => setCollapsed(true), 0);
+                }
+              }}
+            />
+          </nav>
         </Sider>
         <Content className="geo-content" style={{ padding: 24 }}>
           <Breadcrumb
-            style={{ margin: '8px 0' }}
-            items={breadcrumbItems.map((item: any) => ({
-              title: <Link href={item.path}>{item.label}</Link>
+            style={{ margin: '8px 0 16px' }}
+            items={location.breadcrumb.map((item: {
+              href: string;
+              label: string;
+            }) => ({
+              title: <Link href={item.href}>{item.label}</Link>
             }))}
           />
           {children}
