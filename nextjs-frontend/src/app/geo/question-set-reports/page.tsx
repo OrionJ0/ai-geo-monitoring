@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Alert,
   Button,
@@ -53,6 +55,7 @@ type CitationSource = {
   title?: string;
   owned?: boolean;
   competitor_owned?: boolean;
+  display_index?: number;
 };
 type CitationSourceGroups = {
   explicit_citations?: CitationSource[];
@@ -96,6 +99,8 @@ type ExecutionSummary = {
   completed?: number;
   failed?: number;
   pending?: number;
+  executing?: number;
+  queued?: number;
   failure_stages?: Record<string, number>;
 };
 type RunStateNotice = {
@@ -143,6 +148,7 @@ type ReportRow = {
   platform_name?: string;
   model_name?: string;
   status: string;
+  execution_state?: 'completed' | 'failed' | 'executing' | 'queued';
   error_message?: string;
   failure?: {
     stage?: string;
@@ -170,14 +176,18 @@ type ReportRow = {
     };
   } | null;
   answer?: string;
+  answer_format?: 'plain_text' | 'markdown_v1';
   provider_citations?: Array<{
     url?: string;
     title?: string;
     domain?: string;
     source_role?: 'explicit_citation' | 'retrieval_candidate' | string;
+    source_origin?: string;
+    display_index?: number;
   }>;
   web_capture?: {
     status?: string;
+    answer_format?: 'plain_text' | 'markdown_v1';
     selector_version?: string;
     artifact_owner_record_id?: number;
     captured_at?: string;
@@ -270,6 +280,7 @@ type RunReport = {
   question_set_name: string;
   source: 'native' | 'imported';
   status: 'running' | 'completed' | 'partial' | 'failed' | 'paused';
+  control_state?: 'running' | 'pausing' | 'paused' | 'terminal' | 'read_only';
   started_at?: string;
   completed_at?: string | null;
   paused_at?: string | null;
@@ -314,6 +325,19 @@ function formatDate(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function safeMarkdownUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol)
+      && !url.username
+      && !url.password
+      ? url.toString()
+      : '';
+  } catch {
+    return '';
+  }
 }
 
 function percent(value?: number | null) {
@@ -430,6 +454,8 @@ export default function QuestionSetReportsPage() {
   const [reportLoading, setReportLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [pauseSubmitting, setPauseSubmitting] = useState(false);
+  const [resumeSubmitting, setResumeSubmitting] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
   const [pdfLayout, setPdfLayout] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -655,10 +681,13 @@ export default function QuestionSetReportsPage() {
     completed: summary.completed,
     failed: summary.failed,
     pending: summary.pending,
+    executing: 0,
+    queued: summary.pending,
     failure_stages: {},
   };
   const runStateNotice = report ? getRunStateNotice({
     status: report.status,
+    controlState: report.control_state,
     source: report.source,
     integrityStatus: report.integrity?.status,
     capabilities: report.capabilities,
@@ -720,24 +749,42 @@ export default function QuestionSetReportsPage() {
   };
 
   const pauseRun = async () => {
-    if (!projectId || !report || !report.capabilities?.can_pause) return;
+    if (
+      !projectId
+      || !report
+      || !report.capabilities?.can_pause
+      || pauseSubmitting
+      || resumeSubmitting
+    ) return;
+    setPauseSubmitting(true);
     try {
       await axios.post(`/api/geo-projects/${projectId}/question-set-runs/${report.id}/pause`);
       message.success('已发送暂停信号，已开始调度的任务完成后暂停');
-      loadReport(projectId, report.id, true);
+      await loadReport(projectId, report.id, true);
     } catch (error) {
       message.error(getApiErrorMessage(error, '暂停运行失败'));
+    } finally {
+      setPauseSubmitting(false);
     }
   };
 
   const resumeRun = async () => {
-    if (!projectId || !report || !report.capabilities?.can_resume) return;
+    if (
+      !projectId
+      || !report
+      || !report.capabilities?.can_resume
+      || pauseSubmitting
+      || resumeSubmitting
+    ) return;
+    setResumeSubmitting(true);
     try {
       await axios.post(`/api/geo-projects/${projectId}/question-set-runs/${report.id}/resume`);
       message.success('运行已恢复');
-      loadReport(projectId, report.id, true);
+      await loadReport(projectId, report.id, true);
     } catch (error) {
       message.error(getApiErrorMessage(error, '恢复运行失败'));
+    } finally {
+      setResumeSubmitting(false);
     }
   };
 
@@ -826,11 +873,13 @@ export default function QuestionSetReportsPage() {
       title: '状态',
       dataIndex: 'status',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.status : 90,
-      render: (value: string) => value === 'completed'
+      render: (value: string, row: ReportRow) => value === 'completed'
         ? <Tag color="success">完成</Tag>
         : value === 'failed'
           ? <Tag color="error">失败</Tag>
-          : <Tag color="processing" icon={<LoadingOutlined spin />}>进行中</Tag>,
+          : row.execution_state === 'executing'
+            ? <Tag color="processing" icon={<LoadingOutlined spin />}>正在执行</Tag>
+            : <Tag>等待处理</Tag>,
     },
     {
       title: '品牌表现',
@@ -985,6 +1034,8 @@ export default function QuestionSetReportsPage() {
                       <Button
                         icon={<PauseCircleOutlined />}
                         onClick={pauseRun}
+                        loading={pauseSubmitting}
+                        disabled={pauseSubmitting || resumeSubmitting}
                       >
                         暂停
                       </Button>
@@ -994,6 +1045,8 @@ export default function QuestionSetReportsPage() {
                         type="primary"
                         icon={<CaretRightOutlined />}
                         onClick={resumeRun}
+                        loading={resumeSubmitting}
+                        disabled={pauseSubmitting || resumeSubmitting}
                       >
                         继续运行
                       </Button>
@@ -1387,19 +1440,37 @@ export default function QuestionSetReportsPage() {
                             </div>
                           ) : null}
                           <Text className={styles.answerLabel}>AI 原始回答</Text>
-                          <Paragraph className={styles.answerText}>
-                            {pdfLayout
-                              ? (row.answer || '暂无回答内容').split(/\r?\n/).map((line, index) => (
-                                  <span
-                                    key={`answer-line-${index}`}
-                                    className={styles.pdfAnswerLine}
-                                    data-pdf-breakpoint="true"
-                                  >
-                                    {line || '\u00A0'}
-                                  </span>
-                                ))
-                              : (row.answer || '暂无回答内容')}
-                          </Paragraph>
+                          {row.answer_format === 'markdown_v1' ? (
+                            <div className={`${styles.answerText} ${styles.markdownAnswer}`}>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                urlTransform={safeMarkdownUrl}
+                                components={{
+                                  a: ({ children, ...props }) => (
+                                    <a {...props} target="_blank" rel="noreferrer">
+                                      {children}
+                                    </a>
+                                  ),
+                                }}
+                              >
+                                {row.answer || '暂无回答内容'}
+                              </ReactMarkdown>
+                            </div>
+                          ) : (
+                            <Paragraph className={styles.answerText}>
+                              {pdfLayout
+                                ? (row.answer || '暂无回答内容').split(/\r?\n/).map((line, index) => (
+                                    <span
+                                      key={`answer-line-${index}`}
+                                      className={styles.pdfAnswerLine}
+                                      data-pdf-breakpoint="true"
+                                    >
+                                      {line || '\u00A0'}
+                                    </span>
+                                  ))
+                                : (row.answer || '暂无回答内容')}
+                            </Paragraph>
+                          )}
                           <WebCaptureEvidence record={row as unknown as Record<string, any>} />
                           {row.citation_evidence_status === 'legacy_unverified' ? (
                             <Alert

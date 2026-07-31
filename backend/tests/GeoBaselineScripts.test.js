@@ -41,9 +41,9 @@ test('评测分析器只暴露正式提示词与默认关闭思考路径', async
   });
   const definition = analyzer.getPromptDefinition();
 
-  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v6');
+  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v7');
   assert.equal(definition.request_profile.deepseek_thinking, 'disabled');
-  assert.match(via, /semantic_evidence_few_shot_v6/);
+  assert.match(via, /semantic_evidence_few_shot_v7/);
   assert.match(via, /thinking=disabled/);
 });
 

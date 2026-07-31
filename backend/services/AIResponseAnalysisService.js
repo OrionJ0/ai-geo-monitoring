@@ -8,7 +8,7 @@ const {
 
 const ANALYSIS_METHOD = CURRENT_ANALYSIS_CONTRACT;
 const STRUCTURE_VERSION = CURRENT_STRUCTURE_VERSION;
-const PROMPT_REVISION = 'semantic_evidence_few_shot_v6';
+const PROMPT_REVISION = 'semantic_evidence_few_shot_v7';
 const VALID_ENTITY_TYPES = new Set(['brand', 'company', 'other_organization']);
 const VALID_COMPETITOR_RELATIONS = new Set(['competitor', 'non_competitor']);
 const VALID_RECOMMENDATION_KINDS = new Set(['explicit']);
@@ -768,20 +768,43 @@ function normalizeMentions(value, responseText, entityMap) {
     const entityKey = compact(entity.name);
     const entityForms = formsByEntity.get(entityKey) || {
       entity_name: entity.name,
-      surface_forms: new Set()
+      surface_forms: new Set(),
+      dropped_count: 0,
+      field: `mentions[${index}].surface_forms`
     };
     surfaceForms.forEach((surface, surfaceIndex) => {
       const field = `mentions[${index}].surface_forms[${surfaceIndex}]`;
-      const text = boundedString(surface, field, 60);
-      if (/[。！？!?；;\n\r]/u.test(text)) {
-        throw new AIResponseAnalysisError(`${field} 必须是短实体词，不能是完整句子`);
-      }
-      if (!source.includes(text)) {
-        throw new AIResponseAnalysisError(`${field} 无法在原回答中定位`);
+      const text = String(surface || '').replace(/\s+/gu, ' ').trim();
+      if (
+        !text
+        || text.length > 60
+        || /[。！？!?；;\n\r]/u.test(text)
+        || !source.includes(text)
+      ) {
+        entityForms.dropped_count += 1;
+        return;
       }
       entityForms.surface_forms.add(text);
     });
     formsByEntity.set(entityKey, entityForms);
+  });
+
+  const normalizationWarnings = [];
+  formsByEntity.forEach((entry) => {
+    if (entry.surface_forms.size === 0) {
+      throw new AIResponseAnalysisError(
+        `${entry.field} 无法在原回答中定位任何短实体词`,
+        'invalid_analysis_output',
+        { field: entry.field }
+      );
+    }
+    if (entry.dropped_count > 0 && normalizationWarnings.length < 50) {
+      normalizationWarnings.push({
+        code: 'unsupported_surface_form_dropped',
+        entity_name: entry.entity_name,
+        dropped_count: entry.dropped_count
+      });
+    }
   });
 
   const candidates = [];
@@ -857,7 +880,44 @@ function normalizeMentions(value, responseText, entityMap) {
     mentions.push({ ...occurrence });
   });
   if (mentions.length > 500) throw new AIResponseAnalysisError('mentions 最多返回 500 项');
-  return mentions.map(({ entity_name, surface_forms }) => ({ entity_name, surface_forms }));
+  return {
+    mentions: mentions.map(({ entity_name, surface_forms }) => ({ entity_name, surface_forms })),
+    normalization_warnings: normalizationWarnings
+  };
+}
+
+function validationField(error) {
+  const explicit = String(error?.details?.field || '').trim();
+  if (explicit) return explicit.slice(0, 160);
+  const matched = String(error?.message || '').match(
+    /^([a-z_]+(?:\[\d+\])?(?:\.[a-z_]+(?:\[\d+\])?)*)/i
+  );
+  if (!matched) return 'root';
+  const rootField = matched[1].split(/[.[]/u)[0];
+  return [
+    'entities',
+    'mentions',
+    'target_entity_name',
+    'competitor_relations',
+    'candidate_lists',
+    'recommendations',
+    'claims',
+    'sentiment'
+  ].includes(rootField) ? matched[1] : 'root';
+}
+
+function correctionRequirement(error) {
+  const field = validationField(error);
+  if (field.includes('surface_forms')) {
+    return '只保留能在完整原回答中逐字定位、长度不超过 60 字且不是完整句子的实体短名称或别名。';
+  }
+  if (field.includes('evidence')) {
+    return '重新引用完整原回答中可逐字定位的原文片段，不要概括、改写或补充。';
+  }
+  if (field === 'competitor_relations' || error?.code === 'analysis_relation_incomplete') {
+    return '逐一覆盖全部非目标实体，引用 entities.name，并为每个关系提供合法关系、理由和原文证据。';
+  }
+  return '根据完整问题和回答修正该字段及其依赖字段，并重新输出完整 v4 JSON 对象。';
 }
 
 function normalizeTargetEntityName(value, entityMap) {
@@ -1179,7 +1239,12 @@ class AIResponseAnalysisService {
     }
     const entities = normalizeEntities(parsed.entities);
     const entityMap = buildEntityMap(entities);
-    const mentions = normalizeMentions(parsed.mentions, context.responseText, entityMap);
+    const normalizedMentions = normalizeMentions(
+      parsed.mentions,
+      context.responseText,
+      entityMap
+    );
+    const mentions = normalizedMentions.mentions;
     const mentionedEntityKeys = new Set(mentions.map((item) => compact(item.entity_name)));
     entities.forEach((entity, index) => {
       if (!mentionedEntityKeys.has(compact(entity.name))) {
@@ -1203,6 +1268,9 @@ class AIResponseAnalysisService {
       schema_version: STRUCTURE_VERSION,
       entities,
       mentions,
+      ...(normalizedMentions.normalization_warnings.length
+        ? { normalization_warnings: normalizedMentions.normalization_warnings }
+        : {}),
       target_entity_name: targetEntityName,
       competitor_relations: normalizeCompetitorRelations(
         parsed.competitor_relations,
@@ -1236,7 +1304,7 @@ class AIResponseAnalysisService {
   recalculateFromStructure(structured, responseText) {
     const entities = normalizeEntities(structured?.entities);
     const entityMap = buildEntityMap(entities);
-    const mentions = normalizeMentions(
+    const normalizedMentions = normalizeMentions(
       structured?.mentions,
       responseText,
       entityMap
@@ -1244,7 +1312,13 @@ class AIResponseAnalysisService {
     return this.calculate({
       ...structured,
       entities,
-      mentions
+      mentions: normalizedMentions.mentions,
+      ...(Array.isArray(structured?.normalization_warnings)
+        && structured.normalization_warnings.length
+        ? { normalization_warnings: structured.normalization_warnings.slice(0, 50) }
+        : normalizedMentions.normalization_warnings.length
+          ? { normalization_warnings: normalizedMentions.normalization_warnings }
+          : {})
     });
   }
 
@@ -1389,7 +1463,12 @@ class AIResponseAnalysisService {
           basePrompt,
           '',
           '上一次输出未通过结构校验。',
-          `具体错误：${lastError?.message || '结构无效'}`,
+          '<validation_feedback>',
+          `字段路径：${validationField(lastError)}`,
+          `错误类型：${lastError?.code || 'invalid_analysis_output'}`,
+          `校验信息：${lastError?.message || '结构无效'}`,
+          `纠正要求：${correctionRequirement(lastError)}`,
+          '</validation_feedback>',
           '上一次无效输出：',
           lastInvalidOutput,
           '请重新通读当前问题和完整回答，根据校验错误重新审阅实体、关系、候选顺序、情绪和原文证据。',

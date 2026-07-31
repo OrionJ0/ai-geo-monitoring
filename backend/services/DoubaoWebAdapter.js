@@ -4,6 +4,10 @@ const {
   DeepSeekWebPage,
   adapterError
 } = require('./DeepSeekWebAdapter');
+const {
+  BROWSER_ANSWER_TREE_SERIALIZER,
+  renderAnswerTree
+} = require('./WebAnswerMarkdown');
 
 const DOUBAO_WEB_IDENTITY = Object.freeze({
   platformCode: 'doubao-web',
@@ -226,7 +230,7 @@ class DoubaoWebPage extends DeepSeekWebPage {
   async getConversationSnapshot() {
     const verificationMarkers = JSON.stringify(selectors.verificationMarkers);
     const loginMarkers = JSON.stringify(selectors.loginMarkers);
-    return this.evaluate(`(() => {
+    const snapshot = await this.evaluate(`(() => {
       const visible = (element) => {
         const style = getComputedStyle(element);
         const rect = element.getBoundingClientRect();
@@ -235,6 +239,7 @@ class DoubaoWebPage extends DeepSeekWebPage {
           && rect.width > 0
           && rect.height > 0;
       };
+      ${BROWSER_ANSWER_TREE_SERIALIZER}
       const hasVisibleMatch = (selectors) => selectors.some((selector) => (
         Array.from(document.querySelectorAll(selector)).some(visible)
       ));
@@ -292,7 +297,8 @@ class DoubaoWebPage extends DeepSeekWebPage {
       return {
         assistantTurns: messages.map(({ message, root }) => ({
           id: String(message.getAttribute('data-message-id') || ''),
-          text: String(root.innerText || root.textContent || '').trim()
+          text: String(root.innerText || root.textContent || '').trim(),
+          serialized_answer: serializeAnswerTree(root)
         })).filter((turn) => turn.id),
         generationActive,
         busy: Boolean(document.querySelector('[aria-busy="true"]')),
@@ -300,6 +306,19 @@ class DoubaoWebPage extends DeepSeekWebPage {
         loginRequired: explicitLoginButton || hasVisibleMatch(${loginMarkers})
       };
     })()`);
+    const assistantTurns = (snapshot?.assistantTurns || []).map((turn) => {
+      if (!turn?.serialized_answer) return turn;
+      if (turn.serialized_answer.truncated === true) {
+        throw adapterError('web_response_too_large', '豆包回答超过结构化采集上限');
+      }
+      const markdown = renderAnswerTree(turn.serialized_answer.tree);
+      return {
+        id: String(turn.id || ''),
+        text: markdown || String(turn.text || '').trim(),
+        answer_format: markdown ? 'markdown_v1' : 'plain_text'
+      };
+    });
+    return { ...snapshot, assistantTurns };
   }
 
   async extractCitations(turnId) {
@@ -329,10 +348,19 @@ class DoubaoWebPage extends DeepSeekWebPage {
         }
         if (!['http:', 'https:'].includes(url.protocol) || seen.has(url.href)) continue;
         seen.add(url.href);
+        const visibleTitle = String(anchor.textContent || '')
+          .replace(/\\s+/g, ' ').trim();
+        const metadataTitle = [
+          anchor.getAttribute('data-title'),
+          anchor.getAttribute('title'),
+          anchor.getAttribute('aria-label')
+        ].map((value) => String(value || '').replace(/\\s+/g, ' ').trim())
+          .find((value) => value && !/^(?:\\[|【)?[-–—]?\\s*\\d+\\s*(?:\\]|】)?$/.test(value));
+        const marker = visibleTitle.match(/^(?:\\[|【)?[-–—]?\\s*(\\d+)\\s*(?:\\]|】)?$/);
         rows.push({
           url: url.href,
-          title: String(anchor.textContent || url.hostname)
-            .replace(/\\s+/g, ' ').trim().slice(0, 300)
+          title: String(metadataTitle || visibleTitle || url.hostname).slice(0, 300),
+          ...(marker ? { display_index: Number(marker[1]) } : {})
         });
         if (rows.length >= 200) break;
       }

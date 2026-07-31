@@ -192,3 +192,92 @@ test('豆包普通模式存在网络检索候选时，历史空状态也按本�
   assert.equal(evidence.searchObserved, true);
   assert.equal(evidence.searchEvidenceType, 'network_retrieval_candidates');
 });
+
+test('纯数字引用标记单独保留序号并使用域名作为标题', () => {
+  const evidence = buildWebCaptureEvidence({
+    id: 53,
+    platform: 'deepseek-web',
+    provider_citations: [{
+      url: 'https://example.com/source',
+      title: '-1',
+      display_index: 1,
+      source_role: 'explicit_citation'
+    }],
+    result_summary: {
+      web_capture: {
+        status: 'completed',
+        artifacts: {
+          search_state: { id: SEARCH_ARTIFACT_ID },
+          final_answer: { id: FINAL_ARTIFACT_ID }
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(evidence.explicitCitations, [{
+    url: 'https://example.com/source',
+    title: 'example.com',
+    domain: 'example.com',
+    displayIndex: 1
+  }]);
+});
+
+test('历史检索候选只在展示层修复可证明乱码并保留过滤统计', () => {
+  const evidence = buildWebCaptureEvidence({
+    id: 54,
+    platform: 'deepseek-web',
+    provider_citations: [{
+      url: 'https://example.com/source',
+      title: 'ç”µç£æ„ŸçŸ¥ - ä¸Šæµ·å¹¿æ‹“',
+      source_role: 'retrieval_candidate'
+    }],
+    result_summary: {
+      web_capture: {
+        status: 'completed',
+        search: {
+          candidate_observation: {
+            observed_count: 34,
+            accepted_count: 12,
+            dropped_count: 22,
+            truncated: false
+          }
+        },
+        artifacts: {
+          search_state: { id: SEARCH_ARTIFACT_ID },
+          final_answer: { id: FINAL_ARTIFACT_ID }
+        }
+      }
+    }
+  });
+
+  assert.equal(evidence.retrievalCandidates[0].title, '电磁感知 - 上海广拓');
+  assert.deepEqual(evidence.candidateObservation, {
+    observedCount: 34,
+    acceptedCount: 12,
+    droppedCount: 22,
+    truncated: false
+  });
+});
+
+test('丢弃包含内嵌凭据的引用 URL', () => {
+  const evidence = buildWebCaptureEvidence({
+    id: 55,
+    platform: 'deepseek-web',
+    provider_citations: [{
+      url: 'https://user:secret@example.com/private',
+      title: '带凭据来源',
+      source_role: 'explicit_citation'
+    }],
+    result_summary: {
+      web_capture: {
+        status: 'completed',
+        artifacts: {
+          search_state: { id: SEARCH_ARTIFACT_ID },
+          final_answer: { id: FINAL_ARTIFACT_ID }
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(evidence.explicitCitations, []);
+});

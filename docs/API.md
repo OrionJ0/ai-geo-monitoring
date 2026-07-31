@@ -113,7 +113,14 @@ Authorization: Bearer <token>
   - 返回运行来源、当前状态、本次汇总和分页信息，不在列表中返回逐条回答
 - `GET /api/geo-projects/:projectId/question-set-runs/:runId` 获取一次单问题或问题集运行的独立报告
   - 报告只聚合关系字段归属的本次任务，包含 `execution_summary`、失败阶段、完整性摘要、逐问题逐平台结果和服务端计算的 pause/resume/retry capabilities
+  - `control_state` 区分 `running / pausing / paused / terminal / read_only`；`execution_summary.executing + execution_summary.queued = execution_summary.pending`，行级 `execution_state` 区分正在执行与等待处理，不返回内部执行 token 或租约 owner
+  - 新 Web 回答可声明 `answer_format=markdown_v1`；存量或未声明格式的回答按 `plain_text` 返回。显式引用的 `display_index` 与标题分离，`retrieval_candidate` 仅供核查且不进入引用 KPI
   - snapshot-only 与 imported 报告保持可读、可导出，但执行型 capability 为 false 并返回稳定禁用原因
+- `POST /api/geo-projects/:projectId/question-set-runs/:runId/pause` 暂停原生运行
+  - soft pause 只阻止领取新的排队任务，不强制中断已启动的外部平台请求；有任务收尾时返回 `control_state=pausing`
+  - 重复暂停返回 `200` 和 `idempotent_replay=true`；终态或只读报告仍拒绝操作
+- `POST /api/geo-projects/:projectId/question-set-runs/:runId/resume` 继续原生运行
+  - 条件更新保证只有一个并发请求取得恢复权并启动调度；重复继续返回 `200` 和 `idempotent_replay=true`，不会创建第二次调度
 - `POST /api/geo-projects/:projectId/question-set-runs/:runId/retry-failed` 重新提交原生运行中的失败项
   - 请求体可传 `idempotency_key`（8–128 位字母、数字、点、下划线、冒号或连字符），也可使用 `Idempotency-Key` 请求头；同一运行和同一键只创建一批重试记录
   - 返回 `202 Accepted`；结构化分析失败且已保存完整原回答时，只调用独立分析 API，不再调用监测平台且不消耗检测配额

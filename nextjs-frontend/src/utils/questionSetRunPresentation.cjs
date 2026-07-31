@@ -65,6 +65,7 @@ function formatSkippedPlatforms(skippedPlatforms) {
 
 function getRunStateNotice({
   status,
+  controlState,
   source,
   integrityStatus,
   capabilities = {},
@@ -73,6 +74,9 @@ function getRunStateNotice({
   const counts = `已完成 ${safeCount(executionSummary.completed)} 条，失败 ${
     safeCount(executionSummary.failed)
   } 条，待处理 ${safeCount(executionSummary.pending)} 条。`;
+  const pendingBreakdown = `正在执行 ${safeCount(executionSummary.executing)} 条，等待处理 ${
+    safeCount(executionSummary.queued)
+  } 条。`;
   const stages = formatFailureStages(executionSummary.failure_stages);
   const stageDescription = stages ? `主要失败阶段：${stages}。` : '';
   const retryDescription = capabilities.can_retry
@@ -106,6 +110,16 @@ function getRunStateNotice({
       type: 'info',
       title: '问题集仍在运行',
       description: `${counts}报告会自动更新。`
+    };
+  }
+  if (controlState === 'pausing') {
+    const nextStep = capabilities.can_resume
+      ? '可以点击“继续运行”恢复。'
+      : (CAPABILITY_REASON_MESSAGES[capabilities.resume_disabled_reason] || '');
+    return {
+      type: 'warning',
+      title: '正在暂停，等待已启动任务收尾',
+      description: `${counts}${pendingBreakdown}系统不会再启动新的等待任务；已启动任务完成后将完全暂停。${nextStep}`
     };
   }
   if (status === 'paused') {

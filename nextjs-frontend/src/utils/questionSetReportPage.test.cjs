@@ -94,6 +94,30 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.doesNotMatch(source, /明确引用/);
 });
 
+test('可信 Markdown 回答使用 GFM 安全渲染且存量回答保持纯文本', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /import ReactMarkdown from 'react-markdown'/);
+  assert.match(source, /import remarkGfm from 'remark-gfm'/);
+  assert.match(source, /answer_format\?: 'plain_text' \| 'markdown_v1'/);
+  assert.match(source, /row\.answer_format === 'markdown_v1'/);
+  assert.match(source, /<ReactMarkdown[\s\S]*remarkPlugins=\{\[remarkGfm\]\}/);
+  assert.match(source, /safeMarkdownUrl/);
+  assert.doesNotMatch(source, /rehypeRaw|dangerouslySetInnerHTML/);
+  assert.match(source, /<Paragraph className=\{styles\.answerText\}>/);
+});
+
+test('检索候选默认折叠并解释它不是回答引用', () => {
+  const componentPath = path.resolve(__dirname, '../components/WebCaptureEvidence.tsx');
+  const source = fs.readFileSync(componentPath, 'utf8');
+
+  assert.match(source, /<Collapse/);
+  assert.match(source, /平台搜索过程中观察到/);
+  assert.match(source, /不代表回答引用/);
+  assert.match(source, /不计入引用 KPI/);
+  assert.doesNotMatch(source, /defaultActiveKey/);
+});
+
 test('v4 单回答详情展示回答内竞品提及占比及可复核语义证据', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 
@@ -239,6 +263,13 @@ test('原生问题集报告可以确认后重试失败项', () => {
   assert.match(source, /report\.capabilities\?\.can_pause/);
   assert.match(source, /report\.capabilities\?\.can_resume/);
   assert.match(source, /retry_disabled_reason/);
+  assert.match(source, /control_state/);
+  assert.match(source, /execution_state/);
+  assert.match(source, /pauseSubmitting/);
+  assert.match(source, /resumeSubmitting/);
+  assert.match(source, /loading=\{pauseSubmitting\}/);
+  assert.match(source, /loading=\{resumeSubmitting\}/);
+  assert.match(source, /disabled=\{pauseSubmitting \|\| resumeSubmitting\}/);
   assert.doesNotMatch(
     source,
     /report\.source === 'native'[\s\S]{0,160}report\.status !== 'running'/

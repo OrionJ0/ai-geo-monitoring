@@ -51,6 +51,7 @@ const DIAGNOSTIC_HEADERS = [
 ];
 const REVERSIBILITY_HEADERS = [
   'analysis_contract_version',
+  'answer_format',
   'legacy_citation_count',
   'legacy_citation_sources_json',
   'owned_citation_count',
@@ -166,6 +167,7 @@ function buildCsv(report) {
         : {}
     ),
     report.analysis_contract_version || '',
+    row.answer_format === 'markdown_v1' ? 'markdown_v1' : 'plain_text',
     row.legacy_citation_count ?? '',
     JSON.stringify(Array.isArray(row.legacy_citation_sources) ? row.legacy_citation_sources : []),
     row.owned_citation_count ?? '',
@@ -536,6 +538,10 @@ function parseCsv(csv) {
         '不能早于 record_created_at'
       );
     }
+    const answerFormat = valueAt(row, 'answer_format').trim() || 'plain_text';
+    if (!['plain_text', 'markdown_v1'].includes(answerFormat)) {
+      throw fieldError('INVALID_FIELD', line, 'answer_format', '只允许 plain_text 或 markdown_v1');
+    }
     const competitorMentions = parseObjectArray(
       valueAt(row, 'competitor_mentions_json'),
       'competitor_mentions_json',
@@ -673,6 +679,7 @@ function parseCsv(csv) {
       status,
       error_message: valueAt(row, 'error_message'),
       answer: valueAt(row, 'answer'),
+      answer_format: answerFormat,
       has_metrics: hasMetrics,
       brand_mentioned: parseBoolean(valueAt(row, 'brand_mentioned'), 'brand_mentioned', line),
       brand_mentions: parseNonNegativeInteger(valueAt(row, 'brand_mentions'), 'brand_mentions', line),

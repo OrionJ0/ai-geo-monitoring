@@ -393,6 +393,32 @@ test('Doubao citation redirects resolve only a safe HTTP target', () => {
   );
 });
 
+test('Doubao 检索候选只接受已验证搜索结果数组并拒绝任意深层 URL', () => {
+  const page = new DoubaoWebPage({ connection: {} });
+  const result = page.extractCandidatesFromJson({
+    data: {
+      search_results: [{
+        url: 'https://example.com/accepted',
+        title: '可信搜索结果'
+      }]
+    },
+    arbitrary: {
+      nested: {
+        url: 'https://example.com/rejected',
+        title: '无关链接'
+      }
+    }
+  });
+
+  assert.deepEqual(result, {
+    candidates: [{
+      url: 'https://example.com/accepted',
+      title: '可信搜索结果'
+    }],
+    observed_count: 1
+  });
+});
+
 test('Doubao interactive login verification rejects an explicit anonymous login page before checking mode', async () => {
   let modeChecks = 0;
   const doubaoPage = new DoubaoWebPage({ connection: {} }, { sleep: async () => {} });

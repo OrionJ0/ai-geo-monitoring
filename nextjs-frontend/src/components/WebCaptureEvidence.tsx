@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Card, Descriptions, Image, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Card, Collapse, Descriptions, Image, Space, Spin, Tag, Typography } from 'antd';
 import axios from '@/lib/axiosConfig';
 import { buildWebCaptureEvidence } from '@/utils/webCaptureEvidence.cjs';
 
@@ -78,6 +78,7 @@ export default function WebCaptureEvidence({ record }: WebCaptureEvidenceProps) 
       <Space orientation="vertical" size={4} style={{ width: '100%' }}>
         {sources.map((source) => (
           <a key={source.url} href={source.url} target="_blank" rel="noreferrer">
+            {source.displayIndex ? `【${source.displayIndex}】` : ''}
             {source.title || source.domain || source.url}
           </a>
         ))}
@@ -114,7 +115,29 @@ export default function WebCaptureEvidence({ record }: WebCaptureEvidenceProps) 
             {renderSources(evidence.explicitCitations, '页面未显示引用')}
           </Descriptions.Item>
           <Descriptions.Item label="检索候选" span={2}>
-            {renderSources(evidence.retrievalCandidates, '未记录检索候选')}
+            <Collapse
+              size="small"
+              items={[{
+                key: 'retrieval-candidates',
+                label: `查看检索候选（${evidence.retrievalCandidates.length}）`,
+                children: (
+                  <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                    <Text type="secondary">
+                      这些页面仅在平台搜索过程中观察到，不代表回答引用，也不计入引用 KPI。
+                    </Text>
+                    {evidence.candidateObservation ? (
+                      <Text type="secondary">
+                        观察 {evidence.candidateObservation.observedCount} 条，接纳
+                        {' '}{evidence.candidateObservation.acceptedCount} 条，过滤
+                        {' '}{evidence.candidateObservation.droppedCount} 条
+                        {evidence.candidateObservation.truncated ? '，结果已截断' : ''}。
+                      </Text>
+                    ) : null}
+                    {renderSources(evidence.retrievalCandidates, '未记录检索候选')}
+                  </Space>
+                ),
+              }]}
+            />
           </Descriptions.Item>
         </Descriptions>
 

@@ -37,7 +37,7 @@ test('v4 prompt stages semantic analysis without competitor hints or rule dictio
   assert.equal(CURRENT_STRUCTURE_VERSION, 'geo_metric_input_v4');
   assert.equal(CURRENT_METRIC_SEMANTICS, 'contextual_competitor_mentions_sov_v1');
   assert.equal(definition.version, 'ai_structured_v4');
-  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v6');
+  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v7');
   assert.match(definition.template, /完整抽取/);
   assert.match(definition.template, /逐一判断竞争关系/);
   assert.match(definition.template, /独立判断候选顺序/);
@@ -334,6 +334,63 @@ test('a retry re-reads the complete answer instead of freezing the first invalid
   assert.equal(result.analysis_method, 'ai_structured_v4');
   assert.equal(prompts.length, 2);
   assert.match(prompts[1], /重新通读|重新审阅/);
+  assert.match(prompts[1], /字段路径：competitor_relations/);
+  assert.match(prompts[1], /错误类型：analysis_relation_incomplete/);
+  assert.match(prompts[1], /纠正要求：/);
   assert.doesNotMatch(prompts[0], /不应进入提示词的企业/);
   assert.doesNotMatch(prompts[1], /不改变对原回答的语义判断/);
+});
+
+test('同一实体保留精确表面词并丢弃无依据附加名称', () => {
+  const service = new AIResponseAnalysisService();
+  const responseText = '上海广拓提供周界报警方案。';
+  const structured = service.parseOutput(JSON.stringify(completeOutput({
+    entities: [{ name: '上海广拓', type: 'company' }],
+    mentions: [{
+      entity_name: '上海广拓',
+      surface_forms: ['上海广拓', '不存在的广拓别名', '上海广拓提供周界报警方案。']
+    }],
+    target_entity_name: '上海广拓',
+    sentiment: {
+      label: 'neutral',
+      reason: '回答只陈述能力',
+      evidence: ['上海广拓提供周界报警方案'],
+      risk_terms: []
+    }
+  })), { responseText, brand: { name: '上海广拓' } });
+
+  assert.deepEqual(structured.mentions, [{
+    entity_name: '上海广拓',
+    surface_forms: ['上海广拓']
+  }]);
+  assert.deepEqual(structured.normalization_warnings, [{
+    code: 'unsupported_surface_form_dropped',
+    entity_name: '上海广拓',
+    dropped_count: 2
+  }]);
+  assert.equal(JSON.stringify(structured.normalization_warnings).includes('不存在的广拓别名'), false);
+});
+
+test('实体没有任何精确表面词时仍拒绝整份分析', () => {
+  const service = new AIResponseAnalysisService();
+  assert.throws(
+    () => service.parseOutput(JSON.stringify(completeOutput({
+      entities: [{ name: '上海广拓', type: 'company' }],
+      mentions: [{
+        entity_name: '上海广拓',
+        surface_forms: ['不存在的广拓别名', '整句也不在原回答。']
+      }],
+      target_entity_name: '上海广拓',
+      sentiment: {
+        label: 'neutral',
+        reason: '无证据',
+        evidence: [],
+        risk_terms: []
+      }
+    })), {
+      responseText: '原回答没有出现任何品牌。',
+      brand: { name: '上海广拓' }
+    }),
+    /无法在原回答中定位任何短实体词/
+  );
 });

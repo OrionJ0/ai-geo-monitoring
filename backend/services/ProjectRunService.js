@@ -2481,7 +2481,7 @@ class ProjectRunService {
     });
     if (!run) throw Object.assign(new Error('运行记录不存在'), { status: 404 });
     if (run.source !== 'native') throw Object.assign(new Error('导入报告不能暂停'), { status: 409 });
-    if (run.paused_at) throw Object.assign(new Error('运行已暂停'), { status: 409 });
+    if (run.completed_at) throw Object.assign(new Error('运行已完成，无法暂停'), { status: 409 });
     const rows = Array.isArray(run.imported_rows) ? run.imported_rows : [];
     const pendingCount = rows.filter((row) => row.status === 'pending').length;
     const records = await QuestionRecord.findAll({
@@ -2490,14 +2490,49 @@ class ProjectRunService {
         project_id: run.project_id,
         run_slot_index: { [require('sequelize').Op.not]: null }
       },
-      attributes: ['id', 'status']
+      attributes: [
+        'id',
+        'status',
+        'execution_token',
+        'execution_started_at',
+        'lease_owner',
+        'lease_expires_at'
+      ]
     });
     const pendingRecords = records.filter((r) => r.status === 'pending').length;
     if (!pendingRecords && !pendingCount) {
       throw Object.assign(new Error('运行已完成，无法暂停'), { status: 409 });
     }
-    await run.update({ paused_at: new Date() });
-    return { ok: true, runId, paused: true };
+    const [updated] = await QuestionSetRun.update(
+      { paused_at: new Date() },
+      {
+        where: {
+          id: run.id,
+          project_id: run.project_id,
+          source: 'native',
+          completed_at: null,
+          paused_at: null
+        }
+      }
+    );
+    const QuestionSetRunService = require('./QuestionSetRunService');
+    const controlState = records.some(
+      (record) => QuestionSetRunService.deriveExecutionState(record) === 'executing'
+    ) ? 'pausing' : 'paused';
+    if (!updated) {
+      await run.reload();
+      if (!run.paused_at) {
+        throw Object.assign(new Error('运行状态已变化，请刷新后重试'), { status: 409 });
+      }
+    }
+    return {
+      ok: true,
+      runId,
+      run_id: runId,
+      paused: true,
+      control_state: controlState,
+      idempotent_replay: updated === 0
+    };
   }
 
   async resumeRun(runId, projectId) {
@@ -2506,7 +2541,34 @@ class ProjectRunService {
     });
     if (!run) throw Object.assign(new Error('运行记录不存在'), { status: 404 });
     if (run.source !== 'native') throw Object.assign(new Error('导入报告不能恢复'), { status: 409 });
-    if (!run.paused_at) throw Object.assign(new Error('运行未处于暂停状态'), { status: 409 });
+    if (run.completed_at) throw Object.assign(new Error('运行已完成，无法恢复'), { status: 409 });
+    const [claimed] = await QuestionSetRun.update(
+      { paused_at: null },
+      {
+        where: {
+          id: run.id,
+          project_id: run.project_id,
+          source: 'native',
+          completed_at: null,
+          paused_at: { [Op.not]: null }
+        }
+      }
+    );
+    if (!claimed) {
+      await run.reload();
+      if (!run.paused_at && !run.completed_at) {
+        return {
+          ok: true,
+          runId,
+          run_id: runId,
+          resumed: true,
+          remainingCount: null,
+          control_state: 'running',
+          idempotent_replay: true
+        };
+      }
+      throw Object.assign(new Error('运行状态已变化，请刷新后重试'), { status: 409 });
+    }
 
     // 找到所有 pending 状态的记录
     const records = await QuestionRecord.findAll({
@@ -2524,19 +2586,48 @@ class ProjectRunService {
         runId: run.id,
         expectedRevision: Number(run.revision) || 0
       });
-      return { ok: true, runId, resumed: true, remainingCount: 0 };
+      return {
+        ok: true,
+        runId,
+        run_id: runId,
+        resumed: true,
+        remainingCount: 0,
+        control_state: 'terminal',
+        idempotent_replay: false
+      };
     }
 
-    const context = await this.buildPersistedQuestionSetRunContext(run, records);
-    if (!context) {
-      throw Object.assign(new Error('项目不存在或已归档'), { status: 409 });
+    let context;
+    try {
+      context = await this.buildPersistedQuestionSetRunContext(run, records);
+      if (!context) {
+        throw Object.assign(new Error('项目不存在或已归档'), { status: 409 });
+      }
+      this.schedulePreparedRun(context);
+    } catch (error) {
+      await QuestionSetRun.update(
+        { paused_at: new Date() },
+        {
+          where: {
+            id: run.id,
+            project_id: run.project_id,
+            completed_at: null,
+            paused_at: null
+          }
+        }
+      ).catch(() => {});
+      throw error;
     }
 
-    // 清除暂停状态并恢复执行
-    await run.update({ paused_at: null });
-    this.schedulePreparedRun(context);
-
-    return { ok: true, runId, resumed: true, remainingCount: context.entries.length };
+    return {
+      ok: true,
+      runId,
+      run_id: runId,
+      resumed: true,
+      remainingCount: context.entries.length,
+      control_state: 'running',
+      idempotent_replay: false
+    };
   }
 
   async runProject({

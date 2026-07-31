@@ -10,7 +10,7 @@ test('exposes the v4 semantic evidence prompt with DeepSeek thinking disabled by
   const definition = service.getPromptDefinition();
 
   assert.equal(definition.version, 'ai_structured_v4');
-  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v6');
+  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v7');
   assert.match(definition.template, /<analysis_input>/);
   assert.match(definition.template, /完整抽取/);
   assert.equal((definition.template.match(/<example focus=/g) || []).length, 10);
@@ -48,7 +48,7 @@ test('grounds the production semantic prompt with diverse focused examples', () 
   const service = new AIResponseAnalysisService();
   const definition = service.getPromptDefinition();
 
-  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v6');
+  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v7');
   assert.match(definition.template, /<analysis_input>/);
   assert.match(definition.template, /完整抽取/);
   assert.match(definition.template, /<examples>/);
@@ -125,7 +125,7 @@ test('requests DeepSeek with thinking disabled and JSON output without sampling 
   assert.equal(result.sov_numerator, 0);
   assert.equal(result.sov_denominator, 0);
   assert.equal(result.answer_competitor_share, null);
-  assert.equal(result.analysis_structure.prompt_revision, 'semantic_evidence_few_shot_v6');
+  assert.equal(result.analysis_structure.prompt_revision, 'semantic_evidence_few_shot_v7');
 });
 
 test('applies administrator-confirmed analysis request option overrides', async () => {
@@ -282,7 +282,10 @@ test('retries one malformed structured response before dropping the sample', asy
 
   assert.equal(attempts, 2);
   assert.equal(result.brand_mentioned, false);
-  assert.match(prompts[1], /具体错误：AI 分析 API 未返回有效 JSON/);
+  assert.match(prompts[1], /字段路径：root/);
+  assert.match(prompts[1], /错误类型：invalid_analysis_output/);
+  assert.match(prompts[1], /校验信息：AI 分析 API 未返回有效 JSON/);
+  assert.match(prompts[1], /纠正要求：/);
   assert.match(prompts[1], /上一次无效输出：\s*\{"entities":/);
   assert.match(prompts[1], /重新通读当前问题和完整回答/);
   assert.doesNotMatch(prompts[1], /不改变对原回答的语义判断/);

@@ -127,6 +127,16 @@ test('新版 CSV 在旧列尾部追加可判定语义并保持旧 SOV 列为空'
   );
 });
 
+test('回答格式通过兼容追加列往返', () => {
+  const parsed = QuestionSetRunCsvService.parseCsv(
+    QuestionSetRunCsvService.buildCsv(currentReport({
+      answer: '上海广拓可作为候选。\n\n| 厂家 | 特点 |\n| --- | --- |\n| 上海广拓 | 定位精确 |',
+      answer_format: 'markdown_v1'
+    }))
+  );
+  assert.equal(parsed.rows[0].answer_format, 'markdown_v1');
+});
+
 test('新版 CSV 拒绝旧列值、混合语义、非法分母和非法竞争实体证据', () => {
   assert.throws(
     () => QuestionSetRunCsvService.parseCsv(
@@ -340,6 +350,7 @@ test('合法旧版 v1 必需列文件仍可导入', () => {
 
   assert.equal(parsed.questionSetName, '旧版合法报告');
   assert.equal(parsed.rows[0].status, 'completed');
+  assert.equal(parsed.rows[0].answer_format, 'plain_text');
   assert.equal(parsed.rows[0].analysis_method, 'legacy_rules_v1');
   assert.equal(parsed.analysisContractVersion, null);
   assert.equal(parsed.metricSemanticsVersion, 'configured_competitor_sov_v1');

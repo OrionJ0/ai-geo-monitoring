@@ -129,7 +129,7 @@ test('returns the versioned runtime analysis prompt template to administrators',
     assert.equal(response.status, 200);
     assert.equal(response.headers['cache-control'], 'no-store');
     assert.equal(response.json.data.version, 'ai_structured_v4');
-    assert.equal(response.json.data.prompt_revision, 'semantic_evidence_few_shot_v6');
+    assert.equal(response.json.data.prompt_revision, 'semantic_evidence_few_shot_v7');
     assert.match(response.json.data.template, /\{\{目标品牌\}\}/);
     assert.match(response.json.data.template, /\{\{当前问题\}\}/);
     assert.match(response.json.data.template, /完整抽取/);

@@ -184,6 +184,36 @@ test('captures one new searched assistant turn in strict state-machine order', a
   );
 });
 
+test('persists the trusted Markdown answer format returned by the managed page', async () => {
+  const events = [];
+  let now = 0;
+  const answer = '| 厂家 | 特点 |\n| --- | --- |\n| 上海广拓 | 定位精确 |';
+  const turn = { id: 'turn-markdown', text: answer, answer_format: 'markdown_v1' };
+  const page = createPage(events, [
+    { assistantTurns: [], generationActive: false, busy: false },
+    { assistantTurns: [], generationActive: false, busy: false },
+    { assistantTurns: [turn], generationActive: false, busy: false },
+    { assistantTurns: [turn], generationActive: false, busy: false }
+  ]);
+  const adapter = new DeepSeekWebAdapter({
+    page,
+    captureStore: createCaptureStore(events),
+    now: () => now,
+    sleep: async (ms) => { now += ms; },
+    pollMs: 1,
+    stableMs: 1,
+    timeoutMs: 30_000
+  });
+
+  const result = await adapter.capture('对比厂家', {
+    record_id: 125,
+    user_id: 7
+  });
+
+  assert.equal(result.text, answer);
+  assert.equal(result.web_capture.answer_format, 'markdown_v1');
+});
+
 test('rejects missing capture ownership before opening or staging a page', async () => {
   const events = [];
   const adapter = new DeepSeekWebAdapter({
@@ -527,12 +557,18 @@ test('normalizes DOM citations and keeps bounded Network-only sources as retriev
   page.extractCitations = async () => [
     {
       url: 'https://Example.com/source#fragment',
-      title: '明确来源',
+      title: '-1',
+      display_index: 1,
       source_role: 'explicit_citation'
     },
     {
       url: 'https://example.com/source',
       title: '重复来源',
+      source_role: 'explicit_citation'
+    },
+    {
+      url: 'https://named.example.com/article',
+      title: '明确来源',
       source_role: 'explicit_citation'
     },
     {
@@ -546,18 +582,32 @@ test('normalizes DOM citations and keeps bounded Network-only sources as retriev
       source_role: 'explicit_citation'
     },
     {
+      url: 'https://user:secret@example.com/private',
+      title: '带凭据来源',
+      source_role: 'explicit_citation'
+    },
+    {
       url: `https://example.com/${'x'.repeat(2050)}`,
       title: '超长来源',
       source_role: 'explicit_citation'
     }
   ];
-  page.collectRetrievalCandidates = async () => [
-    { url: 'https://example.com/source', title: '与明确来源重复' },
-    { url: 'https://retrieval.example.net/report', title: '仅检索候选' },
-    { url: 'https://chat.deepseek.com/internal/source', title: '平台自身资源' },
-    { url: 'https://cdn.example.net/avatar.png~signed', title: '图片资源' },
-    { url: 'file:///etc/passwd', title: '非法候选' }
-  ];
+  page.collectRetrievalCandidates = async () => ({
+    candidates: [
+      { url: 'https://example.com/source', title: '与明确来源重复' },
+      { url: 'https://retrieval.example.net/report', title: '仅检索候选' },
+      { url: 'https://chat.deepseek.com/internal/source', title: '平台自身资源' },
+      { url: 'https://cdn.example.net/avatar.png~signed', title: '图片资源' },
+      { url: 'https://user:secret@retrieval.example.net/private', title: '带凭据候选' },
+      { url: 'file:///etc/passwd', title: '非法候选' }
+    ],
+    observation: {
+      observed_count: 5,
+      accepted_count: 2,
+      dropped_count: 3,
+      truncated: false
+    }
+  });
   const adapter = new DeepSeekWebAdapter({
     page,
     captureStore: createCaptureStore(events),
@@ -577,6 +627,14 @@ test('normalizes DOM citations and keeps bounded Network-only sources as retriev
     {
       url: 'https://example.com/source',
       domain: 'example.com',
+      title: 'example.com',
+      display_index: 1,
+      source_origin: 'deepseek_web_dom',
+      source_role: 'explicit_citation'
+    },
+    {
+      url: 'https://named.example.com/article',
+      domain: 'named.example.com',
       title: '明确来源',
       source_origin: 'deepseek_web_dom',
       source_role: 'explicit_citation'
@@ -596,6 +654,12 @@ test('normalizes DOM citations and keeps bounded Network-only sources as retriev
       source_role: 'retrieval_candidate'
     }
   ]);
+  assert.deepEqual(result.web_capture.search.candidate_observation, {
+    observed_count: 5,
+    accepted_count: 2,
+    dropped_count: 3,
+    truncated: false
+  });
 });
 
 test('a completed Web answer remains successful when no explicit citation is present', async () => {
@@ -649,11 +713,19 @@ test('passive Network observation reads bodies only for bounded same-origin JSON
         return {
           body: JSON.stringify({
             data: {
-              sources: [{
-                url: 'https://source.example/report',
-                title: '白名单来源',
+              sources: Array.from({ length: 25 }, (_, index) => ({
+                url: `https://source.example/report-${index}#fragment`,
+                title: index === 0
+                  ? 'ç”µç£æ„ŸçŸ¥ - ä¸Šæµ·å¹¿æ‹“'
+                  : `白名单来源 ${index}`,
                 cookie: '不得保存'
-              }]
+              }))
+            },
+            unrelated: {
+              nested: {
+                url: 'https://tracker.example/should-not-be-collected',
+                title: '无关深层链接'
+              }
             }
           }),
           base64Encoded: false
@@ -702,12 +774,23 @@ test('passive Network observation reads bodies only for bounded same-origin JSON
     }
   });
 
-  const candidates = await page.collectRetrievalCandidates();
+  const result = await page.collectRetrievalCandidates();
 
-  assert.deepEqual(candidates, [{
-    url: 'https://source.example/report',
-    title: '白名单来源'
-  }]);
+  assert.equal(result.candidates.length, 20);
+  assert.deepEqual(result.candidates[0], {
+    url: 'https://source.example/report-0',
+    title: '电磁感知 - 上海广拓'
+  });
+  assert.equal(
+    result.candidates.some((item) => item.url.includes('tracker.example')),
+    false
+  );
+  assert.deepEqual(result.observation, {
+    observed_count: 25,
+    accepted_count: 20,
+    dropped_count: 5,
+    truncated: true
+  });
   assert.deepEqual(
     commands.filter(([method]) => method === 'Network.getResponseBody'),
     [['Network.getResponseBody', { requestId: 'eligible' }]]

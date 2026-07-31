@@ -7,6 +7,7 @@ const {
   VisibilityMetric
 } = require('../models');
 const QuestionSetRunCsvService = require('./QuestionSetRunCsvService');
+const { repairMojibakeText } = require('./WebSourceText');
 const CitationMetricSemanticsService = require('./CitationMetricSemanticsService');
 const GeoMetricSemanticsService = require('./GeoMetricSemanticsService');
 const {
@@ -152,6 +153,39 @@ function deriveStatus(rows, pausedAt = null) {
   if (completed === total) return 'completed';
   if (failed === total) return 'failed';
   return 'partial';
+}
+
+function deriveExecutionState(row, now = new Date()) {
+  const status = String(row?.status || 'pending');
+  if (status === 'completed' || status === 'failed') return status;
+  const expiresAt = new Date(row?.lease_expires_at || 0).getTime();
+  const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  const hasActiveLease = Boolean(
+    row?.execution_token
+    && row?.execution_started_at
+    && row?.lease_owner
+    && Number.isFinite(expiresAt)
+    && Number.isFinite(nowMs)
+    && expiresAt > nowMs
+  );
+  return hasActiveLease ? 'executing' : 'queued';
+}
+
+function deriveControlState({
+  source,
+  integrityStatus,
+  pausedAt,
+  executionSummary
+}) {
+  if (
+    source === 'imported'
+    || integrityStatus === 'snapshot_only'
+    || integrityStatus === 'missing_records'
+  ) return 'read_only';
+  const pending = Number(executionSummary?.pending) || 0;
+  if (pending <= 0) return 'terminal';
+  if (!pausedAt) return 'running';
+  return Number(executionSummary?.executing) > 0 ? 'pausing' : 'paused';
 }
 
 function deriveCapabilities({ source, status, summary, integrityStatus }) {
@@ -313,6 +347,10 @@ function summarizeExecution(rows) {
     completed: rows.filter((row) => row.status === 'completed').length,
     failed: rows.filter((row) => row.status === 'failed').length,
     pending: rows.filter((row) => row.status === 'pending').length,
+    executing: rows.filter((row) => row.execution_state === 'executing').length,
+    queued: rows.filter((row) => (
+      row.status === 'pending' && row.execution_state !== 'executing'
+    )).length,
     failure_stages: Object.fromEntries(failureStages)
   };
 }
@@ -352,11 +390,26 @@ function normalizeProviderCitations(value) {
     const key = `${sourceRole}:${url}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    const domain = boundedText(source.domain, 255) || new URL(url).hostname;
+    const rawTitle = repairMojibakeText(
+      boundedText(source.title, 500).replace(/\s+/g, ' ').trim()
+    );
+    const marker = rawTitle.match(/^(?:\[|【)?[-–—]?\s*(\d+)\s*(?:\]|】)?$/);
+    const displayIndex = Number.isSafeInteger(Number(source.display_index))
+      && Number(source.display_index) > 0
+      ? Number(source.display_index)
+      : marker
+        ? Number(marker[1])
+        : null;
     output.push({
       url,
-      title: boundedText(source.title, 500),
-      domain: boundedText(source.domain, 255) || new URL(url).hostname,
-      source_role: sourceRole
+      title: rawTitle && !marker ? rawTitle : domain,
+      domain,
+      source_role: sourceRole,
+      ...(boundedText(source.source_origin, 80)
+        ? { source_origin: boundedText(source.source_origin, 80) }
+        : {}),
+      ...(displayIndex ? { display_index: displayIndex } : {})
     });
     if (output.length >= 200) break;
   }
@@ -387,6 +440,7 @@ function normalizeWebCapture(value, fallbackRecordId) {
   return {
     schema_version: boundedText(value.schema_version, 100),
     status: 'completed',
+    answer_format: value.answer_format === 'markdown_v1' ? 'markdown_v1' : 'plain_text',
     selector_version: boundedText(value.selector_version, 100),
     artifact_owner_record_id: recordId,
     captured_at: boundedText(value.captured_at || value.completed_at, 80),
@@ -406,7 +460,25 @@ function normalizeWebCapture(value, fallbackRecordId) {
         : value.search?.observed === false
           ? false
           : null,
-      evidence_type: boundedText(value.search?.evidence_type, 100)
+      evidence_type: boundedText(value.search?.evidence_type, 100),
+      ...(value.search?.candidate_observation
+        && typeof value.search.candidate_observation === 'object'
+        && !Array.isArray(value.search.candidate_observation)
+        ? {
+            candidate_observation: {
+              observed_count: Math.max(0, Math.trunc(finiteNumber(
+                value.search.candidate_observation.observed_count
+              ))),
+              accepted_count: Math.max(0, Math.trunc(finiteNumber(
+                value.search.candidate_observation.accepted_count
+              ))),
+              dropped_count: Math.max(0, Math.trunc(finiteNumber(
+                value.search.candidate_observation.dropped_count
+              ))),
+              truncated: value.search.candidate_observation.truncated === true
+            }
+          }
+        : {})
     },
     artifacts: {
       search_state: searchState,
@@ -447,11 +519,15 @@ function normalizeNativeRow(record) {
     platform_name: row.platform_name || row.platform || '',
     model_name: row.model_name || '',
     status: row.status || 'pending',
+    execution_state: deriveExecutionState(row),
     error_message: row.error_message || '',
     failure,
     retry,
     analysis_diagnostics: analysisDiagnostics,
     answer: detail.ai_response_original || '',
+    answer_format: row.result_summary?.web_capture?.answer_format === 'markdown_v1'
+      ? 'markdown_v1'
+      : 'plain_text',
     provider_citations: normalizeProviderCitations(detail.provider_citations),
     web_capture: normalizeWebCapture(row.result_summary?.web_capture, row.id),
     has_metrics: Boolean(metric),
@@ -617,6 +693,17 @@ class QuestionSetRunService {
       || sourceRows.find((row) => row?.metric_semantics_version)?.metric_semantics_version
       || LEGACY_METRIC_SEMANTICS;
     const rows = sourceRows
+      .map((row) => ({
+        ...row,
+        answer_format: row?.answer_format === 'markdown_v1'
+          || row?.web_capture?.answer_format === 'markdown_v1'
+          ? 'markdown_v1'
+          : 'plain_text',
+        provider_citations: normalizeProviderCitations(row?.provider_citations),
+        execution_state: ['completed', 'failed', 'executing', 'queued'].includes(row?.execution_state)
+          ? row.execution_state
+          : deriveExecutionState(row)
+      }))
       .map(normalizeStoredWebCapture)
       .map((row) => normalizeRowMetricSemantics(row, fallbackMetricSemanticsVersion))
       .map(normalizeCitationSemantics)
@@ -631,6 +718,13 @@ class QuestionSetRunService {
       ? 'failed'
       : deriveStatus(rows, pausedAt);
     const summary = summarize(rows);
+    const executionSummary = summarizeExecution(rows);
+    const controlState = deriveControlState({
+      source: run.source,
+      integrityStatus,
+      pausedAt,
+      executionSummary
+    });
     return {
       id: run.id,
       project_id: run.project_id,
@@ -643,6 +737,7 @@ class QuestionSetRunService {
       planned_platforms: Array.isArray(run.planned_platforms) ? run.planned_platforms : [],
       skipped_platforms: Array.isArray(run.skipped_platforms) ? run.skipped_platforms : [],
       status,
+      control_state: controlState,
       started_at: run.started_at,
       completed_at: run.completed_at,
       paused_at: pausedAt,
@@ -659,7 +754,7 @@ class QuestionSetRunService {
         summary,
         integrityStatus
       }),
-      execution_summary: summarizeExecution(rows),
+      execution_summary: executionSummary,
       summary,
       rows
     };
@@ -941,6 +1036,8 @@ class QuestionSetRunService {
 module.exports = new QuestionSetRunService();
 module.exports.SCHEMA_VERSION = SCHEMA_VERSION;
 module.exports.deriveStatus = deriveStatus;
+module.exports.deriveExecutionState = deriveExecutionState;
+module.exports.deriveControlState = deriveControlState;
 module.exports.deriveCapabilities = deriveCapabilities;
 module.exports.summarize = summarize;
 module.exports.summarizeExecution = summarizeExecution;

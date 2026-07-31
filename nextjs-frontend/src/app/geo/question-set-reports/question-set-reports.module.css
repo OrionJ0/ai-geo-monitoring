@@ -231,6 +231,37 @@
   white-space: pre-wrap;
 }
 
+.markdownAnswer {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.markdownAnswer :global(p) {
+  margin: 0 0 0.8em;
+}
+
+.markdownAnswer :global(table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.markdownAnswer :global(th),
+.markdownAnswer :global(td) {
+  padding: 6px 10px;
+  border: 1px solid #d9e0ea;
+  text-align: left;
+}
+
+.markdownAnswer :global(pre) {
+  max-width: 100%;
+  padding: 12px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: #f4f6f9;
+}
+
 .pdfAnswerLine {
   display: block;
   min-height: 1.75em;

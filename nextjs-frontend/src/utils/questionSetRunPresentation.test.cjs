@@ -144,3 +144,25 @@ test('运行、暂停、完成和失败提示不互相矛盾', () => {
   assert.equal(failed.title, '本次运行失败');
   assert.match(failed.description, /可以重试失败项/);
 });
+
+test('暂停收尾明确说明正在执行与等待处理数量', () => {
+  const notice = getRunStateNotice({
+    status: 'paused',
+    controlState: 'pausing',
+    source: 'native',
+    integrityStatus: 'complete',
+    capabilities: { can_resume: true },
+    executionSummary: {
+      completed: 4,
+      failed: 0,
+      pending: 6,
+      executing: 2,
+      queued: 4
+    }
+  });
+
+  assert.equal(notice.title, '正在暂停，等待已启动任务收尾');
+  assert.match(notice.description, /正在执行 2 条，等待处理 4 条/);
+  assert.match(notice.description, /不会再启动新的等待任务/);
+  assert.match(notice.description, /可以点击“继续运行”恢复/);
+});

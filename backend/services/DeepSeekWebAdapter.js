@@ -1,11 +1,18 @@
 const { createHash } = require('node:crypto');
 const selectors = require('../config/deepseekWebSelectors');
+const {
+  BROWSER_ANSWER_TREE_SERIALIZER,
+  renderAnswerTree
+} = require('./WebAnswerMarkdown');
+const { repairMojibakeText } = require('./WebSourceText');
 
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_CAPTURE_METADATA_BYTES = 32 * 1024;
 const MAX_NETWORK_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_NETWORK_RESPONSES = 50;
 const MAX_PROVIDER_CITATIONS = 200;
+const MAX_RETRIEVAL_CANDIDATES = 20;
+const MAX_RETRIEVAL_TITLE_CHARS = 160;
 const SCREENSHOT_COMMAND_TIMEOUT_MS = 45_000;
 const SCREENSHOT_RETRY_DELAY_MS = 500;
 const DEEPSEEK_WEB_IDENTITY = Object.freeze({
@@ -63,7 +70,11 @@ function normalizeExternalUrl(value) {
   } catch {
     return null;
   }
-  if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+  if (
+    !['http:', 'https:'].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+  ) return null;
   parsed.hash = '';
   const normalized = parsed.toString();
   return normalized.length <= 2048 ? normalized : null;
@@ -71,8 +82,18 @@ function normalizeExternalUrl(value) {
 
 function isRetrievalCandidateUrl(url, identity) {
   if (identity.allowedOrigins.includes(url.origin)) return false;
+  if (/\/(?:login|logout|sign-?in|register|feedback)(?:\/|$)/i.test(url.pathname)) {
+    return false;
+  }
   return !/\.(?:avif|bmp|css|gif|heic|ico|jpe?g|js|map|mjs|mp3|mp4|ogg|png|svg|ttf|wav|webm|webp|woff2?)(?:~|$)/i
     .test(url.pathname);
+}
+
+function citationDisplayIndex(value) {
+  const matched = String(value || '').trim().match(/^(?:\[|【)?[-–—]?\s*(\d+)\s*(?:\]|】)?$/);
+  if (!matched) return null;
+  const parsed = Number(matched[1]);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function normalizeProviderCitations(
@@ -94,12 +115,19 @@ function normalizeProviderCitations(
       return;
     }
     seen.add(url);
+    const rawTitle = String(item?.title || '').replace(/\s+/g, ' ').trim();
+    const displayIndex = Number.isSafeInteger(Number(item?.display_index))
+      && Number(item.display_index) > 0
+      ? Number(item.display_index)
+      : citationDisplayIndex(rawTitle);
+    const title = rawTitle && citationDisplayIndex(rawTitle) === null
+      ? bounded(rawTitle, 500)
+      : parsed.hostname.toLowerCase();
     rows.push({
       url,
       domain: parsed.hostname.toLowerCase(),
-      ...(String(item?.title || '').trim()
-        ? { title: bounded(String(item.title).replace(/\s+/g, ' ').trim(), 500) }
-        : {}),
+      title,
+      ...(displayIndex ? { display_index: displayIndex } : {}),
       source_origin: sourceRole === 'explicit_citation'
         ? identity.domCitationOrigin
         : identity.networkCitationOrigin,
@@ -174,7 +202,13 @@ class DeepSeekWebAdapter {
       if (newTurns.length === 1) {
         const text = normalizeText(newTurns[0].text);
         if (text) {
-          finalTurn = { id: String(newTurns[0].id), text };
+          finalTurn = {
+            id: String(newTurns[0].id),
+            text,
+            answer_format: newTurns[0].answer_format === 'markdown_v1'
+              ? 'markdown_v1'
+              : 'plain_text'
+          };
           if (text !== stableText) {
             stableText = text;
             stableSince = this.now();
@@ -257,7 +291,12 @@ class DeepSeekWebAdapter {
       }
       currentStage = 'content_extracted';
       const explicitCitations = await this.page.extractCitations(finalTurn.id);
-      const retrievalCandidates = await this.page.collectRetrievalCandidates?.() || [];
+      const retrievalObservation = await this.page.collectRetrievalCandidates?.() || [];
+      const retrievalCandidates = Array.isArray(retrievalObservation)
+        ? retrievalObservation
+        : Array.isArray(retrievalObservation.candidates)
+          ? retrievalObservation.candidates
+          : [];
       const configuredSearchObserved = captureMode.search_observed === undefined
         ? captureMode.observed
         : captureMode.search_observed;
@@ -289,6 +328,7 @@ class DeepSeekWebAdapter {
         schema_version: this.identity.captureSchemaVersion,
         selector_version: this.identity.selectorVersion,
         status: 'completed',
+        answer_format: finalTurn.answer_format,
         artifact_owner_record_id: captureOwner.record_id,
         page_origin: this.identity.pageOrigin,
         page_url: safeUrl(metadata.pageUrl, this.identity),
@@ -310,7 +350,10 @@ class DeepSeekWebAdapter {
           evidence_type: bounded(
             searchEvidenceType,
             80
-          )
+          ),
+          ...(!Array.isArray(retrievalObservation) && retrievalObservation.observation
+            ? { candidate_observation: retrievalObservation.observation }
+            : {})
         },
         completion: {
           state: 'stable',
@@ -345,6 +388,7 @@ class DeepSeekWebAdapter {
         platform: this.identity.platformCode,
         model_name: this.identity.modelName,
         text: finalTurn.text,
+        answer_format: finalTurn.answer_format,
         data: {},
         provider_citations: providerCitations,
         web_capture: webCapture
@@ -445,60 +489,88 @@ class DeepSeekWebPage {
   }
 
   extractCandidatesFromJson(value) {
-    const rows = [];
-    let visited = 0;
-    const visit = (node, depth = 0) => {
-      if (depth > 12 || visited >= 10_000 || rows.length >= MAX_PROVIDER_CITATIONS) return;
-      visited += 1;
-      if (Array.isArray(node)) {
-        node.forEach((item) => visit(item, depth + 1));
-        return;
-      }
-      if (!node || typeof node !== 'object') return;
-      const urlKey = ['url', 'link', 'href', 'source_url']
-        .find((key) => typeof node[key] === 'string');
-      if (urlKey) {
+    const paths = this.identity.platformCode === 'doubao-web'
+      ? [
+          ['data', 'search_results'],
+          ['data', 'sources'],
+          ['result', 'search_results']
+        ]
+      : [
+          ['data', 'sources'],
+          ['data', 'search_results'],
+          ['result', 'sources']
+        ];
+    const getPath = (root, path) => path.reduce(
+      (current, key) => current && typeof current === 'object' ? current[key] : undefined,
+      root
+    );
+    const candidates = [];
+    let observedCount = 0;
+    for (const path of paths) {
+      const rows = getPath(value, path);
+      if (!Array.isArray(rows)) continue;
+      observedCount += rows.length;
+      for (const item of rows) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+        const urlKey = ['url', 'link', 'href', 'source_url']
+          .find((key) => typeof item[key] === 'string');
         const titleKey = ['title', 'name', 'site_name']
-          .find((key) => typeof node[key] === 'string');
-        rows.push({
-          url: node[urlKey],
-          ...(titleKey ? { title: node[titleKey] } : {})
-        });
+          .find((key) => typeof item[key] === 'string');
+        if (!urlKey || !titleKey) continue;
+        candidates.push({ url: item[urlKey], title: item[titleKey] });
       }
-      Object.values(node).forEach((item) => visit(item, depth + 1));
-    };
-    visit(value);
-    return rows;
+    }
+    return { candidates, observed_count: observedCount };
   }
 
   parseNetworkBody(buffer, mimeType) {
     const text = buffer.toString('utf8');
+    const parsedRows = [];
     if (mimeType === 'text/event-stream') {
-      return text
+      parsedRows.push(...text
         .split(/\r?\n/)
         .filter((line) => line.startsWith('data:'))
         .map((line) => line.slice(5).trim())
         .filter((line) => line && line !== '[DONE]')
         .flatMap((line) => {
           try {
-            return this.extractCandidatesFromJson(JSON.parse(line));
+            return [this.extractCandidatesFromJson(JSON.parse(line))];
           } catch {
             return [];
           }
-        });
+        }));
+    } else {
+      try {
+        parsedRows.push(this.extractCandidatesFromJson(JSON.parse(text)));
+      } catch {
+        return { candidates: [], observed_count: 0 };
+      }
     }
-    try {
-      return this.extractCandidatesFromJson(JSON.parse(text));
-    } catch {
-      return [];
-    }
+    return {
+      candidates: parsedRows.flatMap((item) => item.candidates),
+      observed_count: parsedRows.reduce(
+        (total, item) => total + Number(item.observed_count || 0),
+        0
+      )
+    };
   }
 
   async collectRetrievalCandidates() {
     const observation = this.networkObservation;
     await this.stopNetworkObservation();
-    if (!observation) return [];
-    const candidates = [];
+    if (!observation) {
+      return {
+        candidates: [],
+        observation: {
+          observed_count: 0,
+          accepted_count: 0,
+          dropped_count: 0,
+          truncated: false
+        }
+      };
+    }
+    const rawCandidates = [];
+    let observedCount = 0;
     for (const [requestId, metadata] of observation.responses) {
       let responseBody;
       try {
@@ -510,10 +582,38 @@ class DeepSeekWebPage {
         ? Buffer.from(String(responseBody.body || ''), 'base64')
         : Buffer.from(String(responseBody?.body || ''), 'utf8');
       if (!buffer.length || buffer.length > MAX_NETWORK_BODY_BYTES) continue;
-      candidates.push(...this.parseNetworkBody(buffer, metadata.mimeType));
-      if (candidates.length >= MAX_PROVIDER_CITATIONS) break;
+      const parsed = this.parseNetworkBody(buffer, metadata.mimeType);
+      observedCount += parsed.observed_count;
+      rawCandidates.push(...parsed.candidates);
     }
-    return candidates.slice(0, MAX_PROVIDER_CITATIONS);
+    const candidates = [];
+    const seen = new Set();
+    let truncated = false;
+    for (const item of rawCandidates) {
+      const url = normalizeExternalUrl(item?.url);
+      const rawTitle = String(item?.title || '').replace(/\s+/g, ' ').trim();
+      if (!url || !rawTitle || rawTitle.length > MAX_RETRIEVAL_TITLE_CHARS) continue;
+      const parsedUrl = new URL(url);
+      if (!isRetrievalCandidateUrl(parsedUrl, this.identity) || seen.has(url)) continue;
+      if (candidates.length >= MAX_RETRIEVAL_CANDIDATES) {
+        truncated = true;
+        continue;
+      }
+      seen.add(url);
+      candidates.push({
+        url,
+        title: repairMojibakeText(rawTitle).slice(0, MAX_RETRIEVAL_TITLE_CHARS)
+      });
+    }
+    return {
+      candidates,
+      observation: {
+        observed_count: observedCount,
+        accepted_count: candidates.length,
+        dropped_count: Math.max(0, observedCount - candidates.length),
+        truncated
+      }
+    };
   }
 
   async assertReady() {
@@ -751,7 +851,7 @@ class DeepSeekWebPage {
   async getConversationSnapshot() {
     const verificationMarkers = JSON.stringify(selectors.verificationMarkers);
     const loginMarkers = JSON.stringify(selectors.loginMarkers);
-    return this.evaluate(`(() => {
+    const snapshot = await this.evaluate(`(() => {
       const visible = (element) => {
         const style = getComputedStyle(element);
         const rect = element.getBoundingClientRect();
@@ -760,6 +860,7 @@ class DeepSeekWebPage {
           && rect.width > 0
           && rect.height > 0;
       };
+      ${BROWSER_ANSWER_TREE_SERIALIZER}
       const hasVisibleMatch = (selectors) => selectors.some((selector) => (
         Array.from(document.querySelectorAll(selector)).some(visible)
       ));
@@ -779,7 +880,8 @@ class DeepSeekWebPage {
       return {
         assistantTurns: turns.map((element, index) => ({
           id: 'assistant-' + index,
-          text: String(element.innerText || element.textContent || '').trim()
+          text: String(element.innerText || element.textContent || '').trim(),
+          serialized_answer: serializeAnswerTree(element)
         })),
         generationActive,
         busy,
@@ -787,6 +889,19 @@ class DeepSeekWebPage {
         loginRequired: hasVisibleMatch(${loginMarkers})
       };
     })()`);
+    const assistantTurns = (snapshot?.assistantTurns || []).map((turn) => {
+      if (!turn?.serialized_answer) return turn;
+      if (turn.serialized_answer.truncated === true) {
+        throw adapterError('web_response_too_large', 'DeepSeek 回答超过结构化采集上限');
+      }
+      const markdown = renderAnswerTree(turn.serialized_answer.tree);
+      return {
+        id: String(turn.id || ''),
+        text: markdown || normalizeText(turn.text),
+        answer_format: markdown ? 'markdown_v1' : 'plain_text'
+      };
+    });
+    return { ...snapshot, assistantTurns };
   }
 
   async extractCitations(turnId) {
@@ -811,10 +926,20 @@ class DeepSeekWebPage {
         }
         if (!['http:', 'https:'].includes(url.protocol) || seen.has(url.href)) continue;
         seen.add(url.href);
+        const visibleTitle = String(anchor.textContent || '')
+          .replace(/\\s+/g, ' ').trim();
+        const metadataTitle = [
+          anchor.getAttribute('data-title'),
+          anchor.getAttribute('title'),
+          anchor.getAttribute('aria-label')
+        ].map((value) => String(value || '').replace(/\\s+/g, ' ').trim())
+          .find((value) => value && !/^(?:\\[|【)?[-–—]?\\s*\\d+\\s*(?:\\]|】)?$/.test(value));
+        const marker = visibleTitle.match(/^(?:\\[|【)?[-–—]?\\s*(\\d+)\\s*(?:\\]|】)?$/);
         rows.push({
           url: url.href,
           domain: url.hostname.toLowerCase(),
-          title: String(anchor.textContent || url.hostname).replace(/\\s+/g, ' ').trim().slice(0, 300),
+          title: String(metadataTitle || visibleTitle || url.hostname).slice(0, 300),
+          ...(marker ? { display_index: Number(marker[1]) } : {}),
           source_origin: 'deepseek_web_dom',
           source_role: 'explicit_citation'
         });

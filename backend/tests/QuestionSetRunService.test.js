@@ -191,6 +191,8 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     completed: 1,
     failed: 1,
     pending: 0,
+    executing: 0,
+    queued: 0,
     failure_stages: {
       analysis_validation: 1
     }
@@ -560,7 +562,7 @@ test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及
     },
     {
       url: 'https://retrieval.example.com/b',
-      title: '检索候选',
+      title: 'ç”µç£æ„ŸçŸ¥ - ä¸Šæµ·å¹¿æ‹“',
       domain: 'retrieval.example.com',
       source_role: 'retrieval_candidate'
     }
@@ -580,7 +582,14 @@ test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及
   assert.equal(report.rows[0].platform, 'deepseek-web');
   assert.equal(report.rows[0].platform_name, 'DeepSeek 网页版');
   assert.equal(report.rows[0].model_name, 'deepseek-web-ui');
-  assert.deepEqual(report.rows[0].provider_citations, providerCitations);
+  assert.equal(
+    report.rows[0].provider_citations[1].title,
+    '电磁感知 - 上海广拓'
+  );
+  assert.equal(
+    providerCitations[1].title,
+    'ç”µç£æ„ŸçŸ¥ - ä¸Šæµ·å¹¿æ‹“'
+  );
   assert.equal(report.rows[0].web_capture.selector_version, 'deepseek-web-v1');
   assert.equal(report.rows[0].web_capture.artifact_owner_record_id, record.id);
   assert.equal(report.rows[0].web_capture.capture_mode.name, 'web_search');
@@ -1070,6 +1079,72 @@ test('执行能力由服务端状态机统一给出暂停和继续条件', () =>
     can_retry: false,
     retry_disabled_reason: 'run_not_terminal'
   });
+});
+
+test('报告从有效执行租约区分暂停收尾和已暂停且不泄漏租约字段', async () => {
+  const run = await createNativeRun(2);
+  await run.update({ paused_at: new Date('2026-07-31T10:00:00.000Z') });
+  const executing = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    question_set_run_id: run.id,
+    run_slot_index: 0,
+    platform: 'deepseek',
+    question: '正在执行的问题',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'pending',
+    execution_token: 'private-token',
+    execution_started_at: new Date(),
+    lease_owner: 'private-owner',
+    lease_expires_at: new Date('2099-01-01T00:00:00.000Z')
+  });
+  const queued = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    question_set_run_id: run.id,
+    run_slot_index: 1,
+    platform: 'deepseek',
+    question: '等待处理的问题',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'pending'
+  });
+
+  const pausing = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+  assert.equal(pausing.status, 'paused');
+  assert.equal(pausing.control_state, 'pausing');
+  assert.deepEqual(pausing.execution_summary, {
+    total: 2,
+    completed: 0,
+    failed: 0,
+    pending: 2,
+    executing: 1,
+    queued: 1,
+    failure_stages: {}
+  });
+  assert.deepEqual(pausing.rows.map((row) => row.execution_state), ['executing', 'queued']);
+  assert.equal(Object.hasOwn(pausing.rows[0], 'execution_token'), false);
+  assert.equal(Object.hasOwn(pausing.rows[0], 'lease_owner'), false);
+  assert.equal(Object.hasOwn(pausing.rows[0], 'lease_expires_at'), false);
+
+  await executing.update({ lease_expires_at: new Date('2000-01-01T00:00:00.000Z') });
+  const paused = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+  assert.equal(paused.control_state, 'paused');
+  assert.equal(paused.execution_summary.executing, 0);
+  assert.equal(paused.execution_summary.queued, 2);
+  assert.deepEqual(paused.rows.map((row) => row.execution_state), ['queued', 'queued']);
+
+  await QuestionRecord.destroy({ where: { id: [executing.id, queued.id] } });
+  await run.destroy();
 });
 
 test('失败阶段聚合把外部阶段名当作普通数据', () => {

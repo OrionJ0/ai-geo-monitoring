@@ -418,13 +418,62 @@ test('resume 发现零 pending 时清理暂停并立即固化终态', async () =
   assert.deepEqual(result, {
     ok: true,
     runId: run.id,
+    run_id: run.id,
     resumed: true,
-    remainingCount: 0
+    remainingCount: 0,
+    control_state: 'terminal',
+    idempotent_replay: false
   });
   await run.reload();
   assert.ok(run.completed_at);
   assert.equal(run.paused_at, null);
   assert.deepEqual(run.imported_rows.map((row) => row.status), ['completed', 'failed']);
+});
+
+test('并发 resume 只有一个请求取得恢复权并调度一次', async () => {
+  const { run } = await createRun(['pending'], {
+    paused_at: new Date('2026-07-26T01:01:00.000Z')
+  });
+  const originalBuildContext = ProjectRunService.buildPersistedQuestionSetRunContext;
+  const originalSchedule = ProjectRunService.schedulePreparedRun;
+  let scheduled = 0;
+  ProjectRunService.buildPersistedQuestionSetRunContext = async () => ({
+    entries: [{}]
+  });
+  ProjectRunService.schedulePreparedRun = () => {
+    scheduled += 1;
+  };
+
+  try {
+    const results = await Promise.all([
+      ProjectRunService.resumeRun(run.id, project.id),
+      ProjectRunService.resumeRun(run.id, project.id)
+    ]);
+    assert.equal(scheduled, 1);
+    assert.deepEqual(
+      results.map((result) => result.idempotent_replay).sort(),
+      [false, true]
+    );
+    assert.ok(results.every((result) => result.control_state === 'running'));
+  } finally {
+    ProjectRunService.buildPersistedQuestionSetRunContext = originalBuildContext;
+    ProjectRunService.schedulePreparedRun = originalSchedule;
+  }
+});
+
+test('重复 pause 返回幂等成功且不改写首次暂停时间', async () => {
+  const { run } = await createRun(['pending']);
+  const first = await ProjectRunService.pauseRun(run.id, project.id);
+  await run.reload();
+  const firstPausedAt = run.paused_at.toISOString();
+  const second = await ProjectRunService.pauseRun(run.id, project.id);
+  await run.reload();
+
+  assert.equal(first.idempotent_replay, false);
+  assert.equal(second.idempotent_replay, true);
+  assert.equal(first.control_state, 'paused');
+  assert.equal(second.control_state, 'paused');
+  assert.equal(run.paused_at.toISOString(), firstPausedAt);
 });
 
 test('报告读取、历史列表和导出不触发父运行写入', async () => {
