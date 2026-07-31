@@ -140,6 +140,7 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
     owned_citation_count: 1,
     citation_sources: [{
       url: 'https://www.gato.com.cn/guide',
+      title: '-1',
       domain: 'www.gato.com.cn',
       owned: true
     }],
@@ -207,6 +208,7 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   assert.equal(report.rows[0].analysis_platform, 'analysis-ai');
   assert.deepEqual(report.rows[0].citation_sources, [{
     url: 'https://www.gato.com.cn/guide',
+    title: 'www.gato.com.cn',
     domain: 'www.gato.com.cn',
     owned: true
   }]);

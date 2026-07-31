@@ -83,7 +83,7 @@ function normalizeFailure(value) {
 
 function normalizeCitationSemantics(row) {
   const eligible = CitationMetricSemanticsService.isCoreKpiEligible(row);
-  const rawSources = Array.isArray(row?.citation_sources) ? row.citation_sources : [];
+  const rawSources = normalizeMetricCitationSources(row?.citation_sources);
   const rawCount = finiteNumber(row?.citation_count);
   if (eligible) {
     const ownedCount = row?.owned_citation_count !== undefined && row?.owned_citation_count !== null
@@ -379,6 +379,33 @@ function safeHttpUrl(value) {
   }
 }
 
+function citationMarker(value) {
+  return String(value || '').match(/^(?:\[|【)?[-–—]?\s*(\d+)\s*(?:\]|】)?$/);
+}
+
+function isPlaceholderCitationTitle(value) {
+  return /^(?:auto[-_ ]?link|link|url|website|source|citation|网页|链接|来源|引用)$/i.test(
+    String(value || '')
+  );
+}
+
+function normalizeMetricCitationSources(value) {
+  return (Array.isArray(value) ? value : []).map((source) => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return source;
+    const rawTitle = repairMojibakeText(
+      boundedText(source.title, 500).replace(/\s+/g, ' ').trim()
+    );
+    if (!rawTitle) return source;
+    const url = safeHttpUrl(source.url);
+    const domain = boundedText(source.domain, 255)
+      || (url ? new URL(url).hostname : '');
+    const title = citationMarker(rawTitle) || isPlaceholderCitationTitle(rawTitle)
+      ? (domain || url || '未知来源')
+      : rawTitle;
+    return { ...source, title };
+  });
+}
+
 function normalizeProviderCitations(value) {
   const output = [];
   const seen = new Set();
@@ -394,8 +421,8 @@ function normalizeProviderCitations(value) {
     const rawTitle = repairMojibakeText(
       boundedText(source.title, 500).replace(/\s+/g, ' ').trim()
     );
-    const marker = rawTitle.match(/^(?:\[|【)?[-–—]?\s*(\d+)\s*(?:\]|】)?$/);
-    const placeholderTitle = /^(?:auto[-_ ]?link|link|url|website|source|citation|网页|链接|来源|引用)$/i.test(rawTitle);
+    const marker = citationMarker(rawTitle);
+    const placeholderTitle = isPlaceholderCitationTitle(rawTitle);
     const displayIndex = Number.isSafeInteger(Number(source.display_index))
       && Number(source.display_index) > 0
       ? Number(source.display_index)
