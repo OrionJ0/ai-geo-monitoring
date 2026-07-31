@@ -87,15 +87,20 @@
   - 修复：正式分析硬切到 `deepseek/deepseek-v4-pro`；以 `choice_set_few_shot_v1` 直接描述买家选择集合，并用目标品牌缺失、同需求不同技术、客户/平台非竞品、别名归并与有序榜单四类示例校准边界；完整 JSON 字段形状作为输出契约，不把提示词做成静态规则器。DeepSeek 固定启用 high 思考和 JSON Object；不设置应用层 Token 上限，提交完整问题和原回答；保持严格校验、具体错误定向重试和 fail-closed。
   - 验证：同一 40+10 人工基线 A/B/C 实测中，旧提示词关闭思考为错误排除 42、可计算性错配 3、SOV MAE 2.77pp、聚合偏差 +4.04pp；胜出方案选择轮次为 40/40 成功、错误排除 5、可计算性错配 0、SOV MAE 0.47pp、聚合偏差 +0.02pp。硬切后生产配置独立全量刷新仍为 40/40 成功、错误排除 8、SOV MAE 0.51pp、聚合偏差 -0.06pp；设置页可见提示词修订、实际请求 JSON、high 思考与 `token_limit: null`。
 
-- [ ] 2026-07-29：稳定品牌榜单与情绪结构化结果
-  - 状态：待修
+- [x] 2026-07-29：稳定品牌榜单与情绪结构化结果
+  - 状态：已修
   - 记录时间：2026-07-29 16:13
   - 现象：相同 `choice_set_few_shot_v1 + deepseek-v4-pro high` 在两轮 40 条基线上均保持 SOV 准确，但榜单一致率分别为 62.5% 和 25%，情绪一致率均为 80%。
   - 影响：回答内竞品提及占比已显著改善，但品牌排名仍可能漏榜，情绪可能把正向描述判断为中性；这两项不应借用 SOV 验收结论宣称已稳定。
   - 来源：
     - `work/geo-baseline-2026-07-28/experiments/choice-set-high-v3/BASELINE-REPORT.md`
     - `work/geo-baseline-2026-07-28/BASELINE-REPORT.md`
-  - 下一步：为榜单与情绪分别建立最小误差样本集，先判断榜单是否应由明确序号确定性抽取，再单独迭代对应示例；不要继续向竞品提示词堆叠混合规则。
+  - 根因：旧版 `choice_set_few_shot_v1` 的示例和任务步骤主要围绕竞品选择集合，未充分区分“编号候选次序、分组内局部次序、推荐偏好、并列表格”和“普通提及顺序”；情绪示例也不足以稳定覆盖正面、中性、负面及目标未提及边界。
+  - 修复：正式分析已硬切到 `ai_structured_v4 / geo_metric_input_v4` 和 `semantic_evidence_few_shot_v6`。提示词把完整实体抽取、竞争关系、候选顺序和目标品牌整体选择倾向拆成独立语义阶段，并增加有序编号、无序表格、推荐但非完整排名、分组局部排名、别名正面、事实中性和明确负面等示例及输出前静默自检。程序仍只校验结构、证据和实体引用，不使用编号正则、排名关键词表或情绪词典推导语义结果。
+  - 验证：
+    - 同一 40 条人工确认主基线使用真实 `deepseek-v4-pro` 重跑 40/40 成功；8 条有榜样本一致率 100%，排名误报、漏报和错名次均为 0；20 条已提及样本情绪一致率 85%，达到既定可用线。
+    - 独立情绪边界集覆盖正面、中性、负面和目标未提及各 3 条，真实模型 12/12 分析成功，9 条有效情绪一致率 100%，未出现系统性偏向中性。该补充集仍保留 `human_review_confirmed: no`，只作为边界回归证据，不冒充人工正式结论。
+    - 证据见 `work/geo-baseline-2026-07-28/experiments/semantic-evidence-v6/BASELINE-REPORT.md`、`work/geo-sentiment-baseline-2026-07-29/BASELINE-PARTIAL.md` 和 `docs/blocked-2026-07-29-002-ai-semantic-analysis-quality/issues/003-deepseek-baseline-and-prompt-calibration.md`。
 
 - [ ] 2026-07-27：完成目标 VM 的豆包 Web 正式切换
   - 状态：待修
