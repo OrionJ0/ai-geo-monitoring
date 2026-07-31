@@ -547,6 +547,106 @@ test('accepts nested surface forms that refer to the same mention occurrence', a
   assert.equal(result.answer_competitor_share, 100);
 });
 
+test('repairs empty surface forms from an entity name grounded in the original answer', async () => {
+  let attempts = 0;
+  const service = new AIResponseAnalysisService({
+    configService: {
+      getAnalysisPlatform: async () => ({
+        code: 'analysis-ai',
+        default_model: 'analysis-model'
+      })
+    },
+    requestService: {
+      queryConfig: async () => {
+        attempts += 1;
+        return {
+          success: true,
+          text: JSON.stringify({
+            entities: [{ name: '广拓', type: 'brand' }],
+            mentions: [{ entity_name: '广拓', surface_forms: [] }],
+            target_entity_name: '广拓',
+            competitor_relations: [],
+            candidate_lists: [],
+            recommendations: [],
+            claims: [],
+            sentiment: {
+              label: 'neutral',
+              reason: '客观陈述',
+              evidence: ['广拓提供周界方案'],
+              risk_terms: []
+            }
+          })
+        };
+      }
+    }
+  });
+
+  const result = await service.analyze({
+    question: '有哪些可选厂商？',
+    responseText: '回答提到广拓提供周界方案。',
+    brand: { name: '广拓' }
+  });
+
+  assert.equal(attempts, 1);
+  assert.equal(result.brand_mentions, 1);
+  assert.deepEqual(result.analysis_structure.mentions, [{
+    entity_name: '广拓',
+    surface_forms: ['广拓']
+  }]);
+});
+
+test('rejects empty surface forms when the entity name is absent from the original answer', () => {
+  const service = new AIResponseAnalysisService();
+
+  assert.throws(
+    () => service.parseOutput(JSON.stringify({
+      entities: [{ name: '广拓', type: 'brand' }],
+      mentions: [{ entity_name: '广拓', surface_forms: [] }],
+      target_entity_name: '广拓',
+      competitor_relations: [],
+      candidate_lists: [],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'neutral',
+        reason: '未出现目标品牌',
+        evidence: [],
+        risk_terms: []
+      }
+    }), {
+      responseText: '回答只提到其他厂商。',
+      brand: { name: '广拓' }
+    }),
+    /surface_forms 至少包含 1 个短实体词/
+  );
+});
+
+test('rejects a non-array surface forms value instead of treating it as empty', () => {
+  const service = new AIResponseAnalysisService();
+
+  assert.throws(
+    () => service.parseOutput(JSON.stringify({
+      entities: [{ name: '广拓', type: 'brand' }],
+      mentions: [{ entity_name: '广拓', surface_forms: '广拓' }],
+      target_entity_name: '广拓',
+      competitor_relations: [],
+      candidate_lists: [],
+      recommendations: [],
+      claims: [],
+      sentiment: {
+        label: 'neutral',
+        reason: '客观陈述',
+        evidence: ['广拓提供周界方案'],
+        risk_terms: []
+      }
+    }), {
+      responseText: '广拓提供周界方案。',
+      brand: { name: '广拓' }
+    }),
+    /surface_forms 必须是数组/
+  );
+});
+
 test('counts a full name with multiple aliases in one parenthetical as one mention', () => {
   const service = new AIResponseAnalysisService();
   const responseText = [

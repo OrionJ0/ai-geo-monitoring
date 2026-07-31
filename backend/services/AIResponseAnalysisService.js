@@ -755,7 +755,14 @@ function normalizeMentions(value, responseText, entityMap) {
 
   value.forEach((item, index) => {
     const entity = requireEntity(entityMap, item?.entity_name, `mentions[${index}].entity_name`);
-    if (!Array.isArray(item?.surface_forms) || !item.surface_forms.length) {
+    if (!Array.isArray(item?.surface_forms)) {
+      throw new AIResponseAnalysisError(`mentions[${index}].surface_forms 必须是数组`);
+    }
+    const suppliedSurfaceForms = item.surface_forms;
+    const surfaceForms = suppliedSurfaceForms.length
+      ? suppliedSurfaceForms
+      : (source.includes(entity.name) ? [entity.name] : []);
+    if (!surfaceForms.length) {
       throw new AIResponseAnalysisError(`mentions[${index}].surface_forms 至少包含 1 个短实体词`);
     }
     const entityKey = compact(entity.name);
@@ -763,7 +770,7 @@ function normalizeMentions(value, responseText, entityMap) {
       entity_name: entity.name,
       surface_forms: new Set()
     };
-    item.surface_forms.forEach((surface, surfaceIndex) => {
+    surfaceForms.forEach((surface, surfaceIndex) => {
       const field = `mentions[${index}].surface_forms[${surfaceIndex}]`;
       const text = boundedString(surface, field, 60);
       if (/[。！？!?；;\n\r]/u.test(text)) {
