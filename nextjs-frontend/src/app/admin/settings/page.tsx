@@ -7,6 +7,7 @@ import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import AIPlatformSettings from './AIPlatformSettings';
 import AIAnalysisSettings from './AIAnalysisSettings';
 import BaiduMarketingSettings from './BaiduMarketingSettings';
+import OwnedSeoDomainsSettings from './OwnedSeoDomainsSettings';
 
 type SettingsResponse = {
   seo_title?: string;
@@ -62,6 +63,7 @@ export default function AdminSettingsPage() {
       'marketing',
       'runtime',
       'seo',
+      'seo-audit',
     ].includes(hash)) {
       setActiveTab(hash);
     }
@@ -186,6 +188,7 @@ export default function AdminSettingsPage() {
           { key: 'marketing', label: '营销监控', children: <BaiduMarketingSettings />, destroyOnHidden: false },
           { key: 'runtime', label: '运行设置', children: runtimeSettings, forceRender: true },
           { key: 'seo', label: '站点 SEO', children: seoSettings, forceRender: true },
+          { key: 'seo-audit', label: '自有检测站点', children: <OwnedSeoDomainsSettings />, destroyOnHidden: false },
         ]}
       />
     </Card>

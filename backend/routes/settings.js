@@ -8,6 +8,7 @@ const AIAnalysisConfigService = require('../services/AIAnalysisConfigService');
 const { AIAnalysisConfigError } = require('../services/AIAnalysisConfigService');
 const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
 const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
+const SeoAuditSettingsService = require('../services/SeoAuditSettingsService');
 
 // 允许的设置项及校验
 const allowedKeys = {
@@ -48,6 +49,51 @@ function analysisError(res, error, fallbackMessage) {
     data: { error_code: isKnown ? error.code : 'analysis_api_error' }
   });
 }
+
+function createSeoAuditSettingsHandlers({
+  settingsService = SeoAuditSettingsService
+} = {}) {
+  return {
+    async get(_req, res) {
+      try {
+        const data = await settingsService.getSettings();
+        return res.json({ success: true, data });
+      } catch {
+        return res.status(500).json({
+          success: false,
+          message: '获取自有站点配置失败'
+        });
+      }
+    },
+
+    async put(req, res) {
+      try {
+        const data = await settingsService.setOwnedOrigins(req.body?.ownedOrigins);
+        return res.json({
+          success: true,
+          message: '自有站点配置已更新',
+          data
+        });
+      } catch (error) {
+        if (error?.code && Number.isInteger(error.status)) {
+          return res.status(error.status).json({
+            success: false,
+            message: error.message,
+            code: error.code
+          });
+        }
+        return res.status(500).json({
+          success: false,
+          message: '更新自有站点配置失败'
+        });
+      }
+    }
+  };
+}
+
+const seoAuditSettingsHandlers = createSeoAuditSettingsHandlers();
+router.get('/seo-audit', adminRequired, seoAuditSettingsHandlers.get);
+router.put('/seo-audit', adminRequired, seoAuditSettingsHandlers.put);
 
 router.get('/analysis-api', adminRequired, async (_req, res) => {
   try {
@@ -219,3 +265,4 @@ router.get('/notice', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.createSeoAuditSettingsHandlers = createSeoAuditSettingsHandlers;

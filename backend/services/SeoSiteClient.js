@@ -372,12 +372,14 @@ function createSeoSiteClient({
   allowedPrivateOrigin = '',
   policy,
   minOriginIntervalMs = 250,
+  originIntervalOverrides = {},
   now = Date.now,
   wait
 } = {}) {
   const privateOrigin = normalizedPrivateOrigin(allowedPrivateOrigin);
   const crawlerPolicy = policy || createSeoAuditCrawlerPolicy({
     minOriginIntervalMs,
+    originIntervalOverrides,
     now,
     ...(wait ? { wait } : {})
   });

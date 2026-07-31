@@ -269,3 +269,64 @@ test('rebuilds a private audit runtime from the stored URL after restart', async
     javascriptRendering: 'not_checked'
   });
 });
+
+test('loads owned origins when the worker starts and passes them to the formal site runtime', async () => {
+  const job = createRow({
+    id: 13,
+    user_id: 7,
+    requested_url: 'https://gato.com.cn/',
+    status: 'queued',
+    progress: { phase: 'queued' },
+    created_at: new Date('2026-07-31T01:00:00Z')
+  });
+  let runtimeOptions = null;
+  const service = createSeoAuditJobService({
+    model: {
+      async findByPk() { return job; },
+      async findOne() { return job; }
+    },
+    settingsService: {
+      async getSettings() {
+        return { ownedOrigins: ['https://gato.com.cn'] };
+      }
+    },
+    runtimeFactory(url, options) {
+      runtimeOptions = options;
+      return {
+        requestedUrl: url,
+        policy: { networkScope: 'public' },
+        service: {
+          async audit() {
+            return {
+              mode: 'site',
+              requestedUrl: url,
+              finalUrl: url,
+              checkedAt: '2026-07-31T01:01:00Z',
+              site: {
+                origin: 'https://gato.com.cn',
+                discoveredPages: 1,
+                auditedPages: 1,
+                failedPages: 0,
+                truncated: false
+              },
+              pages: [],
+              issues: [],
+              sitewide: { checks: [], issues: [] }
+            };
+          }
+        }
+      };
+    },
+    historyService: {
+      async findPreviousSiteReport() { return null; },
+      async save() { return { id: 93 }; }
+    }
+  });
+
+  await service.run(job.id);
+
+  assert.deepEqual(runtimeOptions, {
+    ownedOrigins: ['https://gato.com.cn']
+  });
+  assert.equal(job.status, 'completed');
+});

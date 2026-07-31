@@ -101,6 +101,7 @@ test('the public site runtime stops after a robots WAF in the formal preflight c
 
 test('the public site runtime reports the resolved entry and real request baseline', async () => {
   const runtime = createSiteAuditRuntime('https://example.com/cn', {
+    ownedOrigins: ['https://example.com'],
     clientOptions: clientOptions(async ({ url }) => {
       const pathname = new URL(url).pathname;
       if (pathname === '/cn') {
@@ -137,4 +138,9 @@ test('the public site runtime reports the resolved entry and real request baseli
     redirectHops: 1
   });
   assert.equal(report.site.crawlDiagnostics.renderAttempts, 2);
+  assert.deepEqual(report.site.crawlProfile, {
+    key: 'owned_fast',
+    concurrency: 8,
+    minOriginIntervalMs: 100
+  });
 });

@@ -33,3 +33,9 @@ test('development entry points use Turbopack on the public port 3001 listener', 
     'development commands must not opt out of the default Turbopack bundler',
   );
 });
+
+test('production builds use the verified webpack path', () => {
+  const frontendPackage = readPackageJson(frontendRoot);
+
+  assert.equal(frontendPackage.scripts.build, 'next build --webpack');
+});

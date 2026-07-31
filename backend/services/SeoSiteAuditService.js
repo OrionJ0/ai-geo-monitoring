@@ -247,6 +247,7 @@ function createSeoSiteAuditService({
   siteClient,
   renderService,
   networkScope = 'public',
+  crawlProfile = 'standard',
   ruleConfig = defaultSeoAuditRules,
   scoreConfig = defaultSeoHealthScoreConfig
 } = {}) {
@@ -770,6 +771,11 @@ function createSeoSiteAuditService({
         },
         site: {
           origin,
+          crawlProfile: {
+            key: crawlProfile,
+            concurrency: rules.crawl.concurrency,
+            minOriginIntervalMs: rules.crawl.minOriginIntervalMs
+          },
           discoveredPages: discovered.length,
           auditedPages: pages.length,
           successfulPages: successfulPages.length,

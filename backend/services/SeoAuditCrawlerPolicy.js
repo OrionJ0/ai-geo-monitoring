@@ -20,12 +20,21 @@ function circuitError(classification) {
 
 function createSeoAuditCrawlerPolicy({
   minOriginIntervalMs = 250,
+  originIntervalOverrides = {},
   now = Date.now,
   wait = defaultWait
 } = {}) {
   if (!Number.isInteger(minOriginIntervalMs) || minOriginIntervalMs < 0) {
     throw new TypeError('同域请求间隔必须是非负整数');
   }
+  const intervalOverrides = new Map(
+    Object.entries(originIntervalOverrides).map(([origin, interval]) => {
+      if (!Number.isInteger(interval) || interval < 0) {
+        throw new TypeError('自有站点请求间隔必须是非负整数');
+      }
+      return [new URL(origin).origin, interval];
+    })
+  );
 
   const origins = new Map();
   const diagnostics = {
@@ -49,6 +58,10 @@ function createSeoAuditCrawlerPolicy({
     return origins.get(origin);
   };
 
+  const intervalFor = (url) => (
+    intervalOverrides.get(new URL(url).origin) ?? minOriginIntervalMs
+  );
+
   return {
     async beforeRequest({ url, requestKind = 'link_probe', redirectHop = false }) {
       const state = originState(url);
@@ -56,7 +69,7 @@ function createSeoAuditCrawlerPolicy({
 
       const currentTime = now();
       const reservedStartAt = Math.max(currentTime, state.nextStartAt);
-      state.nextStartAt = reservedStartAt + minOriginIntervalMs;
+      state.nextStartAt = reservedStartAt + intervalFor(url);
       if (reservedStartAt > currentTime) {
         await wait(reservedStartAt - currentTime);
       }

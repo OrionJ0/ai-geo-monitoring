@@ -8,6 +8,7 @@ const {
   resolveSeoAuditTarget,
   withNetworkPolicy
 } = require('./SeoAuditRuntimeService');
+const SeoAuditSettingsService = require('./SeoAuditSettingsService');
 
 function defaultSchedule(callback) {
   setImmediate(() => Promise.resolve(callback()).catch((error) => {
@@ -92,8 +93,14 @@ function createSeoAuditJobService({
   runtimeFactory = createSiteAuditRuntime,
   targetResolver = resolveSeoAuditTarget,
   historyService = createSeoAuditHistoryService(),
+  settingsService,
   schedule = defaultSchedule
 } = {}) {
+  const effectiveSettingsService = siteAuditService
+    ? null
+    : (settingsService
+        || (runtimeFactory === createSiteAuditRuntime ? SeoAuditSettingsService : null));
+
   async function run(jobId) {
     const job = await model.findByPk(jobId);
     if (!job || ['completed', 'failed'].includes(job.status)) return;
@@ -108,13 +115,18 @@ function createSeoAuditJobService({
     });
 
     try {
+      const runtimeSettings = effectiveSettingsService
+        ? await effectiveSettingsService.getSettings()
+        : { ownedOrigins: [] };
       const runtime = siteAuditService
         ? {
             requestedUrl: job.requested_url,
             policy: { networkScope: 'public' },
             service: siteAuditService
           }
-        : runtimeFactory(job.requested_url);
+        : runtimeFactory(job.requested_url, {
+            ownedOrigins: runtimeSettings.ownedOrigins
+          });
       const audited = await runtime.service.audit(runtime.requestedUrl, {
         onProgress: (progress) => job.update({ progress })
       });
