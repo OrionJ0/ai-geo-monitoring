@@ -155,7 +155,6 @@ export default function AdminLayout({
           onBreakpoint={setCollapsed}
           onCollapse={(val) => setCollapsed(val)}
           trigger={null}
-          style={{ background: '#fff' }}
         >
           <nav aria-label="管理员后台主导航">
             <Menu

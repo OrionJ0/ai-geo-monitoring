@@ -63,4 +63,5 @@ test('administrator layout keeps every navigation group visible', () => {
   assert.match(source, /breakpoint="md"/);
   assert.match(source, /aria-label="管理员后台主导航"/);
   assert.match(source, /window\.setTimeout\(\(\) => setCollapsed\(true\), 0\)/);
+  assert.doesNotMatch(source, /style=\{\{\s*background:\s*'#fff'\s*\}\}/);
 });

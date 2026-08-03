@@ -6,6 +6,12 @@ const ONE_MEBIBYTE = 1024 * 1024;
 const REPORT_RESPONSE_BUDGET = 8 * ONE_MEBIBYTE;
 const TONGJI_RESPONSE_BUDGET = 2 * ONE_MEBIBYTE;
 const REAUTHORIZATION_CODES = new Set(['894062', '894063', '894064']);
+const TONGJI_SOURCE_FILTERS = Object.freeze({
+  ALL: null,
+  DIRECT: 'through',
+  SEARCH: 'search,0',
+  EXTERNAL: 'link'
+});
 
 class BaiduMarketingError extends Error {
   constructor(message, code, status = 502, retryable = false) {
@@ -482,6 +488,17 @@ function normalizeTongjiMetric(value) {
   return BigInt(value.replaceAll(',', '')).toString();
 }
 
+function tongjiSourceFilter(sourceKey = 'ALL') {
+  if (!Object.hasOwn(TONGJI_SOURCE_FILTERS, sourceKey)) {
+    throw new BaiduMarketingError(
+      '百度统计来源筛选无效',
+      'BAIDU_TONGJI_SOURCE_INVALID',
+      400
+    );
+  }
+  return TONGJI_SOURCE_FILTERS[sourceKey];
+}
+
 class BaiduMarketingClient {
   constructor({
     manifest,
@@ -912,11 +929,13 @@ class BaiduMarketingClient {
     accountName,
     accessToken,
     siteId,
-    coverage
+    coverage,
+    sourceKey = 'ALL'
   }) {
     const range = assertDateRange(coverage, 731);
     const normalizedSiteId = reportIdentifier(siteId, 'site_id');
     const metrics = this.manifest.tongji.report.metrics;
+    const source = tongjiSourceFilter(sourceKey);
     const response = await this.requestJson({
       method: this.manifest.tongji.report.method,
       url: this.manifest.tongji.report.url,
@@ -939,7 +958,8 @@ class BaiduMarketingClient {
           end_date: range.to.replaceAll('-', ''),
           metrics: metrics.join(','),
           max_results: 0,
-          gran: 'day'
+          gran: 'day',
+          ...(source ? { source } : {})
         }
       }
     });

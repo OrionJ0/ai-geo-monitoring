@@ -24,6 +24,7 @@ type MarketOverviewState = {
   status: 'IDLE' | 'LOADING' | 'READY' | 'PARTIAL' | 'EMPTY' | 'SOURCE_ERROR';
   ad: SourceSlot;
   traffic: SourceSlot;
+  trafficSources: SourceSlot;
   reload: () => Promise<void>;
 };
 
@@ -83,12 +84,16 @@ function trafficSlot(data: Record<string, any>, readAt: string): SourceSlot {
   };
 }
 
-function overallStatus(ad: SourceSlot, traffic: SourceSlot) {
-  const successes = [ad, traffic].filter(
+function overallStatus(
+  ad: SourceSlot,
+  traffic: SourceSlot,
+  trafficSources: SourceSlot
+) {
+  const successes = [ad, traffic, trafficSources].filter(
     (slot) => slot.state !== 'SOURCE_ERROR'
   );
   if (successes.length === 0) return 'SOURCE_ERROR' as const;
-  if (successes.length === 1) return 'PARTIAL' as const;
+  if (successes.length < 3) return 'PARTIAL' as const;
   if (successes.every((slot) => ['ZERO', 'NO_DATA'].includes(slot.state))) {
     return 'EMPTY' as const;
   }
@@ -104,22 +109,28 @@ export default function useMarketOverview({
 }): MarketOverviewState {
   const [ad, setAd] = useState<SourceSlot>(idleSlot);
   const [traffic, setTraffic] = useState<SourceSlot>(idleSlot);
+  const [trafficSources, setTrafficSources] = useState<SourceSlot>(idleSlot);
   const [status, setStatus] = useState<MarketOverviewState['status']>('IDLE');
 
   const reload = useCallback(async () => {
     if (!enabled || !projectId) {
       setAd(idleSlot());
       setTraffic(idleSlot());
+      setTrafficSources(idleSlot());
       setStatus('IDLE');
       return;
     }
     setStatus('LOADING');
     setAd((current) => ({ ...current, state: 'LOADING' }));
     setTraffic((current) => ({ ...current, state: 'LOADING' }));
+    setTrafficSources((current) => ({ ...current, state: 'LOADING' }));
     const encodedProjectId = encodeURIComponent(projectId);
-    const [adResult, trafficResult] = await Promise.allSettled([
+    const [adResult, trafficResult, trafficSourcesResult] = await Promise.allSettled([
       axios.get(`/api/marketing/projects/${encodedProjectId}/dashboard`),
-      axios.get(`/api/marketing/projects/${encodedProjectId}/tongji-trend`)
+      axios.get(`/api/marketing/projects/${encodedProjectId}/tongji-trend`),
+      axios.get(
+        `/api/marketing/projects/${encodedProjectId}/tongji-source-trends`
+      )
     ]);
     const readAt = new Date().toISOString();
     const nextAd = adResult.status === 'fulfilled'
@@ -128,14 +139,18 @@ export default function useMarketOverview({
     const nextTraffic = trafficResult.status === 'fulfilled'
       ? trafficSlot(trafficResult.value.data, readAt)
       : rejectedSlot(trafficResult.reason, '网站流量读取失败');
+    const nextTrafficSources = trafficSourcesResult.status === 'fulfilled'
+      ? trafficSlot(trafficSourcesResult.value.data, readAt)
+      : rejectedSlot(trafficSourcesResult.reason, '网站来源读取失败');
     setAd(nextAd);
     setTraffic(nextTraffic);
-    setStatus(overallStatus(nextAd, nextTraffic));
+    setTrafficSources(nextTrafficSources);
+    setStatus(overallStatus(nextAd, nextTraffic, nextTrafficSources));
   }, [enabled, projectId]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  return { status, ad, traffic, reload };
+  return { status, ad, traffic, trafficSources, reload };
 }

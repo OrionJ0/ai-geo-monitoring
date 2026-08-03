@@ -163,6 +163,14 @@ function createMarketingModule({
         });
       }
     };
+    const siteDirectory = {
+      async listSites({ connection, account }) {
+        return baiduProvider.listTongjiSites({
+          accountName: account.accountName,
+          accessToken: await connectionService.getAccessToken(connection.id)
+        });
+      }
+    };
     const reportProvider = {
       async fetchSearchReport(request) {
         return baiduProvider.fetchSearchReport({
@@ -173,50 +181,82 @@ function createMarketingModule({
         });
       }
     };
+    const resolveTongjiSite = async (connection) => {
+      const accessToken = await connectionService.getAccessToken(
+        connection.id
+      );
+      const accounts = await baiduProvider.listAccounts({
+        connection,
+        accessToken
+      });
+      const account = accounts.find((item) => (
+        item.accountId === String(connection.external_account_id)
+      ));
+      if (!account) {
+        throw new BaiduMarketingError(
+          '百度统计授权主体不在账户目录中',
+          'BAIDU_TONGJI_ACCOUNT_INVALID',
+          502
+        );
+      }
+      const sites = await baiduProvider.listTongjiSites({
+        accountName: account.accountName,
+        accessToken
+      });
+      const site = sites.find((item) => (
+        item.siteId === connection.tongji_site_id
+      ));
+      if (!site || site.status !== 'ACTIVE') {
+        throw new BaiduMarketingError(
+          '项目绑定的百度统计站点当前不可用',
+          'BAIDU_TONGJI_SITE_NOT_AVAILABLE',
+          409
+        );
+      }
+      if (site.domain !== connection.tongji_site_domain) {
+        throw new BaiduMarketingError(
+          '项目绑定的百度统计站点域名已变化',
+          'BAIDU_TONGJI_SITE_DOMAIN_CHANGED',
+          409
+        );
+      }
+      return {
+        accountName: account.accountName,
+        accessToken,
+        site
+      };
+    };
     const tongjiProvider = {
       async readTrend({ connection, coverage }) {
-        const accessToken = await connectionService.getAccessToken(
-          connection.id
-        );
-        const accounts = await baiduProvider.listAccounts({
-          connection,
-          accessToken
-        });
-        const account = accounts.find((item) => (
-          item.accountId === String(connection.authorized_principal_id)
-        ));
-        if (!account) {
-          throw new BaiduMarketingError(
-            '百度统计授权主体不在账户目录中',
-            'BAIDU_TONGJI_ACCOUNT_INVALID',
-            502
-          );
-        }
-        const sites = await baiduProvider.listTongjiSites({
-          accountName: account.accountName,
-          accessToken
-        });
-        const activeSites = sites.filter((site) => site.status === 'ACTIVE');
-        if (activeSites.length !== 1) {
-          throw new BaiduMarketingError(
-            activeSites.length === 0
-              ? '百度统计没有正常站点'
-              : '百度统计存在多个正常站点，暂时无法自动选择',
-            activeSites.length === 0
-              ? 'BAIDU_TONGJI_SITE_MISSING'
-              : 'BAIDU_TONGJI_SITE_AMBIGUOUS',
-            409
-          );
-        }
-        const site = activeSites[0];
+        const context = await resolveTongjiSite(connection);
         return {
-          site,
+          site: context.site,
           rows: await baiduProvider.fetchTongjiTrend({
-            accountName: account.accountName,
-            accessToken,
-            siteId: site.siteId,
+            accountName: context.accountName,
+            accessToken: context.accessToken,
+            siteId: context.site.siteId,
             coverage
           })
+        };
+      },
+      async readSourceTrends({ connection, coverage, sourceKeys }) {
+        const context = await resolveTongjiSite(connection);
+        const sources = [];
+        for (const sourceKey of sourceKeys) {
+          sources.push({
+            sourceKey,
+            rows: await baiduProvider.fetchTongjiTrend({
+              accountName: context.accountName,
+              accessToken: context.accessToken,
+              siteId: context.site.siteId,
+              coverage,
+              sourceKey
+            })
+          });
+        }
+        return {
+          site: context.site,
+          sources
         };
       }
     };
@@ -228,6 +268,7 @@ function createMarketingModule({
     const bindingService = new BaiduBindingService({
       sequelize,
       accountDirectory,
+      siteDirectory,
       allowedProjectIds: env.MARKETING_MONITORING_ALLOWED_PROJECT_IDS
     });
     authorizationRouter.use(requireReady);
@@ -237,7 +278,8 @@ function createMarketingModule({
     authorizationRouter.use(createBaiduBindingRouter({
       service: bindingService,
       includeBindings: false,
-      accountRoute: '/connections/:connectionId/accounts'
+      accountRoute: '/connections/:connectionId/accounts',
+      siteRoute: '/connections/:connectionId/accounts/:accountId/tongji-sites'
     }));
     if ([
       'READY',

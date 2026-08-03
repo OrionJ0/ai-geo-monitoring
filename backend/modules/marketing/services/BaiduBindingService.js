@@ -53,6 +53,45 @@ function normalizeSearchAccounts(accounts) {
   return normalized;
 }
 
+function normalizeTongjiSites(sites) {
+  if (!Array.isArray(sites)) {
+    throw new MarketingBindingError(
+      '百度统计站点目录响应无效',
+      'TONGJI_SITE_DIRECTORY_INVALID',
+      502
+    );
+  }
+  const normalized = [];
+  const seen = new Set();
+  for (const site of sites) {
+    if (
+      typeof site?.siteId !== 'string'
+      || !/^\d+$/u.test(site.siteId)
+      || site.siteId.length > 32
+      || typeof site?.domain !== 'string'
+      || !site.domain
+      || site.domain.length > 255
+      || !['ACTIVE', 'PAUSED'].includes(site.status)
+      || seen.has(site.siteId)
+    ) {
+      throw new MarketingBindingError(
+        '百度统计站点目录响应无效',
+        'TONGJI_SITE_DIRECTORY_INVALID',
+        502
+      );
+    }
+    seen.add(site.siteId);
+    if (site.status === 'ACTIVE') {
+      normalized.push({
+        siteId: site.siteId,
+        domain: site.domain,
+        status: site.status
+      });
+    }
+  }
+  return normalized;
+}
+
 function publicBinding(row) {
   return {
     id: row.id,
@@ -60,6 +99,8 @@ function publicBinding(row) {
     connectionId: row.connection_id,
     externalAccountId: row.external_account_id,
     externalAccountName: row.external_account_name,
+    tongjiSiteId: row.tongji_site_id || null,
+    tongjiSiteDomain: row.tongji_site_domain || null,
     status: row.status,
     bindingVersion: Number(row.binding_version),
     pausedReason: row.paused_reason || null
@@ -78,10 +119,12 @@ class BaiduBindingService {
   constructor({
     sequelize,
     accountDirectory,
+    siteDirectory,
     allowedProjectIds = '*'
   }) {
     this.sequelize = sequelize;
     this.accountDirectory = accountDirectory;
+    this.siteDirectory = siteDirectory;
     this.projectAllowlist = parseProjectAllowlist(allowedProjectIds);
   }
 
@@ -162,7 +205,7 @@ class BaiduBindingService {
     );
   }
 
-  async validateAccount(connectionId, accountId) {
+  async getAccountContext(connectionId, accountId) {
     if (typeof accountId !== 'string' || !accountId || accountId.length > 512) {
       throw new MarketingBindingError(
         '账户标识无效',
@@ -170,7 +213,10 @@ class BaiduBindingService {
         400
       );
     }
-    const accounts = await this.listAccounts(connectionId);
+    const connection = await this.getConnectedConnection(connectionId);
+    const accounts = normalizeSearchAccounts(
+      await this.accountDirectory.listAccounts({ connection })
+    );
     const account = accounts.find((item) => item.accountId === accountId);
     if (!account) {
       throw new MarketingBindingError(
@@ -179,7 +225,36 @@ class BaiduBindingService {
         422
       );
     }
-    return account;
+    return { connection, account };
+  }
+
+  async listTongjiSites(connectionId, accountId) {
+    const context = await this.getAccountContext(connectionId, accountId);
+    return normalizeTongjiSites(
+      await this.siteDirectory.listSites(context)
+    );
+  }
+
+  async validateTongjiSite(context, siteId) {
+    if (typeof siteId !== 'string' || !/^\d+$/u.test(siteId)) {
+      throw new MarketingBindingError(
+        '百度统计站点标识无效',
+        'TONGJI_SITE_ID_INVALID',
+        400
+      );
+    }
+    const sites = normalizeTongjiSites(
+      await this.siteDirectory.listSites(context)
+    );
+    const site = sites.find((item) => item.siteId === siteId);
+    if (!site) {
+      throw new MarketingBindingError(
+        '百度统计站点不属于所选账户或当前不可用',
+        'TONGJI_SITE_NOT_AVAILABLE',
+        422
+      );
+    }
+    return site;
   }
 
   async listBindings(projectId) {
@@ -200,13 +275,16 @@ class BaiduBindingService {
     projectId,
     adminId,
     connectionId,
-    externalAccountId
+    externalAccountId,
+    tongjiSiteId
   }) {
     await this.requireActiveProject(projectId);
-    const account = await this.validateAccount(
+    const context = await this.getAccountContext(
       connectionId,
       externalAccountId
     );
+    const account = context.account;
+    const site = await this.validateTongjiSite(context, tongjiSiteId);
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
     try {
@@ -239,11 +317,13 @@ class BaiduBindingService {
         await this.sequelize.query(
           `INSERT INTO baidu_project_bindings (
             id, project_id, connection_id, external_account_id,
-            external_account_name, status, binding_version, paused_reason,
+            external_account_name, tongji_site_id, tongji_site_domain,
+            status, binding_version, paused_reason,
             created_by_user_id, created_at, updated_at
           ) VALUES (
             :id, :projectId, :connectionId, :accountId,
-            :accountName, 'ACTIVE', 0, NULL,
+            :accountName, :tongjiSiteId, :tongjiSiteDomain,
+            'ACTIVE', 0, NULL,
             :adminId, :now, :now
           )`,
           {
@@ -253,6 +333,8 @@ class BaiduBindingService {
               connectionId,
               accountId: account.accountId,
               accountName: account.accountName,
+              tongjiSiteId: site.siteId,
+              tongjiSiteDomain: site.domain,
               adminId,
               now
             },
@@ -320,9 +402,21 @@ class BaiduBindingService {
   async resumeBinding({ projectId, bindingId }) {
     await this.requireActiveProject(projectId);
     const binding = await this.findBinding(projectId, bindingId);
-    const account = await this.validateAccount(
+    if (!binding.tongjiSiteId) {
+      throw new MarketingBindingError(
+        '绑定缺少百度统计站点，请重新创建绑定',
+        'TONGJI_SITE_BINDING_MISSING',
+        409
+      );
+    }
+    const context = await this.getAccountContext(
       binding.connectionId,
       binding.externalAccountId
+    );
+    const account = context.account;
+    const site = await this.validateTongjiSite(
+      context,
+      binding.tongjiSiteId
     );
     try {
       return await this.sequelize.transaction(async (transaction) => {
@@ -364,6 +458,7 @@ class BaiduBindingService {
           `UPDATE baidu_project_bindings
            SET status = 'ACTIVE',
                external_account_name = :accountName,
+               tongji_site_domain = :tongjiSiteDomain,
                binding_version = binding_version + 1,
                paused_reason = NULL,
                updated_at = :now
@@ -373,6 +468,7 @@ class BaiduBindingService {
               projectId,
               bindingId,
               accountName: account.accountName,
+              tongjiSiteDomain: site.domain,
               now
             },
             transaction
@@ -412,5 +508,6 @@ class BaiduBindingService {
 module.exports = {
   BaiduBindingService,
   MarketingBindingError,
-  normalizeSearchAccounts
+  normalizeSearchAccounts,
+  normalizeTongjiSites
 };

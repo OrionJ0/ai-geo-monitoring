@@ -150,7 +150,8 @@ backend/
 │   │   ├── 001-authorization-connections.js
 │   │   ├── 002-project-bindings.js
 │   │   ├── 003-campaign-snapshots.js
-│   │   └── 004-baidu-oauth-identity.js
+│   │   ├── 004-baidu-oauth-identity.js
+│   │   └── 005-tongji-site-bindings.js
 │   ├── models/
 │   │   └── registerMarketingModels.js
 │   ├── routes/
@@ -248,6 +249,8 @@ nextjs-frontend/src/
 | `connection_id` | 百度连接外键 |
 | `external_account_id` | 百度账户 ID，TEXT |
 | `external_account_name` | 展示名 |
+| `tongji_site_id` | 管理员从当前授权账户目录中明确选择的百度统计站点 ID，TEXT |
+| `tongji_site_domain` | 绑定时从上游目录读取的站点域名，用于运行时一致性校验 |
 | `status` | `ACTIVE` / `PAUSED` |
 | `binding_version` | 暂停、恢复或改绑时递增 |
 | `paused_reason` | `DISCONNECTED` / `REAUTH` / `ADMIN` 等稳定码 |
@@ -262,7 +265,7 @@ nextjs-frontend/src/
 SHA-256(UTF-8(RFC 8785 风格 canonical JSON))
 ```
 
-JSON 固定包含版本号和按 `bindingId` 排序的 `{bindingId,connectionId,accountId,bindingVersion}` 数组；契约测试保存固定输入/输出向量。
+JSON 固定包含版本号和按 `bindingId` 排序的 `{bindingId,connectionId,accountId,tongjiSiteId,tongjiSiteDomain,bindingVersion}` 数组；契约测试保存固定输入/输出向量。
 
 刷新运行保存该指纹；读模型只把与当前指纹一致的成功运行视为当前快照。
 
@@ -345,6 +348,7 @@ GET  /api/admin/marketing/baidu/oauth/callback
 GET  /api/admin/marketing/baidu/authorization-results/current
 GET  /api/admin/marketing/baidu/connections
 GET  /api/admin/marketing/baidu/connections/:connectionId/accounts
+GET  /api/admin/marketing/baidu/connections/:connectionId/accounts/:accountId/tongji-sites
 POST /api/admin/marketing/baidu/connections/:connectionId/disconnect
 ```
 
@@ -382,7 +386,7 @@ POST   /api/marketing/projects/:projectId/baidu-bindings/:bindingId/resume
 DELETE /api/marketing/projects/:projectId/baidu-bindings/:bindingId
 ```
 
-新增绑定只接受 `connectionId` 和 `externalAccountId`。服务端重新读取账户目录确认归属，不信任前端名称。恢复时再次确认连接、账户和项目均有效，然后递增 `binding_version` 并清空旧口径活动快照。
+新增绑定只接受 `connectionId`、`externalAccountId` 和 `tongjiSiteId`。服务端重新读取账户与百度统计站点目录，确认账户归属、站点为 `ACTIVE` 并保存目录返回的域名，不信任前端名称或域名。恢复时再次确认连接、账户、站点和项目均有效，然后递增 `binding_version` 并清空旧口径活动快照。运行时只读取绑定的精确 `siteId`，站点缺失、停用或域名变化均显式失败，不得回退到“唯一活动站点”。
 
 ### 6.4 看板
 
@@ -787,9 +791,9 @@ git diff --check
 
 - `baidu-marketing-pilot-2026-07-30` 固化真实 OAuth、账户目录、4 页搜索报表、百度统计站点目录和趋势响应结构；所有本地 fixture 均使用合成账户名、域名、ID 和指标。
 - 搜索报表严格校验 `rowCount/totalRowCount`、账户、计划、日期和指标类型，消费按试点 `CNY`、2 位小数转为精确字符串；超精度直接拒绝。
-- 百度统计只选择当前授权主体下唯一正常站点，读取 `trend/time/a` 的 PV、访问次数和 UV；`--` 保留为无数据，不转换为 0。该数据在试点阶段实时读取，不进入搜索广告原子快照。
+- 百度统计只读取项目绑定中明确保存且经目录复核的活动站点，读取 `trend/time/a` 的 PV、访问次数和 UV；`--` 保留为无数据，不转换为 0。该数据在试点阶段实时读取，不进入搜索广告原子快照，也不按站点数量自动选择。
 - 服务器 Token 不删除、不导出；本地开发只使用脱敏 fixture。`PILOT_DATA_READY` 不等于正式 `READY`，正式导航继续隐藏。
 
 ## 18. 后续来源边界
 
-落地页 API 开放后只接原始咨询；销售 API 开放后只接人工关联所需的最小订单标识和订单签订金额，其中签订金额是唯一必须同步的销售结果指标，不接有效线索、销售机会、订单数量或其他销售字段。两个来源没有统一 ID 时，由用户为每笔订单签订金额选择一条主要归因咨询。该能力不在本期建表、不在本期 API 返回占位对象，也不以官网访问量、有效商机、毛利或模拟数据代替。
+官网与客服 API 开放后接入按来源归属的客服咨询；客服手动转换后，由销售 API 提供线索入池事实。销售 API 还需提供人工关联所需的最小订单标识、成交订单数和成交订单金额：订单数用于 CPA、成交率和整体转化率，订单金额用于 ROAS。来源系统没有统一来源键时，由用户为每笔成交订单确认一条主要咨询来源。该能力不在本期建表、不在本期 API 返回占位对象，也不以全站访问量、订单金额反推数量、毛利或模拟数据代替。

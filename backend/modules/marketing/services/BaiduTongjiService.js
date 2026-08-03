@@ -5,6 +5,12 @@ const {
 } = require('../domain/projectAllowlist');
 const { fixedShanghaiWindow } = require('../domain/syncWindow');
 
+const TONGJI_SOURCE_DEFINITIONS = Object.freeze([
+  { sourceKey: 'DIRECT', sourceLabel: '直接访问' },
+  { sourceKey: 'SEARCH', sourceLabel: '搜索引擎' },
+  { sourceKey: 'EXTERNAL', sourceLabel: '外部链接' }
+]);
+
 class BaiduTongjiError extends Error {
   constructor(message, code, status = 400) {
     super(message);
@@ -30,6 +36,67 @@ function sumMetric(rows, field) {
     total += BigInt(value);
   }
   return observed ? total.toString() : null;
+}
+
+function normalizeSite(site) {
+  if (
+    !site
+    || typeof site.siteId !== 'string'
+    || typeof site.domain !== 'string'
+    || site.status !== 'ACTIVE'
+  ) {
+    throw new BaiduTongjiError(
+      '百度统计响应无效',
+      'TONGJI_RESPONSE_INVALID',
+      502
+    );
+  }
+  return {
+    siteId: site.siteId,
+    domain: site.domain
+  };
+}
+
+function normalizeRows(rows) {
+  if (!Array.isArray(rows)) {
+    throw new BaiduTongjiError(
+      '百度统计响应无效',
+      'TONGJI_RESPONSE_INVALID',
+      502
+    );
+  }
+  return rows.map((row) => {
+    if (
+      typeof row?.date !== 'string'
+      || !/^\d{4}-\d{2}-\d{2}$/u.test(row.date)
+    ) {
+      throw new BaiduTongjiError(
+        '百度统计趋势日期无效',
+        'TONGJI_RESPONSE_INVALID',
+        502
+      );
+    }
+    return {
+      date: row.date,
+      pageviews: row.pageviews,
+      visits: row.visits,
+      visitors: row.visitors
+    };
+  });
+}
+
+function summarizeRows(rows) {
+  return {
+    pageviews: sumMetric(rows, 'pageviews'),
+    visits: sumMetric(rows, 'visits'),
+    visitors: sumMetric(rows, 'visitors')
+  };
+}
+
+function dataState(summary) {
+  return Object.values(summary).some((value) => value !== null)
+    ? 'DATA'
+    : 'NO_DATA';
 }
 
 class BaiduTongjiService {
@@ -83,6 +150,10 @@ class BaiduTongjiService {
     }
     const connections = await this.sequelize.query(
       `SELECT DISTINCT
+         b.id AS binding_id,
+         b.external_account_id,
+         b.tongji_site_id,
+         b.tongji_site_domain,
          c.id,
          c.authorized_principal_id,
          c.authorized_open_id
@@ -106,8 +177,20 @@ class BaiduTongjiService {
     }
     if (connections.length > 1) {
       throw new BaiduTongjiError(
-        '项目包含多个百度授权连接，无法自动选择统计站点',
-        'TONGJI_CONNECTION_AMBIGUOUS',
+        '项目包含多个活动百度统计绑定',
+        'TONGJI_BINDING_AMBIGUOUS',
+        409
+      );
+    }
+    if (
+      typeof connections[0].tongji_site_id !== 'string'
+      || !/^\d+$/u.test(connections[0].tongji_site_id)
+      || typeof connections[0].tongji_site_domain !== 'string'
+      || !connections[0].tongji_site_domain
+    ) {
+      throw new BaiduTongjiError(
+        '项目绑定缺少明确的百度统计站点',
+        'TONGJI_SITE_BINDING_MISSING',
         409
       );
     }
@@ -124,56 +207,80 @@ class BaiduTongjiService {
       connection,
       coverage
     });
-    if (
-      !result?.site
-      || typeof result.site.siteId !== 'string'
-      || typeof result.site.domain !== 'string'
-      || result.site.status !== 'ACTIVE'
-      || !Array.isArray(result.rows)
-    ) {
-      throw new BaiduTongjiError(
-        '百度统计响应无效',
-        'TONGJI_RESPONSE_INVALID',
-        502
-      );
-    }
-    const rows = result.rows.map((row) => {
-      if (
-        typeof row?.date !== 'string'
-        || !/^\d{4}-\d{2}-\d{2}$/u.test(row.date)
-      ) {
-        throw new BaiduTongjiError(
-          '百度统计趋势日期无效',
-          'TONGJI_RESPONSE_INVALID',
-          502
-        );
-      }
-      return {
-        date: row.date,
-        pageviews: row.pageviews,
-        visits: row.visits,
-        visitors: row.visitors
-      };
-    });
-    const summary = {
-      pageviews: sumMetric(rows, 'pageviews'),
-      visits: sumMetric(rows, 'visits'),
-      visitors: sumMetric(rows, 'visitors')
-    };
+    const site = normalizeSite(result?.site);
+    const rows = normalizeRows(result?.rows);
+    const summary = summarizeRows(rows);
     return {
       projectId: String(projectId),
       source: 'BAIDU_TONGJI',
       mode: 'LIVE_PILOT',
-      site: {
-        siteId: result.site.siteId,
-        domain: result.site.domain
-      },
+      site,
       coverage,
-      dataState: Object.values(summary).some((value) => value !== null)
-        ? 'DATA'
-        : 'NO_DATA',
+      dataState: dataState(summary),
       summary,
       trend: rows
+    };
+  }
+
+  async readProjectSourceTrends(projectId) {
+    const { connection } = await this.getProjectAndConnection(projectId);
+    const coverage = fixedShanghaiWindow(this.clock());
+    const sourceKeys = TONGJI_SOURCE_DEFINITIONS.map(
+      (definition) => definition.sourceKey
+    );
+    const result = await this.provider.readSourceTrends({
+      connection,
+      coverage,
+      sourceKeys
+    });
+    const site = normalizeSite(result?.site);
+    if (!Array.isArray(result?.sources) || result.sources.length !== sourceKeys.length) {
+      throw new BaiduTongjiError(
+        '百度统计来源响应无效',
+        'TONGJI_SOURCE_RESPONSE_INVALID',
+        502
+      );
+    }
+    const byKey = new Map(result.sources.map((source) => [source?.sourceKey, source]));
+    if (byKey.size !== sourceKeys.length) {
+      throw new BaiduTongjiError(
+        '百度统计来源响应无效',
+        'TONGJI_SOURCE_RESPONSE_INVALID',
+        502
+      );
+    }
+    const sources = TONGJI_SOURCE_DEFINITIONS.map((definition) => {
+      const source = byKey.get(definition.sourceKey);
+      if (!source) {
+        throw new BaiduTongjiError(
+          '百度统计来源响应无效',
+          'TONGJI_SOURCE_RESPONSE_INVALID',
+          502
+        );
+      }
+      const trend = normalizeRows(source.rows);
+      const summary = summarizeRows(trend);
+      return {
+        ...definition,
+        dataState: dataState(summary),
+        summary,
+        trend
+      };
+    });
+    return {
+      projectId: String(projectId),
+      source: 'BAIDU_TONGJI',
+      mode: 'LIVE_PILOT',
+      site,
+      coverage,
+      dataState: sources.some((source) => source.dataState === 'DATA')
+        ? 'DATA'
+        : 'NO_DATA',
+      attribution: {
+        level: 'WEBSITE_TRAFFIC_SOURCE',
+        isCrossSystemVerified: false
+      },
+      sources
     };
   }
 }

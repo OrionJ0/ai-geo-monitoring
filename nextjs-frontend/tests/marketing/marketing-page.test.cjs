@@ -20,16 +20,17 @@ test('frontend package has a real executable test command', () => {
   );
 });
 
-test('marketing page skeleton states the integration boundary without fake funnel data', () => {
+test('retired combined marketing page redirects to the formal market overview', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
+  const settingsSource = fs.readFileSync(
+    path.join(frontendDirectory, 'src/app/admin/settings/BaiduMarketingSettings.tsx'),
+    'utf8'
+  );
 
-  assert.match(source, /营销监控/);
-  assert.match(source, /落地页系统和销售系统尚未接入/);
-  assert.match(source, /不会展示模拟的咨询、订单或完整业务漏斗/);
-  assert.match(source, /只读/);
-  assert.doesNotMatch(source, /信息流/);
-  assert.doesNotMatch(source, /咨询(?:数|量)[：:]\s*\d/u);
-  assert.doesNotMatch(source, /订单(?:数|量)[：:]\s*\d/u);
+  assert.match(source, /redirect\(['"]\/geo\/market-overview['"]\)/);
+  assert.doesNotMatch(source, /axios|\/dashboard|\/tongji-trend|营销监控/);
+  assert.match(settingsSource, /href="\/geo\/market-overview"/);
+  assert.doesNotMatch(settingsSource, /href="\/geo\/marketing"/);
 });
 
 test('workspace navigation exposes the new pages even before sources have data', () => {
@@ -45,13 +46,13 @@ test('workspace navigation exposes the new pages even before sources have data',
   assert.match(navigation, /\/geo\/order-results/);
 });
 
-test('pilot marketing page reads Baidu Tongji separately from the local ad snapshot', () => {
-  const source = fs.readFileSync(pagePath, 'utf8');
+test('formal overview keeps Baidu Tongji separate from the local ad snapshot', () => {
+  const source = fs.readFileSync(
+    path.join(frontendDirectory, 'src/lib/marketing/useMarketOverview.ts'),
+    'utf8'
+  );
 
   assert.match(source, /\/tongji-trend/);
-  assert.match(source, /百度统计 · 实时试点/);
-  assert.match(source, /浏览量（PV）/);
-  assert.match(source, /访客数（UV）/);
-  assert.match(source, /不写入搜索广告的本地快照/);
-  assert.match(source, /无数据标记，不按 0 处理/);
+  assert.match(source, /\/dashboard/);
+  assert.match(source, /Promise\.allSettled/);
 });

@@ -49,7 +49,9 @@ async function seedConnectionAndBinding(sequelize, {
   bindingId = 'binding-1',
   connectionId = 'connection-1',
   accountId = '0009007199254740993123',
-  projectId = 11
+  projectId = 11,
+  tongjiSiteId = '301',
+  tongjiSiteDomain = 'active.example.test'
 } = {}) {
   await sequelize.query(
     `INSERT INTO baidu_marketing_connections (
@@ -73,11 +75,13 @@ async function seedConnectionAndBinding(sequelize, {
   await sequelize.query(
     `INSERT INTO baidu_project_bindings (
       id, project_id, connection_id, external_account_id,
-      external_account_name, status, binding_version, paused_reason,
+      external_account_name, tongji_site_id, tongji_site_domain,
+      status, binding_version, paused_reason,
       created_by_user_id, created_at, updated_at
     ) VALUES (
       :bindingId, :projectId, :connectionId, :accountId,
-      :accountName, 'ACTIVE', 0, NULL, 1,
+      :accountName, :tongjiSiteId, :tongjiSiteDomain,
+      'ACTIVE', 0, NULL, 1,
       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     )`,
     {
@@ -86,7 +90,9 @@ async function seedConnectionAndBinding(sequelize, {
         projectId,
         connectionId,
         accountId,
-        accountName: `账户-${bindingId}`
+        accountName: `账户-${bindingId}`,
+        tongjiSiteId,
+        tongjiSiteDomain
       }
     }
   );

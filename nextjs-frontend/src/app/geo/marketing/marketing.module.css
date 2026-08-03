@@ -1,5 +1,4 @@
-.page,
-.boundary {
+.page {
   --ink: #13233a;
   --muted: #5b6b7f;
   --paper: #f7f9fc;
@@ -16,13 +15,11 @@
 
 .page button,
 .page select,
-.page input,
-.boundary button {
+.page input {
   font: inherit;
 }
 
-.page button,
-.boundary button {
+.page button {
   border: 1px solid var(--ink);
   border-radius: 6px;
   background: var(--ink);
@@ -39,8 +36,7 @@
   cursor: not-allowed;
 }
 
-.page :focus-visible,
-.boundary :focus-visible {
+.page :focus-visible {
   outline: 3px solid #e49c24;
   outline-offset: 3px;
 }
@@ -56,58 +52,6 @@
   align-items: center;
 }
 
-.header {
-  display: flex;
-  justify-content: space-between;
-  gap: 32px;
-  align-items: end;
-  padding: 22px 0 26px;
-  border-bottom: 2px solid var(--ink);
-}
-
-.header h1,
-.boundary h1 {
-  margin: 4px 0 8px;
-  color: var(--ink);
-  font-family: "Iowan Old Style", "Songti SC", STSong, serif;
-  font-size: clamp(2.2rem, 5vw, 4.8rem);
-  font-weight: 600;
-  letter-spacing: -0.045em;
-  line-height: 0.98;
-}
-
-.header p,
-.boundary p {
-  max-width: 680px;
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.7;
-}
-
-.eyebrow,
-.kicker {
-  color: var(--signal) !important;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-}
-
-.controls {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
-  gap: 7px 10px;
-  min-width: 330px;
-}
-
-.controls label {
-  grid-column: 1 / -1;
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.controls select,
 .dateFilter input {
   min-height: 42px;
   border: 1px solid #8291a3;
@@ -345,67 +289,22 @@
   font-family: "Avenir Next", "PingFang SC", sans-serif;
 }
 
-.empty,
-.futureNote {
+.empty {
   padding: 20px;
   background: var(--paper);
   color: var(--muted);
 }
 
-.futureNote {
-  margin-top: 32px;
-  border-left: 4px solid var(--signal);
-}
-
-.futureNote p {
-  margin-bottom: 0;
-}
-
-.boundary {
-  max-width: 880px;
-  min-height: 560px;
-  padding: 56px clamp(20px, 6vw, 72px);
-  background: white;
-  border-top: 6px solid var(--signal);
-}
-
-.boundary h2 {
-  margin-top: 28px;
-  color: var(--ink);
-}
-
-.boundary ul {
-  display: grid;
-  gap: 10px;
-  padding-left: 24px;
-  color: var(--ink);
-  line-height: 1.6;
-}
-
-.boundaryRule {
-  width: min(240px, 50%);
-  height: 1px;
-  margin-top: 30px;
-  background: var(--line);
-}
-
 @media (max-width: 760px) {
-  .page,
-  .boundary {
+  .page {
     padding-left: 4px;
     padding-right: 4px;
   }
 
-  .header,
   .ledger,
   .sectionHeading {
     display: grid;
     grid-template-columns: 1fr;
-  }
-
-  .controls {
-    min-width: 0;
-    width: 100%;
   }
 
   .ledger {
@@ -431,8 +330,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .page *,
-  .boundary * {
+  .page * {
     scroll-behavior: auto !important;
     transition: none !important;
   }

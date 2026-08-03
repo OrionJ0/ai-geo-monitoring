@@ -57,6 +57,24 @@ function createMarketingDashboardRouter({
     }
   );
 
+  if (tongjiService) router.get(
+    '/projects/:projectId/tongji-source-trends',
+    async (req, res) => {
+      try {
+        await dashboardService.assertAccess({
+          projectId: req.params.projectId,
+          user: req.user
+        });
+        res.set('Cache-Control', 'private, no-store');
+        return res.json(await tongjiService.readProjectSourceTrends(
+          req.params.projectId
+        ));
+      } catch (error) {
+        return sendError(res, error);
+      }
+    }
+  );
+
   router.post('/projects/:projectId/refresh-runs', async (req, res) => {
     if (
       !req.body

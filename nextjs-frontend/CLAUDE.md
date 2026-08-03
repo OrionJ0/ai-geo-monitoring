@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This project's current product identity is a read-only market data monitoring system, not a single-purpose AI GEO/SEO monitor. It uses a Next.js 16.2.12 frontend (App Router) and Express.js backend. GEO/SEO is the currently formal workflow, but that delivery stage does not redefine the product boundary. A Baidu marketing and analytics module exists as a project-allowlisted `PILOT_DATA_READY` trial; its formal workspace navigation remains hidden until production gates pass. Landing-page consultations, signed order amounts, and manual mapping are the unimplemented long-term path documented in the root `README.md` and `CONTEXT.md`. Legacy repository, service, page, or heading names containing `AI GEO` do not override this positioning.
+This project's current product identity is a read-only market data monitoring system, not a single-purpose AI GEO/SEO monitor. It uses a Next.js 16.2.12 frontend (App Router) and Express.js backend. GEO/SEO is the currently verified formal workflow, but that delivery stage does not redefine the product boundary. The repository contains the full market workspace navigation and the approved 2026-08-03 source-based homepage visual, interaction, state, responsive, and accessibility implementation. Current real data support is narrower: Baidu paid advertising facts and CPC plus Baidu Tongji website-source visits; consultations, lead-pool entries, order count, order amount, and dependent KPIs remain unavailable and render as honest missing states. Production may lag and must be verified independently. `../docs/visual-design-spec.md`, the root `README.md`, and `CONTEXT.md` are the current authorities. Legacy repository, service, page, or heading names containing `AI GEO` do not override this positioning.
 
 ### Production Truth
 
@@ -162,9 +162,11 @@ backend/
 ### Marketing Boundaries
 - Describe the product as a read-only market data monitoring system. When scope matters, distinguish the formal GEO/SEO workflow, the allowlisted Baidu trial, and the unimplemented full-funnel target.
 - Keep the marketing module read-only. Do not add source-system write actions for ads, consultations, leads, opportunities, or orders.
-- Do not expose the marketing page in formal workspace navigation until the PRD/Tech Spec production gates are complete.
-- Landing-page consultations, the minimum order identity needed for mapping, signed order amounts, and manual cross-system mapping are future work; do not create placeholder facts or describe the Baidu trial as a complete funnel.
-- Treat signed order amount as the only required sales-system outcome metric. Effective leads, sales opportunities, order counts, and other sales fields are process context, not required monitoring metrics.
+- The full market navigation already exists in the repository. Do not infer production availability from local code; verify the canonical production entry before claiming it is live.
+- Use `../docs/visual-design-spec.md` as the visual and homepage-metric authority. The source chain is impressions → visits/clicks → consultations → lead-pool entries → completed orders, and the order stage includes both count and amount.
+- Use completed-order count for CPA, close rate, and overall conversion rate; use order amount for ROAS. Never infer a missing count from amount.
+- Only assign records to a source when a trustworthy source key or confirmed manual mapping exists. Do not turn contemporaneous ad, site, consultation, and sales totals into attribution facts.
+- `src/app/geo/market-overview/page.tsx` implements the approved V2 visual and interaction contract. Unsupported downstream data and metrics remain missing by design; report UI completion, data-contract completion, commit, deployment, and production verification as separate stages with direct evidence.
 - Keep Baidu contract parsing inside `backend/modules/marketing/adapters/BaiduMarketingClient.js`.
 
 ### Error Handling

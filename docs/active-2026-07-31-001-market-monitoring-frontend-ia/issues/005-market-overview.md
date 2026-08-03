@@ -1,60 +1,65 @@
 ---
-title: "市场总览与全链路概览"
+title: "新版市场总览：来源全链路、投放效率与每日趋势"
 status: open
-type: HITL
-blocked_by:
-  - "003-ad-performance-page.md"
-  - "004-website-traffic-page.md"
+type: AFK
+blocked_by: []
 ---
 
-# 市场总览与全链路概览
+# 新版市场总览：来源全链路、投放效率与每日趋势
 
 ## Parent
 
 - [PRD](../prd.md)
 - [Tech Spec](../TECH-SPEC.md)
-- 覆盖用户故事：US-001、US-003、US-009、US-010
+- [全局视觉规范](../../visual-design-spec.md)
+- [最终设计图](../assets/market-overview-home-final-2026-08-03.png)
+
+## Current state
+
+- 2026-08-03：产品结构、视觉方向和指标口径已确认。
+- `nextjs-frontend/src/app/geo/market-overview/page.tsx` 已完成新版三模块视觉与交互，并加入面包屑、四张效率卡、百度推广与站内流量来源行、微型漏斗和当前/上期趋势。
+- 已新增 `GET /api/marketing/projects/:projectId/tongji-source-trends`，按百度统计官方来源筛选返回直接访问、搜索引擎和外部链接的逐日 PV、访问次数与 UV；接口明确标记为网站流量来源证据、非跨系统归因。
+- 当前百度统计行只把真实访问次数放入“访问（点击）”；广告投入、展现、客服咨询、线索入池、成交结果和漏斗转化率保持诚实缺失。“搜索引擎”是所有搜索引擎流量，不等同于百度自然搜索。
+- 客服转线索、成交订单数和成交订单金额接口合同尚未完成；当前只有百度推广广告事实与 CPC 可计算，ROAS/CPL/CPA 仍缺真实数据。
+- 后端营销测试 100 项、前端测试 36 项、完整 lint、生产构建和真实 Chrome/axe 9 项均已通过。2026-08-03 用临时本地 Token 只读确认站点目录包含三个活动站点、`23412673` 对应 `gato.com.cn`，且三个来源筛选返回成功零数据；正式 OAuth Token、生产绑定和正式入口仍待本次发布验收。
 
 ## What to build
 
-建立市场总览页面，用三个一级模块呈现全链路概览、投入与流量趋势、需要关注。页面分别组合广告本地快照和百度统计实时结果，任何一个来源失败时仍展示另一个来源的可用数据。
+按现行 PRD 和全局视觉规范，将市场总览硬切为：
 
-全链路固定呈现广告投放、网站访问、原始咨询和订单结果。当前原始咨询与订单结果只说明来源系统尚无稳定API，不展示零值、模拟数字、订单数量或虚构转化率。页面需要完成桌面端和移动端的人工视觉评审。
+1. 面包屑与全局日期；
+2. 无外层底板的 ROAS、CPL、CPA、CPC 四张投放效率卡；
+3. 按来源为行的完整链路表格，阶段为广告投入、展现、访问（点击）、客服咨询、线索入池、成交订单，每行末尾含微型漏斗；
+4. 只有来源和指标两个下拉的每日趋势，支持表头选择指标并比较上一周期。
+
+成交订单同时展示订单数和订单金额。只有可信来源键或确认映射的记录才能进入来源行；不得使用 mock、同期总量拼接或订单金额反推订单数。
 
 ## Acceptance criteria
 
-- [x] 首页只有全链路概览、投入与流量趋势、需要关注三个一级模块。
-- [x] 广告阶段以消费为核心指标，网站阶段以访客数为核心指标。
-- [x] 原始咨询和订单结果显示“来源暂不可接入”及具体依赖，不显示数字。
-- [x] 页面不展示订单数量，也不生成广告到访问的转化率。
-- [x] 广告和网站来源分别展示自己的覆盖范围、更新时间或读取模式。
-- [x] 任一来源失败时页面进入部分可用状态，另一来源数据不会消失。
-- [x] 趋势区域不再次陈列周期汇总数字，也不通过连续漏斗或折线暗示归因。
-- [x] 图表原始值保持精确，并提供等价数据或可访问摘要。
-- [ ] 桌面1440px和移动375px的关键状态截图通过人工视觉评审。
-- [x] 空数据、部分失败、两来源失败和正常数据状态均完成入口验证。
+- [x] 一级页面显示面包屑，不重复市场总览标题和介绍段。
+- [x] 投放效率没有外层白色容器，固定展示 ROAS、CPL、CPA、CPC 的本期、上期和周期变化。
+- [x] 来源全链路按来源为行，包含广告投入、展现、访问（点击）、客服咨询、线索入池、成交订单和全链路漏斗；未接入字段显示缺失，不伪造归因。
+- [x] 点击与官网访问合并为“访问（点击）”一个阶段，不重复计数。
+- [ ] 成交订单同时显示订单数和订单金额；CPA、成交率、整体转化率使用成交订单数，ROAS 使用订单金额。
+- [x] 微型漏斗为 5 阶、左侧共线的递减横条，并显示整体转化率。
+- [x] 每日趋势左上只有来源和指标两个下拉；点击可选表头只改变趋势指标。
+- [x] 投放效率不与全链路或趋势的局部状态联动。
+- [x] 正常状态不显示更新时间；缺失、真实零值、不适用、陈旧、错误和无权限有不同状态。
+- [x] 首页不再显示未接入提示卡、连接状态卡、“需要关注”或第二个大型漏斗。
+- [x] 1440px 页面无为了截图而拉伸的组件，也无页面级横向滚动。
+- [x] 窄屏表格只在自身容器滚动，交互支持键盘，图表有等价数据。
+- [x] 测试证明无可信来源关系的同期数据不会被自动拼入同一链路。
+- [x] 从本地 production build 的真实 `/geo/market-overview` 入口证明新版被调用、V1 不再被调用。
+- [ ] 从正式域名完成 OAuth、三条真实 API 与页面入口生产验收。
 
-## Blocked by
+## Historical V1 evidence
 
-- [003-ad-performance-page.md](003-ad-performance-page.md)
-- [004-website-traffic-page.md](004-website-traffic-page.md)
+以下证据只证明旧版 V1 曾通过本地验证，不计入新版完成证据：
 
-## Verification in progress
+- 旧页面结构、空状态与精确值契约测试 9 项通过。
+- 旧截图位于 `nextjs-frontend/output/playwright/market-overview/`。
+- 旧版验证过广告/流量部分失败、双来源失败和空读状态。
 
-- 页面结构、空状态与精确值契约测试 9 项通过。
-- 真实浏览器正常数据状态：1440px 与 375px 均无横向溢出，三模块顺序一致，控制台无错误。
-- 隔离浏览器模拟验证：广告失败时网站数据继续展示；双来源失败时进入“来源暂不可用”；成功空读区分“零数据”和“无数据”，不伪造零值。
-- 截图：
-  - `nextjs-frontend/output/playwright/market-overview/market-overview-v2-1440.png`
-  - `nextjs-frontend/output/playwright/market-overview/market-overview-v2-375.png`
-  - `nextjs-frontend/output/playwright/market-overview/market-overview-v2-mobile-menu.png`
-  - `nextjs-frontend/output/playwright/market-overview/market-overview-partial.png`
-  - `nextjs-frontend/output/playwright/market-overview/market-overview-two-errors.png`
-  - `nextjs-frontend/output/playwright/market-overview/market-overview-empty.png`
-- 待完成：人工视觉评审。
+## Next dependency
 
-## Visual revision
-
-- 根据 2026-07-31 评审意见，移除独立展示字体、杂志式大标题、`01/02/03` 编号和自定义长卡片。
-- 页面重新使用现有 Inter/系统字体、Ant Design `Card`、`Statistic`、`Alert`、`Empty` 以及项目既有蓝灰色和间距。
-- 移动端全链路使用两列紧凑卡片，趋势单列展示；侧边栏改为覆盖式展开，不再把主内容挤窄。
+实现前先补新版 Tech Spec，明确来源键、人工映射、咨询转线索、订单去重、订单数/金额接口、指标版本和 V1 删除范围。未完成这些合同时，不得用静态数字替代真实链路。

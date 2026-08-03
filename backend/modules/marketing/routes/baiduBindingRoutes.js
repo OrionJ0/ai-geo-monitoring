@@ -29,7 +29,8 @@ function createBaiduBindingRouter({
   adminRequired = defaultAdminRequired,
   includeAccounts = true,
   includeBindings = true,
-  accountRoute = '/admin/baidu/connections/:connectionId/accounts'
+  accountRoute = '/admin/baidu/connections/:connectionId/accounts',
+  siteRoute = '/admin/baidu/connections/:connectionId/accounts/:accountId/tongji-sites'
 }) {
   const router = express.Router();
 
@@ -40,6 +41,22 @@ function createBaiduBindingRouter({
       try {
         res.set('Cache-Control', 'no-store');
         return res.json(await service.listAccounts(req.params.connectionId));
+      } catch (error) {
+        return sendError(res, error);
+      }
+    }
+  );
+
+  if (includeAccounts) router.get(
+    siteRoute,
+    adminRequired,
+    async (req, res) => {
+      try {
+        res.set('Cache-Control', 'no-store');
+        return res.json(await service.listTongjiSites(
+          req.params.connectionId,
+          req.params.accountId
+        ));
       } catch (error) {
         return sendError(res, error);
       }
@@ -62,7 +79,10 @@ function createBaiduBindingRouter({
     '/projects/:projectId/baidu-bindings',
     adminRequired,
     async (req, res) => {
-      if (!exactBody(req.body, ['connectionId', 'externalAccountId'])) {
+      if (!exactBody(
+        req.body,
+        ['connectionId', 'externalAccountId', 'tongjiSiteId']
+      )) {
         return sendError(res, {
           status: 400,
           code: 'BINDING_REQUEST_INVALID',
@@ -74,7 +94,8 @@ function createBaiduBindingRouter({
           projectId: req.params.projectId,
           adminId: req.user.id,
           connectionId: req.body.connectionId,
-          externalAccountId: req.body.externalAccountId
+          externalAccountId: req.body.externalAccountId,
+          tongjiSiteId: req.body.tongjiSiteId
         }));
       } catch (error) {
         return sendError(res, error);

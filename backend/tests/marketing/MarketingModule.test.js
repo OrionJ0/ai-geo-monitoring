@@ -11,8 +11,12 @@ const {
   buildMarketingCapabilities
 } = require('../../modules/marketing/marketingCapabilities');
 const {
-  createMarketingTestDatabase
+  createMarketingTestDatabase,
+  seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
+const {
+  encryptSecret
+} = require('../../services/SecretEncryptionService');
 
 function expectedStatus(moduleState, errorCode = null) {
   return {
@@ -243,6 +247,89 @@ test('pilot data module mounts allowlisted binding and dashboard routes', async 
     'PILOT_DATA_READY'
   );
   await module.shutdown();
+});
+
+test('pilot data route reads the explicitly bound Tongji site when multiple sites are active', async (t) => {
+  const database = await createMarketingTestDatabase(
+    'marketing-explicit-tongji-site-'
+  );
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize, {
+    accountId: 'search-account-1',
+    projectId: 11,
+    tongjiSiteId: '23412673',
+    tongjiSiteDomain: 'gato.com.cn'
+  });
+  const env = enabledConfig({
+    MARKETING_MONITORING_PILOT_MODE: 'true',
+    MARKETING_MONITORING_ALLOWED_PROJECT_IDS: '11',
+    BAIDU_MARKETING_SCOPE: '67,71,1004606,1002161',
+    BAIDU_MARKETING_CONTRACT_VERSION:
+      'baidu-marketing-pilot-2026-07-30'
+  });
+  await database.sequelize.query(
+    `UPDATE baidu_marketing_connections
+     SET access_token_ciphertext = :ciphertext,
+         access_token_expires_at = '2099-01-01T00:00:00.000Z'
+     WHERE id = 'connection-1'`,
+    {
+      replacements: {
+        ciphertext: encryptSecret('access-token-test', env.CONFIG_ENCRYPTION_KEY)
+      }
+    }
+  );
+  const requestedSiteIds = [];
+  const module = createMarketingModule({
+    env,
+    sequelize: database.sequelize,
+    provider: {
+      async listAccounts() {
+        return [{
+          accountId: 'search-account-1',
+          accountName: '搜索账户',
+          product: 'SEARCH',
+          readOnly: true
+        }];
+      },
+      async listTongjiSites() {
+        return [
+          { siteId: '11111111', domain: 'other.example', status: 'ACTIVE' },
+          { siteId: '23412673', domain: 'gato.com.cn', status: 'ACTIVE' }
+        ];
+      },
+      async fetchTongjiTrend({ siteId }) {
+        requestedSiteIds.push(siteId);
+        return [{
+          date: '2026-08-03',
+          pageviews: null,
+          visits: null,
+          visitors: null
+        }];
+      }
+    }
+  });
+  await module.start();
+
+  const app = express();
+  app.use((req, _res, next) => {
+    req.user = { id: 2, role: 'user', status: 'active' };
+    next();
+  });
+  app.use('/api/marketing', module.router);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const response = await fetch(
+    `${baseUrl}/api/marketing/projects/11/tongji-trend`
+  );
+  const body = await response.json();
+  server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+  await module.shutdown();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.site.siteId, '23412673');
+  assert.deepEqual(requestedSiteIds, ['23412673']);
 });
 
 test('the application mounts marketing through its facade without changing global readiness inputs', () => {

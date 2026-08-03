@@ -7,11 +7,11 @@
 - 现行产品定位：本项目是只读市场数据监控系统，不是单一 GEO/SEO 监测系统；当前能力范围不能反向覆盖产品定位。
 - 当前正式工作流：GEO、AI 搜索可见度与技术 SEO 监测。
 - 当前受限试点：百度搜索推广账户、近 30 日展现/点击/消费快照，以及单独呈现的百度统计流量。
-- 最终目标：在项目维度联合观察 GEO/SEO、付费广告、网站访问、原始咨询和订单签订金额。
-- 当前缺口：落地页和销售系统尚无 API，原始咨询、最小订单标识、订单签订金额与人工对应关系均未接入；订单签订金额是销售系统侧唯一必须同步的业务指标，有效线索和销售机会只解释业务过程。
+- 最终目标：按来源联合观察展现、访问（点击）、客服咨询、线索入池、成交订单数和成交订单金额。
+- 当前缺口：客服、线索池和销售系统尚未形成已验证的完整数据合同，来源关系、线索入池数、最小订单标识、成交订单数和成交订单金额均未完成端到端接入；新版首页的视觉与交互已完成本地验收，生产状态仍需独立验证。
 - 操作边界：本系统只读监控，调整投放、处理咨询和维护订单仍在来源系统完成。
 
-详细业务口径见[根 README](../README.md)与[项目上下文](../CONTEXT.md)；营销第一期的现役需求和技术边界见[营销监控需求目录](active-2026-07-29-001-marketing-monitoring/)。
+详细业务口径见[根 README](../README.md)与[项目上下文](../CONTEXT.md)；全局 UI 和市场首页的现行设计标准见[视觉设计规范](visual-design-spec.md)；营销第一期的现役需求和技术边界见[营销监控需求目录](active-2026-07-29-001-marketing-monitoring/)。
 
 ## 当前生产入口
 
@@ -44,6 +44,7 @@
 - `DEPLOYMENT.md`：部署与运维建议
 - `SINGLE_HOST_DEPLOYMENT.md`：Ubuntu/macOS 单机原地部署、systemd 与 Web 图形会话边界
 - `SECURITY.md`：安全加固说明与最佳实践
+- `visual-design-spec.md`：全项目通用视觉、布局、组件、数据展示、交互、动效、响应式与无障碍标准
 - `closed-2026-07-23-002-ai-platform-settings/`：全局 AI 平台设置中心、临时模型目录、分析结构化协议与 OpenAI 兼容协议收敛的已完成需求
 - `active-2026-07-23-004-question-set-run-reports/`：单问题与问题集独立运行报告、AI 实体/关系结构化指标、失败重试可靠性、标准 CSV 往返与 A4 竖版 PDF 的当前修复需求
 - `closed-2026-07-26-001-question-set-run-reliability/`：已完成的问题集运行原子启动、调度防重、执行租约、恢复收敛、历史证据保护和发布验收
@@ -53,7 +54,7 @@
 - `blocked-2026-07-28-001-geo-entity-share-metrics/`：回答内竞品提及占比（SOV）的版本边界、v3 完整输入分析、回答级等权聚合、分析失败隔离、平台视图、历史兼容和人工基线；Issue 008 人工基线已关闭，等待 Issue 009 的真实入口验收
 - `blocked-2026-07-29-002-ai-semantic-analysis-quality/`：v4 全实体语义抽取、竞品/排序/情绪原文证据、DeepSeek Pro 基线校准和全入口硬切已完成实现与技术验收，等待 SOV 波动口径和补充情绪人工基线确认
 - `active-2026-07-29-001-marketing-monitoring/`：只读市场数据监控定位下的百度第一期；真实 OAuth、账户目录、搜索推广 30 日分页报表和百度统计站点/趋势响应已用脱敏 fixture 固化，`PILOT_DATA_READY` 仅向项目白名单开放绑定、搜索快照和统计实时读取；页面入口已展示，真实数据仍等待金额/时区、Refresh Token 与完整生产验收
-- `active-2026-07-31-001-market-monitoring-frontend-ia/`：面向市场负责人和管理层的工作台信息架构、默认项目、市场总览、广告表现、网站流量及现有 GEO 页面自动上下文改造；当前正式导航仍保持 GEO 主入口，市场总览等待视觉确认、异常规则校准和百度 `VERIFIED` 后再切流
+- `active-2026-07-31-001-market-monitoring-frontend-ia/`：工作台信息架构与 2026-08-03 按来源完整链路的新版首页视觉/交互已完成，设计稿见[`assets/market-overview-home-final-2026-08-03.png`](active-2026-07-31-001-market-monitoring-frontend-ia/assets/market-overview-home-final-2026-08-03.png)。前端 36 项测试、生产构建和真实 Chrome/axe 9 项验收已通过；自然来源细分、客服/线索/订单数据、依赖这些字段的 KPI 与生产 OAuth/入口仍待完成
 - `closed-2026-07-31-002-single-brand-platform-runtime/`：已完成的单品牌管理员工作台、全局启用平台运行范围、不可用平台部分跳过、原始失败快照重试，以及默认品牌和历史监测数据保护
 - `closed-2026-07-31-003-question-set-report-trustworthiness/`：问题集报告可信度修复已完成；豆包过渡态在分析前按“采集无效”排除，表格 evidence 使用严格确定性锚定与字段级修复，生产 Flash 真实样本 20 / 20 通过并完成正式入口验收
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录

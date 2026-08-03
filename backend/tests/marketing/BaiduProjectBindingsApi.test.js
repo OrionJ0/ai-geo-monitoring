@@ -85,6 +85,14 @@ test.before(async () => {
           }
         ];
       }
+    },
+    siteDirectory: {
+      async listSites() {
+        return [
+          { siteId: '23412673', domain: 'gato.com.cn', status: 'ACTIVE' },
+          { siteId: '3519765', domain: 'paused.example', status: 'PAUSED' }
+        ];
+      }
     }
   });
   const app = express();
@@ -120,6 +128,16 @@ test('admin binds an exact opaque SEARCH account and can pause/resume it', async
     accountName: '搜索账户甲'
   }]);
 
+  const siteDirectoryResponse = await fetch(
+    `${baseUrl}/api/marketing/admin/baidu/connections/connection-1/accounts/0009007199254740993123/tongji-sites`
+  );
+  assert.equal(siteDirectoryResponse.status, 200);
+  assert.deepEqual(await siteDirectoryResponse.json(), [{
+    siteId: '23412673',
+    domain: 'gato.com.cn',
+    status: 'ACTIVE'
+  }]);
+
   const create = await fetch(
     `${baseUrl}/api/marketing/projects/11/baidu-bindings`,
     {
@@ -127,7 +145,8 @@ test('admin binds an exact opaque SEARCH account and can pause/resume it', async
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         connectionId: 'connection-1',
-        externalAccountId: '0009007199254740993123'
+        externalAccountId: '0009007199254740993123',
+        tongjiSiteId: '23412673'
       })
     }
   );
@@ -135,6 +154,8 @@ test('admin binds an exact opaque SEARCH account and can pause/resume it', async
   const binding = await create.json();
   assert.equal(binding.externalAccountId, '0009007199254740993123');
   assert.equal(binding.status, 'ACTIVE');
+  assert.equal(binding.tongjiSiteId, '23412673');
+  assert.equal(binding.tongjiSiteDomain, 'gato.com.cn');
 
   const duplicateProject = await fetch(
     `${baseUrl}/api/marketing/projects/12/baidu-bindings`,
@@ -143,7 +164,8 @@ test('admin binds an exact opaque SEARCH account and can pause/resume it', async
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         connectionId: 'connection-1',
-        externalAccountId: '0009007199254740993123'
+        externalAccountId: '0009007199254740993123',
+        tongjiSiteId: '23412673'
       })
     }
   );
@@ -189,11 +211,26 @@ test('binding rejects forged accounts, unknown fields, and archived projects', a
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         connectionId: 'connection-1',
-        externalAccountId: 'forged'
+        externalAccountId: 'forged',
+        tongjiSiteId: '23412673'
       })
     }
   );
   assert.equal(forged.status, 422);
+
+  const forgedSite = await fetch(
+    `${baseUrl}/api/marketing/projects/12/baidu-bindings`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        connectionId: 'connection-1',
+        externalAccountId: '0009007199254740993123',
+        tongjiSiteId: '99999999'
+      })
+    }
+  );
+  assert.equal(forgedSite.status, 422);
 
   const extraScope = await fetch(
     `${baseUrl}/api/marketing/projects/11/baidu-bindings`,
@@ -203,6 +240,7 @@ test('binding rejects forged accounts, unknown fields, and archived projects', a
       body: JSON.stringify({
         connectionId: 'connection-1',
         externalAccountId: '0009007199254740993123',
+        tongjiSiteId: '23412673',
         scopeType: 'campaign'
       })
     }
@@ -216,7 +254,8 @@ test('binding rejects forged accounts, unknown fields, and archived projects', a
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         connectionId: 'connection-1',
-        externalAccountId: '0009007199254740993123'
+        externalAccountId: '0009007199254740993123',
+        tongjiSiteId: '23412673'
       })
     }
   );
@@ -233,6 +272,11 @@ test('project allowlist rejects binding before any provider directory call', asy
         providerCalls += 1;
         return [];
       }
+    },
+    siteDirectory: {
+      async listSites() {
+        return [];
+      }
     }
   });
 
@@ -241,7 +285,8 @@ test('project allowlist rejects binding before any provider directory call', asy
       projectId: 12,
       adminId: 1,
       connectionId: 'connection-1',
-      externalAccountId: '0009007199254740993123'
+      externalAccountId: '0009007199254740993123',
+      tongjiSiteId: '23412673'
     }),
     { code: 'MARKETING_PROJECT_NOT_ALLOWED', status: 403 }
   );

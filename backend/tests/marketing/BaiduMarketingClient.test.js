@@ -615,6 +615,44 @@ test('Tongji trend parses exact strings and preserves provider no-data markers',
   });
 });
 
+test('Tongji trend accepts only documented stable source filters', async () => {
+  const calls = [];
+  const fixture = JSON.parse(fs.readFileSync(path.resolve(
+    __dirname,
+    '../../modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/fixtures/tongji-trend.success.redacted.json'
+  ), 'utf8'));
+  const client = createClient(async (request) => {
+    calls.push(request);
+    return structuredClone(fixture);
+  });
+  const request = {
+    accountName: '脱敏搜索账户',
+    accessToken: 'access-token-fixture',
+    siteId: '301',
+    coverage: {
+      from: '2026-07-01',
+      to: '2026-07-30'
+    }
+  };
+
+  for (const [sourceKey, providerValue] of [
+    ['DIRECT', 'through'],
+    ['SEARCH', 'search,0'],
+    ['EXTERNAL', 'link']
+  ]) {
+    await client.fetchTongjiTrend({ ...request, sourceKey });
+    assert.equal(calls.at(-1).json.body.source, providerValue);
+  }
+
+  await client.fetchTongjiTrend({ ...request, sourceKey: 'ALL' });
+  assert.equal(Object.hasOwn(calls.at(-1).json.body, 'source'), false);
+
+  await assert.rejects(
+    client.fetchTongjiTrend({ ...request, sourceKey: 'BAIDU' }),
+    { code: 'BAIDU_TONGJI_SOURCE_INVALID', status: 400 }
+  );
+});
+
 test('Tongji trend rejects impossible calendar dates', async () => {
   const fixture = JSON.parse(fs.readFileSync(path.resolve(
     __dirname,

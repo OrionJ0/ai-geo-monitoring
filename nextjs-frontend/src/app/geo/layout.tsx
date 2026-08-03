@@ -1,9 +1,30 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import { Button, Layout, Menu, message } from 'antd';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import {
+  BellOutlined,
+  BookOutlined,
+  FileSearchOutlined,
+  FundProjectionScreenOutlined,
+  GlobalOutlined,
+  HomeOutlined,
+  LinkOutlined,
+  MessageOutlined,
+  ProfileOutlined,
+  ReadOutlined,
+  SearchOutlined,
+  ShoppingOutlined,
+  UserOutlined
+} from '@ant-design/icons';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import Login from '@/components/Login';
 import { clearAuth, setAuthToken } from '@/lib/axiosConfig';
@@ -33,6 +54,22 @@ type NavigationGroup = {
   children: NavigationPage[];
 };
 
+const navigationIcons: Record<string, React.ReactNode> = {
+  '/market-overview': <HomeOutlined />,
+  '/ad-performance': <FundProjectionScreenOutlined />,
+  '/website-traffic': <GlobalOutlined />,
+  '/consultations': <MessageOutlined />,
+  '/order-results': <ShoppingOutlined />,
+  '/project-dashboard': <SearchOutlined />,
+  '/sources': <LinkOutlined />,
+  '/seo-audit': <FileSearchOutlined />,
+  '/prompts': <BookOutlined />,
+  '/question-set-reports': <ReadOutlined />,
+  '/quick-links': <ProfileOutlined />,
+  '/notice': <BellOutlined />,
+  '/profile': <UserOutlined />
+};
+
 export default function GeoLayout({
   children,
 }: {
@@ -42,6 +79,7 @@ export default function GeoLayout({
   const [collapsed, setCollapsed] = useState(false);
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
+  const siderToggleRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('agd_token') || '';
@@ -71,12 +109,14 @@ export default function GeoLayout({
         label: item.label,
         children: item.children.map((child) => ({
           key: child.key,
+          icon: navigationIcons[child.key],
           label: <Link href={child.href}>{child.label}</Link>
         }))
       };
     }
     return {
       key: item.key,
+      icon: navigationIcons[item.key],
       label: <Link href={item.href}>{item.label}</Link>
     };
   }), [navigation]);
@@ -84,6 +124,22 @@ export default function GeoLayout({
   const handleSiderToggle = () => {
     setCollapsed(!collapsed);
   };
+
+  const closeMobileSider = useCallback(() => {
+    setCollapsed(true);
+    window.requestAnimationFrame(() => siderToggleRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (collapsed) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && window.innerWidth < 768) {
+        closeMobileSider();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [closeMobileSider, collapsed]);
 
   const handleLogin = ({
     token: nextToken,
@@ -124,6 +180,7 @@ export default function GeoLayout({
       >
         <div className="logo" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Button
+            ref={siderToggleRef}
             type="text"
             aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
             aria-expanded={!collapsed}
@@ -142,7 +199,7 @@ export default function GeoLayout({
             type="button"
             className="geo-sider-backdrop"
             aria-label="关闭侧栏"
-            onClick={() => setCollapsed(true)}
+            onClick={closeMobileSider}
           />
         ) : null}
         <Sider
@@ -156,7 +213,6 @@ export default function GeoLayout({
           onBreakpoint={setCollapsed}
           onCollapse={setCollapsed}
           trigger={null}
-          style={{ background: '#fff' }}
         >
           <nav aria-label="工作台主导航">
             <Menu
@@ -167,7 +223,7 @@ export default function GeoLayout({
               items={menuItems}
               onClick={() => {
                 if (window.innerWidth < 768) {
-                  window.setTimeout(() => setCollapsed(true), 0);
+                  window.setTimeout(closeMobileSider, 0);
                 }
               }}
             />

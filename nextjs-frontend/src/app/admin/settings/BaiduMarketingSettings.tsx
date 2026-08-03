@@ -25,12 +25,20 @@ type Account = {
   accountName: string;
 };
 
+type TongjiSite = {
+  siteId: string;
+  domain: string;
+  status: 'ACTIVE';
+};
+
 type Binding = {
   id: string;
   projectId: string;
   connectionId: string;
   externalAccountId: string;
   externalAccountName: string;
+  tongjiSiteId?: string | null;
+  tongjiSiteDomain?: string | null;
   status: 'ACTIVE' | 'PAUSED';
   pausedReason?: string | null;
 };
@@ -43,9 +51,11 @@ export default function BaiduMarketingSettings() {
   const [projectId, setProjectId] = useState('');
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [tongjiSites, setTongjiSites] = useState<TongjiSite[]>([]);
   const [bindingModalOpen, setBindingModalOpen] = useState(false);
   const [bindingConnectionId, setBindingConnectionId] = useState('');
   const [bindingAccountId, setBindingAccountId] = useState('');
+  const [bindingTongjiSiteId, setBindingTongjiSiteId] = useState('');
   const [deletingBinding, setDeletingBinding] = useState<Binding | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -126,6 +136,8 @@ export default function BaiduMarketingSettings() {
     if (!bindingModalOpen || !bindingConnectionId) {
       setAccounts([]);
       setBindingAccountId('');
+      setTongjiSites([]);
+      setBindingTongjiSiteId('');
       return;
     }
     let active = true;
@@ -147,6 +159,33 @@ export default function BaiduMarketingSettings() {
       active = false;
     };
   }, [bindingConnectionId, bindingModalOpen]);
+
+  useEffect(() => {
+    if (!bindingModalOpen || !bindingConnectionId || !bindingAccountId) {
+      setTongjiSites([]);
+      setBindingTongjiSiteId('');
+      return;
+    }
+    let active = true;
+    setError('');
+    axios.get(
+      `/api/admin/marketing/baidu/connections/${encodeURIComponent(bindingConnectionId)}`
+      + `/accounts/${encodeURIComponent(bindingAccountId)}/tongji-sites`
+    ).then((response) => {
+      if (!active) return;
+      const rows = Array.isArray(response.data) ? response.data : [];
+      setTongjiSites(rows);
+      setBindingTongjiSiteId(rows[0]?.siteId || '');
+    }).catch((requestError) => {
+      if (!active) return;
+      setTongjiSites([]);
+      setBindingTongjiSiteId('');
+      setError(getApiErrorMessage(requestError, '无法读取百度统计站点目录'));
+    });
+    return () => {
+      active = false;
+    };
+  }, [bindingAccountId, bindingConnectionId, bindingModalOpen]);
 
   const authorize = async (
     operation: 'CONNECT' | 'REAUTHORIZE',
@@ -192,6 +231,7 @@ export default function BaiduMarketingSettings() {
     );
     setBindingConnectionId(firstConnection?.id || '');
     setBindingAccountId('');
+    setBindingTongjiSiteId('');
     setBindingModalOpen(true);
   };
 
@@ -202,6 +242,7 @@ export default function BaiduMarketingSettings() {
     returnFocusRef.current = event.currentTarget;
     setBindingConnectionId(connectionId);
     setBindingAccountId('');
+    setBindingTongjiSiteId('');
     setBindingModalOpen(true);
   };
 
@@ -211,7 +252,12 @@ export default function BaiduMarketingSettings() {
   };
 
   const createBinding = async () => {
-    if (!projectId || !bindingConnectionId || !bindingAccountId) return;
+    if (
+      !projectId
+      || !bindingConnectionId
+      || !bindingAccountId
+      || !bindingTongjiSiteId
+    ) return;
     setBusy(true);
     setError('');
     try {
@@ -220,6 +266,7 @@ export default function BaiduMarketingSettings() {
         {
           connectionId: bindingConnectionId,
           externalAccountId: bindingAccountId,
+          tongjiSiteId: bindingTongjiSiteId,
         }
       );
       setBindingModalOpen(false);
@@ -316,7 +363,7 @@ export default function BaiduMarketingSettings() {
             showIcon
             title="真实数据试点模式"
             description="当前只对项目白名单开放搜索账户绑定和最近 30 天只读报表；正式导航、币种与时区口径仍在验收。"
-            action={<Button href="/geo/marketing">打开营销监控</Button>}
+            action={<Button href="/geo/market-overview">打开市场总览</Button>}
           />
         ) : null}
         {error ? <Alert type="error" showIcon title={error} role="alert" /> : null}
@@ -394,7 +441,7 @@ export default function BaiduMarketingSettings() {
         <div>
           <h2 id="baidu-marketing-bindings-title">项目账户绑定</h2>
           <p>
-            一个绑定覆盖整个百度搜索账户；暂停或解除绑定不会修改百度来源数据。
+            一个绑定同时固定百度搜索账户和百度统计站点；暂停或解除绑定不会修改百度来源数据。
           </p>
         </div>
         <Space wrap align="end">
@@ -428,7 +475,7 @@ export default function BaiduMarketingSettings() {
               )
             }
           >
-            绑定搜索账户
+            绑定搜索账户和统计站点
           </Button>
           <Button
             onClick={() => loadBindings(projectId)}
@@ -443,7 +490,7 @@ export default function BaiduMarketingSettings() {
           dataSource={bindings}
           pagination={false}
           locale={{ emptyText: projectId ? '当前项目尚未绑定搜索账户' : '暂无监控项目' }}
-          scroll={{ x: 840 }}
+          scroll={{ x: 1020 }}
           columns={[
             {
               title: '搜索账户',
@@ -455,6 +502,17 @@ export default function BaiduMarketingSettings() {
                   <code>{row.externalAccountId}</code>
                 </span>
               ),
+            },
+            {
+              title: '百度统计站点',
+              key: 'tongjiSite',
+              render: (_, row) => row.tongjiSiteId ? (
+                <span>
+                  {row.tongjiSiteDomain}
+                  <br />
+                  <code>{row.tongjiSiteId}</code>
+                </span>
+              ) : <Tag color="red">未绑定</Tag>,
             },
             {
               title: '状态',
@@ -519,7 +577,7 @@ export default function BaiduMarketingSettings() {
         </p>
       </Modal>
       <Modal
-        title={pilotAuthOnly ? '检查百度搜索账户目录' : '绑定百度搜索账户'}
+        title={pilotAuthOnly ? '检查百度账户与统计站点' : '绑定百度账户和统计站点'}
         open={bindingModalOpen}
         onOk={pilotAuthOnly
           ? closeAccountModal
@@ -530,7 +588,9 @@ export default function BaiduMarketingSettings() {
         okButtonProps={{
           disabled: pilotAuthOnly
             ? false
-            : !bindingConnectionId || !bindingAccountId,
+            : !bindingConnectionId
+              || !bindingAccountId
+              || !bindingTongjiSiteId,
         }}
         confirmLoading={busy}
         destroyOnHidden
@@ -578,6 +638,28 @@ export default function BaiduMarketingSettings() {
               title={pilotAuthOnly
                 ? '当前连接没有可见的只读搜索账户'
                 : '当前连接没有可绑定的只读搜索账户'}
+            />
+          ) : null}
+          <label>
+            百度统计站点
+            <br />
+            <select
+              value={bindingTongjiSiteId}
+              onChange={(event) => setBindingTongjiSiteId(event.target.value)}
+              disabled={busy || !tongjiSites.length}
+            >
+              {tongjiSites.map((site) => (
+                <option key={site.siteId} value={site.siteId}>
+                  {site.domain}（{site.siteId}）
+                </option>
+              ))}
+            </select>
+          </label>
+          {bindingAccountId && !tongjiSites.length ? (
+            <Alert
+              type="warning"
+              showIcon
+              title="当前搜索账户没有可绑定的活动百度统计站点"
             />
           ) : null}
         </Space>

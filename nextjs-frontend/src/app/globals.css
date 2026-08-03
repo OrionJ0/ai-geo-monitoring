@@ -212,6 +212,7 @@ button:focus-visible,
   height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
+  background: #fff !important;
 }
 
 .geo-content {
@@ -219,11 +220,12 @@ button:focus-visible,
   height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  background: #f6f8fb;
 }
 
 .workspace-navigation {
   padding: 6px 0 12px;
-  background: #f3f5f8 !important;
+  background: #fff !important;
 }
 
 .workspace-navigation > .ant-menu-item {
@@ -240,13 +242,13 @@ button:focus-visible,
 }
 
 .workspace-navigation > .ant-menu-item-group > .ant-menu-item-group-title {
-  min-height: 40px;
-  margin: 0 4px;
-  padding: 10px 20px;
+  min-height: 32px;
+  margin: 4px 4px 0;
+  padding: 8px 20px 4px;
   border-radius: 8px;
   background: transparent;
   color: #667085;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 20px;
 }
@@ -271,9 +273,18 @@ button:focus-visible,
   width: calc(100% - 8px);
   height: 36px;
   margin: 0 4px;
-  padding-inline-start: 36px !important;
+  padding-inline-start: 20px !important;
   border-radius: 6px;
   line-height: 36px;
+}
+
+.workspace-navigation .ant-menu-item-icon {
+  min-width: 16px;
+  font-size: 16px !important;
+}
+
+.workspace-navigation .ant-menu-title-content {
+  margin-inline-start: 8px !important;
 }
 
 .workspace-navigation .ant-menu-item-group-list .ant-menu-item,
@@ -292,7 +303,7 @@ button:focus-visible,
   background: #e6f4ff;
 }
 
-@media (max-width: 680px) {
+@media (max-width: 767px) {
   .app-header {
     padding: 8px 10px;
   }
@@ -353,5 +364,13 @@ button:focus-visible,
     max-width: 0 !important;
     flex-basis: 0 !important;
     box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
   }
 }

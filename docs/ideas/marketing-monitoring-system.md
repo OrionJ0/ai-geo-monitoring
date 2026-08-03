@@ -1,3 +1,5 @@
+> 历史方案（2026-08-03 标注）：本文保留早期探索过程，不再作为现行订单指标、来源链路或首页设计的依据。当前口径以 `../../CONTEXT.md`、`../visual-design-spec.md` 和 `../active-2026-07-31-001-market-monitoring-frontend-ia/prd.md` 为准。
+
 # 营销监控系统一页方案
 
 - 状态：已确认
