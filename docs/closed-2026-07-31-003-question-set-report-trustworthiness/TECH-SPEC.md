@@ -645,5 +645,5 @@ scope: deep
 - 第二次生产部署在真实浏览器 axe 门禁发现导航分组标题 `#8993a4` 在浅色背景上的对比度仅 2.83–3.10，低于 WCAG AA 的 4.5。标题色收敛为项目既有正文色 `#667085`，在生产背景 `#f3f5f8` 上对比度为 4.55，在当前本地白色背景改动上为 4.97；新增静态契约测试并保留浏览器 axe 作为入口级验收。
 - 正式部署通过 Git Bundle 快进至 `6820ac369b8f59d377998b9b20abf17ba3cba0e2`。发布门禁结果：后端 988 / 988、营销后端 95 / 95、前端 30 / 30、Playwright axe 与响应式 2 / 2、lint、TypeScript 和 Next.js 36 路由生产构建全部通过；GEO 与营销迁移审计无待迁移项。
 - 生产配置实测为 `deepseek-v4-flash`、`thinking=disabled`、Web 搜索关闭、`semantic_evidence_field_repair_v8`。在 42 条有效历史回答中去重后有 38 条，优先选取历史分析失败样本共 20 条，结果 20 / 20（100%）通过；另有 3 条豆包搜索/计划过渡态在分析前排除。20 条中 16 条首轮通过，4 条仅对失败 evidence 执行字段级补丁后通过，0 条放宽校验或重生成整份 JSON。
-- 公开 `https://insight.guangtuo.com/api/ready` 返回 ready，报告入口返回 HTTP 200；服务器 `HEAD` 与 `origin/main` 对齐且工作区干净，前后端 systemd 服务均 active。运行 #3 只读报告为 `completed/terminal`，10 / 10 有效分析、分析覆盖率 100%。
+- 公开 `https://insight.guangtuo.com/api/ready` 返回 ready，报告入口返回 HTTP 200；本地已推送的 `origin/main` 与服务器 `HEAD` 均指向发布提交且服务器工作区干净，前后端 systemd 服务均 active。服务器本地缓存的远端跟踪引用 `origin/main` 仍为 `42f883f`，这是离线 Git Bundle 不访问 GitHub、不会刷新该缓存引用的预期结果，不作为 Bundle 发布后的源码真值。运行 #3 只读报告为 `completed/terminal`，10 / 10 有效分析、分析覆盖率 100%。
 - 豆包专用 Profile 实时预检返回 `ready`，选择器版本为 `doubao-web-v3`，无运行阻塞。历史记录 39、45、51 分别只读归类为 `transient_search_status`、`transient_search_summary`、`transient_planning_status`；记录 54 为有效完整回答。根因确认是旧 adapter 提前把中间节点当成稳定回答，不是豆包拒答或账号失效。
