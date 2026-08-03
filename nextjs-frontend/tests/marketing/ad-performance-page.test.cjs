@@ -22,6 +22,9 @@ test('advertising page uses the default project and the real read-only dashboard
   assert.match(pageSource, /defaultContext\.project\?\.id/);
   assert.match(hookSource, /\/dashboard/);
   assert.match(hookSource, /axios\.get<MarketingDashboardResponse>/);
+  assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data\)/);
+  assert.match(adapterSource, /MARKETING_DASHBOARD_RESPONSE_INVALID/);
+  assert.doesNotMatch(adapterSource, /return '0';/);
   assert.doesNotMatch(hookSource, /axios\.(?:post|put|patch|delete)\(/);
   assert.doesNotMatch(pageSource, /立即刷新|最后成功|更新时间|前往百度/);
 });
@@ -54,13 +57,16 @@ test('trend offers exactly the five advertising metrics and one selected object'
   assert.match(pageSource, /返回总体/);
   assert.match(pageSource, /current === record\.key \? null : record\.key/);
   assert.doesNotMatch(pageSource, /selectedNodeKeys|rowSelection/);
+  assert.match(adapterSource, /currentTrend: normalizeTrend\(campaign\.trend\)/);
+  assert.match(adapterSource, /currentTrend: normalizeTrend\(adGroup\.trend\)/);
+  assert.match(adapterSource, /currentTrend: normalizeTrend\(keyword\.trend\)/);
 });
 
 test('drilldown table keeps the required columns, hierarchy filters, and parent paths', () => {
   [
     '名称', '状态', '预算', '消费', '展现', '点击', 'CTR', '平均 CPC', '详情'
   ].forEach((title) => assert.match(pageSource, new RegExp(`title: '${title}'`)));
-  ['全部层级', '仅项目', '仅方案', '仅单元'].forEach((label) => {
+  ['全部层级', '仅项目', '仅计划', '仅单元', '仅关键词'].forEach((label) => {
     assert.match(pageSource, new RegExp(`label: '${label}'`));
   });
   assert.match(pageSource, /filterTree/);
@@ -84,10 +90,15 @@ test('detail popover is viewport-aware, hoverable, keyboard-triggered, and escap
   assert.doesNotMatch(pageSource, /Drawer|Modal|进入详情页/);
 });
 
-test('real adapter is honest about missing hierarchy fields and fixture stays isolated', () => {
+test('real adapter builds the complete strict advertising hierarchy and fixture stays isolated', () => {
   assert.match(adapterSource, /source: 'dashboard'/);
   assert.match(adapterSource, /dashboard\.campaigns/);
+  assert.match(adapterSource, /dashboard\.adGroups/);
+  assert.match(adapterSource, /dashboard\.keywords/);
   assert.match(adapterSource, /level: 'scheme'/);
+  assert.match(adapterSource, /level: 'unit'/);
+  assert.match(adapterSource, /level: 'keyword'/);
+  assert.match(adapterSource, /targetingType/);
   assert.match(adapterSource, /budgetAmountScaled: null/);
   assert.match(adapterSource, /currentTrend: \[\]/);
   assert.match(adapterSource, /\{ label: '投放设备', value: '—' \}/);
@@ -95,6 +106,7 @@ test('real adapter is honest about missing hierarchy fields and fixture stays is
   assert.match(fixtureSource, /\{ label: '下属方案数', value: '2' \}/);
   assert.doesNotMatch(fixtureSource, /scheme:perimeter-brand|周界报警品牌词/);
   assert.match(hookSource, /NEXT_PUBLIC_AD_PERFORMANCE_FIXTURE/);
+  assert.match(hookSource, /process\.env\.NODE_ENV !== 'production'/);
   assert.match(hookSource, /fixtureEnabled = AD_PERFORMANCE_FIXTURE_ENABLED/);
   assert.match(pageSource, /process\.env\.NODE_ENV !== 'production'/);
   assert.match(pageSource, /get\('fixture'\)[\s\S]*=== 'ad-performance'/);

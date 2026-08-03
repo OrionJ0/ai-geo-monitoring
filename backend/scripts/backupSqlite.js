@@ -73,7 +73,22 @@ async function removeTemporaryArtifacts(temporaryPath) {
   ].map((filename) => fs.promises.rm(filename, { force: true })));
 }
 
-async function backupDatabase({ sourcePath, backupPath }) {
+async function verifyExistingBackup(filename) {
+  const stat = await fs.promises.lstat(filename);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error(`SQLite release 备份不是普通文件: ${filename}`);
+  }
+  if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) {
+    throw new Error(`SQLite release 备份权限必须为 0600 或更严格: ${filename}`);
+  }
+  const integrity = await quickCheck(filename);
+  if (integrity !== 'ok') {
+    throw new Error(`SQLite release 备份完整性检查失败: ${integrity || 'unknown'}`);
+  }
+  return integrity;
+}
+
+async function backupDatabase({ sourcePath, backupPath, ifAbsent = false }) {
   const resolvedSource = path.resolve(sourcePath);
   const resolvedBackup = path.resolve(backupPath);
   const temporaryPath = `${resolvedBackup}.tmp`;
@@ -83,6 +98,11 @@ async function backupDatabase({ sourcePath, backupPath }) {
   }
   if (!fs.existsSync(resolvedSource)) {
     throw new Error(`SQLite 数据库不存在: ${resolvedSource}`);
+  }
+
+  if (ifAbsent && fs.existsSync(resolvedBackup)) {
+    const integrity = await verifyExistingBackup(resolvedBackup);
+    return { backupPath: resolvedBackup, integrity, reused: true };
   }
 
   await fs.promises.mkdir(path.dirname(resolvedBackup), { recursive: true });
@@ -97,7 +117,7 @@ async function backupDatabase({ sourcePath, backupPath }) {
     await fs.promises.chmod(temporaryPath, 0o600);
     await fs.promises.rename(temporaryPath, resolvedBackup);
     await removeTemporaryArtifacts(temporaryPath);
-    return { backupPath: resolvedBackup, integrity };
+    return { backupPath: resolvedBackup, integrity, reused: false };
   } catch (error) {
     await removeTemporaryArtifacts(temporaryPath);
     throw error;
@@ -105,13 +125,16 @@ async function backupDatabase({ sourcePath, backupPath }) {
 }
 
 async function main() {
-  const [sourcePath, backupPath] = process.argv.slice(2);
+  const [sourcePath, backupPath, ...options] = process.argv.slice(2);
   if (!sourcePath || !backupPath) {
     throw new Error('用法: node backend/scripts/backupSqlite.js <数据库路径> <备份路径>');
   }
 
-  const result = await backupDatabase({ sourcePath, backupPath });
-  console.log(`SQLite 最新备份已更新: ${result.backupPath}`);
+  const ifAbsent = options.includes('--if-absent');
+  const result = await backupDatabase({ sourcePath, backupPath, ifAbsent });
+  console.log(result.reused
+    ? `SQLite release 备份已验证并复用: ${result.backupPath}`
+    : `SQLite 备份已创建: ${result.backupPath}`);
 }
 
 if (require.main === module) {

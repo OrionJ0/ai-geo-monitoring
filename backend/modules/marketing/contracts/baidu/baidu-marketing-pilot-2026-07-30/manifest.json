@@ -29,6 +29,42 @@
       ]
     },
     {
+      "title": "搜索推广单元报告",
+      "url": "https://dev2.baidu.com/content?sceneType=0&pageId=102475&nodeId=699&subhead=",
+      "official": true,
+      "supports": [
+        "search_ad_group_report",
+        "report_fields",
+        "report_pagination",
+        "report_date_range",
+        "report_qps"
+      ]
+    },
+    {
+      "title": "搜索推广关键词报告",
+      "url": "https://dev2.baidu.com/content?sceneType=0&pageId=102476&nodeId=705&subhead=",
+      "official": true,
+      "supports": [
+        "search_keyword_report",
+        "report_fields",
+        "report_pagination",
+        "report_date_range",
+        "report_qps"
+      ]
+    },
+    {
+      "title": "搜索推广搜索词报告",
+      "url": "https://dev2.baidu.com/content?sceneType=0&pageId=102477&nodeId=704&subhead=",
+      "official": true,
+      "supports": [
+        "search_term_report",
+        "report_fields",
+        "report_pagination",
+        "report_date_range",
+        "report_qps"
+      ]
+    },
+    {
       "title": "百度统计获取站点列表",
       "url": "https://tongji.baidu.com/api/manual/Chapter1/getSiteList.html",
       "official": true,
@@ -195,6 +231,101 @@
       "pilotObservedPages": 4
     }
   },
+  "searchAdGroupReport": {
+    "method": "POST",
+    "url": "https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData",
+    "reportType": 2284618,
+    "timeUnit": "DAY",
+    "maxDateRangeDays": 731,
+    "qps": 50,
+    "pageSize": 200,
+    "maxRows": 50000,
+    "columns": [
+      "date",
+      "userName",
+      "userId",
+      "campaignId",
+      "campaignNameStatus",
+      "adGroupId",
+      "adGroupNameStatus",
+      "impression",
+      "click",
+      "cost"
+    ],
+    "evidence": {
+      "officialDocumented": true,
+      "pilotObserved": true,
+      "responseShapeVerified": true,
+      "observedRange": "2026-07-29/2026-08-02",
+      "observedRows": 224
+    }
+  },
+  "searchKeywordReport": {
+    "method": "POST",
+    "url": "https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData",
+    "reportType": 2602783,
+    "timeUnit": "DAY",
+    "maxDateRangeDays": 731,
+    "qps": 10,
+    "pageSize": 200,
+    "maxRows": 100000,
+    "columns": [
+      "date",
+      "userName",
+      "userId",
+      "campaignId",
+      "campaignNameStatus",
+      "adGroupId",
+      "adGroupNameStatus",
+      "winfoIdTypeEnum",
+      "wInfoId",
+      "wInfoNameStatus",
+      "impression",
+      "click",
+      "cost"
+    ],
+    "evidence": {
+      "officialDocumented": true,
+      "pilotObserved": true,
+      "responseShapeVerified": true,
+      "observedRange": "2026-07-29/2026-08-02",
+      "observedRows": 524
+    }
+  },
+  "searchTermReport": {
+    "method": "POST",
+    "url": "https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData",
+    "reportType": 2307838,
+    "timeUnit": "DAY",
+    "maxDateRangeDays": 91,
+    "qps": 10,
+    "pageSize": 200,
+    "maxRows": 100000,
+    "columns": [
+      "date",
+      "userName",
+      "userId",
+      "campaignId",
+      "campaignNameStatus",
+      "adGroupId",
+      "adGroupNameStatus",
+      "wInfoNameStatus",
+      "queryWord",
+      "queryStatusName",
+      "wMatchId",
+      "impression",
+      "click",
+      "cost"
+    ],
+    "evidence": {
+      "officialDocumented": true,
+      "pilotObserved": true,
+      "responseShapeVerified": true,
+      "observedRange": "2026-07-29/2026-08-02",
+      "observedRows": 45,
+      "keywordIdAvailable": false
+    }
+  },
   "tongji": {
     "siteDirectory": {
       "method": "POST",
@@ -210,6 +341,69 @@
         "visitor_count"
       ]
     },
+    "sourceReports": {
+      "reportMethods": [
+        "source/all/a",
+        "source/engine/a"
+      ],
+      "officialDocumented": true,
+      "pilotObserved": true,
+      "responseShapeVerified": true,
+      "runtimeEnabled": true,
+      "observedRange": "2026-07-05/2026-08-03",
+      "observedRows": {
+        "all": 5,
+        "engine": 3
+      }
+    },
+    "qualityMetrics": {
+      "metrics": [
+        "bounce_ratio",
+        "avg_visit_time",
+        "avg_visit_pages"
+      ],
+      "officialDocumented": true,
+      "pilotObserved": true,
+      "responseShapeVerified": true,
+      "runtimeEnabled": true,
+      "observedRange": "2026-07-05/2026-08-03",
+      "observedRows": 30
+    },
+    "pageReports": {
+      "landing": {
+        "reportMethod": "visit/landingpage/a",
+        "dimensionField": "visit_page_title",
+        "metrics": [
+          "visit_count",
+          "out_pv_count",
+          "bounce_ratio",
+          "avg_visit_time",
+          "avg_visit_pages"
+        ]
+      },
+      "visited": {
+        "reportMethod": "visit/toppage/a",
+        "dimensionField": "visit_page_title",
+        "metrics": [
+          "pv_count",
+          "visitor_count",
+          "average_stay_time",
+          "outward_count",
+          "exit_ratio"
+        ]
+      },
+      "officialDocumented": true,
+      "pilotObserved": true,
+      "responseShapeVerified": true,
+      "runtimeEnabled": true,
+      "observedRange": "2026-07-05/2026-08-03",
+      "observedRows": {
+        "landing": 9,
+        "visited": 24
+      },
+      "paginationVerified": true,
+      "crossDomainRowsObserved": true
+    },
     "pilotObserved": {
       "siteCount": 3,
       "activeSiteCount": 3,
@@ -219,6 +413,12 @@
       "metricWireType": "safe integer or formatted decimal string",
       "maxResultsZeroReturnedAll": false,
       "completeRangeUsesExplicitDayCount": true,
+      "qualitySummaryShapeVerified": true,
+      "pageDimensionFields": [
+        "name",
+        "pageId"
+      ],
+      "pageMaxResultsZeroReturnedAll": false,
       "noDataMarker": "--"
     }
   },

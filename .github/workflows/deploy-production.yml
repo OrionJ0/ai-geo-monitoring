@@ -11,10 +11,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  verify:
     if: vars.AI_GEO_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
-    environment: production
     timeout-minutes: 45
     steps:
       - name: 检出完整 main 历史
@@ -22,17 +21,112 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 安装 Node.js
+        uses: actions/setup-node@1e60f620b9541d414fcefe26d6a8b1347f09527c # v4.0.4
+        with:
+          node-version: '20.19.5'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            nextjs-frontend/package-lock.json
+
+      - name: 验证后端候选版本
+        working-directory: backend
+        run: |
+          npm ci
+          npm test
+          npm run test:marketing
+          npm run test:website-data
+          npm run test:consultation-records
+
+      - name: 验证正式部署入口
+        run: |
+          npm ci
+          npm run test:deployment
+
+      - name: 验证前端候选版本
+        working-directory: nextjs-frontend
+        env:
+          AI_GEO_BUILD_REVISION: ${{ github.sha }}
+        run: |
+          npm ci
+          npm test
+          npm run lint
+          npm run build
+          npm run test:marketing:browser
+
       - name: 生成并校验发布 Bundle
         id: release
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse refs/heads/main)" = "$GITHUB_SHA"
           bundle="${RUNNER_TEMP}/ai-geo-release-${GITHUB_SHA}.bundle"
           git bundle create "$bundle" refs/heads/main
           git bundle verify "$bundle"
           checksum="$(sha256sum "$bundle" | cut -d ' ' -f 1)"
+          checksum_file="${bundle}.sha256"
+          printf '%s\n' "$checksum" > "$checksum_file"
           echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+          echo "checksum_file=$checksum_file" >> "$GITHUB_OUTPUT"
+
+      - name: 上传已验证发布产物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ai-geo-release-${{ github.sha }}
+          path: |
+            ${{ steps.release.outputs.bundle }}
+            ${{ steps.release.outputs.checksum_file }}
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    needs: verify
+    if: vars.AI_GEO_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: 下载已验证发布产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ai-geo-release-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+
+      - name: 复核发布产物
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="${RUNNER_TEMP}/release/ai-geo-release-${GITHUB_SHA}.bundle"
+          checksum_file="${bundle}.sha256"
+          test -f "$bundle"
+          test -f "$checksum_file"
+          checksum="$(tr -d '[:space:]' < "$checksum_file")"
+          [[ "$checksum" =~ ^[a-f0-9]{64}$ ]]
+          actual="$(sha256sum "$bundle" | cut -d ' ' -f 1)"
+          test "$actual" = "$checksum"
+          echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+
+      - name: 验证生产部署配置
+        shell: bash
+        env:
+          AI_GEO_DEPLOY_HOST: ${{ secrets.AI_GEO_DEPLOY_HOST }}
+          AI_GEO_DEPLOY_USER: ${{ secrets.AI_GEO_DEPLOY_USER }}
+          AI_GEO_DEPLOY_SSH_KEY: ${{ secrets.AI_GEO_DEPLOY_SSH_KEY }}
+          AI_GEO_DEPLOY_KNOWN_HOSTS: ${{ secrets.AI_GEO_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$AI_GEO_DEPLOY_HOST"
+          test -n "$AI_GEO_DEPLOY_USER"
+          test -n "$AI_GEO_DEPLOY_SSH_KEY"
+          test -n "$AI_GEO_DEPLOY_KNOWN_HOSTS"
+          [[ "$AI_GEO_DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$AI_GEO_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
 
       - name: 配置生产 SSH 身份
         shell: bash
@@ -41,11 +135,10 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.AI_GEO_DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/ai_geo_deploy"
-          chmod 600 "$HOME/.ssh/ai_geo_deploy"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
+          install -m 600 /dev/null "$RUNNER_TEMP/ai_geo_deploy"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/ai_geo_deploy"
+          install -m 600 /dev/null "$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/known_hosts"
 
       - name: 上传发布 Bundle
         shell: bash
@@ -55,7 +148,13 @@ jobs:
           BUNDLE: ${{ steps.release.outputs.bundle }}
         run: |
           set -euo pipefail
-          scp -O -i "$HOME/.ssh/ai_geo_deploy" "$BUNDLE" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/ai-geo-release-${GITHUB_SHA}.bundle"
+          scp -O -F /dev/null \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
+            -i "$RUNNER_TEMP/ai_geo_deploy" \
+            "$BUNDLE" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/ai-geo-release-${GITHUB_SHA}.bundle"
 
       - name: 校验、快进并执行正式部署
         shell: bash
@@ -65,5 +164,11 @@ jobs:
           CHECKSUM: ${{ steps.release.outputs.checksum }}
         run: |
           set -euo pipefail
-          ssh -i "$HOME/.ssh/ai_geo_deploy" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+          ssh -F /dev/null \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
+            -i "$RUNNER_TEMP/ai_geo_deploy" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "cd /opt/ai-geo-monitoring && node scripts/deploy-from-bundle.mjs --bundle=/tmp/ai-geo-release-${GITHUB_SHA}.bundle --revision=${GITHUB_SHA} --sha256=${CHECKSUM}"

@@ -24,7 +24,7 @@ test('workspace always shows the complete agreed information architecture', () =
   assert.deepEqual(labels, [
     '市场总览',
     '广告表现',
-    '搜索词分析',
+    '关键词分析',
     '网站流量',
     '原始咨询',
     '订单结果',
@@ -37,7 +37,7 @@ test('workspace always shows the complete agreed information architecture', () =
     '系统通知',
     '个人中心'
   ]);
-  assert.match(hrefs.join(' '), /market-overview|quick-links|ad-performance|search-term-analysis|website-traffic|consultations|order-results/);
+  assert.match(hrefs.join(' '), /market-overview|quick-links|ad-performance|keyword-analysis|website-traffic|consultations|order-results/);
   assert.equal(hrefs.includes('/admin/settings'), false);
   assert.equal(resolveGeoDefaultRoute({ formalNavigation: false }), '/geo/market-overview');
 });
@@ -62,7 +62,7 @@ test('workspace navigation groups use the approved order and names', () => {
   assert.deepEqual(items.slice(0, 4).map((item) => item.label), [
     '市场总览',
     '广告表现',
-    '搜索词分析',
+    '关键词分析',
     '网站流量',
   ]);
   assert.equal(navigation.at(-2).label, '常用网站');

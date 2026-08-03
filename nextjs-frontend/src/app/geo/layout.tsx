@@ -57,7 +57,7 @@ type NavigationGroup = {
 const navigationIcons: Record<string, React.ReactNode> = {
   '/market-overview': <HomeOutlined />,
   '/ad-performance': <FundProjectionScreenOutlined />,
-  '/search-term-analysis': <SearchOutlined />,
+  '/keyword-analysis': <SearchOutlined />,
   '/website-traffic': <GlobalOutlined />,
   '/consultations': <MessageOutlined />,
   '/order-results': <ShoppingOutlined />,
@@ -112,10 +112,7 @@ export default function GeoLayout({
           key: child.key,
           icon: navigationIcons[child.key],
           label: (
-            <Link
-              href={child.href}
-              prefetch={child.key !== '/search-term-analysis'}
-            >
+            <Link href={child.href}>
               {child.label}
             </Link>
           )

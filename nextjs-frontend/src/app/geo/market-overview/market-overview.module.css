@@ -36,6 +36,25 @@
   border-radius: 8px;
 }
 
+.globalControls,
+.deviceControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deviceControl > span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.deviceControl :global(.ant-select) {
+  min-width: 92px;
+}
+
 .statusStack {
   display: grid;
   gap: 8px;
@@ -109,6 +128,14 @@
 .infoButton:hover {
   color: #0f4fb8;
   background: #e6f4ff;
+}
+
+.infoButton:focus-visible,
+.sourceLink:focus-visible,
+.headerButton:focus-visible,
+.tableScroller:focus-visible {
+  outline: 2px solid #2f6bff;
+  outline-offset: 2px;
 }
 
 .kpiGrid {
@@ -252,7 +279,7 @@
 .journeyTable,
 .equivalentTable {
   width: 100%;
-  min-width: 1020px;
+  min-width: 1068px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -288,7 +315,7 @@
 }
 
 .journeyTable thead th:first-child {
-  width: 156px;
+  width: 190px;
   text-align: left;
 }
 
@@ -311,7 +338,7 @@
 }
 
 .journeyTable thead th:nth-child(8) {
-  width: 170px;
+  width: 120px;
 }
 
 .journeyTable tbody th,
@@ -361,10 +388,8 @@
 }
 
 .sourceLink {
-  display: inline-flex;
+  display: block;
   min-width: 0;
-  align-items: center;
-  gap: 8px;
   color: #111827;
 }
 
@@ -385,13 +410,49 @@
   font-size: 16px;
 }
 
-.sourceLink span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
+.sourceIcon[data-brand="baidu"] {
+  color: #2f6bff;
+  background: #edf3ff;
+  font-size: 13px;
+  font-weight: 700;
 }
 
-.sourceLink strong {
+.sourceIcon[data-brand="bing"] {
+  color: #007f75;
+  background: #e8f7f3;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.sourceIcon[data-brand="site"] {
+  color: #15803d;
+  background: #ecfdf3;
+}
+
+.sourceIcon[data-brand="other"] {
+  color: #475467;
+  background: #f2f4f7;
+}
+
+.sourceIcon[data-brand="paid"] {
+  color: #2f6bff;
+  background: #e6f4ff;
+}
+
+.sourceIdentity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.sourceCopy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.sourceCopy > strong {
   overflow: hidden;
   font-size: 14px;
   font-weight: 600;
@@ -399,15 +460,41 @@
   white-space: nowrap;
 }
 
-.sourceLink small {
-  width: fit-content;
-  padding: 1px 6px;
-  color: #0f4fb8;
-  background: #e6f4ff;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
+.sourceMeta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.sourceHost {
+  overflow: hidden;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 400;
   line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.naturalTag,
+.allDeviceTag {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 17px;
+}
+
+.naturalTag {
+  color: #15803d;
+  background: #ecfdf3;
+}
+
+.allDeviceTag {
+  color: #667085;
+  background: #f2f4f7;
 }
 
 .metricCell strong {
@@ -427,47 +514,10 @@
   line-height: 18px;
 }
 
-.microFunnel {
-  display: flex;
-  align-items: center;
+.conversionCell .missingValue {
   justify-content: center;
-  gap: 12px;
-}
-
-.funnelChart {
-  width: 58px;
-  height: 56px;
-  flex: 0 0 58px;
-  border-left: 1px solid #2f6bff;
-}
-
-.funnelChart > div,
-.funnelChart canvas,
-.funnelChart svg {
-  width: 56px !important;
-  height: 56px !important;
-}
-
-.funnelRate {
-  min-width: 74px;
-  text-align: left;
-}
-
-.funnelRate span {
-  display: block;
   color: #667085;
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-}
-
-.funnelRate strong,
-.funnelRate .missingValue {
-  color: #2f6bff;
   font-size: 16px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  line-height: 24px;
 }
 
 .trendHeader {
@@ -590,6 +640,20 @@
   .breadcrumbRow :global(.ant-picker) {
     width: 100%;
     min-width: 0;
+  }
+
+  .globalControls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .deviceControl {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  .deviceControl :global(.ant-select) {
+    width: 100%;
   }
 
   .page section + section {

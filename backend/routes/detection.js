@@ -8,7 +8,11 @@ const {
   VisibilityMetric
 } = require('../models');
 const { bulkConsumeQuota } = require('../middleware/quota');
-const { authRequired, adminRequired } = require('../middleware/auth');
+const {
+  adminRequired,
+  authRequired,
+  authSseRequired
+} = require('../middleware/auth');
 const { Op } = require('sequelize');
 const AIPlatformService = require('../services/AIPlatformService');
 const ResultParserService = require('../services/ResultParserService');
@@ -695,7 +699,7 @@ router.delete('/history/:userId', authRequired, async (req, res) => {
 });
 
 // 流式获取AI原文（SSE方式）
-router.get('/stream', authRequired, async (req, res) => {
+router.get('/stream', authSseRequired, async (req, res) => {
   try {
     const { platform, question, brand } = req.query;
     const user_id = req.user.id; // 已通过 authRequired 验证

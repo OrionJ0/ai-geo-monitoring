@@ -20,6 +20,7 @@ backend/backups/
 # build outputs
 .next/
 **/.next/
+**/.next-*/
 dist/
 build/
 out/
@@ -33,6 +34,7 @@ supabase/
 /tmp/
 /work/
 /test-results/
+**/test-results/
 /playwright-report/
 /blob-report/
 /.eslintcache

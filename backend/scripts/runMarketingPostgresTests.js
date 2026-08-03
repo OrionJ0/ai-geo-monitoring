@@ -4,6 +4,9 @@ const {
   createMarketingMigrationRunner
 } = require('../modules/marketing/migrations/MarketingMigrationRunner');
 const {
+  loadMarketingMigrations
+} = require('../modules/marketing/migrations');
+const {
   MarketingDashboardService
 } = require('../modules/marketing/services/MarketingDashboardService');
 const {
@@ -107,7 +110,11 @@ async function run() {
     const result = await createMarketingMigrationRunner({
       sequelize: database
     }).apply();
-    if (!result.ready || result.appliedVersions.length !== 3) {
+    const expectedVersions = loadMarketingMigrations().map(({ version }) => version);
+    if (
+      !result.ready
+      || JSON.stringify(result.appliedVersions) !== JSON.stringify(expectedVersions)
+    ) {
       throw postgresSafetyError(
         'PostgreSQL 营销迁移验收失败',
         'MARKETING_POSTGRES_MIGRATION_FAILED'
@@ -149,16 +156,21 @@ async function run() {
     const refresh = new MarketingRefreshService({
       sequelize: database,
       reportProvider: {
-        async fetchSearchReport() {
-          return [{
-            accountId: '0009007199254740993123',
-            campaignId: 'campaign-0009007199254740993123',
-            campaignName: 'PostgreSQL 验收计划',
-            metricDate: '2026-07-29',
-            impressions: '900719925474099312345',
-            clicks: '7',
-            costAmountScaled: '3000003'
-          }];
+        async fetchSearchReports() {
+          return {
+            campaigns: [{
+              accountId: '0009007199254740993123',
+              campaignId: 'campaign-0009007199254740993123',
+              campaignName: 'PostgreSQL 验收计划',
+              metricDate: '2026-07-29',
+              impressions: '900719925474099312345',
+              clicks: '7',
+              costAmountScaled: '3000003'
+            }],
+            adGroups: [],
+            keywords: [],
+            searchTerms: []
+          };
         }
       },
       contractVersion: 'postgres-fixture-v1',
@@ -195,7 +207,7 @@ async function run() {
     const failingRefresh = new MarketingRefreshService({
       sequelize: database,
       reportProvider: {
-        async fetchSearchReport() {
+        async fetchSearchReports() {
           const error = new Error('synthetic provider failure');
           error.code = 'SYNTHETIC_PROVIDER_FAILURE';
           throw error;

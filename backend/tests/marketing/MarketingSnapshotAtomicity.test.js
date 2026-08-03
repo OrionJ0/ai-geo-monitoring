@@ -5,6 +5,7 @@ const {
   MarketingRefreshService
 } = require('../../modules/marketing/services/MarketingRefreshService');
 const {
+  campaignOnlyReports,
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
@@ -30,8 +31,8 @@ test('all bindings replace one project snapshot atomically', async (t) => {
     accountId: 'account-2'
   });
   const service = refreshService(database.sequelize, {
-    async fetchSearchReport({ binding }) {
-      return [{
+    async fetchSearchReports({ binding }) {
+      return campaignOnlyReports([{
         accountId: binding.accountId,
         campaignId: `campaign-${binding.id}`,
         campaignName: `计划-${binding.id}`,
@@ -39,7 +40,7 @@ test('all bindings replace one project snapshot atomically', async (t) => {
         impressions: '900719925474099312345',
         clicks: '7',
         costAmountScaled: '1234567'
-      }];
+      }]);
     }
   });
   const run = await service.createRun({
@@ -65,6 +66,35 @@ test('all bindings replace one project snapshot atomically', async (t) => {
   );
 });
 
+test('rejects legacy duplicate active bindings for the same upstream account', async (t) => {
+  const database = await createMarketingTestDatabase();
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize, {
+    bindingId: 'binding-1',
+    connectionId: 'connection-1',
+    accountId: 'same-account'
+  });
+  await seedConnectionAndBinding(database.sequelize, {
+    bindingId: 'binding-2',
+    connectionId: 'connection-2',
+    accountId: 'same-account'
+  });
+  const service = refreshService(database.sequelize, {
+    async fetchSearchReports() {
+      assert.fail('重复上游账户必须在真实调用前失败');
+    }
+  });
+
+  await assert.rejects(
+    service.createRun({
+      projectId: 11,
+      triggerType: 'MANUAL',
+      userId: 2
+    }),
+    { code: 'DUPLICATE_UPSTREAM_ACCOUNT_BINDING', status: 409 }
+  );
+});
+
 test('a later binding failure preserves the complete prior snapshot', async (t) => {
   const database = await createMarketingTestDatabase();
   t.after(database.close);
@@ -75,8 +105,8 @@ test('a later binding failure preserves the complete prior snapshot', async (t) 
     accountId: 'account-2'
   });
   const successful = refreshService(database.sequelize, {
-    async fetchSearchReport({ binding }) {
-      return [{
+    async fetchSearchReports({ binding }) {
+      return campaignOnlyReports([{
         accountId: binding.accountId,
         campaignId: `old-${binding.id}`,
         campaignName: '旧快照',
@@ -84,7 +114,7 @@ test('a later binding failure preserves the complete prior snapshot', async (t) 
         impressions: '1',
         clicks: '1',
         costAmountScaled: '1'
-      }];
+      }]);
     }
   });
   const oldRun = await successful.createRun({
@@ -95,13 +125,13 @@ test('a later binding failure preserves the complete prior snapshot', async (t) 
   await successful.executeRun(oldRun.runId);
 
   const failing = refreshService(database.sequelize, {
-    async fetchSearchReport({ binding }) {
+    async fetchSearchReports({ binding }) {
       if (binding.id === 'binding-2') {
         const error = new Error('upstream failed');
         error.code = 'REPORT_UPSTREAM_FAILED';
         throw error;
       }
-      return [{
+      return campaignOnlyReports([{
         accountId: binding.accountId,
         campaignId: 'new-campaign',
         campaignName: '不得提交',
@@ -109,7 +139,7 @@ test('a later binding failure preserves the complete prior snapshot', async (t) 
         impressions: '99',
         clicks: '99',
         costAmountScaled: '99'
-      }];
+      }]);
     }
   });
   const newRun = await failing.createRun({

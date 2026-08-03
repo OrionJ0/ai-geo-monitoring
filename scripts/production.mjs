@@ -26,6 +26,7 @@ const frontendEntry = path.join(
   'bin',
   'next'
 );
+const releaseRevisionPath = path.join(runtimeDirectory, 'release-revision');
 
 function parseEnvFile(filename) {
   if (!fs.existsSync(filename)) return {};
@@ -105,6 +106,7 @@ async function runSystemctl(args, { privileged = false } = {}) {
 const systemdManager = createSystemdProcessManager({
   runSystemctl,
   waitForHttp,
+  verifyRevision: verifyRunningRevision,
 });
 
 function requireFile(filename, description) {
@@ -130,6 +132,56 @@ async function waitForHttp(url, label, timeoutMs = 45_000) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`${label}健康检查超时: ${lastError || url}`);
+}
+
+function expectedReleaseRevision({ required = false } = {}) {
+  try {
+    const revision = fs.readFileSync(releaseRevisionPath, 'utf8').trim();
+    if (/^[a-f0-9]{40}$/u.test(revision)) return revision;
+  } catch {}
+  if (required) {
+    throw new Error('缺少有效的发布 revision，拒绝启动生产 systemd 服务');
+  }
+  return null;
+}
+
+async function waitForRevision(url, expected, label, timeoutMs = 45_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastObserved = 'unavailable';
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(3_000),
+        redirect: 'manual',
+      });
+      const body = await response.json();
+      lastObserved = String(body?.revision || 'missing');
+      if (response.ok && lastObserved === expected) return;
+    } catch (error) {
+      lastObserved = error.message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(
+    `${label}运行版本不匹配：期望 ${expected.slice(0, 12)}，实际 ${lastObserved.slice(0, 12)}`
+  );
+}
+
+async function verifyRunningRevision() {
+  const expected = expectedReleaseRevision({
+    required: processManagerMode === 'systemd'
+  });
+  if (!expected) return;
+  await waitForRevision(
+    `http://127.0.0.1:${backendPort}/api/health`,
+    expected,
+    '后端'
+  );
+  await waitForRevision(
+    `http://127.0.0.1:${frontendPort}/api/frontend-health`,
+    expected,
+    '前端构建'
+  );
 }
 
 async function getStatus() {
@@ -161,9 +213,10 @@ async function start() {
     await manualManager.start(services.frontend);
     await waitForHttp(`http://127.0.0.1:${frontendPort}/`, '前端');
     await waitForHttp(
-      `http://127.0.0.1:${frontendPort}/api/health`,
-      '前端 API 代理'
+      `http://127.0.0.1:${frontendPort}/api/frontend-health`,
+      '前端构建'
     );
+    await verifyRunningRevision();
 
     const status = await getStatus();
     if (!status.backend.running || !status.frontend.running) {

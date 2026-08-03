@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from '@/lib/axiosConfig';
 import {
   adaptMarketingDashboard,
+  assertMarketingDashboardResponse,
   type AdPerformanceModel,
   type MarketingDashboardResponse
 } from '@/lib/marketing/adPerformanceAdapter';
@@ -30,6 +31,8 @@ type UseAdPerformanceState = {
 };
 
 export const AD_PERFORMANCE_FIXTURE_ENABLED = (
+  process.env.NODE_ENV !== 'production'
+  &&
   process.env.NEXT_PUBLIC_AD_PERFORMANCE_FIXTURE === 'true'
 );
 
@@ -85,6 +88,7 @@ export default function useAdPerformance({
           : undefined
       );
       if (requestId !== requestSequence.current) return;
+      assertMarketingDashboardResponse(response.data);
       setData(adaptMarketingDashboard(response.data, projectName));
     } catch (requestError: unknown) {
       if (requestId !== requestSequence.current) return;
@@ -96,6 +100,7 @@ export default function useAdPerformance({
           : undefined
       );
       const message = response?.data?.error?.message;
+      setData(null);
       setError(
         typeof message === 'string'
           ? message

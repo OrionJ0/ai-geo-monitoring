@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from '@/lib/axiosConfig';
+import { assertMarketingDashboardResponse } from './adPerformanceAdapter';
 
 type SourceSlotState =
   | 'IDLE'
@@ -9,7 +10,6 @@ type SourceSlotState =
   | 'AVAILABLE'
   | 'ZERO'
   | 'NO_DATA'
-  | 'STALE'
   | 'SOURCE_ERROR';
 
 export type SourceSlot<T = unknown> = {
@@ -60,13 +60,11 @@ function rejectedSlot(reason: unknown, fallback: string): SourceSlot {
 function adSlot(data: Record<string, any>, readAt: string): SourceSlot {
   const content = data?.states?.snapshotContentState;
   return {
-    state: data?.states?.snapshotFreshnessState === 'STALE'
-      ? 'STALE'
-      : content === 'ZERO'
-        ? 'ZERO'
-        : content === 'NONE'
-          ? 'NO_DATA'
-          : 'AVAILABLE',
+    state: content === 'ZERO'
+      ? 'ZERO'
+      : content === 'NONE'
+        ? 'NO_DATA'
+        : 'AVAILABLE',
     data,
     errorCode: null,
     errorMessage: null,
@@ -82,6 +80,89 @@ function trafficSlot(data: Record<string, any>, readAt: string): SourceSlot {
     errorMessage: null,
     readAt
   };
+}
+
+function objectRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function exactMetric(value: unknown): boolean {
+  return value === null || (typeof value === 'string' && /^\d+$/u.test(value));
+}
+
+function validTrafficRows(value: unknown): boolean {
+  return Array.isArray(value) && value.every((row) => (
+    objectRecord(row)
+    && typeof row.date === 'string'
+    && exactMetric(row.pageviews)
+    && exactMetric(row.visits)
+    && exactMetric(row.visitors)
+  ));
+}
+
+function assertTongjiOverviewResponse(
+  value: unknown,
+  projectId: string,
+  device: 'pc' | 'mobile',
+  kind: 'trend' | 'sources'
+): asserts value is Record<string, any> {
+  if (!objectRecord(value)) throw new TypeError('百度统计响应合同无效');
+  const baseValid = String(value.projectId) === projectId
+    && value.source === 'BAIDU_TONGJI'
+    && value.mode === 'DATABASE_SNAPSHOT'
+    && value.device === device
+    && ['DATA', 'NO_DATA'].includes(String(value.dataState))
+    && objectRecord(value.coverage)
+    && objectRecord(value.cache)
+    && ['HIT', 'REFRESHED', 'FALLBACK'].includes(String(value.cache.state));
+  const valid = kind === 'trend'
+    ? baseValid
+      && objectRecord(value.summary)
+      && ['pageviews', 'visits', 'visitors']
+        .every((key) => exactMetric(value.summary[key]))
+      && validTrafficRows(value.trend)
+    : baseValid
+      && objectRecord(value.attribution)
+      && value.attribution.level === 'WEBSITE_TRAFFIC_SOURCE'
+      && value.attribution.isCrossSystemVerified === false
+      && Array.isArray(value.sources)
+      && value.sources.length === 4
+      && value.sources.every((source: unknown) => objectRecord(source)
+        && ['BAIDU_SEARCH', 'DIRECT', 'BING_SEARCH', 'OTHER']
+          .includes(String(source.sourceKey))
+        && objectRecord(source.summary)
+        && ['pageviews', 'visits', 'visitors']
+          .every((key) => exactMetric(source.summary[key])));
+  if (!valid) {
+    const error = new TypeError('百度统计响应合同无效');
+    (error as TypeError & { code: string }).code =
+      'TONGJI_RESPONSE_INVALID';
+    throw error;
+  }
+}
+
+function fulfilledAdSlot(value: unknown, readAt: string): SourceSlot {
+  try {
+    assertMarketingDashboardResponse(value);
+    return adSlot(value, readAt);
+  } catch (error) {
+    return rejectedSlot(error, '广告快照响应合同无效');
+  }
+}
+
+function fulfilledTrafficSlot(
+  value: unknown,
+  readAt: string,
+  projectId: string,
+  device: 'pc' | 'mobile',
+  kind: 'trend' | 'sources'
+): SourceSlot {
+  try {
+    assertTongjiOverviewResponse(value, projectId, device, kind);
+    return trafficSlot(value, readAt);
+  } catch (error) {
+    return rejectedSlot(error, '百度统计响应合同无效');
+  }
 }
 
 function overallStatus(
@@ -102,17 +183,25 @@ function overallStatus(
 
 export default function useMarketOverview({
   projectId,
-  enabled
+  enabled,
+  device,
+  trafficTrendSource
 }: {
   projectId: string;
   enabled: boolean;
+  device: 'pc' | 'mobile';
+  trafficTrendSource: 'BAIDU_SEARCH' | 'BING_SEARCH' | 'DIRECT' | 'OTHER' | null;
 }): MarketOverviewState {
   const [ad, setAd] = useState<SourceSlot>(idleSlot);
   const [traffic, setTraffic] = useState<SourceSlot>(idleSlot);
   const [trafficSources, setTrafficSources] = useState<SourceSlot>(idleSlot);
   const [status, setStatus] = useState<MarketOverviewState['status']>('IDLE');
+  const requestSequence = useRef(0);
+  const lastReadAt = useRef(0);
 
-  const reload = useCallback(async () => {
+  const fetchOverview = useCallback(async (silent = false) => {
+    const sequence = requestSequence.current + 1;
+    requestSequence.current = sequence;
     if (!enabled || !projectId) {
       setAd(idleSlot());
       setTraffic(idleSlot());
@@ -120,37 +209,74 @@ export default function useMarketOverview({
       setStatus('IDLE');
       return;
     }
-    setStatus('LOADING');
-    setAd((current) => ({ ...current, state: 'LOADING' }));
-    setTraffic((current) => ({ ...current, state: 'LOADING' }));
-    setTrafficSources((current) => ({ ...current, state: 'LOADING' }));
+    if (!silent) {
+      setStatus('LOADING');
+      setAd((current) => ({ ...current, state: 'LOADING' }));
+      setTraffic((current) => ({ ...current, state: 'LOADING' }));
+      setTrafficSources((current) => ({ ...current, state: 'LOADING' }));
+    }
     const encodedProjectId = encodeURIComponent(projectId);
     const [adResult, trafficResult, trafficSourcesResult] = await Promise.allSettled([
       axios.get(`/api/marketing/projects/${encodedProjectId}/dashboard`),
-      axios.get(`/api/marketing/projects/${encodedProjectId}/tongji-trend`),
       axios.get(
-        `/api/marketing/projects/${encodedProjectId}/tongji-source-trends`
+        `/api/marketing/projects/${encodedProjectId}/tongji-trend`,
+        { params: { device } }
+      ),
+      axios.get(
+        `/api/marketing/projects/${encodedProjectId}/tongji-source-trends`,
+        {
+          params: {
+            device,
+            ...(trafficTrendSource ? { source: trafficTrendSource } : {})
+          }
+        }
       )
     ]);
+    if (sequence !== requestSequence.current) return;
     const readAt = new Date().toISOString();
     const nextAd = adResult.status === 'fulfilled'
-      ? adSlot(adResult.value.data, readAt)
+      ? fulfilledAdSlot(adResult.value.data, readAt)
       : rejectedSlot(adResult.reason, '广告快照读取失败');
     const nextTraffic = trafficResult.status === 'fulfilled'
-      ? trafficSlot(trafficResult.value.data, readAt)
+      ? fulfilledTrafficSlot(
+        trafficResult.value.data,
+        readAt,
+        projectId,
+        device,
+        'trend'
+      )
       : rejectedSlot(trafficResult.reason, '网站流量读取失败');
     const nextTrafficSources = trafficSourcesResult.status === 'fulfilled'
-      ? trafficSlot(trafficSourcesResult.value.data, readAt)
+      ? fulfilledTrafficSlot(
+        trafficSourcesResult.value.data,
+        readAt,
+        projectId,
+        device,
+        'sources'
+      )
       : rejectedSlot(trafficSourcesResult.reason, '网站来源读取失败');
     setAd(nextAd);
     setTraffic(nextTraffic);
     setTrafficSources(nextTrafficSources);
     setStatus(overallStatus(nextAd, nextTraffic, nextTrafficSources));
-  }, [enabled, projectId]);
+    lastReadAt.current = Date.now();
+  }, [device, enabled, projectId, trafficTrendSource]);
+
+  const reload = useCallback(() => fetchOverview(false), [fetchOverview]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    void fetchOverview(false);
+    const handleVisibility = () => {
+      if (
+        document.visibilityState === 'visible'
+        && Date.now() - lastReadAt.current >= 10 * 60 * 1000
+      ) void fetchOverview(true);
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [fetchOverview]);
 
   return { status, ad, traffic, trafficSources, reload };
 }

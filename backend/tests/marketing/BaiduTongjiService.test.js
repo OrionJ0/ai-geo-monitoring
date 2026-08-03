@@ -1,114 +1,530 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { QueryTypes } = require('sequelize');
 
 const {
-  BaiduTongjiService
+  BaiduTongjiService,
+  buildSnapshotPayload,
+  comparisonValue,
+  trafficShare
 } = require('../../modules/marketing/services/BaiduTongjiService');
 const {
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
 
-test('Tongji service selects the project connection and returns exact live pilot totals', async (t) => {
+function rows(pageviews, visits, visitors) {
+  return [
+    {
+      date: '2026-07-29',
+      pageviews: String(pageviews),
+      visits: String(visits),
+      visitors: String(visitors)
+    },
+    {
+      date: '2026-07-30',
+      pageviews: null,
+      visits: null,
+      visitors: null
+    }
+  ];
+}
+
+function trafficSnapshot() {
+  return {
+    site: {
+      siteId: '301',
+      domain: 'active.example.test',
+      status: 'ACTIVE'
+    },
+    allTrend: rows(100, 14, 10),
+    sourceSummaries: [
+      { name: '直接访问', source: 'through', pageviews: '20', visits: '3', visitors: '3' },
+      { name: '百度自然搜索', source: 'searchBaiduNature', pageviews: '30', visits: '4', visitors: '4' },
+      { name: '外部链接', source: 'link', pageviews: '25', visits: '4', visitors: '4' },
+      { name: '其他搜索引擎', source: 'searchOther', pageviews: '20', visits: '3', visitors: '3' },
+      { name: '百度搜索推广', source: 'searchBaiduProFc', pageviews: '5', visits: '1', visitors: '1' }
+    ],
+    engineSummaries: [
+      { name: '百度自然搜索', source: 'searchBaiduNature', engineId: '1', pageviews: '30', visits: '4', visitors: '4' },
+      { name: 'Google', source: 'search,2', engineId: '2', pageviews: '5', visits: '1', visitors: '1' },
+      { name: '必应', source: 'search,14', engineId: '14', pageviews: '15', visits: '2', visitors: '2' },
+      { name: '百度付费推广', source: 'searchBaiduPro', engineId: '1', pageviews: '5', visits: '1', visitors: '1' }
+    ],
+    sourceTrends: [
+      { sourceKey: 'BAIDU_NATURAL', rows: rows(30, 4, 4) },
+      { sourceKey: 'DIRECT', rows: rows(20, 3, 3) },
+      { sourceKey: 'OTHER_SEARCH', rows: rows(20, 3, 3) },
+      { sourceKey: 'EXTERNAL', rows: rows(25, 4, 4) }
+    ],
+    engineTrends: [
+      { engineId: '14', rows: rows(15, 2, 2) }
+    ]
+  };
+}
+
+test('Tongji source aggregation preserves missing values and real zeroes', () => {
+  const missing = trafficSnapshot();
+  missing.sourceSummaries = missing.sourceSummaries.map((row) => ({
+    ...row,
+    pageviews: null,
+    visits: null,
+    visitors: null
+  }));
+  missing.engineSummaries = missing.engineSummaries.map((row) => ({
+    ...row,
+    pageviews: null,
+    visits: null,
+    visitors: null
+  }));
+  const missingPayload = buildSnapshotPayload(
+    missing,
+    { from: '2026-07-29', to: '2026-07-30' },
+    'all'
+  );
+  assert.ok(missingPayload.sources.every((source) => (
+    source.summary.visits === null
+  )));
+
+  const zero = trafficSnapshot();
+  zero.sourceSummaries = zero.sourceSummaries.map((row) => ({
+    ...row,
+    pageviews: '0',
+    visits: '0',
+    visitors: '0'
+  }));
+  zero.engineSummaries = zero.engineSummaries.map((row) => ({
+    ...row,
+    pageviews: '0',
+    visits: '0',
+    visitors: '0'
+  }));
+  const zeroPayload = buildSnapshotPayload(
+    zero,
+    { from: '2026-07-29', to: '2026-07-30' },
+    'all'
+  );
+  assert.ok(zeroPayload.sources.every((source) => (
+    source.summary.visits === '0'
+  )));
+});
+
+test('Tongji ratios use exact half-up rounding and reject impossible shares', () => {
+  assert.equal(trafficShare('1', '6'), '16.7');
+  assert.equal(comparisonValue('5', '6'), '-16.7');
+  assert.throws(
+    () => trafficShare('7', '6'),
+    { code: 'TONGJI_SOURCE_RESPONSE_INVALID', status: 502 }
+  );
+});
+
+async function createService(t, options = {}) {
   const database = await createMarketingTestDatabase('tongji-service-');
   t.after(database.close);
   await seedConnectionAndBinding(database.sequelize, {
     accountId: '1234',
     projectId: 11
   });
-  const service = new BaiduTongjiService({
-    sequelize: database.sequelize,
-    allowedProjectIds: '11',
-    clock: () => Date.parse('2026-07-30T04:00:00.000Z'),
+  return {
+    database,
+    service: new BaiduTongjiService({
+      sequelize: database.sequelize,
+      allowedProjectIds: '11',
+      clock: options.clock || (() => Date.parse('2026-07-30T04:00:00.000Z')),
+      cacheTtlMs: options.cacheTtlMs || 600_000,
+      cacheMaxStaleMs: options.cacheMaxStaleMs,
+      capabilities: options.capabilities,
+      provider: options.provider || {
+        async readTrafficSnapshot() {
+          return trafficSnapshot();
+        }
+      }
+    })
+  };
+}
+
+test('Tongji service persists one ten-minute snapshot shared by trend and source reads', async (t) => {
+  let now = Date.parse('2026-07-30T04:00:00.000Z');
+  let calls = 0;
+  const { database, service } = await createService(t, {
+    clock: () => now,
     provider: {
-      async readTrend({ coverage }) {
+      async readTrafficSnapshot({ coverage, device }) {
+        calls += 1;
         assert.deepEqual(coverage, {
           from: '2026-07-01',
-          to: '2026-07-30'
+          to: '2026-07-30',
+          days: 30
         });
-        return {
-          site: {
-            siteId: '301',
-            domain: 'active.example.test',
-            status: 'ACTIVE'
-          },
-          rows: [
-            {
-              date: '2026-07-28',
-              pageviews: '123',
-              visits: '45',
-              visitors: '30'
-            },
-            {
-              date: '2026-07-29',
-              pageviews: null,
-              visits: null,
-              visitors: null
-            },
-            {
-              date: '2026-07-30',
-              pageviews: '1234',
-              visits: '56',
-              visitors: '40'
-            }
-          ]
-        };
+        assert.equal(device, 'pc');
+        return trafficSnapshot();
       }
     }
   });
 
-  const result = await service.readProjectTrend('11');
+  const trend = await service.readProjectTrend('11', 'pc');
+  const sources = await service.readProjectSourceTrends('11', 'pc');
 
-  assert.equal(result.mode, 'LIVE_PILOT');
-  assert.equal(result.dataState, 'DATA');
-  assert.deepEqual(result.summary, {
-    pageviews: '1357',
-    visits: '101',
-    visitors: '70'
-  });
-  assert.equal(result.trend[1].pageviews, null);
+  assert.equal(calls, 1);
+  assert.equal(trend.mode, 'DATABASE_SNAPSHOT');
+  assert.equal(trend.cache.state, 'REFRESHED');
+  assert.equal(sources.cache.state, 'HIT');
+  assert.equal(sources.device, 'pc');
+  assert.deepEqual(
+    sources.sources.map((source) => ({
+      key: source.sourceKey,
+      label: source.sourceLabel,
+      host: source.sourceHost,
+      visits: source.summary.visits
+    })),
+    [
+      { key: 'BAIDU_SEARCH', label: '百度自然搜索', host: 'baidu.com', visits: '4' },
+      { key: 'DIRECT', label: '直接访问', host: 'active.example.test', visits: '3' },
+      { key: 'BING_SEARCH', label: '必应自然搜索', host: 'bing.com', visits: '2' },
+      { key: 'OTHER', label: '其他来源', host: '多个网站', visits: '5' }
+    ]
+  );
+  assert.deepEqual(sources.sources.at(-1).sourceDetails, ['Google', '外部链接']);
+  assert.equal(sources.sources.at(-1).summary.visitors, null);
+
+  const cacheRows = await database.sequelize.query(
+    'SELECT project_id, device, site_id FROM baidu_tongji_snapshots',
+    { type: QueryTypes.SELECT }
+  );
+  assert.deepEqual(cacheRows, [{ project_id: 11, device: 'pc', site_id: '301' }]);
+
+  now += 5 * 60 * 1000;
+  await service.readProjectTrend('11', 'pc');
+  assert.equal(calls, 1);
 });
 
-test('Tongji service preserves an all-missing provider window as NO_DATA', async (t) => {
-  const database = await createMarketingTestDatabase('tongji-empty-');
-  t.after(database.close);
-  await seedConnectionAndBinding(database.sequelize, {
-    accountId: '1234',
-    projectId: 11
-  });
-  const service = new BaiduTongjiService({
-    sequelize: database.sequelize,
-    allowedProjectIds: '11',
+test('Tongji cache write prunes rows older than the max-stale fallback window', async (t) => {
+  const now = Date.parse('2026-07-30T04:00:00.000Z');
+  const { database, service } = await createService(t, {
+    clock: () => now,
     provider: {
-      async readTrend() {
+      async readTrafficSnapshot() { return trafficSnapshot(); },
+      async readSourceTrend({ sourceKey }) {
+        return { site: trafficSnapshot().site, sourceKey, rows: rows(20, 3, 3) };
+      }
+    }
+  });
+  const old = new Date(now - 48 * 60 * 60 * 1000).toISOString();
+  const seedSnapshot = {
+    id: 'expired-snapshot',
+    projectId: 11,
+    device: 'mobile',
+    siteId: '301',
+    siteDomain: 'active.example.test',
+    coverageStart: '2026-06-29',
+    coverageEnd: '2026-06-30',
+    payloadJson: '{}',
+    refreshedAt: old,
+    expiresAt: old,
+    createdAt: old,
+    updatedAt: old
+  };
+  const seedTrend = {
+    ...seedSnapshot,
+    id: 'expired-trend',
+    sourceKey: 'DIRECT'
+  };
+  const withinFallback = new Date(now - 12 * 60 * 60 * 1000).toISOString();
+  const retainedSnapshot = {
+    ...seedSnapshot,
+    id: 'fallback-snapshot',
+    device: 'all',
+    coverageStart: '2026-06-27',
+    coverageEnd: '2026-06-28',
+    refreshedAt: withinFallback,
+    expiresAt: new Date(
+      Date.parse(withinFallback) + 10 * 60 * 1000
+    ).toISOString(),
+    createdAt: withinFallback,
+    updatedAt: withinFallback
+  };
+  const retainedTrend = {
+    ...retainedSnapshot,
+    id: 'fallback-trend',
+    sourceKey: 'DIRECT'
+  };
+  const seedRange = { ...seedSnapshot, id: 'expired-range' };
+  const retainedRange = { ...retainedSnapshot, id: 'fallback-range' };
+  for (const snapshot of [seedSnapshot, retainedSnapshot]) {
+    await database.sequelize.query(
+      `INSERT INTO baidu_tongji_snapshots (
+         id, project_id, device, site_id, site_domain,
+         coverage_start, coverage_end, payload_json,
+         refreshed_at, expires_at, created_at, updated_at
+       ) VALUES (
+         :id, :projectId, :device, :siteId, :siteDomain,
+         :coverageStart, :coverageEnd, :payloadJson,
+         :refreshedAt, :expiresAt, :createdAt, :updatedAt
+       )`,
+      { replacements: snapshot }
+    );
+  }
+  for (const trend of [seedTrend, retainedTrend]) {
+    await database.sequelize.query(
+      `INSERT INTO baidu_tongji_source_trend_snapshots (
+         id, project_id, device, source_key, site_id, site_domain,
+         coverage_start, coverage_end, payload_json,
+         refreshed_at, expires_at, created_at, updated_at
+       ) VALUES (
+         :id, :projectId, :device, :sourceKey, :siteId, :siteDomain,
+         :coverageStart, :coverageEnd, :payloadJson,
+         :refreshedAt, :expiresAt, :createdAt, :updatedAt
+       )`,
+      { replacements: trend }
+    );
+  }
+  for (const range of [seedRange, retainedRange]) {
+    await database.sequelize.query(
+      `INSERT INTO baidu_tongji_range_snapshots (
+         id, project_id, device, site_id, site_domain,
+         coverage_start, coverage_end, payload_json,
+         refreshed_at, expires_at, created_at, updated_at
+       ) VALUES (
+         :id, :projectId, :device, :siteId, :siteDomain,
+         :coverageStart, :coverageEnd, :payloadJson,
+         :refreshedAt, :expiresAt, :createdAt, :updatedAt
+       )`,
+      { replacements: range }
+    );
+  }
+
+  await service.readProjectTrend('11', 'pc');
+  await service.readProjectSourceTrends('11', 'pc', 'DIRECT');
+  await service.saveSnapshotCache(
+    '11',
+    buildSnapshotPayload(
+      trafficSnapshot(),
+      { from: '2026-07-01', to: '2026-07-30' },
+      'pc'
+    ),
+    'RANGE'
+  );
+
+  const snapshot = await database.sequelize.query(
+    'SELECT COUNT(*) AS count FROM baidu_tongji_snapshots WHERE id = :id',
+    { replacements: { id: 'expired-snapshot' }, type: QueryTypes.SELECT }
+  );
+  const trend = await database.sequelize.query(
+    'SELECT COUNT(*) AS count FROM baidu_tongji_source_trend_snapshots WHERE id = :id',
+    { replacements: { id: 'expired-trend' }, type: QueryTypes.SELECT }
+  );
+  const range = await database.sequelize.query(
+    'SELECT COUNT(*) AS count FROM baidu_tongji_range_snapshots WHERE id = :id',
+    { replacements: { id: 'expired-range' }, type: QueryTypes.SELECT }
+  );
+  const retained = await database.sequelize.query(
+    `SELECT id FROM baidu_tongji_snapshots
+     WHERE id = 'fallback-snapshot'
+     UNION ALL
+     SELECT id FROM baidu_tongji_source_trend_snapshots
+     WHERE id = 'fallback-trend'
+     UNION ALL
+     SELECT id FROM baidu_tongji_range_snapshots
+     WHERE id = 'fallback-range'
+     ORDER BY id`,
+    { type: QueryTypes.SELECT }
+  );
+  assert.equal(Number(snapshot[0].count), 0, '过期基础快照应被写时清理');
+  assert.equal(Number(trend[0].count), 0, '过期来源趋势快照应被写时清理');
+  assert.equal(Number(range[0].count), 0, '过期范围快照应被写时清理');
+  assert.deepEqual(
+    retained.map((row) => row.id),
+    ['fallback-range', 'fallback-snapshot', 'fallback-trend'],
+    '已过 TTL 但仍在 max-stale 窗口内的回退快照必须保留'
+  );
+});
+
+test('Tongji source summaries do not prefetch trends and cache only the selected source', async (t) => {
+  let trendCalls = 0;
+  const { service } = await createService(t, {
+    provider: {
+      async readTrafficSnapshot() {
+        return trafficSnapshot();
+      },
+      async readSourceTrend({ sourceKey }) {
+        trendCalls += 1;
+        assert.equal(sourceKey, 'DIRECT');
         return {
-          site: {
-            siteId: '301',
-            domain: 'active.example.test',
-            status: 'ACTIVE'
-          },
-          rows: [{
-            date: '2026-07-30',
-            pageviews: null,
-            visits: null,
-            visitors: null
-          }]
+          site: trafficSnapshot().site,
+          sourceKey,
+          rows: rows(20, 3, 3)
         };
       }
     }
   });
 
-  const result = await service.readProjectTrend('11');
+  const summaries = await service.readProjectSourceTrends('11', 'pc');
+  assert.equal(trendCalls, 0);
+  assert.ok(summaries.sources.every((source) => (
+    !Object.hasOwn(source, 'trend')
+  )));
+  assert.equal(summaries.selectedTrend, null);
 
-  assert.equal(result.dataState, 'NO_DATA');
-  assert.deepEqual(result.summary, {
-    pageviews: null,
-    visits: null,
-    visitors: null
-  });
+  const direct = await service.readProjectSourceTrends('11', 'pc', 'DIRECT');
+  assert.equal(trendCalls, 1);
+  assert.equal(direct.selectedTrend.sourceKey, 'DIRECT');
+  assert.equal(direct.selectedTrend.summary.visits, '3');
+
+  const cached = await service.readProjectSourceTrends('11', 'pc', 'DIRECT');
+  assert.equal(trendCalls, 1);
+  assert.deepEqual(cached.selectedTrend.trend, direct.selectedTrend.trend);
 });
 
-test('Tongji service rejects an active account binding without an explicit site', async (t) => {
+test('Tongji cache refreshes after ten minutes and isolates PC from mobile', async (t) => {
+  let now = Date.parse('2026-07-30T04:00:00.000Z');
+  const devices = [];
+  const { database, service } = await createService(t, {
+    clock: () => now,
+    provider: {
+      async readTrafficSnapshot({ device }) {
+        devices.push(device);
+        return trafficSnapshot();
+      }
+    }
+  });
+
+  await service.readProjectTrend('11', 'pc');
+  now += 11 * 60 * 1000;
+  await service.readProjectTrend('11', 'pc');
+  await service.readProjectTrend('11', 'mobile');
+
+  assert.deepEqual(devices, ['pc', 'pc', 'mobile']);
+  const count = await database.sequelize.query(
+    'SELECT COUNT(*) AS count FROM baidu_tongji_snapshots',
+    { type: QueryTypes.SELECT }
+  );
+  assert.equal(Number(count[0].count), 2);
+});
+
+test('Tongji cache coalesces concurrent refreshes and falls back to the last database snapshot', async (t) => {
+  let now = Date.parse('2026-07-30T04:00:00.000Z');
+  let calls = 0;
+  let fail = false;
+  const { service } = await createService(t, {
+    clock: () => now,
+    provider: {
+      async readTrafficSnapshot() {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        if (fail) {
+          const error = new Error('upstream unavailable');
+          error.code = 'BAIDU_TONGJI_FAILED';
+          throw error;
+        }
+        return trafficSnapshot();
+      }
+    }
+  });
+
+  await Promise.all([
+    service.readProjectTrend('11', 'pc'),
+    service.readProjectSourceTrends('11', 'pc')
+  ]);
+  assert.equal(calls, 1);
+
+  now += 11 * 60 * 1000;
+  fail = true;
+  const fallback = await service.readProjectTrend('11', 'pc');
+  assert.equal(calls, 2);
+  assert.equal(fallback.cache.state, 'FALLBACK');
+  assert.equal(fallback.summary.visits, '14');
+});
+
+test('Tongji rich requests never fall back to a stale basic-capability snapshot', async (t) => {
+  let now = Date.parse('2026-07-30T04:00:00.000Z');
+  let fail = false;
+  const { service } = await createService(t, {
+    clock: () => now,
+    provider: {
+      async readTrafficSnapshot() {
+        if (fail) throw new Error('synthetic upstream failure');
+        return {
+          ...trafficSnapshot(),
+          quality: null,
+          sourceReportsIncluded: false
+        };
+      }
+    }
+  });
+  const coverage = { from: '2026-07-29', to: '2026-07-30' };
+  await service.readSnapshotForCoverage('11', 'pc', coverage);
+  now += 11 * 60 * 1000;
+  fail = true;
+  await assert.rejects(
+    service.readSnapshotForCoverage('11', 'pc', coverage, {
+      requireQuality: true,
+      requireSources: true
+    }),
+    /synthetic upstream failure/u
+  );
+});
+
+test('Tongji refresh coalescing never lets a basic request satisfy a richer capability request', async (t) => {
+  const calls = [];
+  const { service } = await createService(t, {
+    provider: {
+      async readTrafficSnapshot({ includeQuality, includeSources }) {
+        calls.push({ includeQuality, includeSources });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return {
+          ...trafficSnapshot(),
+          sourceReportsIncluded: includeSources,
+          quality: includeQuality ? {
+            summary: {
+              bounceRate: '10',
+              averageVisitTimeSeconds: '60',
+              averageVisitPages: '2'
+            },
+            rows: [
+              {
+                date: '2026-07-29',
+                bounceRate: '10',
+                averageVisitTimeSeconds: '60',
+                averageVisitPages: '2'
+              },
+              {
+                date: '2026-07-30',
+                bounceRate: null,
+                averageVisitTimeSeconds: null,
+                averageVisitPages: null
+              }
+            ]
+          } : null
+        };
+      }
+    }
+  });
+  const coverage = { from: '2026-07-29', to: '2026-07-30' };
+
+  const [basic, rich] = await Promise.all([
+    service.readSnapshotForCoverage('11', 'pc', coverage),
+    service.readSnapshotForCoverage('11', 'pc', coverage, {
+      requireQuality: true,
+      requireSources: true
+    })
+  ]);
+
+  assert.equal(basic.quality, null);
+  assert.equal(rich.sourceReportsIncluded, true);
+  assert.notEqual(rich.quality, null);
+  assert.deepEqual(calls, [
+    { includeQuality: false, includeSources: false },
+    { includeQuality: true, includeSources: true }
+  ]);
+});
+
+test('Tongji service rejects an invalid device and a binding without an explicit site', async (t) => {
+  const { service } = await createService(t);
+  await assert.rejects(
+    service.readProjectTrend('11', 'tablet'),
+    { code: 'TONGJI_DEVICE_INVALID', status: 400 }
+  );
+
   const database = await createMarketingTestDatabase('tongji-site-missing-');
   t.after(database.close);
   await seedConnectionAndBinding(database.sequelize, {
@@ -117,75 +533,438 @@ test('Tongji service rejects an active account binding without an explicit site'
     tongjiSiteId: null,
     tongjiSiteDomain: null
   });
-  const service = new BaiduTongjiService({
+  const missingSite = new BaiduTongjiService({
     sequelize: database.sequelize,
     allowedProjectIds: '11',
     provider: {
-      async readTrend() {
+      async readTrafficSnapshot() {
         assert.fail('缺少站点绑定时不得调用百度统计');
       }
     }
   });
-
   await assert.rejects(
-    service.readProjectTrend('11'),
+    missingSite.readProjectTrend('11', 'pc'),
     { code: 'TONGJI_SITE_BINDING_MISSING', status: 409 }
   );
 });
 
-test('Tongji service returns separate exact source trends without cross-system attribution', async (t) => {
-  const database = await createMarketingTestDatabase('tongji-sources-');
+test('Tongji service deduplicates same-site account bindings and rejects different sites', async (t) => {
+  const database = await createMarketingTestDatabase('tongji-multi-account-');
   t.after(database.close);
   await seedConnectionAndBinding(database.sequelize, {
-    accountId: '1234',
+    bindingId: 'binding-1',
+    connectionId: 'connection-1',
+    accountId: 'account-1',
     projectId: 11
   });
+  await seedConnectionAndBinding(database.sequelize, {
+    bindingId: 'binding-2',
+    connectionId: 'connection-2',
+    accountId: 'account-2',
+    projectId: 11
+  });
+  let calls = 0;
   const service = new BaiduTongjiService({
     sequelize: database.sequelize,
     allowedProjectIds: '11',
     clock: () => Date.parse('2026-07-30T04:00:00.000Z'),
     provider: {
-      async readSourceTrends({ coverage, sourceKeys }) {
-        assert.deepEqual(coverage, {
-          from: '2026-07-01',
-          to: '2026-07-30'
-        });
-        assert.deepEqual(sourceKeys, ['DIRECT', 'SEARCH', 'EXTERNAL']);
+      async readTrafficSnapshot() {
+        calls += 1;
+        return trafficSnapshot();
+      }
+    }
+  });
+  await service.readProjectTrend('11', 'pc');
+  assert.equal(calls, 1);
+
+  await database.sequelize.query(
+    "UPDATE baidu_project_bindings SET tongji_site_id = '302' WHERE id = 'binding-2'"
+  );
+  await assert.rejects(
+    service.readProjectTrend('11', 'pc'),
+    { code: 'TONGJI_BINDING_AMBIGUOUS', status: 409 }
+  );
+});
+
+function rangeRows(coverage, values) {
+  const rows = [];
+  for (
+    let cursor = Date.parse(`${coverage.from}T00:00:00.000Z`), index = 0;
+    cursor <= Date.parse(`${coverage.to}T00:00:00.000Z`);
+    cursor += 86_400_000, index += 1
+  ) {
+    rows.push({
+      date: new Date(cursor).toISOString().slice(0, 10),
+      pageviews: String(values.pageviews[index] || 0),
+      visits: String(values.visits[index] || 0),
+      visitors: values.visitors == null
+        ? null
+        : String(values.visitors[index] || 0)
+    });
+  }
+  return rows;
+}
+
+function rangeSnapshot(coverage) {
+  const current = coverage.from === '2026-07-29';
+  const scale = current ? 10 : 8;
+  return {
+    site: trafficSnapshot().site,
+    allTrend: rangeRows(coverage, {
+      pageviews: [scale * 7, scale * 8],
+      visits: [scale * 5, scale * 5],
+      visitors: [scale * 4, scale * 4]
+    }),
+    sourceSummaries: [
+      { name: '百度自然搜索', source: 'searchBaiduNature', pageviews: String(scale * 6), visits: String(scale * 4), visitors: String(scale * 3) },
+      { name: '直接访问', source: 'through', pageviews: String(scale * 5), visits: String(scale * 3), visitors: String(scale * 2) },
+      { name: '其他搜索', source: 'searchOther', pageviews: String(scale * 4), visits: String(scale * 2), visitors: String(scale * 2) },
+      { name: '外部链接', source: 'link', pageviews: String(scale * 2), visits: String(scale), visitors: String(scale) }
+    ],
+    engineSummaries: [
+      { name: '必应', source: 'search,14', engineId: '14', pageviews: String(scale * 3), visits: String(scale * 2), visitors: String(scale) }
+    ],
+    quality: {
+      summary: {
+        bounceRate: current ? '42.6' : '45.1',
+        averageVisitTimeSeconds: current ? '98' : '80',
+        averageVisitPages: current ? '2.5' : '2.25'
+      },
+      rows: [
+        {
+          date: coverage.from,
+          bounceRate: current ? '40' : '44',
+          averageVisitTimeSeconds: current ? '100' : '82',
+          averageVisitPages: current ? '2.6' : '2.3'
+        },
+        {
+          date: coverage.to,
+          bounceRate: current ? '45.2' : '46.2',
+          averageVisitTimeSeconds: current ? '96' : '78',
+          averageVisitPages: current ? '2.4' : '2.2'
+        }
+      ]
+    }
+  };
+}
+
+test('website traffic contract exposes verified all-site quality summary and trend', async (t) => {
+  const { database, service } = await createService(t, {
+    capabilities: { qualityMetrics: true },
+    provider: {
+      async readTrafficSnapshot({ coverage }) {
+        return rangeSnapshot(coverage);
+      }
+    }
+  });
+
+  const result = await service.readProjectWebsiteTraffic('11', {
+    device: 'all',
+    from: '2026-07-29',
+    to: '2026-07-30',
+    source: 'ALL',
+    metric: 'bounceRate'
+  });
+
+  assert.deepEqual(result.summary.bounceRate, {
+    current: '42.6',
+    previous: '45.1',
+    changePoints: '-2.5'
+  });
+  assert.deepEqual(result.summary.averageVisitTime, {
+    current: '98',
+    previous: '80',
+    changeSeconds: '18'
+  });
+  assert.deepEqual(result.summary.averageVisitPages, {
+    current: '2.5',
+    previous: '2.25',
+    changePages: '0.25'
+  });
+  assert.deepEqual(result.trend, [
+    {
+      date: '2026-07-29',
+      previousDate: '2026-07-27',
+      current: '40',
+      previous: '44'
+    },
+    {
+      date: '2026-07-30',
+      previousDate: '2026-07-28',
+      current: '45.2',
+      previous: '46.2'
+    }
+  ]);
+  assert.equal(result.selectedMetricState, 'DATA');
+  assert.equal(result.sourceQuality.allSiteBounceRate, '42.6');
+  assert.equal(result.capabilities.qualityMetrics, true);
+  const rangeRows = await database.sequelize.query(
+    'SELECT coverage_start, coverage_end FROM baidu_tongji_range_snapshots ORDER BY coverage_start',
+    { type: QueryTypes.SELECT }
+  );
+  const fixedRows = await database.sequelize.query(
+    'SELECT COUNT(*) AS count FROM baidu_tongji_snapshots',
+    { type: QueryTypes.SELECT }
+  );
+  assert.equal(rangeRows.length, 2);
+  assert.equal(Number(fixedRows[0].count), 0);
+});
+
+test('website traffic contract compares equal periods, preserves all-device and sorts source share', async (t) => {
+  const calls = [];
+  const { service } = await createService(t, {
+    provider: {
+      async readTrafficSnapshot({ coverage, device }) {
+        calls.push({ coverage, device });
+        return rangeSnapshot(coverage);
+      },
+      async readSourceTrend({ coverage, sourceKey, device }) {
+        assert.equal(sourceKey, 'DIRECT');
+        assert.equal(device, 'all');
+        const scale = coverage.from === '2026-07-29' ? 10 : 8;
         return {
-          site: {
-            siteId: '301',
-            domain: 'active.example.test',
-            status: 'ACTIVE'
-          },
-          sources: sourceKeys.map((sourceKey, index) => ({
-            sourceKey,
-            rows: [{
-              date: '2026-07-30',
-              pageviews: String((index + 1) * 10),
-              visits: String(index + 1),
-              visitors: String(index + 1)
-            }]
-          }))
+          site: trafficSnapshot().site,
+          sourceKey,
+          rows: rangeRows(coverage, {
+            pageviews: [scale * 2, scale * 3],
+            visits: [scale, scale * 2],
+            visitors: [scale, scale]
+          })
         };
       }
     }
   });
 
-  const result = await service.readProjectSourceTrends('11');
+  const result = await service.readProjectWebsiteTraffic('11', {
+    device: 'all',
+    from: '2026-07-29',
+    to: '2026-07-30',
+    source: 'DIRECT',
+    metric: 'visits'
+  });
 
-  assert.equal(result.source, 'BAIDU_TONGJI');
-  assert.equal(result.attribution.level, 'WEBSITE_TRAFFIC_SOURCE');
-  assert.equal(result.attribution.isCrossSystemVerified, false);
+  assert.deepEqual(calls, [
+    { coverage: { from: '2026-07-29', to: '2026-07-30', days: 2 }, device: 'all' },
+    { coverage: { from: '2026-07-27', to: '2026-07-28', days: 2 }, device: 'all' }
+  ]);
+  assert.equal(result.device, 'all');
+  assert.deepEqual(result.previousCoverage, {
+    from: '2026-07-27',
+    to: '2026-07-28'
+  });
+  assert.equal(result.summary.visits.current, '100');
+  assert.equal(result.summary.visits.previous, '80');
+  assert.equal(result.summary.visits.changePercent, '25.0');
   assert.deepEqual(
-    result.sources.map((source) => ({
-      sourceKey: source.sourceKey,
-      sourceLabel: source.sourceLabel,
-      visits: source.summary.visits
-    })),
+    result.sourceQuality.rows.map((row) => [
+      row.sourceLabel,
+      row.visits,
+      row.trafficShare
+    ]),
     [
-      { sourceKey: 'DIRECT', sourceLabel: '直接访问', visits: '1' },
-      { sourceKey: 'SEARCH', sourceLabel: '搜索引擎', visits: '2' },
-      { sourceKey: 'EXTERNAL', sourceLabel: '外部链接', visits: '3' }
+      ['百度自然搜索', '40', '40.0'],
+      ['直接访问', '30', '30.0'],
+      ['必应自然搜索', '20', '20.0'],
+      ['其他来源', '10', '10.0']
     ]
   );
+  assert.equal(result.sourceQuality.rows.at(-1).averageVisitTime, null);
+  assert.equal(result.capabilities.qualityMetrics, false);
+  assert.equal(result.capabilities.sourcePageCorrelation, false);
+  assert.deepEqual(result.trend.map((row) => row.current), ['10', '20']);
+});
+
+test('website page contract validates pagination and reports unverified data as unavailable', async (t) => {
+  const { service } = await createService(t);
+  const result = await service.readProjectWebsitePages('11', {
+    device: 'mobile',
+    from: '2026-07-01',
+    to: '2026-07-30',
+    view: 'visited',
+    page: '3',
+    pageSize: '20',
+    sortBy: 'exitRate',
+    sortOrder: 'ascend',
+    query: '/product'
+  });
+  assert.equal(result.dataState, 'UNAVAILABLE');
+  assert.deepEqual(result.rows, []);
+  assert.deepEqual(result.pagination, {
+    page: 3,
+    pageSize: 20,
+    totalItems: null,
+    totalPages: null
+  });
+  assert.equal(result.scope.source, 'ALL');
+
+  await assert.rejects(
+    service.readProjectWebsitePages('11', {
+      device: 'pc',
+      from: '2026-07-01',
+      to: '2026-07-30',
+      view: 'landing',
+      page: 1,
+      pageSize: 101,
+      sortBy: 'visits',
+      sortOrder: 'descend'
+    }),
+    { code: 'TONGJI_PAGE_QUERY_INVALID', status: 400 }
+  );
+  await assert.rejects(
+    service.readProjectWebsitePages('11', {
+      device: 'pc',
+      from: '2026-07-01',
+      to: '2026-07-30',
+      page: '1e2'
+    }),
+    { code: 'TONGJI_PAGE_QUERY_INVALID', status: 400 }
+  );
+});
+
+test('website page contract filters, sorts and paginates verified Baidu page rows', async (t) => {
+  const calls = [];
+  const { service } = await createService(t, {
+    capabilities: { qualityMetrics: false, pageReports: true },
+    provider: {
+      async readPageReport(input) {
+        calls.push(input);
+        return {
+          view: 'landing',
+          total: 4,
+          rows: [
+            {
+              pageId: '202',
+              pageUrl: 'https://active.example.test/product-b',
+              visits: '8',
+              contributionPageviews: '20',
+              bounceRate: '50',
+              averageVisitTimeSeconds: '20',
+              averageVisitPages: '2'
+            },
+            {
+              pageId: '200',
+              pageUrl: 'https://active.example.test/',
+              visits: '30',
+              contributionPageviews: '60',
+              bounceRate: '40',
+              averageVisitTimeSeconds: '60',
+              averageVisitPages: '3'
+            },
+            {
+              pageId: '201',
+              pageUrl: 'https://active.example.test/product-a',
+              visits: '12',
+              contributionPageviews: '24',
+              bounceRate: '45',
+              averageVisitTimeSeconds: '40',
+              averageVisitPages: '2.5'
+            },
+            {
+              pageId: '999',
+              pageUrl: 'http://127.0.0.1:3000/internal-preview',
+              visits: '100',
+              contributionPageviews: '100',
+              bounceRate: '1',
+              averageVisitTimeSeconds: '1000',
+              averageVisitPages: '10'
+            }
+          ]
+        };
+      }
+    }
+  });
+
+  const result = await service.readProjectWebsitePages('11', {
+    device: 'mobile',
+    from: '2026-07-01',
+    to: '2026-07-30',
+    view: 'landing',
+    page: 1,
+    pageSize: 1,
+    sortBy: 'visits',
+    sortOrder: 'descend',
+    query: '/product'
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].connection.tongji_site_id, '301');
+  assert.equal(calls[0].device, 'mobile');
+  assert.equal(result.dataState, 'DATA');
+  assert.deepEqual(result.rows.map((row) => row.title), [null]);
+  assert.deepEqual(result.rows.map((row) => row.pageId), ['201']);
+  assert.deepEqual(result.rows.map((row) => row.path), ['/product-a']);
+  assert.deepEqual(result.pagination, {
+    page: 1,
+    pageSize: 1,
+    totalItems: 2,
+    totalPages: 2
+  });
+  assert.deepEqual(result.dataQuality, {
+    excludedCrossDomainRows: 1
+  });
+  assert.equal(result.capabilities.pageReports, true);
+
+  const secondPage = await service.readProjectWebsitePages('11', {
+    device: 'mobile',
+    from: '2026-07-01',
+    to: '2026-07-30',
+    view: 'landing',
+    page: 2,
+    pageSize: 1,
+    sortBy: 'visits',
+    sortOrder: 'descend',
+    query: '/product'
+  });
+  assert.equal(calls.length, 1, '同一报告的内部分页必须复用一次受控刷新');
+  assert.deepEqual(secondPage.rows.map((row) => row.pageId), ['202']);
+});
+
+test('website page report survives a process restart and falls back to the persisted snapshot', async (t) => {
+  let now = Date.parse('2026-07-30T04:00:00.000Z');
+  const first = await createService(t, {
+    clock: () => now,
+    capabilities: { pageReports: true },
+    provider: {
+      async readPageReport() {
+        return {
+          view: 'landing',
+          total: 1,
+          rows: [{
+            pageId: '200',
+            pageUrl: 'https://active.example.test/product-a',
+            visits: '12',
+            contributionPageviews: '24',
+            bounceRate: '45',
+            averageVisitTimeSeconds: '40',
+            averageVisitPages: '2.5'
+          }]
+        };
+      }
+    }
+  });
+  const input = {
+    device: 'pc',
+    from: '2026-07-01',
+    to: '2026-07-30',
+    view: 'landing'
+  };
+  const refreshed = await first.service.readProjectWebsitePages('11', input);
+  assert.equal(refreshed.cache.state, 'REFRESHED');
+
+  now += 11 * 60 * 1000;
+  const restarted = new BaiduTongjiService({
+    sequelize: first.database.sequelize,
+    allowedProjectIds: '11',
+    clock: () => now,
+    cacheTtlMs: 600_000,
+    cacheMaxStaleMs: 86_400_000,
+    capabilities: { pageReports: true },
+    provider: {
+      async readPageReport() { throw new Error('upstream unavailable'); }
+    }
+  });
+  const fallback = await restarted.readProjectWebsitePages('11', input);
+  assert.equal(fallback.cache.state, 'FALLBACK');
+  assert.deepEqual(fallback.rows.map((row) => row.pageId), ['200']);
 });

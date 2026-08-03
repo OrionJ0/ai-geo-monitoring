@@ -59,7 +59,7 @@ test('root sequelize sync never registers or creates marketing domain tables', (
   }
 });
 
-test('marketing ships the six immutable domain migrations in order', () => {
+test('marketing ships immutable domain migrations in order', () => {
   assert.deepEqual(
     loadMarketingMigrations().map((migration) => migration.version),
     [
@@ -68,7 +68,14 @@ test('marketing ships the six immutable domain migrations in order', () => {
       '003-campaign-snapshots',
       '004-baidu-oauth-identity',
       '005-tongji-site-bindings',
-      '006-tongji-credentials'
+      '006-tongji-credentials',
+      '007-tongji-snapshots',
+      '008-tongji-source-trend-snapshots',
+      '009-tongji-range-snapshots',
+      '010-search-hierarchy-snapshots',
+      '011-tongji-cache-pruning-indexes',
+      '012-tongji-snapshot-capabilities',
+      '013-tongji-page-report-snapshots'
     ]
   );
 });
@@ -82,7 +89,7 @@ test('migration ledger uses a checksum constraint supported by each dialect', ()
   assert.doesNotMatch(ledgerChecksumConstraint('postgres'), /GLOB/u);
 });
 
-test('marketing migration audit is read-only and apply creates five domain tables idempotently', async (t) => {
+test('marketing migration audit is read-only and applies its source tables idempotently', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-ledger-'));
   const database = createDatabase(path.join(directory, 'ledger.sqlite'));
   t.after(async () => {
@@ -101,7 +108,14 @@ test('marketing migration audit is read-only and apply creates five domain table
       '003-campaign-snapshots',
       '004-baidu-oauth-identity',
       '005-tongji-site-bindings',
-      '006-tongji-credentials'
+      '006-tongji-credentials',
+      '007-tongji-snapshots',
+      '008-tongji-source-trend-snapshots',
+      '009-tongji-range-snapshots',
+      '010-search-hierarchy-snapshots',
+      '011-tongji-cache-pruning-indexes',
+      '012-tongji-snapshot-capabilities',
+      '013-tongji-page-report-snapshots'
     ]
   });
   assert.deepEqual(await database.getQueryInterface().showAllTables(), []);
@@ -113,11 +127,18 @@ test('marketing migration audit is read-only and apply creates five domain table
   assert.equal(first.ready, true);
   assert.deepEqual(second, first);
   assert.deepEqual([...tables].sort(), [
+    'baidu_ad_group_daily_metrics',
     'baidu_authorization_attempts',
     'baidu_campaign_daily_metrics',
+    'baidu_keyword_daily_metrics',
     'baidu_marketing_connections',
     'baidu_marketing_refresh_runs',
     'baidu_project_bindings',
+    'baidu_search_term_daily_metrics',
+    'baidu_tongji_page_report_snapshots',
+    'baidu_tongji_range_snapshots',
+    'baidu_tongji_snapshots',
+    'baidu_tongji_source_trend_snapshots',
     'marketing_schema_migrations'
   ]);
   const columns = await database.getQueryInterface().describeTable(
@@ -133,6 +154,61 @@ test('marketing migration audit is read-only and apply creates five domain table
   );
   assert.ok(bindingColumns.tongji_site_id);
   assert.ok(bindingColumns.tongji_site_domain);
+  const tongjiIndexes = await database.getQueryInterface().showIndex(
+    'baidu_tongji_range_snapshots'
+  );
+  const rangeIndex = tongjiIndexes.find(
+    (index) => index.name === 'baidu_tongji_range_snapshots_scope'
+  );
+  assert.equal(rangeIndex?.unique, true);
+  assert.deepEqual(rangeIndex?.fields.map((field) => field.attribute), [
+    'project_id',
+    'device',
+    'coverage_start',
+    'coverage_end'
+  ]);
+  const snapshotIndexes = await database.getQueryInterface().showIndex(
+    'baidu_tongji_snapshots'
+  );
+  const sourceTrendIndexes = await database.getQueryInterface().showIndex(
+    'baidu_tongji_source_trend_snapshots'
+  );
+  const rangeSnapshotIndexes = await database.getQueryInterface().showIndex(
+    'baidu_tongji_range_snapshots'
+  );
+  const pageReportIndexes = await database.getQueryInterface().showIndex(
+    'baidu_tongji_page_report_snapshots'
+  );
+  assert.deepEqual(
+    snapshotIndexes.find(
+      (index) => index.name === 'baidu_tongji_snapshots_refreshed'
+    )?.fields.map((field) => field.attribute),
+    ['refreshed_at']
+  );
+  assert.deepEqual(
+    sourceTrendIndexes.find(
+      (index) => index.name === 'baidu_tongji_source_trends_refreshed'
+    )?.fields.map((field) => field.attribute),
+    ['refreshed_at']
+  );
+  assert.deepEqual(
+    rangeSnapshotIndexes.find(
+      (index) => index.name === 'baidu_tongji_range_snapshots_refreshed'
+    )?.fields.map((field) => field.attribute),
+    ['refreshed_at']
+  );
+  assert.equal(
+    pageReportIndexes.find(
+      (index) => index.name === 'baidu_tongji_page_reports_scope'
+    )?.unique,
+    true
+  );
+  assert.deepEqual(
+    pageReportIndexes.find(
+      (index) => index.name === 'baidu_tongji_page_reports_refreshed'
+    )?.fields.map((field) => field.attribute),
+    ['refreshed_at']
+  );
 });
 
 test('concurrent SQLite runners serialize and apply a migration once', async (t) => {

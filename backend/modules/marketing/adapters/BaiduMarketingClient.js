@@ -5,12 +5,31 @@ const {
 const ONE_MEBIBYTE = 1024 * 1024;
 const REPORT_RESPONSE_BUDGET = 8 * ONE_MEBIBYTE;
 const TONGJI_RESPONSE_BUDGET = 2 * ONE_MEBIBYTE;
+const TONGJI_PAGE_REPORT_TIME_BUDGET_MS = 30_000;
 const REAUTHORIZATION_CODES = new Set(['894062', '894063', '894064']);
 const TONGJI_SOURCE_FILTERS = Object.freeze({
   ALL: null,
   DIRECT: 'through',
   SEARCH: 'search,0',
-  EXTERNAL: 'link'
+  EXTERNAL: 'link',
+  BAIDU_NATURAL: 'searchBaiduNature',
+  OTHER_SEARCH: 'searchOther'
+});
+const TONGJI_DEVICES = new Set(['all', 'pc', 'mobile']);
+const TONGJI_QUALITY_METRICS = Object.freeze([
+  'bounce_ratio',
+  'avg_visit_time',
+  'avg_visit_pages'
+]);
+const TONGJI_SOURCE_REPORTS = Object.freeze({
+  ALL: {
+    method: 'source/all/a',
+    dimensionField: 'source_type_title'
+  },
+  ENGINE: {
+    method: 'source/engine/a',
+    dimensionField: 'source_engine_title'
+  }
 });
 
 class BaiduMarketingError extends Error {
@@ -418,32 +437,145 @@ function normalizeReportPage(response) {
   return data[0];
 }
 
-function normalizeSearchReportRow(row, binding, costScale, range) {
+function reportName(value, field, maxLength = 512) {
+  if (
+    typeof value !== 'string'
+    || !value
+    || value.length > maxLength
+  ) {
+    throw new BaiduMarketingError(
+      `百度 ${field} 无效`,
+      'BAIDU_REPORT_RESPONSE_INVALID',
+      502
+    );
+  }
+  return value;
+}
+
+function reportEnum(value, field, values) {
+  const key = String(value ?? '').trim();
+  const normalized = values[key];
+  if (!normalized) {
+    throw new BaiduMarketingError(
+      `百度 ${field} 无效`,
+      'BAIDU_REPORT_RESPONSE_INVALID',
+      502
+    );
+  }
+  return normalized;
+}
+
+function normalizeReportIdentity(row, binding, range) {
   const accountId = reportIdentifier(row?.userId, 'userId');
-  const campaignId = reportIdentifier(row?.campaignId, 'campaignId');
   if (
     accountId !== String(binding.accountId)
     || row?.userName !== binding.accountName
     || !strictIsoDate(row?.date)
     || row.date < range.from
     || row.date > range.to
-    || typeof row?.campaignNameStatus !== 'string'
-    || !row.campaignNameStatus
   ) {
     throw new BaiduMarketingError(
-      '百度搜索计划报告行无效',
+      '百度搜索报告账户或日期无效',
       'BAIDU_REPORT_RESPONSE_INVALID',
       502
     );
   }
+  return { accountId, metricDate: row.date };
+}
+
+function normalizeReportMetrics(row, costScale) {
   return {
-    accountId,
-    campaignId,
-    campaignName: row.campaignNameStatus,
-    metricDate: row.date,
     impressions: reportIntegerText(row.impression, 'impression'),
     clicks: reportIntegerText(row.click, 'click'),
     costAmountScaled: decimalNumberToScaledText(row.cost, costScale)
+  };
+}
+
+function normalizeSearchReportRow(row, binding, costScale, range) {
+  const identity = normalizeReportIdentity(row, binding, range);
+  const campaignId = reportIdentifier(row?.campaignId, 'campaignId');
+  return {
+    ...identity,
+    campaignId,
+    campaignName: reportName(row?.campaignNameStatus, 'campaignNameStatus'),
+    ...normalizeReportMetrics(row, costScale)
+  };
+}
+
+function normalizeAdGroupReportRow(row, binding, costScale, range) {
+  return {
+    ...normalizeReportIdentity(row, binding, range),
+    campaignId: reportIdentifier(row?.campaignId, 'campaignId'),
+    campaignName: reportName(row?.campaignNameStatus, 'campaignNameStatus'),
+    adGroupId: reportIdentifier(row?.adGroupId, 'adGroupId'),
+    adGroupName: reportName(row?.adGroupNameStatus, 'adGroupNameStatus'),
+    ...normalizeReportMetrics(row, costScale)
+  };
+}
+
+const TARGETING_TYPES = Object.freeze({
+  0: 'KEYWORD',
+  1: 'WORD_PACKAGE',
+  3: 'AUTO_EXPANSION',
+  '关键词': 'KEYWORD',
+  '词包': 'WORD_PACKAGE',
+  '自动扩量': 'AUTO_EXPANSION'
+});
+
+function normalizeKeywordReportRow(row, binding, costScale, range) {
+  return {
+    ...normalizeAdGroupReportRow(row, binding, costScale, range),
+    keywordId: reportIdentifier(row?.wInfoId, 'wInfoId'),
+    keywordName: reportName(row?.wInfoNameStatus, 'wInfoNameStatus'),
+    targetingType: reportEnum(
+      row?.winfoIdTypeEnum,
+      'winfoIdTypeEnum',
+      TARGETING_TYPES
+    )
+  };
+}
+
+const QUERY_STATUSES = Object.freeze({
+  0: 'ADDED',
+  1: 'NOT_ADDED',
+  2: 'NOT_ADDABLE',
+  '已添加': 'ADDED',
+  '未添加': 'NOT_ADDED',
+  '不可添加': 'NOT_ADDABLE'
+});
+const MATCH_TYPES = Object.freeze({
+  15: 'INTELLIGENT',
+  16: 'INTELLIGENT_AUDIENCE',
+  31: 'PHRASE',
+  63: 'EXACT',
+  101: 'EXPANSION_MATCH_SELECTION',
+  103: 'URL_TARGETING',
+  109: 'PRODUCT_TARGETING',
+  110: 'AUTO_EXPANSION',
+  111: 'WORD_PACKAGE',
+  '智能匹配': 'INTELLIGENT',
+  '智能匹配-人群智选': 'INTELLIGENT_AUDIENCE',
+  '短语': 'PHRASE',
+  '精确': 'EXACT',
+  '扩量-匹配智选': 'EXPANSION_MATCH_SELECTION',
+  '网址定向': 'URL_TARGETING',
+  '商品定向': 'PRODUCT_TARGETING',
+  '扩量-自动扩量': 'AUTO_EXPANSION',
+  '词包': 'WORD_PACKAGE'
+});
+
+function normalizeSearchTermReportRow(row, binding, costScale, range) {
+  const searchTerm = reportName(row?.queryWord, 'queryWord', 1024);
+  return {
+    ...normalizeAdGroupReportRow(row, binding, costScale, range),
+    keywordName: reportName(row?.wInfoNameStatus, 'wInfoNameStatus'),
+    searchTerm,
+    queryStatus: reportEnum(
+      row?.queryStatusName,
+      'queryStatusName',
+      QUERY_STATUSES
+    ),
+    matchType: reportEnum(row?.wMatchId, 'wMatchId', MATCH_TYPES)
   };
 }
 
@@ -491,7 +623,32 @@ function normalizeTongjiMetric(value) {
   return BigInt(value.replaceAll(',', '')).toString();
 }
 
+function normalizeTongjiDecimalMetric(value) {
+  if (value === '--') return null;
+  const normalized = typeof value === 'number' ? String(value) : value;
+  if (
+    typeof normalized !== 'string'
+    || !/^\d+(?:\.\d+)?$/u.test(normalized)
+    || normalized.length > 64
+    || !Number.isFinite(Number(normalized))
+  ) {
+    throw new BaiduMarketingError(
+      '百度统计质量指标无效',
+      'BAIDU_TONGJI_RESPONSE_INVALID',
+      502
+    );
+  }
+  const [whole, fraction = ''] = normalized.split('.');
+  const canonicalWhole = BigInt(whole).toString();
+  const canonicalFraction = fraction.replace(/0+$/u, '');
+  return canonicalFraction
+    ? `${canonicalWhole}.${canonicalFraction}`
+    : canonicalWhole;
+}
+
 function tongjiSourceFilter(sourceKey = 'ALL') {
+  const engineMatch = /^ENGINE:(\d+)$/u.exec(sourceKey);
+  if (engineMatch) return `search,${engineMatch[1]}`;
   if (!Object.hasOwn(TONGJI_SOURCE_FILTERS, sourceKey)) {
     throw new BaiduMarketingError(
       '百度统计来源筛选无效',
@@ -500,6 +657,266 @@ function tongjiSourceFilter(sourceKey = 'ALL') {
     );
   }
   return TONGJI_SOURCE_FILTERS[sourceKey];
+}
+
+function tongjiDeviceFilter(device = null) {
+  if (device == null || device === 'all') return null;
+  if (!TONGJI_DEVICES.has(device)) {
+    throw new BaiduMarketingError(
+      '百度统计设备筛选无效',
+      'BAIDU_TONGJI_DEVICE_INVALID',
+      400
+    );
+  }
+  return device;
+}
+
+function normalizeTongjiQualityTrendResult(result, range) {
+  if (
+    !result
+    || typeof result !== 'object'
+    || !Array.isArray(result.fields)
+    || result.fields.length !== TONGJI_QUALITY_METRICS.length + 1
+    || result.fields[0] !== 'simple_date_title'
+    || !TONGJI_QUALITY_METRICS.every((field, index) => (
+      result.fields[index + 1] === field
+    ))
+    || !Array.isArray(result.items)
+    || result.items.length !== 4
+    || !Array.isArray(result.items[0])
+    || !Array.isArray(result.items[1])
+    || result.items[0].length !== result.items[1].length
+    || !Array.isArray(result.sum)
+    || result.sum.length !== 2
+    || !Array.isArray(result.sum[0])
+    || result.sum[0].length !== TONGJI_QUALITY_METRICS.length
+    || !Array.isArray(result.sum[1])
+    || result.sum[1].length !== 0
+    || !Number.isSafeInteger(result.total)
+    || result.total < 0
+    || result.total !== result.items[0].length
+    || result.offset !== 0
+  ) {
+    throw new BaiduMarketingError(
+      '百度统计质量趋势响应无效',
+      'BAIDU_TONGJI_RESPONSE_INVALID',
+      502
+    );
+  }
+  const seenDates = new Set();
+  const rows = result.items[0].map((dimension, index) => {
+    const metricRow = result.items[1][index];
+    const rawDate = dimension?.[0];
+    if (
+      !Array.isArray(dimension)
+      || dimension.length !== 1
+      || typeof rawDate !== 'string'
+      || !/^\d{4}\/\d{2}\/\d{2}$/u.test(rawDate)
+      || !Array.isArray(metricRow)
+      || metricRow.length !== TONGJI_QUALITY_METRICS.length
+    ) {
+      throw new BaiduMarketingError(
+        '百度统计质量趋势行无效',
+        'BAIDU_TONGJI_RESPONSE_INVALID',
+        502
+      );
+    }
+    const date = rawDate.replaceAll('/', '-');
+    if (
+      !strictIsoDate(date)
+      || date < range.from
+      || date > range.to
+      || seenDates.has(date)
+    ) {
+      throw new BaiduMarketingError(
+        '百度统计质量趋势日期无效',
+        'BAIDU_TONGJI_RESPONSE_INVALID',
+        502
+      );
+    }
+    seenDates.add(date);
+    return {
+      date,
+      bounceRate: normalizeTongjiDecimalMetric(metricRow[0]),
+      averageVisitTimeSeconds: normalizeTongjiDecimalMetric(metricRow[1]),
+      averageVisitPages: normalizeTongjiDecimalMetric(metricRow[2])
+    };
+  }).sort((left, right) => left.date.localeCompare(right.date));
+  return {
+    summary: {
+      bounceRate: normalizeTongjiDecimalMetric(result.sum[0][0]),
+      averageVisitTimeSeconds: normalizeTongjiDecimalMetric(result.sum[0][1]),
+      averageVisitPages: normalizeTongjiDecimalMetric(result.sum[0][2])
+    },
+    rows
+  };
+}
+
+function normalizeTongjiPageReportResult(
+  result,
+  view,
+  report,
+  expectedOffset
+) {
+  const metrics = report?.metrics;
+  if (
+    !result
+    || typeof result !== 'object'
+    || !Array.isArray(metrics)
+    || !report.dimensionField
+    || !Array.isArray(result.fields)
+    || result.fields.length !== metrics.length + 1
+    || result.fields[0] !== report.dimensionField
+    || !metrics.every((field, index) => result.fields[index + 1] === field)
+    || !Array.isArray(result.items)
+    || result.items.length !== 4
+    || !Array.isArray(result.items[0])
+    || !Array.isArray(result.items[1])
+    || result.items[0].length !== result.items[1].length
+    || !Number.isSafeInteger(result.total)
+    || result.total < 0
+    || result.total > 10000
+    || result.items[0].length > result.total
+    || !Number.isSafeInteger(result.offset)
+    || result.offset !== expectedOffset
+  ) {
+    throw new BaiduMarketingError(
+      '百度统计页面报告响应无效',
+      'BAIDU_TONGJI_RESPONSE_INVALID',
+      502
+    );
+  }
+  const seen = new Set();
+  const rows = result.items[0].map((dimension, index) => {
+    const item = dimension?.[0];
+    const metricRow = result.items[1][index];
+    const pageId = text(item?.pageId);
+    const rawUrl = text(item?.name);
+    let pageUrl;
+    try {
+      const parsed = new URL(rawUrl);
+      if (
+        !['http:', 'https:'].includes(parsed.protocol)
+        || parsed.username
+        || parsed.password
+      ) throw new Error('invalid');
+      parsed.search = '';
+      parsed.hash = '';
+      pageUrl = parsed.toString();
+    } catch {
+      throw new BaiduMarketingError(
+        '百度统计页面标识无效',
+        'BAIDU_TONGJI_RESPONSE_INVALID',
+        502
+      );
+    }
+    if (
+      !Array.isArray(dimension)
+      || dimension.length !== 1
+      || !item
+      || typeof item !== 'object'
+      || !/^\d+$/u.test(pageId)
+      || rawUrl.length > 4096
+      || seen.has(pageId)
+      || !Array.isArray(metricRow)
+      || metricRow.length !== metrics.length
+    ) {
+      throw new BaiduMarketingError(
+        '百度统计页面报告行无效',
+        'BAIDU_TONGJI_RESPONSE_INVALID',
+        502
+      );
+    }
+    seen.add(pageId);
+    if (view === 'landing') {
+      return {
+        pageId,
+        pageUrl,
+        visits: normalizeTongjiMetric(metricRow[0]),
+        contributionPageviews: normalizeTongjiMetric(metricRow[1]),
+        bounceRate: normalizeTongjiDecimalMetric(metricRow[2]),
+        averageVisitTimeSeconds: normalizeTongjiDecimalMetric(metricRow[3]),
+        averageVisitPages: normalizeTongjiDecimalMetric(metricRow[4])
+      };
+    }
+    return {
+      pageId,
+      pageUrl,
+      pageviews: normalizeTongjiMetric(metricRow[0]),
+      visitors: normalizeTongjiMetric(metricRow[1]),
+      averageStayTimeSeconds: normalizeTongjiDecimalMetric(metricRow[2]),
+      downstreamPageviews: normalizeTongjiMetric(metricRow[3]),
+      exitRate: normalizeTongjiDecimalMetric(metricRow[4])
+    };
+  });
+  return { total: result.total, offset: result.offset, rows };
+}
+
+function normalizeTongjiSourceResult(result, metrics, report) {
+  if (
+    !result
+    || typeof result !== 'object'
+    || !Array.isArray(result.fields)
+    || result.fields.length !== metrics.length + 1
+    || result.fields[0] !== report.dimensionField
+    || !metrics.every((field, index) => result.fields[index + 1] === field)
+    || !Array.isArray(result.items)
+    || result.items.length !== 4
+    || !Array.isArray(result.items[0])
+    || !Array.isArray(result.items[1])
+    || result.items[0].length !== result.items[1].length
+    || !Number.isSafeInteger(result.total)
+    || result.total < 0
+    || result.total > 100
+    || result.total !== result.items[0].length
+    || (result.offset ?? 0) !== 0
+  ) {
+    throw new BaiduMarketingError(
+      '百度统计来源响应无效',
+      'BAIDU_TONGJI_RESPONSE_INVALID',
+      502
+    );
+  }
+  const seen = new Set();
+  return result.items[0].map((dimension, index) => {
+    const item = dimension?.[0];
+    const metricRow = result.items[1][index];
+    const name = text(item?.name);
+    const source = text(item?.source);
+    const engineId = item?.engineId == null ? null : text(item.engineId);
+    const url = item?.url == null ? null : text(item.url);
+    if (
+      !Array.isArray(dimension)
+      || dimension.length !== 1
+      || !item
+      || typeof item !== 'object'
+      || !name
+      || name.length > 200
+      || !source
+      || source.length > 100
+      || (engineId !== null && !/^\d+$/u.test(engineId))
+      || (url !== null && url.length > 512)
+      || !Array.isArray(metricRow)
+      || metricRow.length !== metrics.length
+      || seen.has(source)
+    ) {
+      throw new BaiduMarketingError(
+        '百度统计来源行无效',
+        'BAIDU_TONGJI_RESPONSE_INVALID',
+        502
+      );
+    }
+    seen.add(source);
+    return {
+      name,
+      source,
+      engineId,
+      url,
+      pageviews: normalizeTongjiMetric(metricRow[0]),
+      visits: normalizeTongjiMetric(metricRow[1]),
+      visitors: normalizeTongjiMetric(metricRow[2])
+    };
+  });
 }
 
 class BaiduMarketingClient {
@@ -608,7 +1025,8 @@ class BaiduMarketingClient {
     method,
     url,
     json,
-    maxResponseBytes = ONE_MEBIBYTE
+    maxResponseBytes = ONE_MEBIBYTE,
+    timeoutMs = this.timeoutMs
   }) {
     this.assertAllowed(method, url);
     return this.transport({
@@ -618,7 +1036,7 @@ class BaiduMarketingClient {
         'Content-Type': 'application/json;charset:utf-8'
       },
       json,
-      timeoutMs: this.timeoutMs,
+      timeoutMs,
       maxResponseBytes
     });
   }
@@ -779,10 +1197,16 @@ class BaiduMarketingClient {
     );
   }
 
-  async fetchSearchReport({ binding, accessToken, coverage }) {
+  async fetchConfiguredSearchReport({
+    report,
+    binding,
+    accessToken,
+    coverage,
+    normalizeRow
+  }) {
     const range = assertDateRange(
       coverage,
-      this.manifest.searchPlanReport.maxDateRangeDays
+      report?.maxDateRangeDays
     );
     const accountName = assertString(
       binding?.accountName,
@@ -796,11 +1220,18 @@ class BaiduMarketingClient {
       accessToken,
       'BAIDU_ACCESS_TOKEN_INVALID'
     );
-    const pageSize = this.manifest.searchPlanReport.pageSize;
-    const maxRows = this.manifest.searchPlanReport.maxRows;
+    const pageSize = report?.pageSize;
+    const maxRows = report?.maxRows;
     const costScale = this.manifest.money?.costScale;
     if (
-      !Number.isSafeInteger(pageSize)
+      report?.method !== 'POST'
+      || report?.url
+        !== 'https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData'
+      || !Number.isSafeInteger(report?.reportType)
+      || report?.timeUnit !== 'DAY'
+      || !Array.isArray(report?.columns)
+      || !report.columns.length
+      || !Number.isSafeInteger(pageSize)
       || pageSize <= 0
       || !Number.isSafeInteger(maxRows)
       || maxRows <= 0
@@ -815,8 +1246,8 @@ class BaiduMarketingClient {
     let expectedTotal = null;
     for (let startRow = 0; startRow <= maxRows; startRow += pageSize) {
       const response = await this.requestJson({
-        method: this.manifest.searchPlanReport.method,
-        url: this.manifest.searchPlanReport.url,
+        method: report.method,
+        url: report.url,
         maxResponseBytes: REPORT_RESPONSE_BUDGET,
         json: {
           header: {
@@ -824,11 +1255,11 @@ class BaiduMarketingClient {
             accessToken: token
           },
           body: {
-            reportType: this.manifest.searchPlanReport.reportType,
+            reportType: report.reportType,
             startDate: range.from,
             endDate: range.to,
-            timeUnit: this.manifest.searchPlanReport.timeUnit,
-            columns: [...this.manifest.searchPlanReport.columns],
+            timeUnit: report.timeUnit,
+            columns: [...report.columns],
             sorts: [],
             filters: [],
             startRow,
@@ -846,13 +1277,13 @@ class BaiduMarketingClient {
         || startRow + page.rowCount > expectedTotal
       ) {
         throw new BaiduMarketingError(
-          '百度搜索计划报告分页无效',
+          '百度搜索报告分页无效',
           'BAIDU_REPORT_PAGINATION_INVALID',
           502
         );
       }
       normalizedRows.push(...page.rows.map((row) => (
-        normalizeSearchReportRow(
+        normalizeRow(
           row,
           { accountId, accountName },
           costScale,
@@ -862,17 +1293,57 @@ class BaiduMarketingClient {
       if (normalizedRows.length === expectedTotal) return normalizedRows;
       if (page.rowCount !== pageSize) {
         throw new BaiduMarketingError(
-          '百度搜索计划报告分页未推进',
+          '百度搜索报告分页未推进',
           'BAIDU_REPORT_PAGINATION_INVALID',
           502
         );
       }
     }
     throw new BaiduMarketingError(
-      '百度搜索计划报告超过行数预算',
+      '百度搜索报告超过行数预算',
       'BAIDU_REPORT_PAGE_BUDGET_EXCEEDED',
       502
     );
+  }
+
+  async fetchSearchReport(request) {
+    return this.fetchConfiguredSearchReport({
+      ...request,
+      report: this.manifest.searchPlanReport,
+      normalizeRow: normalizeSearchReportRow
+    });
+  }
+
+  async fetchSearchAdGroupReport(request) {
+    return this.fetchConfiguredSearchReport({
+      ...request,
+      report: this.manifest.searchAdGroupReport,
+      normalizeRow: normalizeAdGroupReportRow
+    });
+  }
+
+  async fetchSearchKeywordReport(request) {
+    return this.fetchConfiguredSearchReport({
+      ...request,
+      report: this.manifest.searchKeywordReport,
+      normalizeRow: normalizeKeywordReportRow
+    });
+  }
+
+  async fetchSearchTermReport(request) {
+    return this.fetchConfiguredSearchReport({
+      ...request,
+      report: this.manifest.searchTermReport,
+      normalizeRow: normalizeSearchTermReportRow
+    });
+  }
+
+  async fetchSearchReports(request) {
+    const campaigns = await this.fetchSearchReport(request);
+    const adGroups = await this.fetchSearchAdGroupReport(request);
+    const keywords = await this.fetchSearchKeywordReport(request);
+    const searchTerms = await this.fetchSearchTermReport(request);
+    return { campaigns, adGroups, keywords, searchTerms };
   }
 
   async listTongjiSites({ accountName, accessToken }) {
@@ -933,12 +1404,14 @@ class BaiduMarketingClient {
     accessToken,
     siteId,
     coverage,
-    sourceKey = 'ALL'
+    sourceKey = 'ALL',
+    device = null
   }) {
     const range = assertDateRange(coverage, 731);
     const normalizedSiteId = reportIdentifier(siteId, 'site_id');
     const metrics = this.manifest.tongji.report.metrics;
     const source = tongjiSourceFilter(sourceKey);
+    const clientDevice = tongjiDeviceFilter(device);
     const response = await this.requestJson({
       method: this.manifest.tongji.report.method,
       url: this.manifest.tongji.report.url,
@@ -962,7 +1435,8 @@ class BaiduMarketingClient {
           metrics: metrics.join(','),
           max_results: range.days,
           gran: 'day',
-          ...(source ? { source } : {})
+          ...(source ? { source } : {}),
+          ...(clientDevice ? { clientDevice } : {})
         }
       }
     });
@@ -993,7 +1467,7 @@ class BaiduMarketingClient {
       );
     }
     const seenDates = new Set();
-    return result.items[0].map((dimension, index) => {
+    const rows = result.items[0].map((dimension, index) => {
       const metricRow = result.items[1][index];
       const rawDate = dimension?.[0];
       if (
@@ -1031,6 +1505,231 @@ class BaiduMarketingClient {
         visitors: normalizeTongjiMetric(metricRow[2])
       };
     }).sort((left, right) => left.date.localeCompare(right.date));
+    const expectedDates = Array.from({ length: range.days }, (_, index) => {
+      const date = new Date(`${range.from}T00:00:00.000Z`);
+      date.setUTCDate(date.getUTCDate() + index);
+      return date.toISOString().slice(0, 10);
+    });
+    if (
+      rows.length !== expectedDates.length
+      || rows.some((row, index) => row.date !== expectedDates[index])
+    ) {
+      throw new BaiduMarketingError(
+        '百度统计趋势日期不完整',
+        'BAIDU_TONGJI_RESPONSE_INVALID',
+        502
+      );
+    }
+    return rows;
+  }
+
+  async fetchTongjiQualityTrend({
+    accountName,
+    accessToken,
+    siteId,
+    coverage,
+    sourceKey = 'ALL',
+    device = 'all'
+  }) {
+    if (this.manifest.tongji?.qualityMetrics?.runtimeEnabled !== true) {
+      throw new BaiduMarketingError(
+        '百度统计质量指标尚未通过真实账号合同验证',
+        'BAIDU_TONGJI_CAPABILITY_NOT_VERIFIED',
+        503
+      );
+    }
+    const range = assertDateRange(coverage, 731);
+    const normalizedSiteId = reportIdentifier(siteId, 'site_id');
+    const source = tongjiSourceFilter(sourceKey);
+    const clientDevice = tongjiDeviceFilter(device);
+    const response = await this.requestJson({
+      method: this.manifest.tongji.report.method,
+      url: this.manifest.tongji.report.url,
+      maxResponseBytes: TONGJI_RESPONSE_BUDGET,
+      json: {
+        header: {
+          userName: assertString(
+            accountName,
+            'BAIDU_TONGJI_ACCOUNT_INVALID'
+          ),
+          accessToken: assertString(
+            accessToken,
+            'BAIDU_ACCESS_TOKEN_INVALID'
+          )
+        },
+        body: {
+          site_id: Number(normalizedSiteId),
+          method: this.manifest.tongji.report.reportMethod,
+          start_date: range.from.replaceAll('-', ''),
+          end_date: range.to.replaceAll('-', ''),
+          metrics: TONGJI_QUALITY_METRICS.join(','),
+          max_results: range.days,
+          gran: 'day',
+          ...(source ? { source } : {}),
+          ...(clientDevice ? { clientDevice } : {})
+        }
+      }
+    });
+    return normalizeTongjiQualityTrendResult(
+      normalizeTongjiEnvelope(response)?.result,
+      range
+    );
+  }
+
+  async fetchTongjiPageReport({
+    accountName,
+    accessToken,
+    siteId,
+    coverage,
+    device = 'all',
+    view
+  }) {
+    const pageReports = this.manifest.tongji?.pageReports;
+    if (pageReports?.runtimeEnabled !== true) {
+      throw new BaiduMarketingError(
+        '百度统计页面报告尚未通过真实账号合同验证',
+        'BAIDU_TONGJI_CAPABILITY_NOT_VERIFIED',
+        503
+      );
+    }
+    const report = pageReports[view];
+    if (!report || !['landing', 'visited'].includes(view)) {
+      throw new BaiduMarketingError(
+        '百度统计页面报告视图无效',
+        'BAIDU_TONGJI_PAGE_VIEW_INVALID',
+        400
+      );
+    }
+    const range = assertDateRange(coverage, 366);
+    const normalizedSiteId = reportIdentifier(siteId, 'site_id');
+    const clientDevice = tongjiDeviceFilter(device);
+    const pageSize = 100;
+    const rows = [];
+    const seenPageIds = new Set();
+    let total = null;
+    let startIndex = 0;
+    const deadline = Date.now() + TONGJI_PAGE_REPORT_TIME_BUDGET_MS;
+    do {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs < 100) {
+        throw new BaiduMarketingError(
+          '百度统计页面报告超过总耗时预算',
+          'BAIDU_TONGJI_PAGE_REPORT_BUDGET_EXCEEDED',
+          504,
+          true
+        );
+      }
+      const response = await this.requestJson({
+        method: this.manifest.tongji.report.method,
+        url: this.manifest.tongji.report.url,
+        maxResponseBytes: TONGJI_RESPONSE_BUDGET,
+        timeoutMs: Math.min(this.timeoutMs, remainingMs),
+        json: {
+          header: {
+            userName: assertString(
+              accountName,
+              'BAIDU_TONGJI_ACCOUNT_INVALID'
+            ),
+            accessToken: assertString(
+              accessToken,
+              'BAIDU_ACCESS_TOKEN_INVALID'
+            )
+          },
+          body: {
+            site_id: Number(normalizedSiteId),
+            method: report.reportMethod,
+            start_date: range.from.replaceAll('-', ''),
+            end_date: range.to.replaceAll('-', ''),
+            metrics: report.metrics.join(','),
+            start_index: startIndex,
+            max_results: pageSize,
+            ...(clientDevice ? { clientDevice } : {})
+          }
+        }
+      });
+      const pageResult = normalizeTongjiPageReportResult(
+        normalizeTongjiEnvelope(response)?.result,
+        view,
+        report,
+        startIndex
+      );
+      if (total === null) total = pageResult.total;
+      if (
+        pageResult.total !== total
+        || (startIndex < total && pageResult.rows.length === 0)
+        || pageResult.rows.some((row) => seenPageIds.has(row.pageId))
+      ) {
+        throw new BaiduMarketingError(
+          '百度统计页面报告分页响应无效',
+          'BAIDU_TONGJI_RESPONSE_INVALID',
+          502
+        );
+      }
+      for (const row of pageResult.rows) seenPageIds.add(row.pageId);
+      rows.push(...pageResult.rows);
+      startIndex += pageResult.rows.length;
+    } while (startIndex < total);
+    return { view, total, rows };
+  }
+
+  async fetchTongjiSourceSummary({
+    accountName,
+    accessToken,
+    siteId,
+    coverage,
+    reportKey,
+    device = null
+  }) {
+    if (this.manifest.tongji?.sourceReports?.runtimeEnabled !== true) {
+      throw new BaiduMarketingError(
+        '百度统计来源报告尚未通过真实账号合同验证',
+        'BAIDU_TONGJI_CAPABILITY_NOT_VERIFIED',
+        503
+      );
+    }
+    const range = assertDateRange(coverage, 731);
+    const normalizedSiteId = reportIdentifier(siteId, 'site_id');
+    const metrics = this.manifest.tongji.report.metrics;
+    const report = TONGJI_SOURCE_REPORTS[reportKey];
+    const clientDevice = tongjiDeviceFilter(device);
+    if (!report) {
+      throw new BaiduMarketingError(
+        '百度统计来源报告无效',
+        'BAIDU_TONGJI_SOURCE_REPORT_INVALID',
+        400
+      );
+    }
+    const response = await this.requestJson({
+      method: this.manifest.tongji.report.method,
+      url: this.manifest.tongji.report.url,
+      maxResponseBytes: TONGJI_RESPONSE_BUDGET,
+      json: {
+        header: {
+          userName: assertString(
+            accountName,
+            'BAIDU_TONGJI_ACCOUNT_INVALID'
+          ),
+          accessToken: assertString(
+            accessToken,
+            'BAIDU_ACCESS_TOKEN_INVALID'
+          )
+        },
+        body: {
+          site_id: Number(normalizedSiteId),
+          method: report.method,
+          start_date: range.from.replaceAll('-', ''),
+          end_date: range.to.replaceAll('-', ''),
+          metrics: metrics.join(','),
+          max_results: 100,
+          ...(clientDevice ? { clientDevice } : {})
+        }
+      }
+    });
+    return normalizeTongjiSourceResult(
+      normalizeTongjiEnvelope(response)?.result,
+      metrics,
+      report
+    );
   }
 }
 

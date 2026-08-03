@@ -114,9 +114,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
 将生成的值设置到 `.env` 的 `JWT_SECRET` 字段。
 
-### 2. 更改默认管理员密码
-在 `.env` 中设置强随机密码到 `DEFAULT_ADMIN_PASSWORD`。
-首次登录后建议立即修改。
+### 2. 禁止生产启动期管理员初始化
+生产环境保持 `DEFAULT_ADMIN_BOOTSTRAP_ENABLED=false`。只有首次本地初始化时才临时启用，并在 `.env` 中提供非示例强密码；代码不会使用固定回退密码，也不会覆盖、提权或重新激活既有用户。
 
 ### 3. 配置 CORS 白名单
 同机 loopback 代理不依赖白名单。前后端分域、代理位于容器网络或需要直接跨域访问后端时，在 `.env` 中设置 `ALLOWED_ORIGINS` 为实际使用的域名。
@@ -134,7 +133,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 部署前请确认：
 
 - [ ] JWT_SECRET 已设置为强随机值（至少32字符）
-- [ ] DEFAULT_ADMIN_PASSWORD 已更改
+- [ ] 生产环境 `DEFAULT_ADMIN_BOOTSTRAP_ENABLED=false`
 - [ ] 分域或非 loopback 代理部署时，ALLOWED_ORIGINS 已配置为实际域名
 - [ ] 公网或存在不可信账号时，SEO_AUDIT_ALLOW_PRIVATE_TARGETS 保持为 false
 - [ ] 所有 API 密钥已检查并更新

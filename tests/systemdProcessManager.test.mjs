@@ -77,6 +77,7 @@ test('starts backend before frontend and waits for public-path readiness', async
   };
   const calls = [];
   const readinessChecks = [];
+  let revisionVerified = false;
   const manager = createSystemdProcessManager({
     runSystemctl: async (args, options = {}) => {
       calls.push({ args, privileged: options.privileged === true });
@@ -99,6 +100,9 @@ test('starts backend before frontend and waits for public-path readiness', async
     },
     waitForHttp: async (url, label) => {
       readinessChecks.push({ url, label });
+    },
+    verifyRevision: async () => {
+      revisionVerified = true;
     },
   });
 
@@ -131,6 +135,37 @@ test('starts backend before frontend and waits for public-path readiness', async
   ]);
   assert.equal(status.backend.running, true);
   assert.equal(status.frontend.running, true);
+  assert.equal(revisionVerified, true);
+});
+
+test('rolls back both units when the running revision does not match', async () => {
+  const calls = [];
+  const manager = createSystemdProcessManager({
+    runSystemctl: async (args, options = {}) => {
+      calls.push({ args, privileged: options.privileged === true });
+      if (args[0] !== 'show') return { stdout: '' };
+      return {
+        stdout: [
+          'LoadState=loaded',
+          'ActiveState=active',
+          'SubState=running',
+          'MainPID=7101',
+          'User=ubuntu',
+          '',
+        ].join('\n'),
+      };
+    },
+    waitForHttp: async () => {},
+    verifyRevision: async () => {
+      throw new Error('运行版本不匹配');
+    },
+  });
+
+  await assert.rejects(manager.start(), /运行版本不匹配/);
+  assert.deepEqual(
+    calls.filter(({ args }) => args[0] === 'stop').map(({ args }) => args[1]),
+    ['ai-geo-frontend.service', 'ai-geo-backend.service']
+  );
 });
 
 test('stops frontend before backend through privileged systemd control', async () => {

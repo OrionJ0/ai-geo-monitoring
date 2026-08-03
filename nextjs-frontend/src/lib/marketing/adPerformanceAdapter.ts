@@ -1,4 +1,4 @@
-export type AdHierarchyLevel = 'project' | 'scheme' | 'unit';
+export type AdHierarchyLevel = 'project' | 'scheme' | 'unit' | 'keyword';
 
 export type AdDeliveryStatus = 'active' | 'paused' | 'unknown';
 
@@ -56,10 +56,29 @@ export type AdPerformanceModel = {
   structure: AdHierarchyNode[];
 };
 
-type DashboardCampaign = AdExactMetrics & {
+export type DashboardCampaign = AdExactMetrics & {
   accountId: string;
   campaignId: string;
   campaignName: string;
+  trend?: Array<Partial<AdDailyMetrics> & { date: string }>;
+};
+
+export type DashboardAdGroup = DashboardCampaign & {
+  adGroupId: string;
+  adGroupName: string;
+};
+
+export type DashboardKeyword = DashboardAdGroup & {
+  keywordId: string;
+  keywordName: string;
+  targetingType: 'KEYWORD' | 'WORD_PACKAGE' | 'AUTO_EXPANSION';
+};
+
+export type DashboardSearchTerm = DashboardAdGroup & {
+  keywordName: string;
+  searchTerm: string;
+  queryStatus: 'ADDED' | 'NOT_ADDED' | 'NOT_ADDABLE';
+  matchType: string;
 };
 
 export type MarketingDashboardResponse = {
@@ -81,7 +100,20 @@ export type MarketingDashboardResponse = {
   } | null;
   summary?: Partial<AdExactMetrics>;
   trend?: Array<Partial<AdDailyMetrics> & { date: string }>;
+  bindings?: Array<{
+    accountId: string;
+    accountName: string;
+  }>;
   campaigns?: DashboardCampaign[];
+  adGroups?: DashboardAdGroup[];
+  keywords?: DashboardKeyword[];
+  searchTerms?: DashboardSearchTerm[];
+  hierarchyCounts?: {
+    campaigns: number;
+    adGroups: number;
+    keywords: number;
+    searchTerms: number;
+  };
 };
 
 const EMPTY_METRICS: AdExactMetrics = Object.freeze({
@@ -91,8 +123,230 @@ const EMPTY_METRICS: AdExactMetrics = Object.freeze({
 });
 
 function decimalText(value: unknown): string {
-  if (typeof value !== 'string' || !/^\d+$/u.test(value)) return '0';
+  if (typeof value !== 'string' || !/^\d+$/u.test(value)) {
+    const error = new TypeError('营销看板响应合同无效');
+    (error as TypeError & { code: string }).code =
+      'MARKETING_DASHBOARD_RESPONSE_INVALID';
+    throw error;
+  }
   return BigInt(value).toString();
+}
+
+function invalidDashboard(): never {
+  const error = new TypeError('营销看板响应合同无效');
+  (error as TypeError & { code: string }).code =
+    'MARKETING_DASHBOARD_RESPONSE_INVALID';
+  throw error;
+}
+
+function objectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function text(value: unknown, maximum = 512): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maximum;
+}
+
+function dateText(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime())
+    && parsed.toISOString().slice(0, 10) === value;
+}
+
+function exactMetrics(value: unknown): value is AdExactMetrics {
+  if (!objectRecord(value)) return false;
+  return ['costAmountScaled', 'impressions', 'clicks'].every((field) => (
+    typeof value[field] === 'string' && /^\d+$/u.test(value[field])
+  ));
+}
+
+function exactTrend(value: unknown): boolean {
+  return Array.isArray(value) && value.every((row) => (
+    objectRecord(row) && dateText(row.date) && exactMetrics(row)
+  ));
+}
+
+function dashboardCampaign(value: unknown): value is DashboardCampaign {
+  if (!objectRecord(value)) return false;
+  const row = value as Record<string, unknown>;
+  const metricsValid = exactMetrics(row);
+  const trendValid = row.trend === undefined || exactTrend(row.trend);
+  return text(value.accountId, 128)
+    && text(value.campaignId, 128)
+    && text(value.campaignName)
+    && metricsValid
+    && trendValid;
+}
+
+function dashboardAdGroup(value: unknown): value is DashboardAdGroup {
+  return dashboardCampaign(value)
+    && text((value as unknown as Record<string, unknown>).adGroupId, 128)
+    && text((value as unknown as Record<string, unknown>).adGroupName);
+}
+
+function dashboardKeyword(value: unknown): value is DashboardKeyword {
+  if (!dashboardAdGroup(value)) return false;
+  const row = value as unknown as Record<string, unknown>;
+  return text(row.keywordId, 128)
+    && text(row.keywordName, 1024)
+    && ['KEYWORD', 'WORD_PACKAGE', 'AUTO_EXPANSION']
+      .includes(String(row.targetingType));
+}
+
+function dashboardSearchTerm(value: unknown): value is DashboardSearchTerm {
+  if (!dashboardAdGroup(value)) return false;
+  const row = value as unknown as Record<string, unknown>;
+  return text(row.keywordName, 1024)
+    && text(row.searchTerm, 1024)
+    && ['ADDED', 'NOT_ADDED', 'NOT_ADDABLE'].includes(String(row.queryStatus))
+    && text(row.matchType, 64);
+}
+
+function identity(...parts: unknown[]): string {
+  return parts.map((part) => String(part)).join('\u0000');
+}
+
+function uniqueMap<T>(
+  rows: T[],
+  keyOf: (row: T) => string
+): Map<string, T> | null {
+  const result = new Map<string, T>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (result.has(key)) return null;
+    result.set(key, row);
+  }
+  return result;
+}
+
+function metricsEqual(left: AdExactMetrics, right: AdExactMetrics): boolean {
+  return left.costAmountScaled === right.costAmountScaled
+    && left.impressions === right.impressions
+    && left.clicks === right.clicks;
+}
+
+function sumMetrics(rows: AdExactMetrics[]): AdExactMetrics {
+  return rows.reduce((sum, row) => ({
+    costAmountScaled: (
+      BigInt(sum.costAmountScaled) + BigInt(row.costAmountScaled)
+    ).toString(),
+    impressions: (BigInt(sum.impressions) + BigInt(row.impressions)).toString(),
+    clicks: (BigInt(sum.clicks) + BigInt(row.clicks)).toString()
+  }), { ...EMPTY_METRICS });
+}
+
+function dashboardSemanticsValid(value: MarketingDashboardResponse): boolean {
+  const bindings = value.bindings || [];
+  const campaigns = value.campaigns || [];
+  const adGroups = value.adGroups || [];
+  const keywords = value.keywords || [];
+  const searchTerms = value.searchTerms || [];
+  const bindingMap = uniqueMap(bindings, (row) => row.accountId);
+  const campaignMap = uniqueMap(
+    campaigns,
+    (row) => identity(row.accountId, row.campaignId)
+  );
+  const adGroupMap = uniqueMap(
+    adGroups,
+    (row) => identity(row.accountId, row.campaignId, row.adGroupId)
+  );
+  const keywordMap = uniqueMap(
+    keywords,
+    (row) => identity(row.accountId, row.keywordId)
+  );
+  if (!bindingMap || !campaignMap || !adGroupMap || !keywordMap) return false;
+
+  const campaignMatches = (row: DashboardCampaign) => {
+    const parent = campaignMap.get(identity(row.accountId, row.campaignId));
+    return bindingMap.has(row.accountId)
+      && Boolean(parent)
+      && parent?.campaignName === row.campaignName;
+  };
+  const adGroupMatches = (row: DashboardAdGroup) => {
+    const parent = adGroupMap.get(identity(
+      row.accountId,
+      row.campaignId,
+      row.adGroupId
+    ));
+    return campaignMatches(row)
+      && Boolean(parent)
+      && parent?.campaignName === row.campaignName
+      && parent?.adGroupName === row.adGroupName;
+  };
+  if (!campaigns.every((row) => bindingMap.has(row.accountId))) return false;
+  if (!adGroups.every(adGroupMatches)) return false;
+  if (!keywords.every(adGroupMatches)) return false;
+  if (!searchTerms.every(adGroupMatches)) return false;
+
+  const summary = value.summary as AdExactMetrics;
+  const trend = value.trend as AdDailyMetrics[];
+  if (!metricsEqual(sumMetrics(campaigns), summary)) return false;
+  if (!metricsEqual(sumMetrics(trend), summary)) return false;
+  if (value.states?.snapshotContentState === 'NONE') {
+    return campaigns.length === 0
+      && adGroups.length === 0
+      && keywords.length === 0
+      && searchTerms.length === 0
+      && trend.length === 0
+      && metricsEqual(summary, EMPTY_METRICS);
+  }
+  return true;
+}
+
+export function assertMarketingDashboardResponse(
+  value: unknown
+): asserts value is MarketingDashboardResponse {
+  if (!objectRecord(value) || !text(value.projectId, 128)) {
+    invalidDashboard();
+  }
+  const states = value.states;
+  const snapshotState = objectRecord(states)
+    ? states.snapshotContentState
+    : null;
+  if (!['NONE', 'ZERO', 'DATA'].includes(String(snapshotState))) {
+    invalidDashboard();
+  }
+  const coverage = value.coverage;
+  if (snapshotState === 'NONE') {
+    if (coverage !== null) invalidDashboard();
+  } else if (
+    !objectRecord(coverage)
+    || !dateText(coverage.from)
+    || !dateText(coverage.to)
+    || coverage.from > coverage.to
+    || !text(coverage.currency, 16)
+    || !Number.isSafeInteger(coverage.costScale)
+    || Number(coverage.costScale) < 0
+    || Number(coverage.costScale) > 12
+  ) invalidDashboard();
+  if (!exactMetrics(value.summary) || !exactTrend(value.trend)) {
+    invalidDashboard();
+  }
+  const bindings = value.bindings;
+  const campaigns = value.campaigns;
+  const adGroups = value.adGroups;
+  const keywords = value.keywords;
+  const searchTerms = value.searchTerms;
+  if (
+    !Array.isArray(bindings)
+    || !bindings.every((row) => objectRecord(row)
+      && text(row.accountId, 128) && text(row.accountName))
+    || !Array.isArray(campaigns) || !campaigns.every(dashboardCampaign)
+    || !Array.isArray(adGroups) || !adGroups.every(dashboardAdGroup)
+    || !Array.isArray(keywords) || !keywords.every(dashboardKeyword)
+    || !Array.isArray(searchTerms) || !searchTerms.every(dashboardSearchTerm)
+    || !objectRecord(value.hierarchyCounts)
+    || value.hierarchyCounts.campaigns !== campaigns.length
+    || value.hierarchyCounts.adGroups !== adGroups.length
+    || value.hierarchyCounts.keywords !== keywords.length
+    || value.hierarchyCounts.searchTerms !== searchTerms.length
+  ) invalidDashboard();
+  if (!dashboardSemanticsValid(value as MarketingDashboardResponse)) {
+    invalidDashboard();
+  }
 }
 export function shiftIsoDate(value: string, days: number): string {
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -137,6 +391,22 @@ function normalizeTrend(
     date: row.date,
     ...normalizeMetrics(row)
   }));
+}
+
+function hierarchyKey(...parts: string[]): string {
+  return parts.join('\u0000');
+}
+
+function appendGrouped<T>(map: Map<string, T[]>, key: string, row: T): void {
+  const current = map.get(key);
+  if (current) current.push(row);
+  else map.set(key, [row]);
+}
+
+function targetingTypeLabel(value: DashboardKeyword['targetingType']): string {
+  if (value === 'WORD_PACKAGE') return '词包';
+  if (value === 'AUTO_EXPANSION') return '自动扩量';
+  return '关键词';
 }
 
 export function sumAdMetrics(rows: AdExactMetrics[]): AdExactMetrics {
@@ -198,29 +468,108 @@ export function adaptMarketingDashboard(
 
   const currentTrend = normalizeTrend(dashboard.trend);
   const campaigns = dashboard.campaigns || [];
+  const adGroups = dashboard.adGroups || [];
+  const keywords = dashboard.keywords || [];
+  const adGroupsByCampaign = new Map<string, DashboardAdGroup[]>();
+  const keywordsByAdGroup = new Map<string, DashboardKeyword[]>();
+  for (const adGroup of adGroups) {
+    appendGrouped(
+      adGroupsByCampaign,
+      hierarchyKey(adGroup.accountId, adGroup.campaignId),
+      adGroup
+    );
+  }
+  for (const keyword of keywords) {
+    appendGrouped(
+      keywordsByAdGroup,
+      hierarchyKey(
+        keyword.accountId,
+        keyword.campaignId,
+        keyword.adGroupId
+      ),
+      keyword
+    );
+  }
   const projectStatus: AdDeliveryStatus = (
     dashboard.states?.projectState === 'ACTIVE' ? 'active' : 'unknown'
   );
-  const schemeNodes: AdHierarchyNode[] = campaigns.map((campaign) => ({
-    key: `scheme:${campaign.accountId}:${campaign.campaignId}`,
-    id: String(campaign.campaignId),
-    name: campaign.campaignName,
-    level: 'scheme',
-    status: 'unknown',
-    budgetAmountScaled: null,
-    metrics: normalizeMetrics(campaign),
-    currentTrend: [],
-    previousTrend: [],
-    details: [
-      { label: '方案 ID', value: String(campaign.campaignId) },
-      { label: '所属项目', value: projectName },
-      { label: '投放设备', value: '—' },
-      { label: '投放地域', value: '—' },
-      { label: '出价策略', value: '—' },
-      { label: '周期预算', value: '—' },
-      { label: '投放状态', value: '—', status: 'unknown' }
-    ]
-  }));
+  const schemeNodes: AdHierarchyNode[] = campaigns.map((campaign) => {
+    const campaignKey = hierarchyKey(
+      campaign.accountId,
+      campaign.campaignId
+    );
+    const unitNodes: AdHierarchyNode[] = (
+      adGroupsByCampaign.get(campaignKey) || []
+    ).map((adGroup) => {
+      const adGroupKey = hierarchyKey(
+        adGroup.accountId,
+        adGroup.campaignId,
+        adGroup.adGroupId
+      );
+      const keywordNodes: AdHierarchyNode[] = (
+        keywordsByAdGroup.get(adGroupKey) || []
+      ).map((keyword) => ({
+        key: `keyword:${keyword.accountId}:${keyword.campaignId}:${keyword.adGroupId}:${keyword.keywordId}`,
+        id: String(keyword.keywordId),
+        name: keyword.keywordName,
+        level: 'keyword',
+        status: 'unknown',
+        budgetAmountScaled: null,
+        metrics: normalizeMetrics(keyword),
+        currentTrend: normalizeTrend(keyword.trend),
+        previousTrend: [],
+        details: [
+          { label: '关键词 ID', value: String(keyword.keywordId) },
+          { label: '所属单元', value: keyword.adGroupName },
+          {
+            label: '定向类型',
+            value: targetingTypeLabel(keyword.targetingType)
+          },
+          { label: '投放状态', value: '—', status: 'unknown' }
+        ]
+      }));
+      return {
+        key: `unit:${adGroup.accountId}:${adGroup.campaignId}:${adGroup.adGroupId}`,
+        id: String(adGroup.adGroupId),
+        name: adGroup.adGroupName,
+        level: 'unit',
+        status: 'unknown',
+        budgetAmountScaled: null,
+        metrics: normalizeMetrics(adGroup),
+        currentTrend: normalizeTrend(adGroup.trend),
+        previousTrend: [],
+        details: [
+          { label: '单元 ID', value: String(adGroup.adGroupId) },
+          { label: '所属计划', value: campaign.campaignName },
+          { label: '下属关键词数', value: String(keywordNodes.length) },
+          { label: '投放状态', value: '—', status: 'unknown' }
+        ],
+        children: keywordNodes
+      };
+    });
+    return {
+      key: `scheme:${campaign.accountId}:${campaign.campaignId}`,
+      id: String(campaign.campaignId),
+      name: campaign.campaignName,
+      level: 'scheme',
+      status: 'unknown',
+      budgetAmountScaled: null,
+      metrics: normalizeMetrics(campaign),
+      currentTrend: normalizeTrend(campaign.trend),
+      previousTrend: [],
+      details: [
+        { label: '计划 ID', value: String(campaign.campaignId) },
+        { label: '所属项目', value: projectName },
+        { label: '下属单元数', value: String(unitNodes.length) },
+        { label: '投放设备', value: '—' },
+        { label: '投放地域', value: '—' },
+        { label: '出价策略', value: '—' },
+        { label: '周期预算', value: '—' },
+        { label: '投放状态', value: '—', status: 'unknown' }
+      ],
+      children: unitNodes
+    };
+  });
   const summary = normalizeMetrics(dashboard.summary);
   const projectNode: AdHierarchyNode = {
     key: `project:${dashboard.projectId}`,
@@ -236,7 +585,7 @@ export function adaptMarketingDashboard(
       { label: '项目 ID', value: String(dashboard.projectId) },
       { label: '优化目标', value: '—' },
       { label: '项目预算', value: '—' },
-      { label: '下属方案数', value: String(schemeNodes.length) },
+      { label: '下属计划数', value: String(schemeNodes.length) },
       {
         label: '投放状态',
         value: projectStatus === 'active' ? '投放中' : '—',

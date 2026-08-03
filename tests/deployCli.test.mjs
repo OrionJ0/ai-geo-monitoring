@@ -36,12 +36,15 @@ test('deployment check accepts a clean main checkout and rejects local changes',
     path.join(directory, 'backend', '.env'),
     [
       'PORT=3002',
+      'NODE_ENV=production',
       `JWT_SECRET=${'j'.repeat(32)}`,
       `CONFIG_ENCRYPTION_KEY=${Buffer.alloc(32, 7).toString('base64')}`,
       'DB_STORAGE=database.sqlite',
       '',
     ].join('\n')
   );
+  fs.chmodSync(path.join(directory, 'backend', 'database.sqlite'), 0o600);
+  fs.chmodSync(path.join(directory, 'backend', '.env'), 0o600);
 
   await git(directory, ['init', '-b', 'main']);
   await git(directory, ['add', '.gitignore', 'README.md']);
@@ -76,6 +79,24 @@ test('deployment check accepts a clean main checkout and rejects local changes',
     { cwd: projectRoot, env: environment }
   );
   assert.equal(JSON.parse(prepared.stdout).revision, revision);
+
+  fs.writeFileSync(
+    path.join(directory, 'backend', '.env'),
+    fs.readFileSync(path.join(directory, 'backend', '.env'), 'utf8')
+      .replace('NODE_ENV=production\n', '')
+  );
+  await assert.rejects(
+    execFileAsync(
+      process.execPath,
+      [deployScript, '--check', '--json'],
+      { cwd: projectRoot, env: environment }
+    ),
+    /NODE_ENV 必须显式设置为 production/
+  );
+  fs.appendFileSync(
+    path.join(directory, 'backend', '.env'),
+    'NODE_ENV=production\n'
+  );
   await assert.rejects(
     execFileAsync(
       process.execPath,
@@ -132,6 +153,7 @@ test('deployment builds the current frontend before browser acceptance and migra
   });
 
   fs.mkdirSync(path.join(directory, 'backend', 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(directory, 'deploy'), { recursive: true });
   fs.mkdirSync(path.join(directory, 'nextjs-frontend'), { recursive: true });
   fs.mkdirSync(path.join(directory, 'scripts'), { recursive: true });
   fs.writeFileSync(
@@ -139,6 +161,10 @@ test('deployment builds the current frontend before browser acceptance and migra
     'backend/.env\nbackend/database.sqlite\nbackend/database.latest.sqlite\n.runtime/\nlogs/\ndeploy-trace.log\n'
   );
   fs.writeFileSync(path.join(directory, 'README.md'), 'fixture\n');
+  fs.writeFileSync(
+    path.join(directory, 'deploy', 'ai-geo-deploy-gate.sh'),
+    '#!/bin/sh\nexit 126\n'
+  );
   fs.writeFileSync(path.join(directory, 'backend', 'package.json'), '{}\n');
   fs.writeFileSync(path.join(directory, 'nextjs-frontend', 'package.json'), '{}\n');
   fs.writeFileSync(path.join(directory, 'backend', 'database.sqlite'), 'database\n');
@@ -146,19 +172,22 @@ test('deployment builds the current frontend before browser acceptance and migra
     path.join(directory, 'backend', '.env'),
     [
       'PORT=3002',
+      'NODE_ENV=production',
       `JWT_SECRET=${'j'.repeat(32)}`,
       `CONFIG_ENCRYPTION_KEY=${Buffer.alloc(32, 7).toString('base64')}`,
       'DB_STORAGE=database.sqlite',
       '',
     ].join('\n')
   );
+  fs.chmodSync(path.join(directory, 'backend', 'database.sqlite'), 0o600);
+  fs.chmodSync(path.join(directory, 'backend', '.env'), 0o600);
   fs.writeFileSync(
     path.join(directory, 'scripts', 'production.mjs'),
     "import fs from 'node:fs'; fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `production:${process.argv[2]}\\n`);\n"
   );
   fs.writeFileSync(
     path.join(directory, 'backend', 'scripts', 'backupSqlite.js'),
-    "const fs = require('node:fs'); fs.copyFileSync(process.argv[2], process.argv[3]); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, 'backup\\n');\n"
+    "const fs = require('node:fs'); fs.mkdirSync(require('node:path').dirname(process.argv[3]), { recursive: true }); if (!process.argv.includes('--if-absent') || !fs.existsSync(process.argv[3])) fs.copyFileSync(process.argv[2], process.argv[3]); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `backup:${process.argv[3]}:${process.argv.slice(4).join(' ')}\\n`);\n"
   );
   fs.writeFileSync(
     path.join(directory, 'backend', 'scripts', 'migrateGeoMetricSemantics.js'),
@@ -167,6 +196,14 @@ test('deployment builds the current frontend before browser acceptance and migra
   fs.writeFileSync(
     path.join(directory, 'backend', 'scripts', 'migrateMarketing.js'),
     "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `marketing-migration:${process.argv.slice(2).join(' ')}\\n`);\n"
+  );
+  fs.writeFileSync(
+    path.join(directory, 'backend', 'scripts', 'migrateWebsiteData.js'),
+    "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `website-data-migration:${process.argv.slice(2).join(' ')}\\n`);\n"
+  );
+  fs.writeFileSync(
+    path.join(directory, 'backend', 'scripts', 'migrateConsultationRecords.js'),
+    "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `consultation-migration:${process.argv.slice(2).join(' ')}\\n`);\n"
   );
   const fakeNpm = path.join(binDirectory, 'npm');
   fs.writeFileSync(
@@ -200,26 +237,61 @@ test('deployment builds the current frontend before browser acceptance and migra
         PATH: `${binDirectory}:${process.env.PATH}`,
         AI_GEO_PROJECT_ROOT: directory,
         AI_GEO_DEPLOY_TRACE: tracePath,
+        AI_GEO_DEPLOY_GATE_PATH: path.join(directory, 'installed-deploy-gate'),
       }
     }
   );
 
   const trace = fs.readFileSync(tracePath, 'utf8').trim().split('\n');
-  const backupIndex = trace.indexOf('backup');
+  const releaseBackupIndex = trace.findIndex((line) => (
+    line.includes('/releases/database.pre-') && line.endsWith(':--if-absent')
+  ));
+  const latestBackupIndex = trace.findIndex((line) => (
+    line.endsWith('/backend/database.latest.sqlite:')
+  ));
   const frontendBuildIndex = trace.indexOf('npm:run build');
   const browserAcceptanceIndex = trace.indexOf('npm:run test:marketing:browser');
   const applyIndex = trace.findIndex((line) => line.startsWith('migration:--apply '));
   const auditIndex = trace.indexOf('migration:');
   const marketingApplyIndex = trace.indexOf('marketing-migration:--apply');
   const marketingAuditIndex = trace.indexOf('marketing-migration:');
+  const websiteDataTestIndex = trace.indexOf('npm:run test:website-data');
+  const websiteDataApplyIndex = trace.indexOf('website-data-migration:--apply');
+  const websiteDataAuditIndex = trace.indexOf('website-data-migration:');
+  const consultationTestIndex = trace.indexOf('npm:run test:consultation-records');
+  const consultationApplyIndex = trace.indexOf('consultation-migration:--apply');
+  const consultationAuditIndex = trace.indexOf('consultation-migration:');
   const startIndex = trace.indexOf('production:start');
-  assert.ok(backupIndex >= 0);
-  assert.ok(frontendBuildIndex > backupIndex);
+  assert.ok(releaseBackupIndex >= 0);
+  assert.ok(latestBackupIndex > releaseBackupIndex);
+  assert.ok(frontendBuildIndex > latestBackupIndex);
   assert.ok(browserAcceptanceIndex > frontendBuildIndex);
-  assert.ok(applyIndex > backupIndex);
+  assert.ok(applyIndex > latestBackupIndex);
   assert.ok(applyIndex > browserAcceptanceIndex);
   assert.ok(auditIndex > applyIndex);
   assert.ok(marketingApplyIndex > auditIndex);
   assert.ok(marketingAuditIndex > marketingApplyIndex);
-  assert.ok(startIndex > marketingAuditIndex);
+  assert.ok(websiteDataTestIndex > latestBackupIndex);
+  assert.ok(websiteDataApplyIndex > marketingAuditIndex);
+  assert.ok(websiteDataAuditIndex > websiteDataApplyIndex);
+  assert.ok(consultationTestIndex > latestBackupIndex);
+  assert.ok(consultationApplyIndex > websiteDataAuditIndex);
+  assert.ok(consultationAuditIndex > consultationApplyIndex);
+  assert.ok(startIndex > consultationAuditIndex);
+  assert.equal(
+    fs.readFileSync(path.join(directory, 'installed-deploy-gate'), 'utf8'),
+    '#!/bin/sh\nexit 126\n'
+  );
+  assert.equal(
+    fs.statSync(path.join(directory, 'installed-deploy-gate')).mode & 0o777,
+    0o755
+  );
+});
+
+test('deployment binds the frontend production build to the release revision', () => {
+  const source = fs.readFileSync(deployScript, 'utf8');
+  assert.match(
+    source,
+    /AI_GEO_BUILD_REVISION:\s*revision/u
+  );
 });

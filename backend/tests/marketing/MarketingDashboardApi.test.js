@@ -8,6 +8,7 @@ const {
   MarketingRefreshService
 } = require('../../modules/marketing/services/MarketingRefreshService');
 const {
+  campaignOnlyReports,
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
@@ -20,9 +21,9 @@ test('dashboard returns one revision and exact aggregates without provider calls
   const refresh = new MarketingRefreshService({
     sequelize: database.sequelize,
     reportProvider: {
-      async fetchSearchReport({ binding }) {
+      async fetchSearchReports({ binding }) {
         providerCalls += 1;
-        return [
+        return campaignOnlyReports([
           {
             accountId: binding.accountId,
             campaignId: 'campaign-0009007199254740993123',
@@ -41,7 +42,7 @@ test('dashboard returns one revision and exact aggregates without provider calls
             clicks: '4',
             costAmountScaled: '2000002'
           }
-        ];
+        ]);
       }
     },
     contractVersion: 'fixture-contract-v1',
@@ -89,7 +90,9 @@ test('dashboard rejects filters outside the saved coverage', async (t) => {
   await seedConnectionAndBinding(database.sequelize);
   const refresh = new MarketingRefreshService({
     sequelize: database.sequelize,
-    reportProvider: { async fetchSearchReport() { return []; } },
+    reportProvider: {
+      async fetchSearchReports() { return campaignOnlyReports(); }
+    },
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6,
@@ -121,8 +124,8 @@ test('restoring an old binding fingerprint does not revive deleted facts', async
   const refresh = new MarketingRefreshService({
     sequelize: database.sequelize,
     reportProvider: {
-      async fetchSearchReport({ binding }) {
-        return [{
+      async fetchSearchReports({ binding }) {
+        return campaignOnlyReports([{
           accountId: binding.accountId,
           campaignId: `campaign-${binding.id}`,
           campaignName: '口径测试',
@@ -130,7 +133,7 @@ test('restoring an old binding fingerprint does not revive deleted facts', async
           impressions: '9',
           clicks: '1',
           costAmountScaled: '2'
-        }];
+        }]);
       }
     },
     contractVersion: 'fixture-contract-v1',

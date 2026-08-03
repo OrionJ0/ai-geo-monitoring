@@ -21,7 +21,27 @@ case "$original_command" in
     revision=${revision%.bundle}
     is_commit "$revision"
     [ "$bundle_path" = "/tmp/ai-geo-release-${revision}.bundle" ]
-    exec scp -t "$bundle_path"
+    if [ -e "$bundle_path" ] || [ -L "$bundle_path" ]; then
+      printf '%s\n' 'Bundle 临时路径已存在，拒绝覆盖。' >&2
+      exit 126
+    fi
+    if ! (umask 077; set -C; : > "$bundle_path") 2>/dev/null; then
+      printf '%s\n' '无法安全预留 Bundle 临时路径。' >&2
+      exit 126
+    fi
+    cleanup_bundle() {
+      rm -f -- "$bundle_path"
+    }
+    trap 'cleanup_bundle; exit 126' HUP INT TERM
+    if scp -t "$bundle_path"; then
+      trap - HUP INT TERM
+      exit 0
+    else
+      status=$?
+      cleanup_bundle
+      trap - HUP INT TERM
+      exit "$status"
+    fi
     ;;
   "cd /opt/ai-geo-monitoring && node scripts/deploy-from-bundle.mjs "*)
     set -- $original_command

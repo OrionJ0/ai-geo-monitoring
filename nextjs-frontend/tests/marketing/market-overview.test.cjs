@@ -20,12 +20,21 @@ test('overview independently settles advertising, traffic and traffic-source rea
   const source = fs.readFileSync(hookPath, 'utf8');
 
   assert.match(source, /Promise\.allSettled/);
+  assert.match(source, /assertMarketingDashboardResponse/);
+  assert.match(source, /assertTongjiOverviewResponse/);
   assert.match(source, /\/dashboard/);
   assert.match(source, /\/tongji-trend/);
   assert.match(source, /\/tongji-source-trends/);
   assert.match(source, /ad:\s*SourceSlot/);
   assert.match(source, /traffic:\s*SourceSlot/);
   assert.match(source, /trafficSources:\s*SourceSlot/);
+  assert.match(source, /trafficTrendSource \? \{ source: trafficTrendSource \}/);
+  assert.match(source, /10 \* 60 \* 1000/);
+  assert.doesNotMatch(source, /setInterval/);
+  assert.match(source, /visibilitychange/);
+  const page = fs.readFileSync(pagePath, 'utf8');
+  assert.match(page, /websiteFallbackRange/);
+  assert.match(page, /disabled=\{!projectId\}/);
 });
 
 test('overview implements the final three-section visual hierarchy', () => {
@@ -60,16 +69,18 @@ test('journey uses fixed stages and never fabricates unsupported attribution', (
     '广告投入',
     '展现',
     '访问（点击）',
-    '客服咨询',
+    '官网表单咨询',
     '线索入池',
     '成交结果',
-    '全链路'
+    '整体转换率'
   ]) {
     assert.match(source, new RegExp(column));
   }
   assert.match(source, /可信的按来源关联/);
-  assert.match(source, /className=\{styles\.microFunnel\}/);
-  assert.doesNotMatch(source, /百度自然搜索|必应自然搜索/);
+  assert.doesNotMatch(source, /microFunnel|funnelChart|funnelRate/);
+  for (const label of ['百度搜索', '必应搜索', '直接访问', '其他来源', '自然流量']) {
+    assert.match(source, new RegExp(label));
+  }
   assert.doesNotMatch(source, /订单数量|成交订单数/);
 });
 
@@ -82,6 +93,9 @@ test('journey adds Baidu Tongji source rows as visit-only evidence', () => {
   assert.match(source, /WEBSITE_TRAFFIC_SOURCE/);
   assert.match(source, /不是跨系统归因/);
   assert.doesNotMatch(source, /sourceTotals\.visits[^\n]+(?:客服咨询|线索入池|成交结果)/);
+  assert.match(source, /visibleAlignedFormKeys/);
+  assert.match(source, /百度推广（仅官网表单）/);
+  assert.match(source, /直接访问（仅官网表单）/);
 });
 
 test('selectable headers update only the trend metric', () => {
@@ -92,6 +106,7 @@ test('selectable headers update only the trend metric', () => {
   assert.match(source, /disabled=\{!targetMetric\}/);
   assert.match(source, /metric\.key === 'clicks' \? 'visits' : null/);
   assert.match(source, /trendSource/);
+  assert.match(source, /trafficSourceData\?\.selectedTrend/);
   assert.doesNotMatch(source, /onRow|onClick:\s*\(.*setTrendSource/s);
 });
 
@@ -110,8 +125,9 @@ test('trend exposes two selectors, summaries, two-period semantics and equivalen
   for (const sourceKey of [
     'BAIDU_TONGJI_ALL',
     'BAIDU_TONGJI_DIRECT',
-    'BAIDU_TONGJI_SEARCH',
-    'BAIDU_TONGJI_EXTERNAL'
+    'BAIDU_TONGJI_BAIDU_SEARCH',
+    'BAIDU_TONGJI_BING_SEARCH',
+    'BAIDU_TONGJI_OTHER'
   ]) {
     assert.match(source, new RegExp(sourceKey));
   }

@@ -589,7 +589,7 @@ test('Tongji trend parses exact integers and formatted strings without truncatin
     accessToken: 'access-token-fixture',
     siteId: '301',
     coverage: {
-      from: '2026-07-01',
+      from: '2026-07-28',
       to: '2026-07-30'
     }
   });
@@ -617,10 +617,10 @@ test('Tongji trend parses exact integers and formatted strings without truncatin
   assert.deepEqual(captured.json.body, {
     site_id: 301,
     method: 'trend/time/a',
-    start_date: '20260701',
+    start_date: '20260728',
     end_date: '20260730',
     metrics: 'pv_count,visit_count,visitor_count',
-    max_results: 30,
+    max_results: 3,
     gran: 'day'
   });
 });
@@ -678,7 +678,7 @@ test('Tongji trend accepts only documented stable source filters', async () => {
     accessToken: 'access-token-fixture',
     siteId: '301',
     coverage: {
-      from: '2026-07-01',
+      from: '2026-07-28',
       to: '2026-07-30'
     }
   };
@@ -686,19 +686,363 @@ test('Tongji trend accepts only documented stable source filters', async () => {
   for (const [sourceKey, providerValue] of [
     ['DIRECT', 'through'],
     ['SEARCH', 'search,0'],
-    ['EXTERNAL', 'link']
+    ['EXTERNAL', 'link'],
+    ['BAIDU_NATURAL', 'searchBaiduNature'],
+    ['OTHER_SEARCH', 'searchOther'],
+    ['ENGINE:2', 'search,2']
   ]) {
-    await client.fetchTongjiTrend({ ...request, sourceKey });
+    await client.fetchTongjiTrend({ ...request, sourceKey, device: 'pc' });
     assert.equal(calls.at(-1).json.body.source, providerValue);
+    assert.equal(calls.at(-1).json.body.clientDevice, 'pc');
   }
 
   await client.fetchTongjiTrend({ ...request, sourceKey: 'ALL' });
   assert.equal(Object.hasOwn(calls.at(-1).json.body, 'source'), false);
+  assert.equal(Object.hasOwn(calls.at(-1).json.body, 'clientDevice'), false);
+
+  await client.fetchTongjiTrend({ ...request, device: 'all' });
+  assert.equal(Object.hasOwn(calls.at(-1).json.body, 'clientDevice'), false);
 
   await assert.rejects(
     client.fetchTongjiTrend({ ...request, sourceKey: 'BAIDU' }),
     { code: 'BAIDU_TONGJI_SOURCE_INVALID', status: 400 }
   );
+  await assert.rejects(
+    client.fetchTongjiTrend({ ...request, device: 'tablet' }),
+    { code: 'BAIDU_TONGJI_DEVICE_INVALID', status: 400 }
+  );
+});
+
+test('Tongji quality parser preserves no-data and zero while runtime stays fail-closed', async () => {
+  const request = {
+    accountName: '脱敏搜索账户',
+    accessToken: 'access-token-fixture',
+    siteId: '301',
+    coverage: { from: '2026-07-29', to: '2026-07-30' },
+    device: 'all'
+  };
+  const disabledManifest = structuredClone(manifest);
+  disabledManifest.tongji.qualityMetrics.runtimeEnabled = false;
+  const disabledClient = new BaiduMarketingClient({
+    manifest: disabledManifest,
+    ...config,
+    transport: async () => {
+      throw new Error('unexpected request');
+    }
+  });
+  await assert.rejects(
+    disabledClient.fetchTongjiQualityTrend(request),
+    { code: 'BAIDU_TONGJI_CAPABILITY_NOT_VERIFIED', status: 503 }
+  );
+
+  const verifiedManifest = structuredClone(manifest);
+  verifiedManifest.tongji.qualityMetrics.runtimeEnabled = true;
+  const response = {
+    header: { status: 0, failures: [] },
+    body: {
+      data: [{
+        result: {
+          fields: [
+            'simple_date_title',
+            'bounce_ratio',
+            'avg_visit_time',
+            'avg_visit_pages'
+          ],
+          sum: [['42.60', '98.0', '2.500'], []],
+          items: [
+            [['2026/07/30'], ['2026/07/29']],
+            [['--', 0, '0.00'], ['42.60', '98.0', '2.500']],
+            [],
+            []
+          ],
+          total: 2,
+          offset: 0
+        }
+      }]
+    }
+  };
+  let captured;
+  const client = new BaiduMarketingClient({
+    manifest: verifiedManifest,
+    ...config,
+    transport: async (outbound) => {
+      captured = outbound;
+      return response;
+    }
+  });
+  assert.deepEqual(await client.fetchTongjiQualityTrend(request), {
+    summary: {
+      bounceRate: '42.6',
+      averageVisitTimeSeconds: '98',
+      averageVisitPages: '2.5'
+    },
+    rows: [
+      {
+        date: '2026-07-29',
+        bounceRate: '42.6',
+        averageVisitTimeSeconds: '98',
+        averageVisitPages: '2.5'
+      },
+      {
+        date: '2026-07-30',
+        bounceRate: null,
+        averageVisitTimeSeconds: '0',
+        averageVisitPages: '0'
+      }
+    ]
+  });
+  assert.equal(Object.hasOwn(captured.json.body, 'clientDevice'), false);
+  assert.equal(
+    captured.json.body.metrics,
+    'bounce_ratio,avg_visit_time,avg_visit_pages'
+  );
+
+  response.body.data[0].result.fields[1] = 'avg_visit_time';
+  await assert.rejects(
+    client.fetchTongjiQualityTrend(request),
+    { code: 'BAIDU_TONGJI_RESPONSE_INVALID' }
+  );
+});
+
+test('Tongji landing-page parser returns a strict paginated page contract', async () => {
+  const verifiedManifest = structuredClone(manifest);
+  verifiedManifest.tongji.pageReports.runtimeEnabled = true;
+  let captured;
+  const client = new BaiduMarketingClient({
+    manifest: verifiedManifest,
+    ...config,
+    transport: async (outbound) => {
+      captured = outbound;
+      return {
+        header: { status: 0, failures: [] },
+        body: {
+          data: [{
+            result: {
+              fields: [
+                'visit_page_title',
+                'visit_count',
+                'out_pv_count',
+                'bounce_ratio',
+                'avg_visit_time',
+                'avg_visit_pages'
+              ],
+              items: [
+                [[{ name: 'https://gato.com.cn/', pageId: '101' }]],
+                [['12', '35', '42.60', '98.0', '2.500']],
+                [],
+                []
+              ],
+              total: 1,
+              offset: 0
+            }
+          }]
+        }
+      };
+    }
+  });
+
+  const result = await client.fetchTongjiPageReport({
+    accountName: '脱敏搜索账户',
+    accessToken: 'access-token-fixture',
+    siteId: '301',
+    coverage: { from: '2026-07-29', to: '2026-07-30' },
+    device: 'mobile',
+    view: 'landing'
+  });
+
+  assert.deepEqual(result, {
+    view: 'landing',
+    total: 1,
+    rows: [{
+      pageId: '101',
+      pageUrl: 'https://gato.com.cn/',
+      visits: '12',
+      contributionPageviews: '35',
+      bounceRate: '42.6',
+      averageVisitTimeSeconds: '98',
+      averageVisitPages: '2.5'
+    }]
+  });
+  assert.equal(captured.json.body.method, 'visit/landingpage/a');
+  assert.equal(captured.json.body.clientDevice, 'mobile');
+  assert.equal(captured.json.body.max_results, 100);
+  assert.equal(captured.json.body.start_index, 0);
+});
+
+test('Tongji page reports paginate explicitly and normalize visited-page metrics', async () => {
+  const verifiedManifest = structuredClone(manifest);
+  verifiedManifest.tongji.pageReports.runtimeEnabled = true;
+  const calls = [];
+  const client = new BaiduMarketingClient({
+    manifest: verifiedManifest,
+    ...config,
+    transport: async (outbound) => {
+      calls.push(outbound.json.body);
+      const offset = outbound.json.body.start_index;
+      const pageId = offset === 0 ? '201' : '202';
+      const suffix = offset === 0 ? 'product-a' : 'product-b';
+      return {
+        header: { status: 0, failures: [] },
+        body: {
+          data: [{
+            result: {
+              fields: [
+                'visit_page_title',
+                'pv_count',
+                'visitor_count',
+                'average_stay_time',
+                'outward_count',
+                'exit_ratio'
+              ],
+              items: [
+                [[{ name: `https://gato.com.cn/${suffix}`, pageId }]],
+                [[offset === 0 ? '30' : '20', '10', '12.5', '8', '40.00']],
+                [],
+                []
+              ],
+              total: 2,
+              offset
+            }
+          }]
+        }
+      };
+    }
+  });
+
+  const result = await client.fetchTongjiPageReport({
+    accountName: '脱敏搜索账户',
+    accessToken: 'access-token-fixture',
+    siteId: '301',
+    coverage: { from: '2026-07-29', to: '2026-07-30' },
+    device: 'pc',
+    view: 'visited'
+  });
+
+  assert.deepEqual(calls.map((call) => call.start_index), [0, 1]);
+  assert.deepEqual(calls.map((call) => call.max_results), [100, 100]);
+  assert.equal(calls[0].method, 'visit/toppage/a');
+  assert.deepEqual(result.rows, [
+    {
+      pageId: '201',
+      pageUrl: 'https://gato.com.cn/product-a',
+      pageviews: '30',
+      visitors: '10',
+      averageStayTimeSeconds: '12.5',
+      downstreamPageviews: '8',
+      exitRate: '40'
+    },
+    {
+      pageId: '202',
+      pageUrl: 'https://gato.com.cn/product-b',
+      pageviews: '20',
+      visitors: '10',
+      averageStayTimeSeconds: '12.5',
+      downstreamPageviews: '8',
+      exitRate: '40'
+    }
+  ]);
+});
+
+test('Tongji source reports normalize real source identities and device filters', async () => {
+  const calls = [];
+  const response = {
+    header: { status: 0, failures: [] },
+    body: {
+      data: [{
+        result: {
+          fields: [
+            'source_engine_title',
+            'pv_count',
+            'visit_count',
+            'visitor_count'
+          ],
+          items: [
+            [
+              [{ name: '百度自然搜索', source: 'searchBaiduNature', url: 'baidu.test', engineId: '1' }],
+              [{ name: 'Google', source: 'search,2', url: 'google.test', engineId: '2' }]
+            ],
+            [
+              ['1,234', 56, 40],
+              [123, 45, 30]
+            ],
+            [],
+            []
+          ],
+          total: 2,
+          offset: 0
+        }
+      }]
+    }
+  };
+  const disabledManifest = structuredClone(manifest);
+  disabledManifest.tongji.sourceReports.runtimeEnabled = false;
+  const disabledClient = new BaiduMarketingClient({
+    manifest: disabledManifest,
+    ...config,
+    transport: async () => {
+      throw new Error('unexpected request');
+    }
+  });
+  await assert.rejects(
+    disabledClient.fetchTongjiSourceSummary({
+      accountName: '脱敏搜索账户',
+      accessToken: 'access-token-fixture',
+      siteId: '301',
+      coverage: { from: '2026-07-01', to: '2026-07-30' },
+      reportKey: 'ENGINE',
+      device: 'mobile'
+    }),
+    { code: 'BAIDU_TONGJI_CAPABILITY_NOT_VERIFIED', status: 503 }
+  );
+  const verifiedManifest = structuredClone(manifest);
+  verifiedManifest.tongji.sourceReports.runtimeEnabled = true;
+  const client = new BaiduMarketingClient({
+    manifest: verifiedManifest,
+    ...config,
+    transport: async (request) => {
+      calls.push(request);
+      return response;
+    }
+  });
+
+  const rows = await client.fetchTongjiSourceSummary({
+    accountName: '脱敏搜索账户',
+    accessToken: 'access-token-fixture',
+    siteId: '301',
+    coverage: { from: '2026-07-01', to: '2026-07-30' },
+    reportKey: 'ENGINE',
+    device: 'mobile'
+  });
+
+  assert.deepEqual(rows, [
+    {
+      name: '百度自然搜索',
+      source: 'searchBaiduNature',
+      engineId: '1',
+      url: 'baidu.test',
+      pageviews: '1234',
+      visits: '56',
+      visitors: '40'
+    },
+    {
+      name: 'Google',
+      source: 'search,2',
+      engineId: '2',
+      url: 'google.test',
+      pageviews: '123',
+      visits: '45',
+      visitors: '30'
+    }
+  ]);
+  assert.deepEqual(calls[0].json.body, {
+    site_id: 301,
+    method: 'source/engine/a',
+    start_date: '20260701',
+    end_date: '20260730',
+    metrics: 'pv_count,visit_count,visitor_count',
+    max_results: 100,
+    clientDevice: 'mobile'
+  });
 });
 
 test('Tongji trend rejects impossible calendar dates', async () => {

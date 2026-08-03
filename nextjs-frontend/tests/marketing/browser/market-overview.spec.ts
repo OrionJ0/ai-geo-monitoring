@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import path from 'node:path';
 
 const artifactDirectory = path.resolve(
@@ -21,7 +22,10 @@ const trend = Array.from({ length: 60 }, (_, index) => ({
 }));
 
 function sum(field: 'impressions' | 'clicks' | 'costAmountScaled') {
-  return trend.reduce((total, row) => total + BigInt(row[field]), 0n).toString();
+  return trend.reduce(
+    (total, row) => total + BigInt(row[field]),
+    BigInt(0)
+  ).toString();
 }
 
 function dashboard(options: {
@@ -50,7 +54,7 @@ function dashboard(options: {
       bindingState: 'ACTIVE',
       blockingCode: null
     }],
-    coverage: {
+    coverage: content === 'NONE' ? null : {
       from: '2026-06-05',
       to: '2026-08-03',
       lastSuccessfulAt: '2026-08-03T03:58:00.000Z',
@@ -64,13 +68,29 @@ function dashboard(options: {
       costAmountScaled: content === 'DATA' ? sum('costAmountScaled') : '0'
     },
     trend: content === 'DATA' ? trend : [],
-    campaigns: [],
+    campaigns: content === 'DATA' ? [{
+      accountId: 'baidu-search-1',
+      campaignId: 'campaign-1',
+      campaignName: '广拓品牌推广',
+      impressions: sum('impressions'),
+      clicks: sum('clicks'),
+      costAmountScaled: sum('costAmountScaled'),
+      trend
+    }] : [],
+    adGroups: [],
+    keywords: [],
+    searchTerms: [],
+    hierarchyCounts: {
+      campaigns: content === 'DATA' ? 1 : 0,
+      adGroups: 0,
+      keywords: 0,
+      searchTerms: 0
+    },
     activeRun: null,
     lastRun: {
       runId: 'run-fixture-1',
       status: 'SUCCEEDED',
-      failureCode: null,
-      nextRetryAt: null
+      failureCode: null
     }
   };
 }
@@ -78,8 +98,9 @@ function dashboard(options: {
 const traffic = {
   projectId: '11',
   source: 'BAIDU_TONGJI',
-  mode: 'LIVE_PILOT',
+  mode: 'DATABASE_SNAPSHOT',
   site: { siteId: 'site-1', domain: 'gato.com.cn' },
+  device: 'pc',
   coverage: { from: '2026-07-05', to: '2026-08-03' },
   dataState: 'DATA',
   summary: { pageviews: '84500', visits: '32600', visitors: '25100' },
@@ -88,14 +109,16 @@ const traffic = {
     pageviews: String(2500 + (index * 19)),
     visits: String(950 + (index * 11)),
     visitors: String(720 + (index * 9))
-  }))
+  })),
+  cache: { state: 'HIT', ttlSeconds: 600, refreshedAt: '2026-08-03T03:58:00.000Z' }
 };
 
 const trafficSources = {
   projectId: '11',
   source: 'BAIDU_TONGJI',
-  mode: 'LIVE_PILOT',
+  mode: 'DATABASE_SNAPSHOT',
   site: { siteId: 'site-1', domain: 'gato.com.cn' },
+  device: 'pc',
   coverage: { from: '2026-07-05', to: '2026-08-03' },
   dataState: 'DATA',
   attribution: {
@@ -103,10 +126,35 @@ const trafficSources = {
     isCrossSystemVerified: false
   },
   sources: [
-    { sourceKey: 'DIRECT', sourceLabel: '直接访问', multiplier: 5 },
-    { sourceKey: 'SEARCH', sourceLabel: '搜索引擎', multiplier: 3 },
-    { sourceKey: 'EXTERNAL', sourceLabel: '外部链接', multiplier: 2 }
-  ].map(({ sourceKey, sourceLabel, multiplier }) => {
+    {
+      sourceKey: 'BAIDU_SEARCH',
+      sourceLabel: '百度搜索',
+      sourceHost: 'baidu.com',
+      sourceDetails: ['百度自然搜索'],
+      multiplier: 3
+    },
+    {
+      sourceKey: 'BING_SEARCH',
+      sourceLabel: '必应搜索',
+      sourceHost: 'bing.com',
+      sourceDetails: [],
+      multiplier: 0
+    },
+    {
+      sourceKey: 'DIRECT',
+      sourceLabel: '直接访问',
+      sourceHost: 'gato.com.cn',
+      sourceDetails: ['gato.com.cn'],
+      multiplier: 5
+    },
+    {
+      sourceKey: 'OTHER',
+      sourceLabel: '其他来源',
+      sourceHost: '多个网站',
+      sourceDetails: ['Google', '外部链接'],
+      multiplier: 2
+    }
+  ].map(({ sourceKey, sourceLabel, sourceHost, sourceDetails, multiplier }) => {
     const sourceTrend = traffic.trend.map((row, index) => ({
       date: row.date,
       pageviews: String((240 + index) * multiplier),
@@ -116,27 +164,88 @@ const trafficSources = {
     return {
       sourceKey,
       sourceLabel,
+      sourceHost,
+      sourceType: 'ORGANIC',
+      sourceDetails,
       dataState: 'DATA',
       summary: {
         pageviews: sourceTrend.reduce(
           (total, row) => total + BigInt(row.pageviews),
-          0n
+          BigInt(0)
         ).toString(),
         visits: sourceTrend.reduce(
           (total, row) => total + BigInt(row.visits),
-          0n
+          BigInt(0)
         ).toString(),
         visitors: sourceTrend.reduce(
           (total, row) => total + BigInt(row.visitors),
-          0n
+          BigInt(0)
         ).toString()
-      },
-      trend: sourceTrend
+      }
     };
-  })
+  }),
+  cache: { state: 'HIT', ttlSeconds: 600, refreshedAt: '2026-08-03T03:58:00.000Z' }
 };
 
-async function installCommonRoutes(page) {
+const trafficSourceMultipliers = {
+  BAIDU_SEARCH: 3,
+  BING_SEARCH: 0,
+  DIRECT: 5,
+  OTHER: 2
+};
+
+function trafficSourceTrend(
+  sourceKey: keyof typeof trafficSourceMultipliers
+) {
+  const multiplier = trafficSourceMultipliers[sourceKey] || 0;
+  return traffic.trend.map((row, index) => ({
+    date: row.date,
+    pageviews: String((240 + index) * multiplier),
+    visits: String((90 + index) * multiplier),
+    visitors: sourceKey === 'OTHER'
+      ? null
+      : String((70 + index) * multiplier)
+  }));
+}
+
+const websiteForms = {
+  projectId: '11',
+  sourceSystem: 'GATO_WEBSITE',
+  consultationType: 'WEBSITE_FORM',
+  dataCoverage: 'ATTRIBUTED_SESSION_SUBMISSIONS_ONLY',
+  formRecordTotalAvailable: false,
+  coverage: {
+    from: '2026-07-05',
+    to: '2026-08-03',
+    timeZone: 'Asia/Shanghai'
+  },
+  dataState: 'DATA',
+  summary: { attributedFormSubmissionSessions: '7' },
+  sourceBreakdown: [
+    {
+      sourceKey: 'BAIDU_PAID',
+      upstreamSources: ['baidu_paid'],
+      attributedFormSubmissionSessions: '2'
+    },
+    {
+      sourceKey: 'DIRECT',
+      upstreamSources: ['direct'],
+      attributedFormSubmissionSessions: '1'
+    },
+    {
+      sourceKey: 'ORGANIC_SEARCH',
+      upstreamSources: ['organic_search'],
+      attributedFormSubmissionSessions: '4'
+    }
+  ],
+  cache: {
+    state: 'HIT',
+    refreshedAt: '2026-08-03T03:58:00.000Z',
+    expiresAt: '2026-08-03T04:08:00.000Z'
+  }
+};
+
+async function installCommonRoutes(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('agd_token', 'playwright.market-overview.signature');
     localStorage.setItem('agd_user_id', '2');
@@ -174,21 +283,54 @@ async function installCommonRoutes(page) {
       }
     })
   }));
-  await page.route('**/api/marketing/projects/11/tongji-trend', (route) => (
-    route.fulfill({
+  await page.route('**/api/marketing/projects/11/tongji-trend**', (route) => {
+    const device = new URL(route.request().url()).searchParams.get('device') || 'pc';
+    return route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(traffic)
-    })
-  ));
-  await page.route('**/api/marketing/projects/11/tongji-source-trends', (route) => (
-    route.fulfill({
+      body: JSON.stringify({ ...traffic, device })
+    });
+  });
+  await page.route('**/api/marketing/projects/11/tongji-source-trends**', (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const device = params.get('device') || 'pc';
+    const sourceKey = params.get('source');
+    const selectedSource = trafficSources.sources.find((source) => (
+      source.sourceKey === sourceKey
+    ));
+    return route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(trafficSources)
+      body: JSON.stringify({
+        ...trafficSources,
+        device,
+        selectedTrend: selectedSource ? {
+          site: trafficSources.site,
+          coverage: trafficSources.coverage,
+          device,
+          sourceKey,
+          dataState: selectedSource.dataState,
+          summary: selectedSource.summary,
+          trend: trafficSourceTrend(
+            sourceKey as keyof typeof trafficSourceMultipliers
+          ),
+          cache: trafficSources.cache
+        } : null
+      })
+    });
+  });
+  await page.route(
+    '**/api/website-data/projects/11/form-consultations**',
+    (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(websiteForms)
     })
-  ));
+  );
 }
 
-async function installDashboard(page, response = dashboard(), delay = 0) {
+async function installDashboard(
+  page: Page,
+  response = dashboard(),
+  delay = 0
+) {
   await page.route('**/api/marketing/projects/11/dashboard**', async (route) => {
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
     await route.fulfill({
@@ -198,7 +340,7 @@ async function installDashboard(page, response = dashboard(), delay = 0) {
   });
 }
 
-async function installDashboardError(page) {
+async function installDashboardError(page: Page) {
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => route.fulfill({
     status: 503,
     contentType: 'application/json',
@@ -212,7 +354,7 @@ function artifact(name: string) {
   return path.join(artifactDirectory, name);
 }
 
-function collectConsoleErrors(page) {
+function collectConsoleErrors(page: Page) {
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -222,6 +364,7 @@ function collectConsoleErrors(page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-08-03T04:00:00.000Z'));
   await installCommonRoutes(page);
 });
 
@@ -229,7 +372,13 @@ test('desktop layout matches the final structure and is keyboard/axe clean', asy
   const consoleErrors = collectConsoleErrors(page);
   await installDashboard(page);
   await page.setViewportSize({ width: 1440, height: 1024 });
+  const initialSourceRequest = page.waitForRequest((request) => (
+    request.url().includes('/tongji-source-trends')
+  ));
   await page.goto('/geo/market-overview');
+  expect(
+    new URL((await initialSourceRequest).url()).searchParams.get('source')
+  ).toBeNull();
 
   await expect(page.getByRole('heading', { name: '投放效率' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '来源全链路' })).toBeVisible();
@@ -268,14 +417,35 @@ test('desktop layout matches the final structure and is keyboard/axe clean', asy
   await page.getByRole('button', { name: '选择访问（点击）作为趋势指标' }).click();
   await expect(page.getByRole('img', { name: /访问（点击）每日趋势/u })).toBeVisible();
   await trendSourceControl.click();
-  await page.getByRole('option', { name: '搜索引擎（百度统计）' }).click();
+  const selectedSourceRequest = page.waitForRequest((request) => (
+    new URL(request.url()).searchParams.get('source') === 'BAIDU_SEARCH'
+  ));
+  await page.getByRole('option', { name: '百度搜索（自然流量）' }).click();
+  expect(
+    new URL((await selectedSourceRequest).url()).searchParams.get('device')
+  ).toBe('pc');
   await expect(page.getByRole('img', { name: /访问次数每日趋势/u })).toBeVisible();
   await page.getByRole('button', { name: '选择访问（点击）作为趋势指标' }).click();
-  await expect(trendSourceControl).toContainText('搜索引擎（百度统计）');
+  await expect(trendSourceControl).toContainText('百度搜索（自然流量）');
   await trendSourceControl.click();
   await page.getByRole('option', { name: '百度推广' }).click();
   await expect(trendSourceControl).toContainText('百度推广');
   await expect(page.getByRole('img', { name: /访问（点击）每日趋势/u })).toBeVisible();
+  await expect(page.getByText('自然流量', { exact: true })).toHaveCount(4);
+  await expect(page.getByRole('columnheader', { name: '官网表单咨询' })).toBeVisible();
+  await expect(page.getByText('搜索引擎（官网表单来源未细分）')).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '整体转换率' })).toBeVisible();
+  await expect(page.locator('[class*="microFunnel"], [class*="funnelChart"]')).toHaveCount(0);
+
+  const device = page.getByLabel('网站流量设备');
+  const deviceControl = device.locator(
+    'xpath=ancestor::div[contains(@class,"ant-select")][1]'
+  );
+  await deviceControl.click();
+  await page.getByRole('option', { name: '移动端' }).click();
+  await expect(deviceControl).toContainText('移动端');
+  await deviceControl.click();
+  await page.getByRole('option', { name: 'PC 端' }).click();
 
   const info = page.getByRole('button', { name: 'ROAS口径说明' });
   await efficiencySource.focus();
@@ -363,7 +533,7 @@ test('loading state uses structural skeletons', async ({ page }) => {
 
 test('empty data keeps the table contract without zero-shaped attribution', async ({ page }) => {
   await installDashboard(page, dashboard({ content: 'NONE' }));
-  await page.route('**/api/marketing/projects/11/tongji-trend', (route) => route.fulfill({
+  await page.route('**/api/marketing/projects/11/tongji-trend**', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
       ...traffic,
@@ -372,16 +542,16 @@ test('empty data keeps the table contract without zero-shaped attribution', asyn
       trend: []
     })
   }));
-  await page.route('**/api/marketing/projects/11/tongji-source-trends', (route) => route.fulfill({
+  await page.route('**/api/marketing/projects/11/tongji-source-trends**', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
       ...trafficSources,
       dataState: 'NO_DATA',
+      selectedTrend: null,
       sources: trafficSources.sources.map((source) => ({
         ...source,
         dataState: 'NO_DATA',
-        summary: { pageviews: null, visits: null, visitors: null },
-        trend: []
+        summary: { pageviews: null, visits: null, visitors: null }
       }))
     })
   }));
@@ -401,14 +571,14 @@ test('partial source error preserves the page and reports the failed source', as
   await page.screenshot({ path: artifact('market-overview-partial-error-1440x1024.png') });
 });
 
-test('stale state shows the only required timestamp near the affected source', async ({ page }) => {
+test('stale snapshot metadata does not create a normal-page warning', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installDashboard(page, dashboard({ freshness: 'STALE' }));
   await page.setViewportSize({ width: 1440, height: 1024 });
   await page.goto('/geo/market-overview');
-  await expect(page.getByText('广告数据陈旧')).toBeVisible();
-  await expect(page.getByText(/最后成功快照/)).toBeVisible();
-  await page.screenshot({ path: artifact('market-overview-stale-1440x1024.png') });
+  await expect(page.getByText('广告数据陈旧')).toHaveCount(0);
+  await expect(page.getByRole('row', { name: /百度推广/u })).toBeVisible();
+  await page.screenshot({ path: artifact('market-overview-stale-hidden-1440x1024.png') });
 });
 
 test('permission blocking state stops data access without exposing a false dashboard', async ({ page }) => {

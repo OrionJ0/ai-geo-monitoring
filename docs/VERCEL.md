@@ -1,6 +1,8 @@
 # Vercel 部署
 
-本仓库是 Next.js 前端、Express 后端和 SQLite 数据库分离的结构。推荐部署方式是：
+> 可选架构说明：本文不是当前正式发布路径。当前唯一支持的生产入口、systemd 单机部署和验收口径以 [部署与运维](DEPLOYMENT.md#当前正式单机实例) 为准。只有明确决定把前端与常驻后端分离部署时才使用本文；完成 Vercel 示例不构成现网已经切换或受支持入口已经增加。
+
+本仓库是 Next.js 前端、Express 后端和 SQLite 数据库分离的结构。若明确采用前后端分离部署，推荐方式是：
 
 - Vercel 只部署 `nextjs-frontend/`
 - `backend/` 部署到支持常驻 Node.js 服务和持久化磁盘/数据库的平台，例如云服务器、Railway、Render、Fly.io 等

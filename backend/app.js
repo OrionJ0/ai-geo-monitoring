@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('node:path');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -8,6 +9,7 @@ const { createCorsOptionsDelegate } = require('./config/corsPolicy');
 const { shouldSkipGeneralLimiter } = require('./config/apiRateLimitPolicy');
 const { resolveServerHost } = require('./config/serverBinding');
 const { configureTrustedProxy } = require('./config/trustedProxyPolicy');
+const { readRuntimeRevision } = require('./config/runtimeRevision');
 
 const app = express();
 configureTrustedProxy(app);
@@ -82,12 +84,33 @@ const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
 const AIPlatformConfigService = require('./services/AIPlatformConfigService');
 const AIRuntimeSettingsService = require('./services/AIRuntimeSettingsService');
 const GeoMetricSemanticsMigrationService = require('./services/GeoMetricSemanticsMigrationService');
-const { authRequired } = require('./middleware/auth');
+const { authHeaderRequired, authRequired } = require('./middleware/auth');
 const { createMarketingModule } = require('./modules/marketing');
+const {
+  createWebsiteFormConsultationModule
+} = require('./modules/websiteFormConsultations');
+const {
+  createConsultationRecordModule
+} = require('./modules/consultationRecords');
 
 const marketingModule = createMarketingModule({
   env: process.env,
   sequelize
+});
+const websiteFormConsultationModule = createWebsiteFormConsultationModule({
+  env: process.env,
+  sequelize
+});
+const consultationRecordModule = createConsultationRecordModule({
+  sequelize,
+  websiteProjectId: websiteFormConsultationModule.configuredProjectId,
+  websiteSourceClient: websiteFormConsultationModule.sourceClient
+});
+
+// 发布 revision 在进程启动时捕获。运行期间改写 marker 不能让旧进程
+// 冒充新版本，systemd 启动验收因此能证明实际进程已经重启。
+const RUNTIME_REVISION = readRuntimeRevision({
+  filename: path.resolve(__dirname, '../.runtime/release-revision')
 });
 
 // 用户登录与公开用户接口保持在 /api/users 下（登录无需鉴权）
@@ -95,7 +118,8 @@ app.use('/api/users', userRoutes);
 // 公开验证码接口（注册用）
 app.use('/api/captcha', captchaRoutes);
 // 需要登录的接口：检测、统计与业务配置
-app.use('/api/detection', authRequired, detectionRoutes);
+// detection 路由逐项鉴权；SSE 与普通请求一样仅接受 Authorization Header。
+app.use('/api/detection', detectionRoutes);
 app.use('/api/statistics', authRequired, statisticsRoutes);
 app.use('/api/membership', authRequired, membershipRoutes);
 // 定时任务接口（需要登录）
@@ -104,6 +128,12 @@ app.use('/api/geo-projects', authRequired, geoProjectRoutes);
 app.use('/api/seo-audits', authRequired, seoAuditRoutes);
 app.use('/api/admin/ai-platforms', adminAIPlatformRoutes);
 app.use('/api/ai-platforms', aiPlatformRoutes);
+app.use('/api/website-data', authRequired, websiteFormConsultationModule.router);
+app.use(
+  '/api/consultations',
+  authHeaderRequired,
+  consultationRecordModule.router
+);
 app.use('/api/marketing', authRequired, marketingModule.router);
 app.use(
   '/api/admin/marketing/baidu',
@@ -118,7 +148,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0',
+    revision: RUNTIME_REVISION
   });
 });
 
@@ -511,10 +542,18 @@ async function ensureDynamicPlatformColumns() {
 
 // 确保存在演示用户（不占用 id=1），并修复明文密码
 async function ensureDefaultUser() {
+  if (
+    process.env.NODE_ENV === 'production'
+    || process.env.DEMO_USER_ENABLED !== 'true'
+  ) return;
   try {
+    const passwordRaw = String(process.env.DEMO_USER_PASSWORD || '');
+    if (passwordRaw.length < 16) {
+      throw new Error('DEMO_USER_PASSWORD 必须至少 16 个字符');
+    }
     const existing = await User.findOne({ where: { username: 'demo' } });
     if (!existing) {
-      const hashed = await bcrypt.hash('demo-password', 10);
+      const hashed = await bcrypt.hash(passwordRaw, 10);
       const user = await User.create({
         username: 'demo',
         email: 'demo@example.com',
@@ -527,7 +566,7 @@ async function ensureDefaultUser() {
       // 若历史上使用了明文密码，进行修复（bcrypt 哈希以 $2 开头）
       const isHashed = typeof existing.password === 'string' && existing.password.startsWith('$2');
       if (!isHashed) {
-        const hashed = await bcrypt.hash('demo-password', 10);
+        const hashed = await bcrypt.hash(passwordRaw, 10);
         await existing.update({ password: hashed });
         console.log('已修复演示用户密码为安全哈希');
       }
@@ -539,10 +578,22 @@ async function ensureDefaultUser() {
 
 // 确保存在管理员账户且 id=1 为管理员；必要时创建或提升
 async function ensureDefaultAdmin() {
+  if (process.env.DEFAULT_ADMIN_BOOTSTRAP_ENABLED !== 'true') return;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('生产环境禁止启动期管理员 bootstrap');
+  }
   try {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
     const email = process.env.DEFAULT_ADMIN_EMAIL || 'admin@example.com';
-    const passwordRaw = process.env.DEFAULT_ADMIN_PASSWORD || 'admin123456';
+    const passwordRaw = String(process.env.DEFAULT_ADMIN_PASSWORD || '');
+    if (
+      passwordRaw.length < 16
+      || ['admin123456', 'password', 'changeme'].includes(
+        passwordRaw.toLocaleLowerCase('en-US')
+      )
+    ) {
+      throw new Error('DEFAULT_ADMIN_PASSWORD 必须是非示例强密码');
+    }
     const hashed = await bcrypt.hash(passwordRaw, 10);
 
     const user1 = await User.findByPk(1);
@@ -561,32 +612,10 @@ async function ensureDefaultAdmin() {
       return;
     }
 
-    // 存在 id=1：确保其为管理员，并尽量更新等级/状态
-    const updates = {};
-    if (user1.role !== 'admin') updates.role = 'admin';
-    if (user1.membership_level !== 'enterprise') updates.membership_level = 'enterprise';
-    if (user1.status !== 'active') updates.status = 'active';
-
-    // 若需要，尝试更新用户名/邮箱为默认管理员信息（避免唯一冲突）
-    try {
-      const otherWithUsername = await User.findOne({ where: { username }, attributes: ['id'] });
-      if (!otherWithUsername || otherWithUsername.id === 1) updates.username = username;
-      const otherWithEmail = await User.findOne({ where: { email }, attributes: ['id'] });
-      if (!otherWithEmail || otherWithEmail.id === 1) updates.email = email;
-    } catch (_) { }
-
-    // 若历史上使用了明文密码，进行修复
-    const isHashed = typeof user1.password === 'string' && user1.password.startsWith('$2');
-    if (!isHashed) updates.password = hashed;
-
-    if (Object.keys(updates).length > 0) {
-      await user1.update(updates);
-      console.log('已将 id=1 用户设置为管理员并更新必要字段');
-    } else {
-      console.log('id=1 用户已是管理员');
-    }
+    // 启动期 bootstrap 只允许首次创建，绝不重新提权、激活或改写既有身份。
+    console.log('id=1 用户已存在，跳过管理员 bootstrap');
   } catch (e) {
-    console.warn('确保默认管理员失败:', e.message);
+    throw new Error(`管理员 bootstrap 失败: ${e.message}`);
   }
 }
 

@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dayjs from 'dayjs';
-import { Bar, Line } from '@ant-design/plots';
+import { Line } from '@ant-design/plots';
 import {
   Alert,
   Breadcrumb,
@@ -20,11 +20,14 @@ import {
 import {
   FundProjectionScreenOutlined,
   GlobalOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  LinkOutlined,
+  SearchOutlined
 } from '@ant-design/icons';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import useMarketingCapabilities from '@/lib/useMarketingCapabilities';
 import useMarketOverview from '@/lib/marketing/useMarketOverview';
+import useWebsiteFormConsultations from '@/lib/websiteData/useWebsiteFormConsultations';
 import { groupDigits } from '@/utils/marketingValues.cjs';
 import {
   buildPeriodRows,
@@ -47,10 +50,20 @@ const PAID_SOURCE = 'BAIDU_PAID';
 const TONGJI_ALL_SOURCE = 'BAIDU_TONGJI_ALL';
 const TONGJI_SOURCE_KEYS = Object.freeze({
   BAIDU_TONGJI_DIRECT: 'DIRECT',
-  BAIDU_TONGJI_SEARCH: 'SEARCH',
-  BAIDU_TONGJI_EXTERNAL: 'EXTERNAL'
+  BAIDU_TONGJI_BAIDU_SEARCH: 'BAIDU_SEARCH',
+  BAIDU_TONGJI_BING_SEARCH: 'BING_SEARCH',
+  BAIDU_TONGJI_OTHER: 'OTHER'
 });
 const MISSING_ATTRIBUTION = '缺少可信的按来源关联，当前不能计算该指标。';
+const FORM_ONLY_SOURCE_LABELS = Object.freeze({
+  BAIDU_PAID: '百度推广（仅官网表单）',
+  DIRECT: '直接访问（仅官网表单）',
+  ORGANIC_SEARCH: '搜索引擎（官网表单来源未细分）',
+  REFERRAL: '外部推荐（官网表单来源）',
+  CAMPAIGN: '活动来源（官网表单来源）',
+  SOCIAL: '社交媒体（官网表单来源）',
+  UNKNOWN: '未识别来源（官网表单）'
+});
 
 const TREND_METRICS = [
   {
@@ -94,9 +107,10 @@ const TRAFFIC_TREND_METRICS = [
 const TREND_SOURCES = [
   { value: PAID_SOURCE, label: '百度推广' },
   { value: TONGJI_ALL_SOURCE, label: '官网全站（百度统计）' },
+  { value: 'BAIDU_TONGJI_BAIDU_SEARCH', label: '百度搜索（自然流量）' },
+  { value: 'BAIDU_TONGJI_BING_SEARCH', label: '必应搜索（自然流量）' },
   { value: 'BAIDU_TONGJI_DIRECT', label: '直接访问（百度统计）' },
-  { value: 'BAIDU_TONGJI_SEARCH', label: '搜索引擎（百度统计）' },
-  { value: 'BAIDU_TONGJI_EXTERNAL', label: '外部链接（百度统计）' }
+  { value: 'BAIDU_TONGJI_OTHER', label: '其他来源（自然流量）' }
 ];
 
 const KPI_DEFINITIONS = [
@@ -262,39 +276,6 @@ function EfficiencyCard({ metric, current, previous, change, loading, period }) 
   );
 }
 
-const FUNNEL_SHAPE = [
-  { stage: '展现', width: 52 },
-  { stage: '访问', width: 36 },
-  { stage: '咨询', width: 24 },
-  { stage: '入池', width: 12 },
-  { stage: '成交', width: 4 }
-];
-
-function MicroFunnel({ rate }) {
-  return (
-    <div className={styles.microFunnel}>
-      <div className={styles.funnelChart} aria-hidden="true">
-        <Bar
-          data={FUNNEL_SHAPE}
-          xField="width"
-          yField="stage"
-          height={56}
-          axis={false}
-          legend={false}
-          tooltip={false}
-          padding={0}
-          style={{ fill: '#2f6bff', fillOpacity: 0.82 }}
-          animate={false}
-        />
-      </div>
-      <div className={styles.funnelRate}>
-        <span>整体转化率</span>
-        {rate ? <strong>{rate}</strong> : <MissingValue label="整体转化率" />}
-      </div>
-    </div>
-  );
-}
-
 function MetricHeader({ metric, targetMetric, selected, setTrendMetric }) {
   return (
     <th scope="col" className={selected ? styles.selectedHeader : undefined}>
@@ -314,7 +295,72 @@ function MetricHeader({ metric, targetMetric, selected, setTrendMetric }) {
   );
 }
 
-function TrafficSourceRow({ source, dateRange }) {
+function SourceIdentity({
+  sourceKey,
+  label,
+  host,
+  natural = false,
+  tag = null
+}) {
+  let icon = <GlobalOutlined aria-hidden="true" />;
+  let brand = 'site';
+  if (sourceKey === 'BAIDU_SEARCH') {
+    icon = <span aria-hidden="true">度</span>;
+    brand = 'baidu';
+  } else if (sourceKey === 'BING_SEARCH') {
+    icon = <span aria-hidden="true">b</span>;
+    brand = 'bing';
+  } else if (sourceKey === 'OTHER') {
+    icon = <LinkOutlined aria-hidden="true" />;
+    brand = 'other';
+  } else if (sourceKey === PAID_SOURCE) {
+    icon = <FundProjectionScreenOutlined aria-hidden="true" />;
+    brand = 'paid';
+  } else if (sourceKey === 'SEARCH') {
+    icon = <SearchOutlined aria-hidden="true" />;
+  }
+  return (
+    <span className={styles.sourceIdentity}>
+      <span className={styles.sourceIcon} data-brand={brand}>{icon}</span>
+      <span className={styles.sourceCopy}>
+        <strong>{label}</strong>
+        <span className={styles.sourceMeta}>
+          <span className={styles.sourceHost}>{host}</span>
+          <span className={natural ? styles.naturalTag : styles.allDeviceTag}>
+            {tag || (natural ? '自然流量' : '全部设备')}
+          </span>
+        </span>
+      </span>
+    </span>
+  );
+}
+
+function WebsiteFormConsultationCell({ source, websiteForms, label }) {
+  if (websiteForms.state === 'LOADING') {
+    return <Skeleton active paragraph={false} title={{ width: 48 }} />;
+  }
+  if (source) {
+    return (
+      <>
+        <strong>{groupDigits(source.attributedFormSubmissionSessions)}</strong>
+        <small>官网可归因成功提交会话</small>
+      </>
+    );
+  }
+  const reason = websiteForms.state === 'SOURCE_ERROR'
+    ? websiteForms.errorMessage || '官网表单咨询读取失败。'
+    : websiteForms.state === 'IDLE'
+      ? '等待项目与日期范围后读取官网表单咨询。'
+      : '官网接口未提供该来源拆分，不能按 0 展示。';
+  return <MissingValue reason={reason} label={`${label}官网表单咨询`} />;
+}
+
+function TrafficSourceRow({
+  source,
+  dateRange,
+  formConsultation,
+  websiteForms
+}) {
   const sourcePeriod = dateRange
     ? buildPeriodRows(source.trend || [], dateRange[0], dateRange[1])
     : null;
@@ -327,8 +373,12 @@ function TrafficSourceRow({ source, dateRange }) {
     <tr>
       <th scope="row">
         <Link href="/geo/website-traffic" className={styles.sourceLink}>
-          <span className={styles.sourceIcon}><GlobalOutlined /></span>
-          <span><strong>{source.sourceLabel}</strong><small>百度统计</small></span>
+          <SourceIdentity
+            sourceKey={source.sourceKey}
+            label={source.sourceLabel}
+            host={source.sourceHost}
+            natural
+          />
         </Link>
       </th>
       <td className={styles.metricCell}>
@@ -341,11 +391,16 @@ function TrafficSourceRow({ source, dateRange }) {
         <strong>{sourceTotals.visits == null
           ? <MissingValue label={`${source.sourceLabel}访问`} />
           : groupDigits(sourceTotals.visits)}</strong>
-        <small>站内访问来源</small>
+        <small>{source.sourceDetails?.length
+          ? source.sourceDetails.join('、')
+          : '当前范围未记录访问'}</small>
       </td>
       <td className={styles.metricCell}>
-        <MissingValue label={`${source.sourceLabel}客服咨询`} />
-        <small>咨询率 —</small>
+        <WebsiteFormConsultationCell
+          source={formConsultation}
+          websiteForms={websiteForms}
+          label={source.sourceLabel}
+        />
       </td>
       <td className={styles.metricCell}>
         <MissingValue label={`${source.sourceLabel}线索入池`} />
@@ -355,12 +410,63 @@ function TrafficSourceRow({ source, dateRange }) {
         <MissingValue label={`${source.sourceLabel}成交结果`} />
         <small>成交率 — · 金额 —</small>
       </td>
-      <td><MicroFunnel rate={null} /></td>
+      <td className={styles.conversionCell}>
+        <MissingValue label={`${source.sourceLabel}整体转换率`} />
+      </td>
     </tr>
   );
 }
 
-function StatusMessages({ defaultContext, marketing, overview }) {
+function WebsiteFormOnlyRow({ source, websiteForms }) {
+  const label = FORM_ONLY_SOURCE_LABELS[source.sourceKey]
+    || '其他官网表单来源';
+  const sourceOnlyReason = '该官网表单来源没有可精确对齐的百度访问来源，单独展示。';
+  return (
+    <tr>
+      <th scope="row">
+        <SourceIdentity
+          sourceKey={source.sourceKey}
+          label={label}
+          host="gato.com.cn"
+          tag="官网表单"
+        />
+      </th>
+      <td className={styles.metricCell}>
+        <MissingValue reason={sourceOnlyReason} label={`${label}广告投入`} />
+      </td>
+      <td className={styles.metricCell}>
+        <MissingValue reason={sourceOnlyReason} label={`${label}展现`} />
+      </td>
+      <td className={styles.metricCell}>
+        <MissingValue reason={sourceOnlyReason} label={`${label}访问`} />
+      </td>
+      <td className={styles.metricCell}>
+        <WebsiteFormConsultationCell
+          source={source}
+          websiteForms={websiteForms}
+          label={label}
+        />
+      </td>
+      <td className={styles.metricCell}>
+        <MissingValue label={`${label}线索入池`} />
+      </td>
+      <td className={styles.metricCell}>
+        <MissingValue label={`${label}成交结果`} />
+        <small>成交率 — · 金额 —</small>
+      </td>
+      <td className={styles.conversionCell}>
+        <MissingValue label={`${label}整体转换率`} />
+      </td>
+    </tr>
+  );
+}
+
+function StatusMessages({
+  defaultContext,
+  marketing,
+  overview,
+  websiteForms
+}) {
   const messages = [];
   if (defaultContext.errorMessage) {
     messages.push({
@@ -383,18 +489,6 @@ function StatusMessages({ defaultContext, marketing, overview }) {
       type: 'info',
       title: '广告数据尚未开放',
       description: '页面结构可用，但不会越过现有能力门读取或展示数据。'
-    });
-  }
-  if (overview.ad.state === 'STALE') {
-    const timestamp = overview.ad.data?.coverage?.lastSuccessfulAt;
-    messages.push({
-      key: 'stale',
-      type: 'warning',
-      title: '广告数据陈旧',
-      description: timestamp
-        ? `当前保留最后成功快照：${new Date(timestamp).toLocaleString('zh-CN')}`
-        : '当前保留最后成功快照，请前往广告表现检查刷新状态。',
-      action: <Link href="/geo/ad-performance">查看广告表现</Link>
     });
   }
   if (overview.ad.state === 'SOURCE_ERROR') {
@@ -424,6 +518,23 @@ function StatusMessages({ defaultContext, marketing, overview }) {
       action: <Button size="small" onClick={overview.reload}>重试</Button>
     });
   }
+  if (websiteForms.state === 'SOURCE_ERROR') {
+    messages.push({
+      key: 'website-forms-error',
+      type: 'warning',
+      title: '官网表单咨询读取失败',
+      description: websiteForms.errorMessage || '官网表单咨询暂时不可用。',
+      action: <Button size="small" onClick={websiteForms.reload}>重试</Button>
+    });
+  } else if (websiteForms.state === 'FALLBACK') {
+    messages.push({
+      key: 'website-forms-fallback',
+      type: 'warning',
+      title: '官网表单咨询使用缓存',
+      description: '官网接口暂时不可用，当前展示相同日期范围的最后成功聚合快照。',
+      action: <Button size="small" onClick={websiteForms.reload}>重试</Button>
+    });
+  }
   if (!messages.length) return null;
   return (
     <div className={styles.statusStack} aria-live="polite">
@@ -446,20 +557,52 @@ export default function MarketOverviewPage() {
   const marketing = useMarketingCapabilities();
   const projectId = defaultContext.project?.id || '';
   const enabled = marketing.capabilities.adsRead || marketing.capabilities.trafficRead;
-  const overview = useMarketOverview({ projectId, enabled });
+  const [trafficDevice, setTrafficDevice] = useState('pc');
+  const [trendSource, setTrendSource] = useState(PAID_SOURCE);
+  const selectedTrafficSourceKey = TONGJI_SOURCE_KEYS[trendSource] || null;
+  const overview = useMarketOverview({
+    projectId,
+    enabled,
+    device: trafficDevice,
+    trafficTrendSource: selectedTrafficSourceKey
+  });
   const reducedMotion = useReducedMotion();
   const [dateRange, setDateRange] = useState(null);
+  const websiteFallbackRange = useMemo(() => {
+    const to = dayjs();
+    return [
+      to.subtract(29, 'day').format('YYYY-MM-DD'),
+      to.format('YYYY-MM-DD')
+    ];
+  }, []);
   const [efficiencySource, setEfficiencySource] = useState(PAID_SOURCE);
-  const [trendSource, setTrendSource] = useState(PAID_SOURCE);
   const [trendMetric, setTrendMetric] = useState('clicks');
+  const websiteForms = useWebsiteFormConsultations({
+    projectId,
+    enabled: Boolean(projectId && dateRange),
+    from: dateRange?.[0] || null,
+    to: dateRange?.[1] || null
+  });
 
   const ad = overview.ad;
-  const coverage = ad.data?.coverage || overview.traffic.data?.coverage || null;
+  const trafficData = overview.traffic.data?.device === trafficDevice
+    ? overview.traffic.data
+    : null;
+  const trafficSourceData = overview.trafficSources.data?.device === trafficDevice
+    ? overview.trafficSources.data
+    : null;
+  const coverage = ad.data?.coverage || trafficData?.coverage || null;
   const defaultRange = ad.data?.filter || coverage;
 
   useEffect(() => {
-    if (!coverage?.from || !coverage?.to || !defaultRange?.from || !defaultRange?.to) return;
+    if (!projectId) {
+      setDateRange(null);
+      return;
+    }
     setDateRange((current) => {
+      if (!coverage?.from || !coverage?.to || !defaultRange?.from || !defaultRange?.to) {
+        return current || websiteFallbackRange;
+      }
       if (
         current
         && current[0] >= coverage.from
@@ -467,7 +610,14 @@ export default function MarketOverviewPage() {
       ) return current;
       return [defaultRange.from, defaultRange.to];
     });
-  }, [coverage?.from, coverage?.to, defaultRange?.from, defaultRange?.to]);
+  }, [
+    coverage?.from,
+    coverage?.to,
+    defaultRange?.from,
+    defaultRange?.to,
+    projectId,
+    websiteFallbackRange
+  ]);
 
   const period = useMemo(() => {
     if (!dateRange) return null;
@@ -533,32 +683,47 @@ export default function MarketOverviewPage() {
   };
 
   const trafficSources = (
-    overview.trafficSources.data?.attribution?.level === 'WEBSITE_TRAFFIC_SOURCE'
-    && overview.trafficSources.data?.attribution?.isCrossSystemVerified === false
-  ) ? overview.trafficSources.data?.sources || [] : [];
-  const selectedTrafficSourceKey = TONGJI_SOURCE_KEYS[trendSource] || null;
-  const selectedTrafficSource = selectedTrafficSourceKey
-    ? trafficSources.find((source) => (
-        source.sourceKey === selectedTrafficSourceKey
-      )) || null
-    : null;
+    trafficSourceData?.attribution?.level === 'WEBSITE_TRAFFIC_SOURCE'
+    && trafficSourceData?.attribution?.isCrossSystemVerified === false
+  ) ? trafficSourceData?.sources || [] : [];
+  const websiteFormBySource = new Map(
+    (websiteForms.data?.sourceBreakdown || []).map((source) => [
+      source.sourceKey,
+      source
+    ])
+  );
+  const visibleAlignedFormKeys = new Set([
+    ...(['AVAILABLE', 'ZERO'].includes(ad.state) ? [PAID_SOURCE] : []),
+    ...(trafficSources.some((source) => source.sourceKey === 'DIRECT')
+      ? ['DIRECT']
+      : [])
+  ]);
+  const formOnlySources = (websiteForms.data?.sourceBreakdown || []).filter(
+    (source) => (
+      !visibleAlignedFormKeys.has(source.sourceKey)
+      && BigInt(source.attributedFormSubmissionSessions) > BigInt(0)
+    )
+  );
+  const selectedTrafficTrend = (
+    trafficSourceData?.selectedTrend?.sourceKey === selectedTrafficSourceKey
+  ) ? trafficSourceData.selectedTrend : null;
   const selectedTrendRows = useMemo(() => (
     trendSource === PAID_SOURCE
       ? ad.data?.trend || []
       : trendSource === TONGJI_ALL_SOURCE
-        ? overview.traffic.data?.trend || []
-        : selectedTrafficSource?.trend || []
+        ? trafficData?.trend || []
+        : selectedTrafficTrend?.trend || []
   ), [
     ad.data?.trend,
-    overview.traffic.data?.trend,
-    selectedTrafficSource?.trend,
+    trafficData?.trend,
+    selectedTrafficTrend?.trend,
     trendSource
   ]);
   const selectedTrendCoverage = trendSource === PAID_SOURCE
     ? ad.data?.coverage || coverage
     : trendSource === TONGJI_ALL_SOURCE
-      ? overview.traffic.data?.coverage || coverage
-      : overview.trafficSources.data?.coverage || coverage;
+      ? trafficData?.coverage || coverage
+      : trafficSourceData?.coverage || coverage;
   const availableTrendMetrics = trendSource === PAID_SOURCE
     ? TREND_METRICS
     : TRAFFIC_TREND_METRICS;
@@ -621,27 +786,47 @@ export default function MarketOverviewPage() {
     previousSummary.total,
     1
   );
-  const selectedTrendError = trendSource === PAID_SOURCE
-    ? overview.ad.errorMessage
-    : trendSource === TONGJI_ALL_SOURCE
-      ? overview.traffic.errorMessage
-      : overview.trafficSources.errorMessage;
+  const selectedTrendError = (
+    trendSource === 'BAIDU_TONGJI_OTHER'
+    && selectedMetric.key === 'visitors'
+  )
+    ? '其他来源合并多个互斥会话来源，同一访客可能跨来源重复，不能安全相加 UV。'
+    : trendSource === PAID_SOURCE
+      ? overview.ad.errorMessage
+      : trendSource === TONGJI_ALL_SOURCE
+        ? overview.traffic.errorMessage
+        : overview.trafficSources.errorMessage;
   const loading = (
     defaultContext.loading
     || marketing.loading
     || (enabled && overview.status === 'LOADING' && !ad.data)
   );
-  const canShowAdRow = ['AVAILABLE', 'ZERO', 'STALE'].includes(ad.state);
+  const canShowAdRow = ['AVAILABLE', 'ZERO'].includes(ad.state);
   const canShowTrafficSourceRows = ['AVAILABLE', 'NO_DATA'].includes(
     overview.trafficSources.state
   ) && trafficSources.length > 0;
+  const canShowFormOnlyRows = formOnlySources.length > 0;
 
   return (
     <div className={styles.page}>
       <h1 className={styles.visuallyHidden}>市场总览</h1>
       <div className={styles.breadcrumbRow}>
         <Breadcrumb items={[{ title: '首页' }, { title: '市场总览' }]} />
-        <RangePicker
+        <div className={styles.globalControls}>
+          <label className={styles.deviceControl}>
+            <span>网站流量设备</span>
+            <Select
+              aria-label="网站流量设备"
+              value={trafficDevice}
+              onChange={setTrafficDevice}
+              options={[
+                { value: 'pc', label: 'PC 端' },
+                { value: 'mobile', label: '移动端' }
+              ]}
+              popupMatchSelectWidth={false}
+            />
+          </label>
+          <RangePicker
           aria-label="全局日期范围"
           value={dateRange
             ? [dayjs(dateRange[0]), dayjs(dateRange[1])]
@@ -650,12 +835,16 @@ export default function MarketOverviewPage() {
           separator="至"
           allowClear={false}
           allowEmpty={[true, true]}
-          disabled={!coverage?.from || !coverage?.to}
+          disabled={!projectId}
           disabledDate={(current) => (
-            !coverage?.from
-            || !coverage?.to
-            || current.isBefore(dayjs(coverage.from), 'day')
-            || current.isAfter(dayjs(coverage.to), 'day')
+            coverage?.from && coverage?.to
+              ? current.isBefore(dayjs(coverage.from), 'day')
+                || current.isAfter(dayjs(coverage.to), 'day')
+              : current.isBefore(
+                dayjs(websiteFallbackRange[1]).subtract(179, 'day'),
+                'day'
+              )
+                || current.isAfter(dayjs(websiteFallbackRange[1]), 'day')
           )}
           onChange={(values) => {
             if (!values?.[0] || !values?.[1]) return;
@@ -664,13 +853,15 @@ export default function MarketOverviewPage() {
               values[1].format('YYYY-MM-DD')
             ]);
           }}
-        />
+          />
+        </div>
       </div>
 
       <StatusMessages
         defaultContext={defaultContext}
         marketing={marketing}
         overview={overview}
+        websiteForms={websiteForms}
       />
 
       {!defaultContext.errorMessage ? (
@@ -708,9 +899,10 @@ export default function MarketOverviewPage() {
           <div className={styles.titleWithInfo}>
             <Title level={2} id="journey-title">来源全链路</Title>
             <InfoTip label="全链路">
-              点击率＝访问（点击）÷展现；咨询率＝客服咨询÷访问（点击）；
-              入池率＝线索入池÷客服咨询；成交率与整体转化率需要可信成交数量。
-              百度统计来源只是站内访问证据，不是跨系统归因。
+              点击率＝访问（点击）÷展现。官网表单咨询列只展示官网可归因成功提交会话，
+              不包含 53KF 客服咨询；只有来源键精确一致时才对齐到已有来源，
+              未细分来源会单独成行。百度统计来源只是站内访问证据，
+              不是跨系统归因；当前不据此计算咨询率。
             </InfoTip>
           </div>
         </div>
@@ -735,10 +927,10 @@ export default function MarketOverviewPage() {
                     setTrendMetric={setTrendMetric}
                   />
                 ))}
-                <th scope="col">客服咨询</th>
+                <th scope="col">官网表单咨询</th>
                 <th scope="col">线索入池</th>
                 <th scope="col">成交结果</th>
-                <th scope="col">全链路</th>
+                <th scope="col">整体转换率</th>
               </tr>
             </thead>
             <tbody>
@@ -746,13 +938,16 @@ export default function MarketOverviewPage() {
                 <tr>
                   <td colSpan={8}><Skeleton active paragraph={{ rows: 1 }} title={false} /></td>
                 </tr>
-              ) : (canShowAdRow || canShowTrafficSourceRows) ? (
+              ) : (canShowAdRow || canShowTrafficSourceRows || canShowFormOnlyRows) ? (
                 <>
                 {canShowAdRow ? <tr>
                   <th scope="row">
                     <Link href="/geo/ad-performance" className={styles.sourceLink}>
-                      <span className={styles.sourceIcon}><FundProjectionScreenOutlined /></span>
-                      <span><strong>百度推广</strong><small>广告</small></span>
+                      <SourceIdentity
+                        sourceKey={PAID_SOURCE}
+                        label="百度推广"
+                        host="e.baidu.com"
+                      />
                     </Link>
                   </th>
                   <td className={styles.metricCell}>
@@ -780,8 +975,11 @@ export default function MarketOverviewPage() {
                     ) || '—'}</small>
                   </td>
                   <td className={styles.metricCell}>
-                    <MissingValue label="客服咨询" />
-                    <small>咨询率 —</small>
+                    <WebsiteFormConsultationCell
+                      source={websiteFormBySource.get(PAID_SOURCE)}
+                      websiteForms={websiteForms}
+                      label="百度推广"
+                    />
                   </td>
                   <td className={styles.metricCell}>
                     <MissingValue label="线索入池" />
@@ -791,13 +989,26 @@ export default function MarketOverviewPage() {
                     <MissingValue label="成交结果" />
                     <small>成交率 — · 金额 —</small>
                   </td>
-                  <td><MicroFunnel rate={null} /></td>
+                  <td className={styles.conversionCell}>
+                    <MissingValue label="百度推广整体转换率" />
+                  </td>
                 </tr> : null}
                 {trafficSources.map((source) => (
                   <TrafficSourceRow
                     key={source.sourceKey}
                     source={source}
                     dateRange={dateRange}
+                    formConsultation={source.sourceKey === 'DIRECT'
+                      ? websiteFormBySource.get('DIRECT')
+                      : null}
+                    websiteForms={websiteForms}
+                  />
+                ))}
+                {formOnlySources.map((source) => (
+                  <WebsiteFormOnlyRow
+                    key={`website-form-${source.sourceKey}`}
+                    source={source}
+                    websiteForms={websiteForms}
                   />
                 ))}
                 </>

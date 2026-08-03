@@ -7,6 +7,8 @@
 
 > 定位说明：本方案是只读市场数据监控系统的百度第一期实现，不以当前正式 GEO/SEO 工作流或本期百度范围重新定义整个项目。
 
+> 2026-08-03 实现状态：本地正式代码已调用计划 `2290316`、单元 `2284618`、关键词 `2602783` 和搜索词 `2307838` 四份官方报告，在同一刷新事务中写入四张事实表，并由 Dashboard 分组返回。严格层级到关键词为止；搜索词报告没有关键词 ID，只作为独立事实。同日已使用服务器现有生产 Token 完成四份真实响应只读验证；仍未部署或完成正式入口验收。
+
 ## 1. 目标与边界
 
 第一期在现有 Express + Sequelize + Next.js 应用中增加一个轻量、只读的百度搜索推广监控模块。模块读取百度广告数据，保存当前项目最近 30 个自然日的本地快照，并提供项目汇总、按日趋势和按推广计划明细。
@@ -17,7 +19,7 @@
 - 只按整个百度账户绑定，不支持推广计划子集。
 - 只读取展现、点击和广告消费，不调用写接口。
 - 一次刷新覆盖项目全部活动绑定，任一账户失败都不替换旧快照。
-- 落地页和销售系统没有 API 时只保留未来接口边界，不建假数据。
+- 百度第一期不把官网、53KF 或销售系统并入营销模块，也不建假数据。2026-08-03 已在平行的独立 `websiteFormConsultations` 模块完成官网聚合适配器、区间/逐日接口和首页接入；它不属于 `/api/marketing` 或百度快照，且官网本地源码与线上合同仍有漂移。53KF 与销售系统仍未接入。
 - 沿用单体、单进程和现有认证授权，不引入消息队列、微服务或通用 ETL。
 
 ## 2. 当前正式入口
@@ -295,7 +297,7 @@ JSON 固定包含版本号和按 `bindingId` 排序的 `{bindingId,connectionId,
 |---|---|
 | `id` | 内部 UUID |
 | `project_id` | 项目外键 |
-| `trigger_type` | `INITIAL` / `AUTO` / `MANUAL` |
+| `trigger_type` | `INITIAL` / `ON_DEMAND` / `MANUAL`；`AUTO` 仅可能存在于旧历史记录，新运行不再创建 |
 | `status` | `QUEUED` / `RUNNING` / `SUCCEEDED` / `FAILED` / `INTERRUPTED` |
 | `active_project_key` | 非终态为项目 ID，终态为空 |
 | `execution_token` | 本次单进程执行防护令牌 |
@@ -304,7 +306,7 @@ JSON 固定包含版本号和按 `bindingId` 排序的 `{bindingId,connectionId,
 | `contract_version` | 本快照使用的不可变百度契约版本 |
 | `currency_code` / `cost_scale` | 本快照金额解释 |
 | `started_at` / `finished_at` | 生命周期时间 |
-| `next_retry_at` | 自动重试最早时间 |
+| `next_retry_at` | 保留字段，未启用；失败后由下一次访问重试 |
 | `failure_code` | 脱敏稳定错误码 |
 | `created_by_user_id` | 手动发起人；自动任务为空 |
 | `created_at` / `updated_at` | 审计时间 |
@@ -441,15 +443,14 @@ GET /api/marketing/projects/:projectId/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD
   "lastRun": {
     "runId": "run-id",
     "status": "SUCCEEDED",
-    "failureCode": null,
-    "nextRetryAt": null
+    "failureCode": null
   }
 }
 ```
 
-dashboard GET 是纯读，不创建 run、不调用百度。整个响应在同一数据库读取快照中生成：PostgreSQL 使用 `REPEATABLE READ READ ONLY`，SQLite 使用同一连接的显式读事务；所有事实查询限定捕获的 `refresh_run_id`。
+dashboard GET 先用同一数据库读取快照判断新鲜度。10 分钟内纯读数据库；快照缺失或过期时创建 `ON_DEMAND` run，通过同项目 single-flight 等待刷新后再读取。刷新失败但已有历史快照时返回旧快照；从未成功同步时返回错误。事实响应仍限定一个 `refresh_run_id`。
 
-第一期返回当前筛选范围的完整推广计划列表，不做服务端分页。契约门必须确认项目最大绑定数、项目合计计划行数和响应字节预算；绑定或刷新超过门禁时稳定拒绝，不能截断。真实规模不满足时先修订 API 和 PRD。
+当前内部试点返回所选范围的完整计划、单元、关键词和搜索词聚合集合，不做服务端分页。刷新设置单报表和项目总事实安全预算，超过门禁时稳定拒绝，不能截断。生产真实规模不满足页面负载时，必须先修订 API/PRD 为分页或按父级懒加载，不能把部分行冒充完整层级。
 
 来源异常、需重授权、暂停、无快照和刷新失败仍返回 200 与业务状态。无权返回 403；项目不存在返回 404。`from/to` 必须同时省略或同时出现，使用严格日历日期、首尾均包含且 `from <= to`；格式错误或超出 coverage 返回 422。没有快照时两者必须省略，响应 `coverage=null`。
 
@@ -460,9 +461,9 @@ POST /api/marketing/projects/:projectId/refresh-runs
 GET  /api/marketing/projects/:projectId/refresh-runs/:runId
 ```
 
-POST 无日期参数，body 只允许 `{"triggerType":"AUTO"|"MANUAL"}`；服务端根据调用路径和权限校验 trigger。成功创建返回 202 与 `Location`；已有活动运行时也返回 202、相同 `runId` 和相同 `Location`，不再创建第二个。归档项目、没有活动绑定或任一绑定暂停/需重新确认时返回 409。
+POST 无日期参数，公开接口 body 只允许 `{"triggerType":"MANUAL"}`。`ON_DEMAND` 只能由 dashboard GET 的服务层创建，`INITIAL` 只用于受控初始化；外部请求不能伪造内部触发类型。成功创建返回 202 与 `Location`；已有活动运行时也返回 202、相同 `runId` 和相同 `Location`，不再创建第二个。归档项目、没有活动绑定或任一绑定暂停/需重新确认时返回 409。
 
-run 资源固定返回 `runId/projectId/triggerType/status/coverage/createdAt/startedAt/finishedAt/failure{code,retryable,retryAfterAt}`，建议客户端按响应 `Retry-After` 轮询。终态不可逆；终态后客户端重新读取 dashboard。跨项目 runId 统一 404。
+run 资源固定返回 `runId/projectId/triggerType/status/coverage/createdAt/startedAt/finishedAt/failure{code}`，建议客户端按响应 `Retry-After` 轮询。失败不承诺自动重试时间；失败后由下一次访问重试。终态不可逆；终态后客户端重新读取 dashboard。跨项目 runId 统一 404。
 
 ## 7. OAuth 与 Token 生命周期
 
@@ -571,13 +572,14 @@ PostgreSQL 写事务使用项目行 `FOR UPDATE`；SQLite 从事务入口使用 
 ### 8.3 新鲜度与重试
 
 - `lastSuccessfulAt + 10 分钟 < now` 即陈旧。
-- `next_retry_at` 只决定自动重试何时可再次创建，不改变陈旧状态。
-- 手动刷新可以绕过自动退避，但仍受同项目单活动运行和合理频率限制。
+- 活动项目快照 coverage 不等于当前固定窗口时也视为陈旧，即使 10 分钟内（上海跨午夜滚动）。
+- 刷新失败不设置自动重试时间；失败后由下一次访问重试。
+- 手动刷新仍受同项目单活动运行和合理频率限制。
 - 不自动重试非幂等 OAuth code exchange。
 
 ## 9. 单进程执行器
 
-- dashboard GET 始终纯读；前端看到 `NONE/STALE` 后显式 POST，POST 只在数据库提交一个 `QUEUED` run。
+- dashboard GET 在缓存新鲜时纯读；缓存缺失或过期时由服务层创建 `ON_DEMAND` run 并等待执行器完成。前端不需要为常规读取再显式 POST。
 - 进程内执行器使用全局小并发（第一期默认 1）、FIFO、有限队列和排队超时；不建设多实例抢占。
 - 生产部署强制 stop-old-before-start-new。营销执行器先取得 singleton（PostgreSQL session advisory lock；单机 SQLite 使用部署锁）再恢复/消费运行；拿不到锁时营销模块 fail-closed，GEO/SEO 继续可用。
 - `execution_token` 与 run 状态 CAS 防止中断或旧进程迟到完成。
@@ -777,7 +779,7 @@ git diff --check
 
 - 单进程执行器，没有多实例调度和进程主管；部署必须无重叠，营销 executor singleton 会拒绝第二执行器。
 - 只保留当前 30 天活动快照，不做历史仓库。
-- 第一版完整返回推广计划列表，不分页；真实规模超限即重新设计。
+- 当前试点完整返回四份报告在所选范围内的聚合列表，不分页；真实规模超限即改为分页或按父级懒加载，不得静默截断。
 - 多账户项目仍保留，但项目刷新采用全有或全无。
 
 实现阻塞项：
@@ -797,4 +799,45 @@ git diff --check
 
 ## 18. 后续来源边界
 
-官网与客服 API 开放后接入按来源归属的客服咨询；客服手动转换后，由销售 API 提供线索入池事实。销售 API 还需提供人工关联所需的最小订单标识、成交订单数和成交订单金额：订单数用于 CPA、成交率和整体转化率，订单金额用于 ROAS。来源系统没有统一来源键时，由用户为每笔成交订单确认一条主要咨询来源。该能力不在本期建表、不在本期 API 返回占位对象，也不以全站访问量、订单金额反推数量、毛利或模拟数据代替。
+后续来源的唯一主数据源、指标语义与无侵入接入红线以 `../adr/0001-marketing-funnel-data-source-of-truth.md` 为准：
+
+- 百度营销提供广告展现、广告点击和消费；百度统计提供网站来源、访问次数、UV 和 PV。官网一方访问只用于表单来源归属和对账，不替代百度统计，两套流量不得相加、平均或补差。
+- 官网数据库中成功写入的表单提交提供“表单咨询”；`contact_click_sessions` 不是咨询，`submission_sessions` 也不覆盖 53KF 在线对话。53KF 只统计访客实际发送过消息的有效对话。
+- 官网 `organic_search` 聚合多个搜索引擎；没有可信引擎级来源键时只能显示“搜索引擎”，不得拆成百度自然或必应自然。
+- GoodieAI 后端只调用官网聚合统计接口，使用部署环境注入的服务凭据、服务端 JWT 缓存、响应结构校验、日期范围来源聚合快照和最后成功数据；常规同步不得读取联系人明细，前端不得直接登录官网后台。最多 31 日的逐日表单趋势已通过逐自然日只读聚合实现并完成真实区间对账；最小权限服务身份、部署与正式入口验收仍是后续门禁。
+- 客服手动转换后，由销售 API 提供线索入池事实。销售 API 还需提供人工关联所需的最小订单标识、成交订单数和成交订单金额：订单数用于 CPA、成交率和整体转化率，订单金额用于 ROAS。
+
+2026-08-03 只读验证证明官网生产聚合接口已经存在，但官网本地仓库缺少线上 `conversion` 和来源归因结构。正式依赖前仍需同步生产实际源码、schema、迁移和测试；共享全权限管理员凭据只能用于短期试点，长期同步必须改用最小权限只读服务身份。本次接入使用独立官网表单快照与独立 API，不复用百度流量或广告快照，也不以全站访问量、订单金额、联系人明细或模拟数据代替。
+
+### 18.1 官网表单咨询独立合同
+
+官网表单咨询与 53KF 在线客服咨询是两个独立事实，不共用接口、字段或默认合计。GoodieAI 的官网表单公开接口固定为：
+
+```http
+GET /api/website-data/projects/:projectId/form-consultations?from=YYYY-MM-DD&to=YYYY-MM-DD
+GET /api/website-data/projects/:projectId/form-consultation-days?from=YYYY-MM-DD&to=YYYY-MM-DD
+```
+
+第一个接口读取最长 180 日的区间聚合；第二个接口读取最长 31 个连续上海自然日，并以单批最多 4 日的并发调用构建 `days[]`。两者使用同一独立缓存仓储和相同来源语义，逐日合计必须等于同响应的区间汇总。
+
+该接口由独立的 `backend/modules/websiteFormConsultations/` 模块承载，不挂载在百度营销 router 下。官网模块与 `backend/modules/marketing/` 分别拥有自己的配置、adapter、service、route、错误码和测试；两者只共享应用级登录鉴权与项目访问控制，任一来源失败不得阻断另一来源。
+
+响应只返回以下语义：
+
+- `sourceSystem = GATO_WEBSITE`；
+- `consultationType = WEBSITE_FORM`；
+- `summary.attributedFormSubmissionSessions`：官网聚合接口能够按会话来源证明的成功表单提交会话；
+- `sourceBreakdown[].sourceKey/upstreamSources/attributedFormSubmissionSessions`：官网一方来源归属，不代表百度统计访问归因；
+- `dataCoverage = ATTRIBUTED_SESSION_SUBMISSIONS_ONLY`：明确不包含缺少会话来源字段的历史表单记录，也不包含 53KF 对话；
+- `capabilities.dailyBreakdown = true`；上游聚合接口不能证明全部表单记录总数，因此 `formRecordTotal`、未归因记录数和归因率能力为 `false`，对应值固定为 `null`；
+- `cache`：最后成功快照的新鲜度或失败回退状态。
+
+该接口不得返回官网访问量、联系入口点击、姓名、电话、邮箱、IP、表单内容、访客 ID、会话 ID或 53KF 数据。首页必须使用“官网表单咨询”或“可归因官网表单咨询”命名，不得把该字段标成“客服咨询”“咨询总数”或“有效线索”。未来 53KF 必须使用独立接口；没有经过批准的跨渠道去重合同前，展示层也不得把两者自动相加。
+
+2026-08-03 本地实现状态：
+
+- 应用正式代码入口已挂载 `/api/website-data`，百度仍挂载 `/api/marketing`；架构守卫测试禁止互相引用适配器。
+- 官网模块拥有独立配置、外部客户端、服务、路由、聚合仓储、`website_data_schema_migrations` 迁移账本和 `migrate:website-data` 命令，不进入营销迁移账本。
+- `BAIDU_PAID` 只对齐百度推广，`DIRECT` 只对齐直接访问；`ORGANIC_SEARCH`、`REFERRAL`、`CAMPAIGN`、`SOCIAL`、`UNKNOWN` 有值时单独成行，不映射为百度/必应自然来源。
+- 营销 127 项、官网数据 20 项、相关前端合同 61 项，共 208/208 通过；相关 lint 和 Next.js 37 路由生产构建已通过。2026-08-01 至 2026-08-03 的官网逐日合计 3 与同区间汇总 3 一致。生产正式入口验收仍未完成。
+- 第二阶段业务变更未推送、未部署、未配置生产凭据，也未从 `https://insight.guangtuo.com` 验收；当前生产流程不会使用本实现。

@@ -8,6 +8,7 @@ const {
   MarketingRefreshService
 } = require('../../modules/marketing/services/MarketingRefreshService');
 const {
+  campaignOnlyReports,
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
@@ -18,14 +19,16 @@ test('executor singleton interrupts inherited nonterminal runs before accepting 
   await seedConnectionAndBinding(database.sequelize);
   const refresh = new MarketingRefreshService({
     sequelize: database.sequelize,
-    reportProvider: { async fetchSearchReport() { return []; } },
+    reportProvider: {
+      async fetchSearchReports() { return campaignOnlyReports(); }
+    },
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6
   });
   const run = await refresh.createRun({
     projectId: 11,
-    triggerType: 'AUTO'
+    triggerType: 'ON_DEMAND'
   });
   const first = new MarketingExecutor({
     sequelize: database.sequelize,
@@ -52,7 +55,9 @@ test('executor shutdown interrupts queued runs that were not yet drained', async
   await seedConnectionAndBinding(database.sequelize);
   const refresh = new MarketingRefreshService({
     sequelize: database.sequelize,
-    reportProvider: { async fetchSearchReport() { return []; } },
+    reportProvider: {
+      async fetchSearchReports() { return campaignOnlyReports(); }
+    },
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6
@@ -64,7 +69,7 @@ test('executor shutdown interrupts queued runs that were not yet drained', async
   await executor.start();
   const run = await refresh.createRun({
     projectId: 11,
-    triggerType: 'AUTO'
+    triggerType: 'ON_DEMAND'
   });
 
   await executor.stop();
@@ -74,7 +79,7 @@ test('executor shutdown interrupts queued runs that were not yet drained', async
   assert.equal(terminal.failure.code, 'APPLICATION_SHUTDOWN');
   const replacement = await refresh.createRun({
     projectId: 11,
-    triggerType: 'AUTO'
+    triggerType: 'ON_DEMAND'
   });
   assert.notEqual(replacement.runId, run.runId);
 });

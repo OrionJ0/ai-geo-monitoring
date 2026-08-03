@@ -1,4 +1,5 @@
 const { Sequelize } = require('sequelize');
+const { buildPostgresTlsOptions } = require('./postgresTls');
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 const enableSQLLogging = process.env.DB_LOGGING === 'true' || (isDevelopment && process.env.DB_LOGGING !== 'false');
@@ -29,10 +30,7 @@ const sequelize = process.env.DATABASE_URL
       ...commonOptions,
       dialect: 'postgres',
       dialectOptions: {
-        ssl: {
-          require: true,
-          rejectUnauthorized: false
-        }
+        ssl: buildPostgresTlsOptions(process.env)
       }
     })
   : new Sequelize({

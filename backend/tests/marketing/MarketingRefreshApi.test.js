@@ -5,6 +5,7 @@ const {
   MarketingRefreshService
 } = require('../../modules/marketing/services/MarketingRefreshService');
 const {
+  campaignOnlyReports,
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
@@ -15,7 +16,9 @@ test('concurrent refresh creation returns one active run with a fixed window', a
   await seedConnectionAndBinding(database.sequelize);
   const service = new MarketingRefreshService({
     sequelize: database.sequelize,
-    reportProvider: { async fetchSearchReport() { return []; } },
+    reportProvider: {
+      async fetchSearchReports() { return campaignOnlyReports(); }
+    },
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6,
@@ -23,8 +26,8 @@ test('concurrent refresh creation returns one active run with a fixed window', a
   });
 
   const runs = await Promise.all([
-    service.createRun({ projectId: 11, triggerType: 'AUTO' }),
-    service.createRun({ projectId: 11, triggerType: 'AUTO' })
+    service.createRun({ projectId: 11, triggerType: 'ON_DEMAND' }),
+    service.createRun({ projectId: 11, triggerType: 'ON_DEMAND' })
   ]);
   assert.equal(runs[0].runId, runs[1].runId);
   assert.deepEqual(runs[0].coverage, {
@@ -43,7 +46,9 @@ test('a queue rejection releases the project refresh slot', async (t) => {
   await seedConnectionAndBinding(database.sequelize);
   const service = new MarketingRefreshService({
     sequelize: database.sequelize,
-    reportProvider: { async fetchSearchReport() { return []; } },
+    reportProvider: {
+      async fetchSearchReports() { return campaignOnlyReports(); }
+    },
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6

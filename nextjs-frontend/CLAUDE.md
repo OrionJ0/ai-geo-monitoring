@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This project's current product identity is a read-only market data monitoring system, not a single-purpose AI GEO/SEO monitor. It uses a Next.js 16.2.12 frontend (App Router) and Express.js backend. GEO/SEO is the currently verified formal workflow, but that delivery stage does not redefine the product boundary. The repository contains the full market workspace navigation and the approved 2026-08-03 source-based homepage visual, interaction, state, responsive, and accessibility implementation. Current real data support is narrower: Baidu paid advertising facts and CPC plus Baidu Tongji website-source visits; consultations, lead-pool entries, order count, order amount, and dependent KPIs remain unavailable and render as honest missing states. Production may lag and must be verified independently. `../docs/visual-design-spec.md`, the root `README.md`, and `CONTEXT.md` are the current authorities. Legacy repository, service, page, or heading names containing `AI GEO` do not override this positioning.
+This project's current product identity is a read-only market data monitoring system, not a single-purpose AI GEO/SEO monitor. It uses a Next.js 16.2.12 frontend (App Router) and Express.js backend. GEO/SEO is the currently verified formal workflow, but that delivery stage does not redefine the product boundary. The repository contains the full market workspace navigation and local design implementations for market overview, ad performance, keyword analysis, website traffic, consultations, and order results. Current local real-data support includes Baidu paid advertising facts and CPC, Baidu Tongji website-source visits, and attributable website form consultations from the separate `/api/website-data` contract. The consultation record UI also has a strict `/api/consultations` contract and a locally live-verified, server-side-masked website record adapter; 53KF remains independently `NOT_CONNECTED`. The order-result UI has no production data source and its complete fixture is development-only. Website form consultations do not include 53KF online chats or all historical form records. 53KF conversations, lead-pool entries, order count, order amount, and dependent KPIs remain unavailable and render as honest missing states. The complete four-report hierarchy, richer Tongji quality/page reads, website-form additions, and current page batch described here have not been deployed; production must be verified independently. `../docs/README.md#当前前端页面实施状态`, `../docs/visual-design-spec.md`, the root `README.md`, and `CONTEXT.md` are the current authorities. Legacy repository, service, page, or heading names containing `AI GEO` do not override this positioning.
 
 ### Production Truth
 
@@ -28,7 +28,7 @@ This project's current product identity is a read-only market data monitoring sy
 cd nextjs-frontend
 npm run dev                         # Start dev on port 3001 with Turbopack
 npm run build    # Build for production
-npm run start    # Start production on 0.0.0.0:3001
+npm run start    # Direct/manual start on 0.0.0.0:3001; formal Ubuntu production uses systemd on 127.0.0.1:3001
 npm run lint     # Run ESLint
 ```
 
@@ -46,78 +46,15 @@ npm start        # Start production
 
 ## Architecture
 
-### Frontend Structure (Next.js App Router)
-```
-src/app/
-├── layout.tsx           # Root layout with AntdRegistry
-├── page.tsx            # 默认登录入口（复用 /login 页面）
-├── login/              # 登录页兼容入口
-├── register/
-├── geo/                # Main GEO functionality
-│   ├── layout.tsx      # GEO-specific layout with Header
-│   ├── page.tsx        # GEO detection interface
-│   ├── dashboard/      # Analytics dashboard
-│   ├── history/        # Detection history
-│   ├── tasks/          # Scheduled tasks
-│   ├── marketing/      # Allowlisted Baidu marketing trial page
-│   ├── profile/        # User profile
-│   └── notice/         # GEO notices
-├── admin/              # Admin panel
-│   ├── layout.tsx      # Admin layout with Header
-│   ├── users/          # User management
-│   ├── memberships/    # Membership plans
-│   ├── settings/       # System settings
-│   ├── history/        # Admin history view
-│   ├── health/         # System health
-│   └── notice/         # Admin notices
-└── tools/writer/       # Content writing tool
-```
+### Current boundaries
 
-### Key Frontend Components
-- **`src/lib/axiosConfig.js`**: Global axios configuration with interceptors for:
-  - Automatic token injection from localStorage (`agd_token`)
-  - 401 error handling (auto-redirects to `/login`)
-  - Token expiration warnings (30min/5min before expiry)
-  - Helper functions: `setAuthToken()`, `clearAuth()`, `shouldRefreshToken()`, `getCurrentToken()`
-  - **Important**: Import from `@/lib/axiosConfig` instead of direct `axios` import
-- **`src/components/Login.jsx`**: `/`、`/login` 以及受保护布局共用的登录表单
-- **`src/app/geo/layout.tsx`**: GEO 工作台导航与登录态保护
-- **`src/app/admin/layout.tsx`**: 管理后台导航、权限与登录态保护
-
-### Backend Structure
-```
-backend/
-├── app.js              # Main Express app with middleware
-├── modules/marketing/  # Isolated read-only marketing module and migrations
-├── config/database.js  # Sequelize configuration
-├── models/             # Sequelize models
-├── middleware/         # Custom middleware
-│   ├── auth.js        # JWT authentication
-│   └── quota.js       # Usage quota checking
-├── routes/             # API routes
-│   ├── detection.js   # GEO detection endpoints
-│   ├── user.js        # User authentication & management
-│   ├── schedules.js   # Scheduled task management
-│   ├── statistics.js  # Analytics endpoints
-│   ├── aiPlatforms.js # Authenticated platform catalog
-│   ├── adminAIPlatforms.js # Admin platform configuration
-│   ├── membership.js  # Membership plans
-│   ├── settings.js    # System settings
-│   └── captcha.js     # CAPTCHA generation
-└── services/          # Business logic
-    └── SchedulerService.js  # Task scheduling
-```
-
-### API Architecture
-- **Authentication**: JWT tokens stored in localStorage (`agd_token`)
-- **Rate Limiting**:
-  - General API: 500 requests/15 minutes
-  - Schedules API: 1000 requests/15 minutes (higher limit for batch operations)
-  - Public endpoints excluded: `/health`, `/captcha`, `/settings/seo`, `/settings/notice`
-- **CORS**: Trusts same-machine loopback proxies; other cross-origin requests use `ALLOWED_ORIGINS`
-- **API Proxy**: Next.js rewrites `/api/*` to backend (configured in `next.config.ts`)
-  - Rewrites use the server-only `API_BASE_URL` env var
-  - Client-side axios must remain same-origin and must not contain a backend IP
+- App Router pages live under `src/app/`; shared components live under `src/components/`; browser API clients and hooks live under `src/lib/`.
+- `src/app/geo/layout.tsx` owns workspace navigation and login protection. `src/app/admin/layout.tsx` owns administrator navigation and permissions.
+- `src/lib/axiosConfig.js` is the only shared browser Axios entry. It owns `agd_token`, auth headers, expiry warnings, and 401 redirects; never import Axios directly or set a component-level global base URL.
+- Browser requests remain same-origin `/api/*`. `next.config.ts` forwards them to the server-only `API_BASE_URL`; never expose the backend IP in client code.
+- Backend route ownership is explicit: Baidu advertising/Tongji use `backend/modules/marketing` and `/api/marketing`; website form aggregates use `backend/modules/websiteFormConsultations` and `/api/website-data`; read-only consultation-record contracts use `backend/modules/consultationRecords` and `/api/consultations`.
+- Authentication uses JWT. General rate limiting is 500 requests per 15 minutes and schedules use 1000; prefer bounded batch endpoints over browser request fans.
+- CORS trusts same-machine loopback proxies; every other cross-origin caller must be present in `ALLOWED_ORIGINS`.
 
 ## Key Technical Patterns
 
@@ -163,9 +100,11 @@ backend/
 - Describe the product as a read-only market data monitoring system. When scope matters, distinguish the formal GEO/SEO workflow, the allowlisted Baidu trial, and the unimplemented full-funnel target.
 - Keep the marketing module read-only. Do not add source-system write actions for ads, consultations, leads, opportunities, or orders.
 - The full market navigation already exists in the repository. Do not infer production availability from local code; verify the canonical production entry before claiming it is live.
-- Use `../docs/visual-design-spec.md` as the visual and homepage-metric authority. The source chain is impressions → visits/clicks → consultations → lead-pool entries → completed orders, and the order stage includes both count and amount.
+- Use `../docs/visual-design-spec.md` as the visual and homepage-metric authority. The source chain is impressions → visits/clicks → website-form consultations / online-chat consultations → lead-pool entries → completed orders, and the order stage includes both count and amount.
 - Use completed-order count for CPA, close rate, and overall conversion rate; use order amount for ROAS. Never infer a missing count from amount.
 - Only assign records to a source when a trustworthy source key or confirmed manual mapping exists. Do not turn contemporaneous ad, site, consultation, and sales totals into attribution facts.
+- Keep Baidu advertising and Tongji endpoints under `/api/marketing`. Keep attributable website form aggregates under the independent `/api/website-data` module and contract. Do not share source clients, response fields, module status, or migration ledgers between them.
+- Name the website value “官网表单咨询”; it covers attributable successful submission sessions only. Never relabel it as total customer-service consultations, 53KF conversations, all form records, leads, or orders. When the upstream aggregate cannot prove total form records, keep total, unattributed count, and attribution rate unavailable.
 - `src/app/geo/market-overview/page.tsx` implements the approved V2 visual and interaction contract. Unsupported downstream data and metrics remain missing by design; report UI completion, data-contract completion, commit, deployment, and production verification as separate stages with direct evidence.
 - Keep Baidu contract parsing inside `backend/modules/marketing/adapters/BaiduMarketingClient.js`.
 
@@ -190,36 +129,6 @@ backend/
 - Shared components in `src/components/`
 - Utilities in `src/utils/`
 - Configuration in `src/lib/`
-
-## Common Development Tasks
-
-### Adding a New API Endpoint
-1. Add route in `backend/routes/`
-2. Register route in `backend/app.js`
-3. Add rate limiting if needed
-4. Test with Postman or curl
-5. Call from frontend using axios from `@/lib/axiosConfig`
-
-### Creating a New Page
-1. Create `src/app/[route]/page.tsx`
-2. Add `'use client'` directive if using React state/effects
-3. Import necessary components and utilities
-4. Add to navigation if needed (update the relevant route layout)
-
-### Debugging API Issues
-1. Check browser DevTools Network tab
-2. Verify token is being sent (Authorization header)
-3. Check backend logs for errors
-4. Test endpoint directly with curl:
-   ```bash
-   curl -H "Authorization: Bearer <token>" http://localhost:3001/api/endpoint
-   ```
-
-### Handling Rate Limit Errors
-- Reduce batch sizes
-- Consider implementing exponential backoff for retries
-- Check if endpoint needs higher limit in backend
-- Prefer a server-side batch endpoint over repeated client-side mutation requests
 
 ## Deployment Notes
 

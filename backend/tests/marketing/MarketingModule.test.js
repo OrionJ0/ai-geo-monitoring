@@ -11,6 +11,7 @@ const {
   buildMarketingCapabilities
 } = require('../../modules/marketing/marketingCapabilities');
 const {
+  campaignOnlyReports,
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
@@ -249,6 +250,113 @@ test('pilot data module mounts allowlisted binding and dashboard routes', async 
   await module.shutdown();
 });
 
+test('pilot data module requests advertising on dashboard access instead of a timer', async (t) => {
+  const database = await createMarketingTestDatabase(
+    'marketing-on-demand-module-'
+  );
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize, {
+    accountId: 'search-account-1',
+    projectId: 11
+  });
+  const env = enabledConfig({
+    MARKETING_MONITORING_PILOT_MODE: 'true',
+    MARKETING_MONITORING_ALLOWED_PROJECT_IDS: '11',
+    BAIDU_MARKETING_SCOPE: '67,71,1004606,1002161',
+    BAIDU_MARKETING_CONTRACT_VERSION:
+      'baidu-marketing-pilot-2026-07-30'
+  });
+  await database.sequelize.query(
+    `UPDATE baidu_marketing_connections
+     SET access_token_ciphertext = :ciphertext,
+         access_token_expires_at = '2099-01-01T00:00:00.000Z'
+     WHERE id = 'connection-1'`,
+    {
+      replacements: {
+        ciphertext: encryptSecret(
+          'search-token-test',
+          env.CONFIG_ENCRYPTION_KEY
+        )
+      }
+    }
+  );
+  let reportCalls = 0;
+  const module = createMarketingModule({
+    env,
+    sequelize: database.sequelize,
+    provider: {
+      async fetchSearchReports({ binding, coverage, accessToken }) {
+        reportCalls += 1;
+        assert.equal(accessToken, 'search-token-test');
+        const campaign = {
+          accountId: binding.accountId,
+          campaignId: 'on-demand-campaign',
+          campaignName: '按需刷新',
+          metricDate: coverage.to,
+          impressions: '10',
+          clicks: '2',
+          costAmountScaled: '3000000'
+        };
+        const adGroup = {
+          ...campaign,
+          adGroupId: 'on-demand-ad-group',
+          adGroupName: '按需刷新单元'
+        };
+        return {
+          campaigns: [campaign],
+          adGroups: [adGroup],
+          keywords: [{
+            ...adGroup,
+            keywordId: 'on-demand-keyword',
+            keywordName: '周界报警',
+            targetingType: 'KEYWORD'
+          }],
+          searchTerms: [{
+            ...adGroup,
+            keywordName: '周界报警',
+            searchTerm: '周界报警厂家',
+            queryStatus: 'NOT_ADDED',
+            matchType: 'PHRASE'
+          }]
+        };
+      }
+    }
+  });
+  await module.start();
+  assert.equal(reportCalls, 0, '模块启动不得请求百度推广');
+
+  const app = express();
+  app.use((req, _res, next) => {
+    req.user = { id: 2, role: 'user', status: 'active' };
+    next();
+  });
+  app.use('/api/marketing', module.router);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const first = await fetch(
+    `${baseUrl}/api/marketing/projects/11/dashboard`
+  );
+  assert.equal(first.status, 200);
+  const firstBody = await first.json();
+  assert.equal(firstBody.summary.impressions, '10');
+  assert.equal(firstBody.adGroups[0].adGroupId, 'on-demand-ad-group');
+  assert.equal(firstBody.keywords[0].keywordId, 'on-demand-keyword');
+  assert.equal(firstBody.searchTerms[0].searchTerm, '周界报警厂家');
+  assert.equal('keywordId' in firstBody.searchTerms[0], false);
+  assert.equal(reportCalls, 1);
+
+  const cached = await fetch(
+    `${baseUrl}/api/marketing/projects/11/dashboard`
+  );
+  assert.equal(cached.status, 200);
+  assert.equal((await cached.json()).summary.impressions, '10');
+  assert.equal(reportCalls, 1);
+  await module.shutdown();
+});
+
 test('pilot data route uses the separate Tongji token and explicitly bound site', async (t) => {
   const database = await createMarketingTestDatabase(
     'marketing-explicit-tongji-site-'
@@ -285,7 +393,7 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
       }
     }
   );
-  const requestedSiteIds = [];
+  const tongjiReportCalls = [];
   const tongjiCredentials = [];
   const module = createMarketingModule({
     env,
@@ -306,14 +414,18 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
           { siteId: '23412673', domain: 'gato.com.cn', status: 'ACTIVE' }
         ];
       },
-      async fetchTongjiTrend({ siteId }) {
-        requestedSiteIds.push(siteId);
+      async fetchTongjiTrend({ siteId, sourceKey = 'ALL', device }) {
+        tongjiReportCalls.push({ kind: 'trend', siteId, sourceKey, device });
         return [{
           date: '2026-08-03',
           pageviews: null,
           visits: null,
           visitors: null
         }];
+      },
+      async fetchTongjiSourceSummary({ siteId, reportKey, device }) {
+        tongjiReportCalls.push({ kind: 'summary', siteId, reportKey, device });
+        return [];
       }
     }
   });
@@ -333,16 +445,45 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
     `${baseUrl}/api/marketing/projects/11/tongji-trend`
   );
   const body = await response.json();
+  const sourceResponse = await fetch(
+    `${baseUrl}/api/marketing/projects/11/tongji-source-trends?device=pc&source=DIRECT`
+  );
+  const sourceBody = await sourceResponse.json();
+  const cachedSourceResponse = await fetch(
+    `${baseUrl}/api/marketing/projects/11/tongji-source-trends?device=pc&source=DIRECT`
+  );
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
   await module.shutdown();
   assert.equal(response.status, 200, JSON.stringify(body));
   assert.equal(body.site.siteId, '23412673');
-  assert.deepEqual(requestedSiteIds, ['23412673']);
-  assert.deepEqual(tongjiCredentials, [{
-    accountName: 'shb-广拓信息',
-    accessToken: 'tongji-token-test'
-  }]);
+  assert.equal(sourceResponse.status, 200, JSON.stringify(sourceBody));
+  assert.equal(cachedSourceResponse.status, 200);
+  assert.equal(sourceBody.selectedTrend.sourceKey, 'DIRECT');
+  assert.equal(tongjiReportCalls.length, 5);
+  assert.ok(tongjiReportCalls.every((call) => (
+    call.siteId === '23412673' && call.device === 'pc'
+  )));
+  assert.deepEqual(
+    tongjiReportCalls.filter((call) => call.kind === 'summary').map(
+      (call) => call.reportKey
+    ),
+    ['ALL', 'ENGINE']
+  );
+  assert.deepEqual(
+    tongjiReportCalls.filter((call) => call.kind === 'trend').map((call) => call.sourceKey),
+    ['ALL', 'ALL', 'DIRECT']
+  );
+  assert.deepEqual(tongjiCredentials, [
+    {
+      accountName: 'shb-广拓信息',
+      accessToken: 'tongji-token-test'
+    },
+    {
+      accountName: 'shb-广拓信息',
+      accessToken: 'tongji-token-test'
+    }
+  ]);
 });
 
 test('the application mounts marketing through its facade without changing global readiness inputs', () => {

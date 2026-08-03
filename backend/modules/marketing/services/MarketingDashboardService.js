@@ -2,6 +2,7 @@ const { Transaction, QueryTypes } = require('sequelize');
 const { bindingFingerprint } = require('../domain/bindingFingerprint');
 const { addDecimalText } = require('../domain/exactValues');
 const { MarketingRefreshError } = require('./MarketingRefreshService');
+const { fixedShanghaiWindow } = require('../domain/syncWindow');
 const {
   parseProjectAllowlist,
   projectAllowed
@@ -27,6 +28,29 @@ function addMetric(target, row) {
     target.costAmountScaled,
     row.cost_amount_scaled_text
   );
+}
+
+function aggregateRows(rows, keyOf, createItem) {
+  const items = new Map();
+  const dailyByItem = new WeakMap();
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (!items.has(key)) {
+      const item = { ...createItem(row), trend: [] };
+      items.set(key, item);
+      dailyByItem.set(item, new Map());
+    }
+    const item = items.get(key);
+    addMetric(item, row);
+    const daily = dailyByItem.get(item);
+    if (!daily.has(row.metric_date)) {
+      const point = { date: row.metric_date, ...emptyTotals() };
+      daily.set(row.metric_date, point);
+      item.trend.push(point);
+    }
+    addMetric(daily.get(row.metric_date), row);
+  }
+  return [...items.values()];
 }
 
 function strictDate(value) {
@@ -160,6 +184,9 @@ class MarketingDashboardService {
 
         let filter = null;
         let metrics = [];
+        let adGroupMetrics = [];
+        let keywordMetrics = [];
+        let searchTermMetrics = [];
         if (snapshotRun) {
           const requestedFrom = from ?? snapshotRun.coverage_start;
           const requestedTo = to ?? snapshotRun.coverage_end;
@@ -177,25 +204,46 @@ class MarketingDashboardService {
             );
           }
           filter = { from: requestedFrom, to: requestedTo };
-          metrics = await this.sequelize.query(
+          const replacements = {
+            projectId,
+            runId: snapshotRun.id,
+            from: requestedFrom,
+            to: requestedTo
+          };
+          const readFacts = (table, orderBy) => this.sequelize.query(
             `SELECT *
-             FROM baidu_campaign_daily_metrics
+             FROM ${table}
              WHERE project_id = :projectId
                AND refresh_run_id = :runId
                AND metric_date >= :from
                AND metric_date <= :to
-             ORDER BY metric_date ASC, binding_id ASC, campaign_id ASC`,
+             ORDER BY metric_date ASC, binding_id ASC, ${orderBy}`,
             {
-              replacements: {
-                projectId,
-                runId: snapshotRun.id,
-                from: requestedFrom,
-                to: requestedTo
-              },
+              replacements,
               type: QueryTypes.SELECT,
               transaction
             }
           );
+          [
+            metrics,
+            adGroupMetrics,
+            keywordMetrics,
+            searchTermMetrics
+          ] = await Promise.all([
+            readFacts('baidu_campaign_daily_metrics', 'campaign_id ASC'),
+            readFacts(
+              'baidu_ad_group_daily_metrics',
+              'campaign_id ASC, ad_group_id ASC'
+            ),
+            readFacts(
+              'baidu_keyword_daily_metrics',
+              'campaign_id ASC, ad_group_id ASC, keyword_id ASC'
+            ),
+            readFacts(
+              'baidu_search_term_daily_metrics',
+              'campaign_id ASC, ad_group_id ASC, search_term_key ASC'
+            )
+          ]);
         }
 
         const activeRuns = await this.sequelize.query(
@@ -228,6 +276,9 @@ class MarketingDashboardService {
           bindings,
           snapshotRun,
           metrics,
+          adGroupMetrics,
+          keywordMetrics,
+          searchTermMetrics,
           filter,
           activeRun: activeRuns[0] || null,
           lastRun: lastRuns[0] || null
@@ -241,13 +292,15 @@ class MarketingDashboardService {
     bindings,
     snapshotRun,
     metrics,
+    adGroupMetrics,
+    keywordMetrics,
+    searchTermMetrics,
     filter,
     activeRun,
     lastRun
   }) {
     const summary = emptyTotals();
     const daily = new Map();
-    const campaigns = new Map();
     for (const row of metrics) {
       addMetric(summary, row);
       if (!daily.has(row.metric_date)) {
@@ -257,20 +310,77 @@ class MarketingDashboardService {
         });
       }
       addMetric(daily.get(row.metric_date), row);
-      const key = [
+    }
+    const campaigns = aggregateRows(
+      metrics,
+      (row) => [
         row.external_account_id,
         row.campaign_id
-      ].join('\u0000');
-      if (!campaigns.has(key)) {
-        campaigns.set(key, {
+      ].join('\u0000'),
+      (row) => ({
           accountId: row.external_account_id,
           campaignId: row.campaign_id,
           campaignName: row.campaign_name,
           ...emptyTotals()
-        });
-      }
-      addMetric(campaigns.get(key), row);
-    }
+      })
+    );
+    const adGroups = aggregateRows(
+      adGroupMetrics,
+      (row) => [
+        row.external_account_id,
+        row.campaign_id,
+        row.ad_group_id
+      ].join('\u0000'),
+      (row) => ({
+        accountId: row.external_account_id,
+        campaignId: row.campaign_id,
+        campaignName: row.campaign_name,
+        adGroupId: row.ad_group_id,
+        adGroupName: row.ad_group_name,
+        ...emptyTotals()
+      })
+    );
+    const keywords = aggregateRows(
+      keywordMetrics,
+      (row) => [
+        row.external_account_id,
+        row.campaign_id,
+        row.ad_group_id,
+        row.keyword_id
+      ].join('\u0000'),
+      (row) => ({
+        accountId: row.external_account_id,
+        campaignId: row.campaign_id,
+        campaignName: row.campaign_name,
+        adGroupId: row.ad_group_id,
+        adGroupName: row.ad_group_name,
+        keywordId: row.keyword_id,
+        keywordName: row.keyword_name,
+        targetingType: row.targeting_type,
+        ...emptyTotals()
+      })
+    );
+    const searchTerms = aggregateRows(
+      searchTermMetrics,
+      (row) => [
+        row.external_account_id,
+        row.campaign_id,
+        row.ad_group_id,
+        row.search_term_key
+      ].join('\u0000'),
+      (row) => ({
+        accountId: row.external_account_id,
+        campaignId: row.campaign_id,
+        campaignName: row.campaign_name,
+        adGroupId: row.ad_group_id,
+        adGroupName: row.ad_group_name,
+        keywordName: row.keyword_name,
+        searchTerm: row.search_term,
+        queryStatus: row.query_status,
+        matchType: row.match_type,
+        ...emptyTotals()
+      })
+    );
     const blocked = bindings.some((binding) => (
       binding.status !== 'ACTIVE'
       || binding.connection_status !== 'CONNECTED'
@@ -279,9 +389,18 @@ class MarketingDashboardService {
       (binding) => binding.connection_status === 'CONNECTED'
     );
     const lastSuccessfulAt = snapshotRun?.finished_at || null;
-    const stale = lastSuccessfulAt
-      ? this.clock() - new Date(lastSuccessfulAt).getTime() > FRESHNESS_MS
-      : false;
+    const currentWindow = fixedShanghaiWindow(this.clock());
+    const coverageRolled = (
+      project.status === 'active'
+      && snapshotRun
+      && (snapshotRun.coverage_start !== currentWindow.from
+        || snapshotRun.coverage_end !== currentWindow.to)
+    );
+    const stale = coverageRolled || (
+      lastSuccessfulAt
+        ? this.clock() - new Date(lastSuccessfulAt).getTime() > FRESHNESS_MS
+        : false
+    );
     const refreshState = activeRun?.status || lastRun?.status || 'IDLE';
     return {
       projectId: String(project.id),
@@ -331,7 +450,16 @@ class MarketingDashboardService {
       filter,
       summary,
       trend: [...daily.values()],
-      campaigns: [...campaigns.values()],
+      campaigns,
+      adGroups,
+      keywords,
+      searchTerms,
+      hierarchyCounts: {
+        campaigns: campaigns.length,
+        adGroups: adGroups.length,
+        keywords: keywords.length,
+        searchTerms: searchTerms.length
+      },
       activeRun: activeRun
         ? {
             runId: activeRun.id,
@@ -342,8 +470,7 @@ class MarketingDashboardService {
         ? {
             runId: lastRun.id,
             status: lastRun.status,
-            failureCode: lastRun.failure_code || null,
-            nextRetryAt: lastRun.next_retry_at || null
+            failureCode: lastRun.failure_code || null
           }
         : null
     };

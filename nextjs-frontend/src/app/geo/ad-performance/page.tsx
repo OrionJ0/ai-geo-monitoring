@@ -53,8 +53,9 @@ type SortOrder = 'ascend' | 'descend' | null;
 const LEVEL_OPTIONS = [
   { value: 'all', label: '全部层级' },
   { value: 'project', label: '仅项目' },
-  { value: 'scheme', label: '仅方案' },
-  { value: 'unit', label: '仅单元' }
+  { value: 'scheme', label: '仅计划' },
+  { value: 'unit', label: '仅单元' },
+  { value: 'keyword', label: '仅关键词' }
 ];
 
 const TREND_OPTIONS: Array<{ value: TrendMetric; label: string }> = [
@@ -325,7 +326,9 @@ function DetailPopover({
   const descriptionId = `ad-detail-${node.key.replace(/[^a-z0-9-]/giu, '-')}`;
   const title = node.level === 'project'
     ? '项目详情'
-    : node.level === 'scheme' ? '方案详情' : '单元详情';
+    : node.level === 'scheme'
+      ? '计划详情'
+      : node.level === 'unit' ? '单元详情' : '关键词详情';
   return (
     <Popover
       title={title}
@@ -957,7 +960,7 @@ export default function AdPerformancePage() {
                     <span
                       className={[
                         styles.expandPlaceholder,
-                        displayLevel === 'all' && record.level === 'unit'
+                        displayLevel === 'all' && record.level === 'keyword'
                           ? styles.leafConnector
                           : '',
                         terminalSiblingKeys.has(record.key)

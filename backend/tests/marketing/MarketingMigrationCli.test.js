@@ -74,7 +74,14 @@ test('marketing migration CLI applies and audits all immutable migrations', () =
         '003-campaign-snapshots',
         '004-baidu-oauth-identity',
         '005-tongji-site-bindings',
-        '006-tongji-credentials'
+        '006-tongji-credentials',
+        '007-tongji-snapshots',
+        '008-tongji-source-trend-snapshots',
+        '009-tongji-range-snapshots',
+        '010-search-hierarchy-snapshots',
+        '011-tongji-cache-pruning-indexes',
+        '012-tongji-snapshot-capabilities',
+        '013-tongji-page-report-snapshots'
       ],
       pendingVersions: []
     });

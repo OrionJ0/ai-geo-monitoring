@@ -71,3 +71,32 @@ test('creates one verified latest snapshot while the WAL source remains open', a
   );
   assert.deepEqual(await get(backup, 'PRAGMA quick_check'), { quick_check: 'ok' });
 });
+
+test('reuses a verified immutable release snapshot without overwriting it', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-release-backup-'));
+  const sourcePath = path.join(directory, 'database.sqlite');
+  const backupPath = path.join(directory, 'database.pre-release.sqlite');
+  const source = openDatabase(sourcePath);
+
+  t.after(async () => {
+    await close(source);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  await run(source, 'CREATE TABLE deployment_check (value TEXT NOT NULL)');
+  await run(source, 'INSERT INTO deployment_check (value) VALUES (?)', ['before']);
+  const first = await backupDatabase({ sourcePath, backupPath, ifAbsent: true });
+  await run(source, 'UPDATE deployment_check SET value = ?', ['after']);
+  const second = await backupDatabase({ sourcePath, backupPath, ifAbsent: true });
+
+  assert.equal(first.reused, false);
+  assert.equal(second.reused, true);
+  assert.equal(fs.statSync(backupPath).mode & 0o777, 0o600);
+  const backup = openDatabase(backupPath);
+  t.after(() => close(backup));
+  assert.deepEqual(
+    await get(backup, 'SELECT value FROM deployment_check'),
+    { value: 'before' }
+  );
+  assert.deepEqual(await get(backup, 'PRAGMA quick_check'), { quick_check: 'ok' });
+});

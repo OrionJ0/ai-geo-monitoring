@@ -34,6 +34,19 @@ ssh ubuntu@182.254.140.163 'cd /opt/ai-geo-monitoring && git status --short --br
 环境已经切换，但控制台新地址尚未得到人工确认；完成确认前，现有服务器密文
 Token 应继续保留，但不得宣称在新域名上重新授权已经通过。
 
+### 2026-08-03 只读运行态复核
+
+- `https://insight.guangtuo.com/api/ready` 返回 `ready`，SQLite 为 WAL，两个 systemd 服务均为 `active`。
+- 服务器项目工作区干净，`HEAD=59a9ca33eabc4a37f8d295267ad0cd7762d711da`；服务器本地 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629`，因此现场显示 `main...origin/main [ahead 5]`。这反映服务器的远端引用未更新，不能据此判断 GitHub 或本地开发工作区版本。
+- 该 `HEAD` 不包含 `/api/website-data/.../form-consultation-days` 或 `baidu_search_term_daily_metrics`。第二阶段业务变更中的百度四层报告、百度统计质量/页面读取和官网逐日表单实现尚未推送或部署，当前正式入口不会使用这些新增实现。
+- 本次复核只读取 Git、systemd 和正式 `/api/ready`，没有修改服务器源码、环境、数据库或服务。
+
+### 2026-08-04 Git Bundle 发布尝试
+
+- GitHub `main` 已推进到只包含候选部署桥接的 `2bbd8c4`，市场工作台第二阶段业务改动尚未推送。
+- workflow `30842859133` 因 `AI_GEO_DEPLOY_ENABLED=false` 安全跳过；临时开启后，`30842939667` 在 SCP 前发现 production Environment 的 `AI_GEO_DEPLOY_HOST`、`AI_GEO_DEPLOY_USER`、`AI_GEO_DEPLOY_SSH_KEY`、`AI_GEO_DEPLOY_KNOWN_HOSTS` 均未配置而失败。没有建立服务器连接，没有上传 Bundle、快进代码、停止服务或执行迁移。
+- 发布开关已恢复为 false。运维配置受限部署密钥和预核验主机指纹后，必须先单独发布 `2bbd8c4` 并从正式域名验证健康；在桥接成功前不得推送市场工作台业务提交。
+
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`
 - 服务器具备 Nginx 或其他反向代理能力
@@ -59,9 +72,8 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
   # 同机 loopback 代理不依赖此项；分域或非 loopback 代理时必须填写
   ALLOWED_ORIGINS=https://example.com,https://www.example.com
 
-  DEFAULT_ADMIN_USERNAME=admin
-  DEFAULT_ADMIN_EMAIL=admin@example.com
-  DEFAULT_ADMIN_PASSWORD=<强随机值>
+  # 生产禁止启动期创建默认管理员；账号必须走受控的现有用户管理流程
+  DEFAULT_ADMIN_BOOTSTRAP_ENABLED=false
 
   # 用于加密数据库中的 AI 平台密钥（32 字节 Base64 或 64 位十六进制）
   CONFIG_ENCRYPTION_KEY=<加密主密钥>
@@ -86,7 +98,7 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
   - SEO 检测请求由后端服务器发出；`localhost` 指后端服务器。内部环境如需检测本机或局域网站点，可将 `SEO_AUDIT_ALLOW_PRIVATE_TARGETS=true`，重启后直接填写目标局域网 URL，无需维护逐 IP 白名单
   - 开启私网检测后，公开自助注册会自动关闭；内部账号由现有用户管理入口创建，不需要增加管理员/普通用户的检测权限分层
   - 私网检测是一项受控 SSRF 能力：所有登录用户都能请求后端可达的普通 Web 服务，因此公网部署、存在外部账号或内网含敏感 HTTP 管理面时必须关闭
-  - **部署后立即修改默认管理员密码**
+  - 生产必须设置 `DEFAULT_ADMIN_BOOTSTRAP_ENABLED=false` 和 `DEMO_USER_ENABLED=false`；不得依赖公开默认管理员账号
 - 生产建议配置 `DATABASE_URL` 使用托管 Postgres（如 Supabase）。未配置时会使用 SQLite（`backend/config/database.js`，默认 `database.sqlite`）。
 
 ## 构建与运行（生产）
@@ -152,7 +164,7 @@ server {
 - 就绪检查：`GET https://<你的域名>/api/ready`。只有返回 `200` 且 `status=ready` 才能接入流量；SQLite 部署还必须显示 `journal_mode=wal`、`busy_timeout_ms>=5000`、`synchronous=normal`，并确认 scheduler 已启动且首次 recovery 无错误。
 - 问题集可靠性迁移前先生成可恢复的数据库备份并执行 `PRAGMA quick_check`；迁移后运行 `cd backend && npm run audit:run-ownership`，确认新运行无悬空归属、重复槽位或完整性错误。未完成生产迁移和回滚确认时不得把需求标记为已关闭。
 - AI 平台配置：管理员登录 `/admin/settings`，人工填写 API Key 和供应商明确支持的模型请求参数，再分别执行“测试连接”和“检测联网能力”。腾讯混元还需先在 TokenHub“工具管理”领取联网搜索免费资源包或开通后付费；普通对话成功但没有 `search_results` 时仍是“证据不足”
-- 登录验证：使用默认管理员登录并立即修改密码（见下方安全建议）
+- 登录验证：使用已由受控用户管理流程创建的管理员账号，不启用启动期默认管理员 bootstrap
 - 当前正式实例只通过 `https://insight.guangtuo.com` 验收；不要用直接 IP 的默认
   Nginx 页面替代域名、TLS 和 Host 路由检查。
 
@@ -160,7 +172,7 @@ server {
 
 1. 先完成数据库备份。
 2. 执行 `cd backend && npm run migrate:marketing`。
-3. 执行 `cd backend && npm run audit:marketing`，确认 6 个版本均已应用且无 checksum 漂移。
+3. 执行 `cd backend && npm run audit:marketing`，确认当前仓库列出的全部版本均已应用且无 checksum 漂移。
 4. 保持 `MARKETING_MONITORING_ENABLED=false` 启动并回归 GEO/SEO。
 5. 用公网域名检查 `GET /api/health`、`GET /api/ready`，再确认禁用状态的 callback 空请求返回营销模块 503 而不是 404；反向代理不得记录 callback query。
 6. 新建本项目专用百度应用，把完整 HTTPS callback 登记为 `https://<域名>/api/admin/marketing/baidu/oauth/callback`，审核通过后取得 `appId`、`secretKey` 和授权链接中的只读 `scope`。
@@ -173,9 +185,21 @@ server {
 
 故障时同时把 `MARKETING_MONITORING_ENABLED` 和 `MARKETING_MONITORING_PILOT_MODE` 恢复为 `false`。若 Token 或主密钥疑似泄露，先阻断连接并在百度控制台撤权，清除本地 Token，轮换应用 Secret 与 `CONFIG_ENCRYPTION_KEY`，然后逐连接重新授权；不得恢复任何旧营销实现或隐式 fallback。
 
+### 官网表单模块发布顺序
+
+官网模块与百度营销模块分别迁移、启停和验收；不得把官网迁移加入 `marketing_schema_migrations`。标准 `npm run deploy` 会在营销迁移复审后单独执行官网数据迁移。
+
+1. 保持 `GATO_WEBSITE_FORM_ENABLED=false`，先执行 `cd backend && npm run migrate:website-data`。
+2. 执行 `cd backend && npm run audit:website-data`，确认仓库现列 `001` 至 `003` 全部应用到 `website_data_schema_migrations` 且 checksum 无漂移；再执行 `npm run audit:consultation-records`，确认咨询详情审计迁移已应用且 checksum 无漂移。
+3. 由部署环境注入官网只读服务身份；不得把账号、密码或官网 JWT 写入 Git、部署日志或前端。共享管理员身份只允许短期试点。
+4. 配置官网模块开关、固定官网根地址、唯一项目 ID、超时和缓存 TTL；先检查 `GET /api/website-data/status` 返回 `READY`。
+5. 以有权访问该项目的 GoodieAI 用户分别请求区间接口 `GET /api/website-data/projects/:projectId/form-consultations?from=YYYY-MM-DD&to=YYYY-MM-DD` 和最长 31 日的逐日接口 `GET /api/website-data/projects/:projectId/form-consultation-days?from=YYYY-MM-DD&to=YYYY-MM-DD`。确认两者的 `sourceSystem=GATO_WEBSITE`、`consultationType=WEBSITE_FORM`，逐日合计等于同区间汇总；`formRecordTotal`、未归因数和归因率在上游不可证明时必须为 `null`，且响应不包含联系人、官网流量或 53KF 字段。
+6. 从正式首页确认表头为“官网表单咨询”：`BAIDU_PAID` 只进入百度推广，`DIRECT` 只进入直接访问，未细分搜索等来源单独成行；不得出现把官网 `organic_search` 映射为百度或必应自然搜索的结果。
+7. 官网接口故障时只允许回退相同项目、相同日期范围的最后成功聚合快照，不得影响百度 API 或全局 `/api/ready`。需要停用时仅设置 `GATO_WEBSITE_FORM_ENABLED=false`，不要回滚百度模块。
+
 ## 安全与合规建议
 - ⚠️ **JWT_SECRET 必须设置为强随机值**（至少32字符），使用默认值会导致严重安全风险
-- ⚠️ **部署后立即修改默认管理员密码**
+- ⚠️ **生产禁用默认管理员 bootstrap 和 demo 用户；管理员账号通过受控用户管理流程创建与轮换**
 - ⚠️ 分域或非 loopback 代理部署时，**设置 ALLOWED_ORIGINS** 为实际使用的域名，不要使用通配符
 - ⚠️ 防火墙只向公网开放 80/443；3002 默认只监听本机，3001 仅供反向代理或受控内网使用
 - ⚠️ 启用 HTTPS（Nginx/TLS），并配置有效的 SSL 证书

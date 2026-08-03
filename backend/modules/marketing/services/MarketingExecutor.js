@@ -14,6 +14,7 @@ class MarketingExecutor {
     this.queueLimit = queueLimit;
     this.queue = [];
     this.running = null;
+    this.jobs = new Map();
     this.accepting = false;
     this.started = false;
   }
@@ -55,7 +56,7 @@ class MarketingExecutor {
     if (
       this.running === runId
       || this.queue.includes(runId)
-    ) return;
+    ) return this.jobs.get(runId)?.promise;
     if (!this.accepting) {
       const error = new Error('营销执行器未接收新运行');
       error.code = 'MARKETING_EXECUTOR_NOT_ACCEPTING';
@@ -66,19 +67,29 @@ class MarketingExecutor {
       error.code = 'MARKETING_EXECUTOR_QUEUE_FULL';
       throw error;
     }
+    let resolveJob;
+    const promise = new Promise((resolve) => {
+      resolveJob = resolve;
+    });
+    this.jobs.set(runId, { promise, resolve: resolveJob });
     this.queue.push(runId);
     this.drain().catch(() => {});
+    return promise;
   }
 
   async drain() {
     if (this.running || !this.queue.length) return;
     const runId = this.queue.shift();
     this.running = runId;
+    const job = this.jobs.get(runId);
     try {
-      await this.refreshService.executeRun(runId);
-    } catch {
+      const value = await this.refreshService.executeRun(runId);
+      job?.resolve({ ok: true, value });
+    } catch (error) {
       // RefreshService persists the stable terminal error.
+      job?.resolve({ ok: false, error });
     } finally {
+      this.jobs.delete(runId);
       this.running = null;
       if (this.queue.length) setImmediate(() => this.drain().catch(() => {}));
     }
@@ -86,6 +97,15 @@ class MarketingExecutor {
 
   async stop() {
     this.accepting = false;
+    for (const runId of this.queue) {
+      this.jobs.get(runId)?.resolve({
+        ok: false,
+        error: Object.assign(new Error('营销执行器已停止'), {
+          code: 'MARKETING_EXECUTOR_STOPPED'
+        })
+      });
+      this.jobs.delete(runId);
+    }
     this.queue = [];
     if (this.started) {
       const now = new Date().toISOString();

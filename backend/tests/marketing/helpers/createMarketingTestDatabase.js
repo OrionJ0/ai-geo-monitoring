@@ -98,7 +98,17 @@ async function seedConnectionAndBinding(sequelize, {
   );
 }
 
+function campaignOnlyReports(campaigns = []) {
+  return {
+    campaigns,
+    adGroups: [],
+    keywords: [],
+    searchTerms: []
+  };
+}
+
 module.exports = {
+  campaignOnlyReports,
   createMarketingTestDatabase,
   seedConnectionAndBinding
 };

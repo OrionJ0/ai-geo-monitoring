@@ -38,6 +38,7 @@ function normalizeStatus(name, unit, properties) {
 function createSystemdProcessManager({
   runSystemctl,
   waitForHttp,
+  verifyRevision,
   units = DEFAULT_UNITS,
 } = {}) {
   if (typeof runSystemctl !== 'function') {
@@ -85,6 +86,9 @@ function createSystemdProcessManager({
         'http://127.0.0.1:3001/api/ready',
         '前端 API 代理'
       );
+      if (typeof verifyRevision === 'function') {
+        await verifyRevision();
+      }
 
       const current = await status();
       if (!current.backend.running || !current.frontend.running) {

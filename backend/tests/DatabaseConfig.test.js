@@ -200,7 +200,7 @@ test('uses Supabase Postgres when DATABASE_URL is configured without applying SQ
   try {
     assert.equal(sequelize.getDialect(), 'postgres');
     assert.equal(sequelize.options.dialectOptions.ssl.require, true);
-    assert.equal(sequelize.options.dialectOptions.ssl.rejectUnauthorized, false);
+    assert.equal(sequelize.options.dialectOptions.ssl.rejectUnauthorized, true);
     assert.equal(sequelize.options.logging, false);
     assert.deepEqual(sequelize.getReadiness(), {
       status: 'initializing',

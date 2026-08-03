@@ -5,6 +5,7 @@ const {
   MarketingRefreshService
 } = require('../../modules/marketing/services/MarketingRefreshService');
 const {
+  campaignOnlyReports,
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
@@ -24,10 +25,10 @@ test('project archived before final commit rejects late provider results', async
   const refresh = new MarketingRefreshService({
     sequelize: database.sequelize,
     reportProvider: {
-      async fetchSearchReport({ binding }) {
+      async fetchSearchReports({ binding }) {
         release();
         await providerCanFinish;
-        return [{
+        return campaignOnlyReports([{
           accountId: binding.accountId,
           campaignId: 'late-campaign',
           campaignName: '晚到计划',
@@ -35,7 +36,7 @@ test('project archived before final commit rejects late provider results', async
           impressions: '1',
           clicks: '1',
           costAmountScaled: '1'
-        }];
+        }]);
       }
     },
     contractVersion: 'fixture-contract-v1',

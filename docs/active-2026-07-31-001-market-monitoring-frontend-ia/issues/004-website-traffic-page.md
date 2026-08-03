@@ -10,6 +10,8 @@ blocked_by:
 
 > 2026-08-03 口径说明：本 issue 已关闭并准确描述“网站流量”独立下钻页的 V1 行为。新版首页可以按来源展示完整链路，但必须使用可信来源键或确认映射；本页的全站百度统计总量仍不得自动归因到广告账户、推广计划或点击。
 
+> 2026-08-04 演进说明：当前本地页已改为服务端 `/website-traffic-overview` 与 `/website-traffic-pages` 合同，包含汇总、单指标趋势、来源质量、入口/受访页面、搜索、排序和分页，不再读取旧 `/tongji-trend`。真实响应已经验证，但本轮实现尚未部署或从正式域名验收；来源行质量和来源—页面联动没有可信证据时继续显示缺失。
+
 ## Parent
 
 - [PRD](../prd.md)
@@ -39,6 +41,6 @@ blocked_by:
 
 ## Verification
 
-- `node --test tests/marketing/website-traffic-page.test.cjs`，4 项全部通过。
-- 页面只调用百度统计 `/tongji-trend`，不依赖广告 dashboard 或刷新 API。
+- `node --test tests/marketing/website-traffic-page.test.cjs` 覆盖服务端合同、状态、筛选、分页与缓存回退。
+- 页面只调用 `/website-traffic-overview` 与 `/website-traffic-pages`，不依赖广告 dashboard 或刷新 API，也不回退 `/tongji-trend`。
 - 空值、无数据标记、站点/连接歧义和归档状态均保留独立文案。

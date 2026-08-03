@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || '.next',
+  env: {
+    AI_GEO_BUILD_REVISION: process.env.AI_GEO_BUILD_REVISION || '',
+  },
   allowedDevOrigins: ['127.0.0.1'],
   experimental: {
     proxyTimeout: 300_000,

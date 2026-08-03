@@ -1,18 +1,10 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-function extractToken(req) {
-  const authHeader = req.headers['authorization'] || '';
+function extractHeaderToken(req) {
+  const authHeader = req.headers?.['authorization'] || '';
   if (authHeader && authHeader.startsWith('Bearer ')) {
     return authHeader.slice(7);
-  }
-  // 兼容 SSE：从查询参数读取 token
-  if (req.query && req.query.token) {
-    return String(req.query.token);
-  }
-  // 兼容 Cookie（可选）
-  if (req.cookies && req.cookies.token) {
-    return String(req.cookies.token);
   }
   return null;
 }
@@ -52,11 +44,10 @@ function assignRequestUser(req, user) {
   };
 }
 
-module.exports = {
-  // 普通鉴权：要求有效 JWT
-  authRequired: async (req, res, next) => {
+function createAuthRequired(tokenExtractor) {
+  return async (req, res, next) => {
     try {
-      const token = extractToken(req);
+      const token = tokenExtractor(req);
       if (!token) {
         return res.status(401).json({ success: false, message: '未授权：缺少令牌' });
       }
@@ -73,12 +64,27 @@ module.exports = {
     } catch (error) {
       return res.status(401).json({ success: false, message: '未授权：令牌无效或已过期' });
     }
-  },
+  };
+}
+
+const authRequired = createAuthRequired(extractHeaderToken);
+const authHeaderRequired = createAuthRequired(extractHeaderToken);
+const authSseRequired = createAuthRequired(extractHeaderToken);
+
+module.exports = {
+  // 普通鉴权：要求有效 JWT
+  authRequired,
+
+  // 咨询详情等敏感读取只能使用 Authorization Header，拒绝 URL/Cookie 凭据。
+  authHeaderRequired,
+
+  // SSE 也只接受 Authorization Header；禁止把完整 JWT 写入 URL。
+  authSseRequired,
 
   // 管理员鉴权：要求 role === 'admin'
   adminRequired: async (req, res, next) => {
     try {
-      const token = extractToken(req);
+      const token = extractHeaderToken(req);
       if (!token) {
         return res.status(401).json({ success: false, message: '未授权：缺少令牌' });
       }

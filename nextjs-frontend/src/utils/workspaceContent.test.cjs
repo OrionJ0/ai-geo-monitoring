@@ -19,17 +19,16 @@ test('市场页面不重复侧边栏标题或展示解释性段落', () => {
     '广告和网站流量分别展示，不连接、不换算',
     '当前只提示数据健康；趋势阈值尚未批准'
   ].forEach((copy) => assert.equal(overview.includes(copy), false));
-  assert.doesNotMatch(overview, />市场总览</);
-  assert.doesNotMatch(consultations, />原始咨询</);
+  assert.match(overview, /<h1 className=\{styles\.visuallyHidden\}>市场总览<\/h1>/);
   assert.doesNotMatch(orders, />订单结果</);
-  assert.doesNotMatch(consultations, /<Card|<Paragraph|<Title/);
+  assert.match(consultations, /<h1 className=\{styles\.visuallyHidden\}>原始咨询<\/h1>/);
+  assert.doesNotMatch(overview, /<Title level=\{1\}/);
+  assert.doesNotMatch(consultations, /<Title level=\{1\}|<Paragraph/);
   assert.doesNotMatch(orders, /<Card|<Paragraph|<Title/);
 });
 
 test('正式工作台页面以控件和数据开场，不重复导航页名', () => {
   const pages = [
-    ['app/geo/ad-performance/page.tsx', /<h1[^>]*>广告表现/],
-    ['app/geo/website-traffic/page.tsx', /<h1[^>]*>网站流量/],
     ['app/geo/project-dashboard/page.tsx', />AI 搜索表现</],
     ['app/geo/sources/page.tsx', />引用来源分析</],
     ['app/geo/prompts/page.tsx', /<Card title="问题库"/],
@@ -40,6 +39,13 @@ test('正式工作台页面以控件和数据开场，不重复导航页名', ()
   pages.forEach(([file, duplicateTitle]) => {
     assert.doesNotMatch(read(file), duplicateTitle);
   });
+
+  const websiteTraffic = read('app/geo/website-traffic/page.tsx');
+  assert.match(websiteTraffic, /<h1 className=\{styles\.visuallyHidden\}>网站流量<\/h1>/);
+  assert.doesNotMatch(websiteTraffic, /<Title level=\{1\}/);
+
+  const adPerformance = read('app/geo/ad-performance/page.tsx');
+  assert.doesNotMatch(adPerformance, /<Title level=\{1\}|<h1[^>]*>广告表现<\/h1>/);
 });
 
 test('SEO 检测用操作和状态说明范围，不展示功能宣传卡片', () => {

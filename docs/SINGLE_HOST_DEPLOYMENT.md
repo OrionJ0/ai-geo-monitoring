@@ -40,7 +40,9 @@ sudo systemctl enable ai-geo-backend.service ai-geo-frontend.service
 
 从旧 PID 管理器首次切换时，先保持 `AI_GEO_PROCESS_MANAGER=manual`，执行 `npm run prod:stop` 并确认 3001/3002 已释放；再把配置明确改为 `systemd`，最后执行 `npm run prod:start`。不得并行保留两套管理器。
 
-首次启用 Bundle 发布前，先人工把包含 `scripts/deploy-from-bundle.mjs` 的版本以同样的已校验 Bundle 方式引导到服务器。完成安装后，可在服务器项目根目录执行只读检查：
+首次启用 Bundle 发布前，必须先把包含 `scripts/deploy-from-bundle.mjs` 的桥接版本单独发布到服务器，再发布依赖新部署入口的业务版本。当前桥接提交为 `2bbd8c4`；只有服务器 `HEAD` 已快进到该提交、桥接部署成功且公网健康检查通过后，才能把第二阶段业务提交推送到 GitHub `main`。不得先推业务提交后再尝试跨版本调用服务器旧脚本。
+
+桥接安装完成后，可在服务器项目根目录执行只读检查：
 
 ```bash
 npm run deploy:check
@@ -59,19 +61,20 @@ git push origin main
 
 手动触发 `.github/workflows/deploy-production.yml` 后会依次：
 
-1. 检出完整 `main`，生成并本地验证 Git Bundle。
-2. 计算 Bundle SHA-256。
-3. 使用 production 环境的 SSH secrets 上传到服务器临时目录。
-4. 由 `scripts/deploy-from-bundle.mjs` 校验并快进服务器 `main`。
-5. 以 `--prepared-revision=<完整 commit>` 调用 `scripts/deploy.mjs`，完成原有正式部署。
+1. `verify` job 在不挂载 production 环境、也不读取生产 secrets 的 runner 中检出完整 `main`，执行后端、部署、前端和浏览器验收。
+2. 确认 `HEAD` 与 `refs/heads/main` 都等于 `GITHUB_SHA`，生成 Git Bundle 和 SHA-256，并上传 1 天有效的不可变 Actions artifact。
+3. `deploy` job 在全新 runner 中下载 artifact 并重新计算 SHA-256；该 job 不检出仓库、不安装依赖、不执行候选版本的 npm 脚本。
+4. 只在 `deploy` job 中读取 production 环境的 SSH secrets，使用显式私钥、预核验 `known_hosts`、`BatchMode`、`IdentitiesOnly` 和 `StrictHostKeyChecking` 上传 Bundle。
+5. 由服务器现有 `scripts/deploy-from-bundle.mjs` 校验完整提交、Bundle SHA-256、快进关系并快进 `main`。
+6. 桥接脚本从快进后的候选提交动态加载 `scripts/deploy.mjs`，以 `--prepared-revision=<完整 commit>` 完成正式部署。
 
-GitHub production 环境必须配置：
+GitHub 必须配置：
 
-- Repository/Environment variable `AI_GEO_DEPLOY_ENABLED=true`
-- `AI_GEO_DEPLOY_HOST`
-- `AI_GEO_DEPLOY_USER`
-- `AI_GEO_DEPLOY_SSH_KEY`
-- `AI_GEO_DEPLOY_KNOWN_HOSTS`
+- Repository variable `AI_GEO_DEPLOY_ENABLED=true`
+- production Environment secrets `AI_GEO_DEPLOY_HOST`
+- production Environment secrets `AI_GEO_DEPLOY_USER`
+- production Environment secrets `AI_GEO_DEPLOY_SSH_KEY`
+- production Environment secrets `AI_GEO_DEPLOY_KNOWN_HOSTS`
 
 主机密钥必须来自运维侧预先核验，不得在 workflow 中临时执行无校验的 `ssh-keyscan`。SSH 私钥应使用只允许该服务器、该部署用户的专用密钥。
 服务器把仓库 `deploy/ai-geo-deploy-gate.sh` 安装到
@@ -91,31 +94,38 @@ job，不会用空凭据尝试连接服务器。
 2. 校验 Bundle SHA-256、`refs/heads/main` 与预期完整 commit，拒绝非快进版本；快进后再次核对 `HEAD`。
 3. 检查 `JWT_SECRET`、`CONFIG_ENCRYPTION_KEY` 和数据库配置。
 4. 通过 systemd 停止前端和后端。
-5. SQLite 使用 Online Backup API 更新唯一最新快照并执行 `PRAGMA quick_check`；Postgres 要求 `AI_GEO_DATABASE_BACKUP_REFERENCE` 已声明外部备份引用。
-6. 后端执行 `npm ci` 和完整测试。
-7. 前端执行 `npm ci`、lint 和生产构建。
-8. 使用第 5 步的备份引用执行 GEO 指标语义迁移，再运行一次只读迁移审计；任一步失败都不启动服务。
-9. 通过 systemd 依次启动后端和 Next.js，并检查后端 ready、前端页面和前端 `/api` 代理。
+5. SQLite 使用 Online Backup API 创建按 release commit 命名、不可覆盖的迁移前快照，再更新便利性的 `latest` 快照；两份都执行 `PRAGMA quick_check`。Postgres 要求 `AI_GEO_DATABASE_BACKUP_REFERENCE` 已声明外部备份引用。
+6. 后端执行 `npm ci`、完整测试以及营销、官网数据、原始咨询专项测试。
+7. 前端执行 `npm ci`、单元测试、lint、生产构建和市场页面 Playwright 验收。
+8. 使用第 5 步的 release 备份引用执行 GEO 指标语义迁移并只读复审。
+9. 应用并复审营销模块迁移。
+10. 应用并复审官网数据迁移。
+11. 应用并复审原始咨询审计迁移。
+12. 写入 release revision，通过 systemd 启动前后端，并检查后端 ready、前端页面、前端 `/api` 代理与前后端 revision 一致。
 
 任何步骤失败都会返回非零退出码并写入部署日志。服务停止后的步骤失败时，网站保持停止；修复问题后重新运行对应 workflow。`npm run deploy` 保留为服务器能够稳定访问 GitHub 时的人工兼容入口，不是当前正式 Bundle 发布路径。
 
-## SQLite 最新备份
+## SQLite 迁移前备份与恢复边界
 
-默认备份位置：
+默认会同时生成：
 
 ```text
 backend/database.latest.sqlite
+backend/releases/database.pre-<完整 release commit>.sqlite
 ```
 
-备份脚本先写入临时文件，通过完整性检查后再替换 latest，因此失败的新快照不会覆盖上一次成功快照。只保留这一份，不保留历史版本。
+备份脚本先写入临时文件，通过完整性检查后再原子替换目标。`latest` 便于日常定位，会被下一次部署更新；`releases/database.pre-<commit>.sqlite` 是该 release 第一次迁移前的不可覆盖快照。相同 commit 重试时只复用权限正确且通过 `PRAGMA quick_check` 的既有 release 快照，绝不拿已部分迁移的数据库覆盖它。
 
 可以在部署命令外指定其他路径：
 
 ```bash
 AI_GEO_SQLITE_BACKUP_PATH=/实际备份路径/database.latest.sqlite npm run deploy
+AI_GEO_SQLITE_RELEASE_BACKUP_DIR=/实际备份目录/releases npm run deploy
 ```
 
-这份文件是部署前快照，不是异机灾备。服务器磁盘损坏、项目目录被整个删除或当前数据库在备份前已经逻辑损坏时，单份本地快照可能无法恢复。
+发生迁移后故障时，默认优先向前修复。若必须恢复，先保持两个 systemd 服务停止，记录失败 release commit，校验对应 `database.pre-<commit>.sqlite` 的权限和 `PRAGMA quick_check`，再由有数据库恢复权限的运维人员把该不可变快照恢复为活动数据库，并让代码与数据库同时回到兼容版本后启动。只切回旧代码、却保留旧代码不认识的未来迁移，不构成安全回滚；也不得使用后续被覆盖的 `latest` 冒充原始迁移前快照。
+
+这些文件位于同机磁盘，不是异机灾备。服务器磁盘损坏、项目目录被整个删除或当前数据库在首次备份前已逻辑损坏时，本地快照可能无法恢复。首次真实迁移前必须确认有一名具备 systemd、日志和数据库恢复权限的人工值守者在线。
 
 Postgres 的备份由外部数据库设施负责，部署命令不会创建数据库快照。执行部署前必须提供可追溯的备份引用：
 

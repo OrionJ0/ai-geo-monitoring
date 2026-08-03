@@ -20,9 +20,9 @@ blocked_by:
 
 ## Scope
 
-- 迁移 `baidu_campaign_daily_metrics` 和 `baidu_marketing_refresh_runs`。
+- 迁移 `baidu_campaign_daily_metrics`、`baidu_ad_group_daily_metrics`、`baidu_keyword_daily_metrics`、`baidu_search_term_daily_metrics` 和 `baidu_marketing_refresh_runs`。
 - 实现固定窗口、完整分页、严格解析、精确值和项目级全有或全无提交。
-- 实现 dashboard 的汇总、趋势、完整推广计划列表和正交状态。
+- 实现 dashboard 的汇总、趋势、计划/单元/关键词/独立搜索词集合和正交状态。
 - 增加安全的 PostgreSQL 营销集成测试 runner。
 - 本 issue 先完成手动刷新；自动陈旧刷新和 Token claim 在 Issue 006。
 
@@ -38,9 +38,9 @@ blocked_by:
 - [ ] 完整成功空结果记录 `ZERO` 和覆盖范围，而不是 `NONE`。
 - [ ] 外部 ID、展现、点击和消费统一为十进制 TEXT；聚合只用 BigInt。
 - [ ] 禁止 `Number`、`parseInt`、浮点求和和 Sequelize `Model.sum` 处理精确值。
-- [ ] dashboard 在同一只读事务按 refresh_run_id 返回同一 revision 的 summary、trend、campaigns、逐绑定健康和覆盖范围。
+- [x] dashboard 在同一只读事务按 refresh_run_id 返回同一 revision 的 summary、trend、campaigns、adGroups、keywords、searchTerms、逐绑定健康和覆盖范围。
 - [ ] 成功 run 持久化 contract version、currency 和 cost scale，契约切换后旧快照仍按旧口径展示。
-- [ ] campaign 行包含账户标识、campaign ID 和名称。
+- [x] 计划、单元和关键词行包含账户及全部稳定父级 ID；搜索词明确不包含百度未返回的关键词 ID。
 - [ ] 日期筛选仅查询本地覆盖范围，不调用百度；越界返回 422。
 - [ ] 同一账户、计划和日期重复同步不产生重复事实。
 - [ ] PostgreSQL runner 只使用本次创建、随机命名、受限且完全限定的 disposable namespace；DDL 前拒绝生产 URL、同 `DATABASE_URL`、public fallback 和伪造 namespace。
@@ -89,3 +89,11 @@ git diff --check
 - 真实 30 天报告返回 777 行、4 页，已验证 `body.data[0].rows`、`rowCount` 与 `totalRowCount`。
 - 适配器完成完整分页、账户一致性、日期、Long ID、整数指标和 2 位消费精度校验；脱敏 fixture 覆盖正常、分页、串线和超精度拒绝。
 - `PILOT_DATA_READY` 可为白名单项目生成搜索广告原子快照；正式币种/时区证据和百度后台同口径核对未完成，本 issue 保持 blocked。
+
+## 2026-08-03 完整层级本地实现
+
+- 新增官方计划 `2290316`、单元 `2284618`、关键词 `2602783`、搜索词 `2307838` 四报表合同和严格客户端；刷新入口已硬切到 `fetchSearchReports()`，没有计划级 fallback。
+- 四组事实在同一次项目事务内原子替换并共享 `refresh_run_id`；重复事实、行数超限、父子 ID/名称不一致都会拒绝整次刷新并保留旧快照。
+- Dashboard additive 返回四组聚合数据，广告表现页按稳定 ID 下钻到关键词。搜索词报告没有关键词 ID，因此保持独立数组，不嵌入关键词严格子树。
+- 后端营销测试、前端 51 项测试和 Next.js 生产构建已通过。本地迁移审计包含 `010-search-hierarchy-snapshots`。
+- 2026-08-03 已使用服务器现有生产 Token 只读取得计划 98、单元 224、关键词 524、搜索词 45 行真实响应，严格字段和父子关系均通过。尚未保存新增层级脱敏 fixture、与百度后台核对或从正式域名验收，因此本 issue 继续保持 `blocked`，生产当前不会使用本地新实现。

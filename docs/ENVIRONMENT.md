@@ -14,8 +14,9 @@ cp nextjs-frontend/.env.example nextjs-frontend/.env.local
 然后编辑 `backend/.env`，至少填写：
 
 - `JWT_SECRET`
-- `DEFAULT_ADMIN_PASSWORD`
 - `CONFIG_ENCRYPTION_KEY`
+
+只有需要首次初始化本地管理员时，才额外配置 `DEFAULT_ADMIN_BOOTSTRAP_ENABLED=true` 和一组非示例的 `DEFAULT_ADMIN_*` 凭据。生产环境禁止启动期管理员 bootstrap。
 
 本地开发可在 `backend/` 目录执行以下命令生成本机专用主密钥。命令不会回显密钥，并会把 `.env` 权限收紧为仅当前用户可读写：
 
@@ -41,9 +42,10 @@ npm run setup:local-key
   - 生产示例：`https://example.com,https://www.example.com`
 
 ## 管理员初始化
-- `DEFAULT_ADMIN_USERNAME` 默认管理员用户名（用于初始化 `id=1` 用户）
-- `DEFAULT_ADMIN_EMAIL` 默认管理员邮箱
-- `DEFAULT_ADMIN_PASSWORD` 默认管理员密码（仅用于初始化，**部署后必须立即修改**）
+- `DEFAULT_ADMIN_BOOTSTRAP_ENABLED` 启动期管理员初始化开关，默认 `false`；只能在首次本地初始化时短暂启用，生产环境设置为 `true` 会拒绝启动
+- `DEFAULT_ADMIN_USERNAME` 首次本地初始化使用的管理员用户名
+- `DEFAULT_ADMIN_EMAIL` 首次本地初始化使用的管理员邮箱
+- `DEFAULT_ADMIN_PASSWORD` 首次本地初始化使用的非示例强密码；不提供固定回退值，也不会覆盖、提权或重新激活已有用户
 
 ## 会员与设置
 - `DEFAULT_MEMBERSHIP_LEVEL` 默认会员等级（`free`/`pro`/`enterprise`），初始化设置表时使用
@@ -112,6 +114,31 @@ BAIDU_MARKETING_REDIRECT_URI=https://<域名>/api/admin/marketing/baidu/oauth/ca
 ```
 
 其余 `APP_ID`、`SECRET_KEY` 和 `SCOPE` 必须来自新建并审核通过的百度应用，不能复用其他系统的应用或 callback。真实 Token 只保存在服务器数据库密文中；本地开发使用契约目录下的脱敏 fixture，不复制生产 Token。
+
+## 官网表单咨询（独立，默认关闭）
+
+官网表单模块与营销模块完全独立：公开接口使用 `/api/website-data`，不依赖 `MARKETING_MONITORING_ENABLED`、百度 App、百度 Token 或 `marketing_schema_migrations`。启用前先在 `backend/` 执行 `npm run migrate:website-data`，再配置：
+
+- `GATO_WEBSITE_FORM_ENABLED`：官网表单模块开关，默认 `false`。
+- `GATO_WEBSITE_FORM_BASE_URL`：固定为 `https://gato.com.cn`；拒绝 HTTP、其他主机、路径、query、fragment 和 URL 凭据。
+- `GATO_WEBSITE_FORM_PROJECT_ID`：唯一允许绑定官网表单来源的 GoodieAI 项目 ID。
+- `GATO_WEBSITE_FORM_USERNAME` / `GATO_WEBSITE_FORM_PASSWORD`：由部署环境或密钥管理注入的官网后台服务身份；不得写入 Git、文档、测试、日志或前端。共享管理员账号只允许短期试点，长期必须换成最小权限只读身份。
+- `GATO_WEBSITE_FORM_HTTP_TIMEOUT_MS`：官网请求超时，允许 100–60000 毫秒。
+- `GATO_WEBSITE_FORM_CACHE_TTL_MS`：日期范围聚合快照 TTL，允许 60000–3600000 毫秒。
+
+最小形态：
+
+```text
+GATO_WEBSITE_FORM_ENABLED=true
+GATO_WEBSITE_FORM_BASE_URL=https://gato.com.cn
+GATO_WEBSITE_FORM_PROJECT_ID=<默认品牌项目 ID>
+GATO_WEBSITE_FORM_USERNAME=<只读服务身份>
+GATO_WEBSITE_FORM_PASSWORD=<由部署环境注入>
+GATO_WEBSITE_FORM_HTTP_TIMEOUT_MS=10000
+GATO_WEBSITE_FORM_CACHE_TTL_MS=600000
+```
+
+`npm run audit:website-data` 只审计官网数据自己的迁移账本。该模块只保存日期范围、来源键、可归因成功表单提交会话数与缓存时间，不保存联系人、表单内容、访客/会话明细或官网 JWT。
 
 ## SEO 设置（可选）
 - `SEO_TITLE` 网站 SEO 标题
