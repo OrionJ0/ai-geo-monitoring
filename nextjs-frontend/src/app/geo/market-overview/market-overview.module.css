@@ -42,6 +42,10 @@
   margin-bottom: 16px;
 }
 
+.statusStack :global(.ant-alert-action a) {
+  color: #174ea6;
+}
+
 .page section + section {
   margin-top: 16px;
 }

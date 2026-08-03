@@ -40,6 +40,13 @@ test('market overview includes narrow viewport and reduced-motion rules', () => 
   assert.match(marketingCss, /overflow-x: auto/);
 });
 
+test('market overview alert actions keep sufficient contrast on warning surfaces', () => {
+  assert.match(
+    marketingCss,
+    /\.statusStack :global\(\.ant-alert-action a\)[\s\S]*color: #174ea6/u
+  );
+});
+
 test('market overview keeps authoritative values out of floating point conversion', () => {
   assert.doesNotMatch(marketingPage, /\bparseInt\s*\(/u);
   assert.doesNotMatch(marketingPage, /\bparseFloat\s*\(/u);
