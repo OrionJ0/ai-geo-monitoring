@@ -6,12 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
-import {
-  acquireDeploymentLock,
-  deploy,
-  releaseDeploymentLock
-} from './deploy.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as bootstrapDeployment from './deploy.mjs';
 
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(import.meta.url);
@@ -94,12 +90,28 @@ export async function prepareBundleRelease({
   return { previousRevision, revision };
 }
 
+export async function loadPreparedDeploy({ projectRoot, revision }) {
+  const normalizedRevision = fullCommit(revision, '预置版本');
+  const candidateUrl = pathToFileURL(
+    path.join(path.resolve(projectRoot), 'scripts', 'deploy.mjs')
+  );
+  candidateUrl.searchParams.set('release', normalizedRevision);
+  const candidateModule = await import(candidateUrl.href);
+  if (typeof candidateModule.deploy !== 'function') {
+    throw new Error('候选版本缺少正式 deploy() 入口');
+  }
+  return candidateModule.deploy;
+}
+
 function argument(name) {
   const prefix = `--${name}=`;
   return process.argv.find((value) => value.startsWith(prefix))?.slice(prefix.length) || '';
 }
 
 async function main() {
+  // 本入口只由生产机 forced-command 发布闸门调用；显式建立生产部署上下文，
+  // 不依赖服务器历史 .env 是否已声明 NODE_ENV。
+  process.env.NODE_ENV = 'production';
   const projectRoot = path.resolve(
     process.env.AI_GEO_PROJECT_ROOT || path.join(scriptDirectory, '..')
   );
@@ -114,17 +126,28 @@ async function main() {
     throw new Error('发布 Bundle 必须是系统临时目录中的 .bundle 普通文件');
   }
 
-  await acquireDeploymentLock();
+  await bootstrapDeployment.acquireDeploymentLock();
   try {
+    // 在改动服务器 main 之前先验证现役环境、分支和工作区；候选代码本身
+    // 已由发布工作流的测试/构建门禁验证。
+    if (typeof bootstrapDeployment.checkPreconditions === 'function') {
+      await bootstrapDeployment.checkPreconditions();
+    }
     const prepared = await prepareBundleRelease({
       projectRoot,
       bundlePath,
       expectedRevision: argument('revision'),
       expectedSha256: argument('sha256')
     });
-    await deploy(prepared.revision, { lockAlreadyAcquired: true });
+    // main 已快进后必须绕过启动器加载阶段的 ESM 缓存，执行候选版本本身的
+    // 部署器；否则旧启动器可能跳过候选版本新增的迁移和发布校验。
+    const candidateDeploy = await loadPreparedDeploy({
+      projectRoot,
+      revision: prepared.revision
+    });
+    await candidateDeploy(prepared.revision, { lockAlreadyAcquired: true });
   } finally {
-    await releaseDeploymentLock();
+    await bootstrapDeployment.releaseDeploymentLock();
     await fs.promises.rm(bundlePath, { force: true });
   }
 }
