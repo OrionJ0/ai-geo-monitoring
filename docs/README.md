@@ -55,7 +55,7 @@
 - `active-2026-07-29-001-marketing-monitoring/`：只读市场数据监控定位下的百度第一期；真实 OAuth、账户目录、搜索推广 30 日分页报表和百度统计站点/趋势响应已用脱敏 fixture 固化，`PILOT_DATA_READY` 仅向项目白名单开放绑定、搜索快照和统计实时读取；页面入口已展示，真实数据仍等待金额/时区、Refresh Token 与完整生产验收
 - `active-2026-07-31-001-market-monitoring-frontend-ia/`：面向市场负责人和管理层的工作台信息架构、默认项目、市场总览、广告表现、网站流量及现有 GEO 页面自动上下文改造；当前正式导航仍保持 GEO 主入口，市场总览等待视觉确认、异常规则校准和百度 `VERIFIED` 后再切流
 - `closed-2026-07-31-002-single-brand-platform-runtime/`：已完成的单品牌管理员工作台、全局启用平台运行范围、不可用平台部分跳过、原始失败快照重试，以及默认品牌和历史监测数据保护
-- `active-2026-07-31-003-question-set-report-trustworthiness/`：问题集报告可信度需求因豆包过渡态误采集和表格 evidence 失败重新进入修复；新增采集质量门禁、历史覆盖率排除、严格表格锚定和 evidence 字段级修复，等待生产 Flash 样本与正式入口验收
+- `closed-2026-07-31-003-question-set-report-trustworthiness/`：问题集报告可信度修复已完成；豆包过渡态在分析前按“采集无效”排除，表格 evidence 使用严格确定性锚定与字段级修复，生产 Flash 真实样本 20 / 20 通过并完成正式入口验收
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
 - `solutions/2026-07-23-seo-site-audit.md`：全站异步抓取、配置化评分、SQLite 任务与历史报告的正式实现和验证证据
 - `closed-2026-07-30-001-seo-audit-response-safety/`：响应可信度分类、WAF/429 止损、同域节流、有界预检和 resolved URL 去重的 PRD、技术方案与验收 issues

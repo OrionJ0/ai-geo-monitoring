@@ -1,6 +1,6 @@
 ---
 title: "拦截采集过渡态并实施 evidence 字段级修复"
-status: active
+status: closed
 type: bugfix
 blocked_by: []
 ---
@@ -27,8 +27,8 @@ blocked_by: []
 - [x] 后端 988 / 988、本次前端报告页 18 / 18、lint 和生产构建通过。
 - [x] 发布门禁发现的既有营销前端契约缺口已用只读边界文案最小修复，营销测试 29 / 29。
 - [x] 发布浏览器门禁发现的导航分组标题对比度问题已修复，并增加颜色契约测试；axe 入口回归仍作为发布必过项。
-- [ ] 使用生产 `deepseek-v4-flash`、关闭思考模式完成真实样本验证，通过率至少 90%。
-- [ ] 通过 Git Bundle 和正式部署入口发布，公开报告入口、systemd/readiness 与豆包运行状态通过复核。
+- [x] 使用生产 `deepseek-v4-flash`、关闭思考模式完成 20 条真实样本验证，20 / 20（100%）通过；3 条采集无效在分析前排除，4 条仅修复失败 evidence 字段。
+- [x] 通过 Git Bundle 和正式部署入口发布至 `6820ac3`，公开报告入口、systemd/readiness 与豆包 `doubao-web-v3` 实时预检通过复核。
 
 ## Root cause evidence
 
@@ -48,5 +48,6 @@ blocked_by: []
 
 ## Release boundary
 
-- 当前尚未完成生产发布，正式服务器仍未使用本 issue 的新代码。
-- 发布前不得关闭本 issue 或把需求目录改回 `closed`。
+- 当前唯一正式入口已使用本 issue 的新代码，分析默认路径为 DeepSeek API `deepseek-v4-flash`，思考模式和 Web 搜索关闭。
+- 旧的过渡态直入分析路径和 evidence 整份 JSON 重试路径已从正式调用链移除，没有保留静默 fallback；历史异常仅在报告读取时按相同采集质量规则只读归类。
+- 入口级证据：正式部署全门禁通过、公开 readiness/报告 HTTP 通过、运行 #3 报告 10 / 10 有效分析、Flash benchmark 20 / 20、豆包实时预检 ready。
