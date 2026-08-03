@@ -30,6 +30,7 @@ const {
 const AlertEvaluationService = require('./AlertEvaluationService');
 const PromptCategoryService = require('./PromptCategoryService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
+const WebCaptureAnswerQualityService = require('./WebCaptureAnswerQualityService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
 
@@ -2377,6 +2378,62 @@ class ProjectRunService {
           platform: target.platform,
           status: 'failed',
           error: message
+        };
+      }
+      const captureQuality = WebCaptureAnswerQualityService.evaluate({
+        platform: target.platform,
+        responseText: originalText,
+        webCapture: resultSummaryPatch.web_capture
+          || retrySummaryMetadata(record).web_capture
+      });
+      if (captureQuality.status === 'invalid') {
+        const message = '豆包网页版采集结果无效，本条不进入结构化分析';
+        const failure = {
+          stage: 'capture_validation',
+          error_code: 'web_capture_invalid_answer'
+        };
+        const retainedSummary = {
+          ...retrySummaryMetadata(record),
+          ...resultSummaryPatch
+        };
+        const retainedWebCapture = retainedSummary.web_capture
+          ? {
+              ...retainedSummary.web_capture,
+              answer_quality: captureQuality
+            }
+          : null;
+        const citationAnalysis = this.buildCitationAnalysis({
+          responseText: originalText,
+          aiResponse: aiResult.data,
+          providerCitations,
+          project: projectData,
+          competitors,
+          citationObservationStatus
+        });
+        const failed = await this.failRecord(record, message, failure, {
+          executionToken,
+          resultSummary: {
+            ...retainedSummary,
+            ...(retainedWebCapture ? { web_capture: retainedWebCapture } : {}),
+            failure
+          },
+          persistResponseDetail: retryMode !== 'analysis_only',
+          responseText: originalText,
+          providerCitations,
+          citationAnalysis
+        });
+        if (executionToken && !failed && generatedWebCapture) {
+          await WebPlatformRegistry.getService(target.platform).discardRecordCapture(
+            record.id,
+            generatedWebCapture
+          );
+        }
+        return {
+          record_id: record.id,
+          prompt_id: prompt.id,
+          platform: target.platform,
+          status: 'failed',
+          error: failed || !executionToken ? message : '执行租约已失效'
         };
       }
       const finalization = await this.finalizeSuccessfulRecord({

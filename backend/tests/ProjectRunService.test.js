@@ -1375,6 +1375,83 @@ test('Web failure stores only bounded failure metadata and never finalizes a met
   }
 });
 
+test('Doubao transient capture is marked invalid before structured analysis', async () => {
+  const originalQueryPlatform = AIPlatformService.queryPlatform;
+  const originalFinalize = ProjectRunService.finalizeSuccessfulRecord;
+  const originalPersistResultDetail = ProjectRunService.persistResultDetail;
+  const originalRunInTransaction = ProjectRunService.runInTransaction;
+  const updates = [];
+  const persistedDetails = [];
+  let finalizations = 0;
+  const webCapture = {
+    schema_version: 'doubao-web-capture-v1',
+    status: 'completed',
+    artifact_owner_record_id: 91,
+    artifacts: {
+      search_state: { id: '00000000-0000-4000-8000-000000000001' },
+      final_answer: { id: '00000000-0000-4000-8000-000000000002' }
+    }
+  };
+
+  AIPlatformService.queryPlatform = async () => ({
+    success: true,
+    platform: 'doubao-web',
+    text: '正在搜索',
+    data: {},
+    provider_citations: [],
+    web_capture: webCapture
+  });
+  ProjectRunService.finalizeSuccessfulRecord = async () => {
+    finalizations += 1;
+    throw new Error('must not analyze an invalid capture');
+  };
+  ProjectRunService.persistResultDetail = async (payload) => persistedDetails.push(payload);
+  ProjectRunService.runInTransaction = async (work) => work({ id: 'capture-invalid' });
+
+  try {
+    const result = await ProjectRunService.runTarget({
+      target: {
+        prompt: { id: 8, question: '测试豆包过渡态' },
+        platform: 'doubao-web',
+        platformConfig: { adapter_type: 'doubao_web' }
+      },
+      record: { id: 91, result_summary: {}, update: async (payload) => updates.push(payload) },
+      runUser: { id: 9 },
+      projectData: { id: 2, name: 'Goodie AI' },
+      competitors: [],
+      keywords: ['Goodie AI']
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error, '豆包网页版采集结果无效，本条不进入结构化分析');
+    assert.equal(finalizations, 0);
+    assert.equal(persistedDetails.length, 1);
+    assert.equal(persistedDetails[0].responseText, '正在搜索');
+    assert.deepEqual(updates.at(-1), {
+      status: 'failed',
+      error_message: '豆包网页版采集结果无效，本条不进入结构化分析',
+      result_summary: {
+        web_capture: {
+          ...webCapture,
+          answer_quality: {
+            status: 'invalid',
+            reason_code: 'transient_search_status'
+          }
+        },
+        failure: {
+          stage: 'capture_validation',
+          error_code: 'web_capture_invalid_answer'
+        }
+      }
+    });
+  } finally {
+    AIPlatformService.queryPlatform = originalQueryPlatform;
+    ProjectRunService.finalizeSuccessfulRecord = originalFinalize;
+    ProjectRunService.persistResultDetail = originalPersistResultDetail;
+    ProjectRunService.runInTransaction = originalRunInTransaction;
+  }
+});
+
 test('queues a project run without waiting for prepared targets to finish', async () => {
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
   const originalGetEnabledPlatforms = AIPlatformService.getEnabledPlatforms;
@@ -1465,14 +1542,16 @@ test('queues a project run without waiting for prepared targets to finish', asyn
 });
 
 test('queues runnable platforms and reports unavailable platforms as skipped', async () => {
+  const originalGetEnabledPlatforms = AIPlatformService.getEnabledPlatforms;
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
   const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
-  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
   const originalFindCompetitors = BrandCompetitor.findAll;
+  const originalConsumeQuota = ProjectRunService.consumeRunQuota;
   const originalCreateEntries = ProjectRunService.createRunEntries;
   const originalSchedule = ProjectRunService.schedulePreparedRun;
   let quotaAmount = 0;
 
+  AIPlatformService.getEnabledPlatforms = async () => ['doubao', 'deepseek'];
   AIPlatformService.getPlatformAvailability = async () => [
     { code: 'doubao', platform_name: '豆包', model_name: 'doubao-model', available: false, reason: 'missing_api_key', config: null },
     { code: 'deepseek', platform_name: 'DeepSeek', model_name: 'deepseek-v4-flash', available: true, reason: null, config: { code: 'deepseek', default_model: 'deepseek-v4-flash' } }
@@ -1506,6 +1585,7 @@ test('queues runnable platforms and reports unavailable platforms as skipped', a
     }]);
     assert.match(result.message, /豆包未配置 API Key，已跳过/);
   } finally {
+    AIPlatformService.getEnabledPlatforms = originalGetEnabledPlatforms;
     AIPlatformService.getPlatformAvailability = originalGetAvailability;
     ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
     ProjectRunService.consumeRunQuota = originalConsumeQuota;
@@ -1516,12 +1596,14 @@ test('queues runnable platforms and reports unavailable platforms as skipped', a
 });
 
 test('does not consume quota or create records when every candidate platform is unavailable', async () => {
+  const originalGetEnabledPlatforms = AIPlatformService.getEnabledPlatforms;
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
   const originalCreateEntries = ProjectRunService.createRunEntries;
   let quotaCalled = false;
   let recordsCalled = false;
 
+  AIPlatformService.getEnabledPlatforms = async () => ['deepseek'];
   AIPlatformService.getPlatformAvailability = async () => [{
     code: 'deepseek',
     platform_name: 'DeepSeek',
@@ -1554,6 +1636,7 @@ test('does not consume quota or create records when every candidate platform is 
     assert.equal(quotaCalled, false);
     assert.equal(recordsCalled, false);
   } finally {
+    AIPlatformService.getEnabledPlatforms = originalGetEnabledPlatforms;
     AIPlatformService.getPlatformAvailability = originalGetAvailability;
     ProjectRunService.consumeRunQuota = originalConsumeQuota;
     ProjectRunService.createRunEntries = originalCreateEntries;
@@ -1563,6 +1646,8 @@ test('does not consume quota or create records when every candidate platform is 
 test('skips an unavailable Web platform while other globally enabled platforms still run', async () => {
   const originalGetEnabledPlatforms = AIPlatformService.getEnabledPlatforms;
   const originalGetAvailability = AIPlatformService.getPlatformAvailability;
+  const originalGetRuntimeSettings = ProjectRunService.getRuntimeSettings;
+  const originalFindCompetitors = BrandCompetitor.findAll;
   const originalConsumeQuota = ProjectRunService.consumeRunQuota;
   const originalCreateEntries = ProjectRunService.createRunEntries;
   const originalSchedule = ProjectRunService.schedulePreparedRun;
@@ -1593,6 +1678,8 @@ test('skips an unavailable Web platform while other globally enabled platforms s
     }
     ];
   };
+  ProjectRunService.getRuntimeSettings = async () => ({ ai_run_concurrency: 2 });
+  BrandCompetitor.findAll = async () => [];
   ProjectRunService.consumeRunQuota = async (_userId, amount) => {
     quotaCalled = true;
     quotaAmount = amount;
@@ -1636,6 +1723,8 @@ test('skips an unavailable Web platform while other globally enabled platforms s
   } finally {
     AIPlatformService.getEnabledPlatforms = originalGetEnabledPlatforms;
     AIPlatformService.getPlatformAvailability = originalGetAvailability;
+    ProjectRunService.getRuntimeSettings = originalGetRuntimeSettings;
+    BrandCompetitor.findAll = originalFindCompetitors;
     ProjectRunService.consumeRunQuota = originalConsumeQuota;
     ProjectRunService.createRunEntries = originalCreateEntries;
     ProjectRunService.schedulePreparedRun = originalSchedule;

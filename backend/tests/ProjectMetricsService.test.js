@@ -205,6 +205,36 @@ test('引用证据独立于品牌分析，分析失败的已抓取回答仍进�
   assert.equal(view.owned_citation_rate, 100);
 });
 
+test('项目覆盖率排除豆包采集过渡态并单独计数', () => {
+  const metrics = [currentMetric({
+    question_record_id: 202,
+    platform: 'doubao-web',
+    brand_mentioned: true,
+    brand_recommended: true
+  })];
+  const records = [currentRecord({
+    id: 202,
+    platform: 'doubao-web',
+    status: 'failed',
+    result_summary: {
+      web_capture: { schema_version: 'doubao-web-capture-v1', status: 'completed' }
+    },
+    resultDetail: {
+      ai_response_original: '梳理品牌核心特点我将梳理目标品牌信息，为后续对比表格制作做准备。'
+    }
+  })];
+
+  const view = ProjectMetricsService.buildCurrentMetricView({
+    metrics,
+    records
+  });
+
+  assert.equal(view.valid_answers, 0);
+  assert.equal(view.invalid_captures, 1);
+  assert.equal(view.acquired_answers, 0);
+  assert.equal(view.analysis_coverage_rate, null);
+});
+
 test('同一新版 reducer 用于全部平台和单平台，空集合保持 N/A', () => {
   const metrics = [currentMetric({
     question_record_id: 1,

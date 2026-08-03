@@ -10,7 +10,7 @@ test('exposes the v4 semantic evidence prompt with DeepSeek thinking disabled by
   const definition = service.getPromptDefinition();
 
   assert.equal(definition.version, 'ai_structured_v4');
-  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v7');
+  assert.equal(definition.prompt_revision, 'semantic_evidence_field_repair_v8');
   assert.match(definition.template, /<analysis_input>/);
   assert.match(definition.template, /完整抽取/);
   assert.equal((definition.template.match(/<example focus=/g) || []).length, 10);
@@ -48,7 +48,7 @@ test('grounds the production semantic prompt with diverse focused examples', () 
   const service = new AIResponseAnalysisService();
   const definition = service.getPromptDefinition();
 
-  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v7');
+  assert.equal(definition.prompt_revision, 'semantic_evidence_field_repair_v8');
   assert.match(definition.template, /<analysis_input>/);
   assert.match(definition.template, /完整抽取/);
   assert.match(definition.template, /<examples>/);
@@ -125,7 +125,7 @@ test('requests DeepSeek with thinking disabled and JSON output without sampling 
   assert.equal(result.sov_numerator, 0);
   assert.equal(result.sov_denominator, 0);
   assert.equal(result.answer_competitor_share, null);
-  assert.equal(result.analysis_structure.prompt_revision, 'semantic_evidence_few_shot_v7');
+  assert.equal(result.analysis_structure.prompt_revision, 'semantic_evidence_field_repair_v8');
 });
 
 test('applies administrator-confirmed analysis request option overrides', async () => {

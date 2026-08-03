@@ -37,7 +37,7 @@ test('v4 prompt stages semantic analysis without competitor hints or rule dictio
   assert.equal(CURRENT_STRUCTURE_VERSION, 'geo_metric_input_v4');
   assert.equal(CURRENT_METRIC_SEMANTICS, 'contextual_competitor_mentions_sov_v1');
   assert.equal(definition.version, 'ai_structured_v4');
-  assert.equal(definition.prompt_revision, 'semantic_evidence_few_shot_v7');
+  assert.equal(definition.prompt_revision, 'semantic_evidence_field_repair_v8');
   assert.match(definition.template, /完整抽取/);
   assert.match(definition.template, /逐一判断竞争关系/);
   assert.match(definition.template, /独立判断候选顺序/);
@@ -339,6 +339,292 @@ test('a retry re-reads the complete answer instead of freezing the first invalid
   assert.match(prompts[1], /纠正要求：/);
   assert.doesNotMatch(prompts[0], /不应进入提示词的企业/);
   assert.doesNotMatch(prompts[1], /不改变对原回答的语义判断/);
+});
+
+test('table evidence is deterministically anchored without regenerating the full JSON', async () => {
+  const calls = [];
+  const responseText = [
+    '表格| 对比维度 | 上海广拓 | 上海欧脉 | 上海炎荣 |',
+    '| --- | --- | --- | --- |',
+    '| 品牌核心定位 | 广拓优势说明 | 欧脉优势说明 | 炎荣优势说明 |'
+  ].join('\n');
+  const output = completeOutput({
+    entities: [
+      { name: '上海广拓', type: 'company' },
+      { name: '上海欧脉', type: 'company' },
+      { name: '上海炎荣', type: 'company' }
+    ],
+    mentions: [
+      { entity_name: '上海广拓', surface_forms: ['上海广拓'] },
+      { entity_name: '上海欧脉', surface_forms: ['上海欧脉'] },
+      { entity_name: '上海炎荣', surface_forms: ['上海炎荣'] }
+    ],
+    target_entity_name: '上海广拓',
+    competitor_relations: [
+      {
+        entity_name: '上海欧脉',
+        relation: 'competitor',
+        reason: '属于同一候选集合',
+        evidence: ['上海欧脉 | 欧脉优势说明']
+      },
+      {
+        entity_name: '上海炎荣',
+        relation: 'competitor',
+        reason: '属于同一候选集合',
+        evidence: ['上海炎荣 | 炎荣优势说明']
+      }
+    ],
+    candidate_lists: [{
+      ordered: false,
+      entries: ['上海广拓', '上海欧脉', '上海炎荣'],
+      reason: '表格并列对比，没有明确排名',
+      evidence: ['| 品牌核心定位 | 上海广拓 | 上海欧脉 | 上海炎荣 |']
+    }],
+    sentiment: {
+      label: 'neutral',
+      reason: '回答并列呈现三个品牌',
+      evidence: ['| 品牌核心定位 | 上海广拓 | 上海欧脉 | 上海炎荣 |'],
+      risk_terms: []
+    }
+  });
+  const service = new AIResponseAnalysisService({
+    configService: {
+      getAnalysisPlatform: async () => ({
+        code: 'deepseek',
+        adapter_type: 'openai_chat_completions',
+        default_model: 'deepseek-v4-flash'
+      })
+    },
+    requestService: {
+      queryConfig: async (_platform, prompt) => {
+        calls.push(prompt);
+        return {
+          success: true,
+          data: { choices: [{ finish_reason: 'stop' }] },
+          text: JSON.stringify(output)
+        };
+      }
+    }
+  });
+
+  const result = await service.analyze({
+    question: '请对比三家厂商',
+    responseText,
+    brand: { name: '上海广拓' }
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(
+    result.analysis_structure.competitor_relations.map((item) => item.evidence),
+    [
+      ['上海欧脉', '欧脉优势说明'],
+      ['上海炎荣', '炎荣优势说明']
+    ]
+  );
+  assert.deepEqual(
+    result.analysis_structure.candidate_lists[0].evidence,
+    ['品牌核心定位', '上海广拓', '上海欧脉', '上海炎荣']
+  );
+});
+
+test('unresolved evidence uses a field-only repair response instead of a full JSON retry', async () => {
+  const prompts = [];
+  const responseText = '广拓和海康都提供周界方案。';
+  const output = completeOutput({
+    entities: [
+      { name: '广拓', type: 'brand' },
+      { name: '海康', type: 'brand' }
+    ],
+    mentions: [
+      { entity_name: '广拓', surface_forms: ['广拓'] },
+      { entity_name: '海康', surface_forms: ['海康'] }
+    ],
+    target_entity_name: '广拓',
+    competitor_relations: [{
+      entity_name: '海康',
+      relation: 'competitor',
+      reason: '提供同类方案',
+      evidence: ['两家公司都能提供解决方案']
+    }],
+    sentiment: {
+      label: 'neutral',
+      reason: '回答客观并列两家公司',
+      evidence: ['回答对两家公司进行了并列介绍'],
+      risk_terms: []
+    }
+  });
+  const repairs = {
+    repairs: [
+      {
+        field: 'competitor_relations[0].evidence',
+        evidence: ['海康都提供周界方案']
+      },
+      {
+        field: 'sentiment.evidence',
+        evidence: ['广拓和海康都提供周界方案']
+      }
+    ]
+  };
+  const service = new AIResponseAnalysisService({
+    configService: {
+      getAnalysisPlatform: async () => ({
+        code: 'deepseek',
+        adapter_type: 'openai_chat_completions',
+        default_model: 'deepseek-v4-flash'
+      })
+    },
+    requestService: {
+      queryConfig: async (_platform, prompt) => {
+        prompts.push(prompt);
+        return {
+          success: true,
+          data: { choices: [{ finish_reason: 'stop' }] },
+          text: JSON.stringify(prompts.length === 1 ? output : repairs)
+        };
+      }
+    }
+  });
+
+  const result = await service.analyze({
+    question: '有哪些可选厂商？',
+    responseText,
+    brand: { name: '广拓' }
+  });
+
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /<evidence_repair_input>/);
+  assert.match(prompts[1], /competitor_relations\[0\]\.evidence/);
+  assert.match(prompts[1], /sentiment\.evidence/);
+  assert.doesNotMatch(prompts[1], /上一次无效输出/);
+  assert.doesNotMatch(prompts[1], /重新输出一份完整/);
+  assert.deepEqual(
+    result.analysis_structure.competitor_relations[0].evidence,
+    ['海康都提供周界方案']
+  );
+  assert.deepEqual(
+    result.analysis_structure.sentiment.evidence,
+    ['广拓和海康都提供周界方案']
+  );
+});
+
+test('table anchoring never drops an ungrounded cell to make evidence pass', async () => {
+  const prompts = [];
+  const responseText = '| 上海欧脉 | 欧脉优势说明 |';
+  const output = completeOutput({
+    entities: [{ name: '上海欧脉', type: 'company' }],
+    mentions: [{ entity_name: '上海欧脉', surface_forms: ['上海欧脉'] }],
+    target_entity_name: null,
+    competitor_relations: [{
+      entity_name: '上海欧脉',
+      relation: 'non_competitor',
+      reason: '未证明存在竞争关系',
+      evidence: ['上海欧脉 | 不存在的能力']
+    }]
+  });
+  const service = new AIResponseAnalysisService({
+    configService: {
+      getAnalysisPlatform: async () => ({
+        code: 'deepseek',
+        adapter_type: 'openai_chat_completions',
+        default_model: 'deepseek-v4-flash'
+      })
+    },
+    requestService: {
+      queryConfig: async (_platform, prompt) => {
+        prompts.push(prompt);
+        return {
+          success: true,
+          data: { choices: [{ finish_reason: 'stop' }] },
+          text: JSON.stringify(prompts.length === 1 ? output : {
+            repairs: [{
+              field: 'competitor_relations[0].evidence',
+              evidence: ['上海欧脉']
+            }]
+          })
+        };
+      }
+    }
+  });
+
+  const result = await service.analyze({
+    question: '上海欧脉是否为竞品？',
+    responseText,
+    brand: { name: '上海广拓' }
+  });
+
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /不存在的能力/);
+  assert.deepEqual(
+    result.analysis_structure.competitor_relations[0].evidence,
+    ['上海欧脉']
+  );
+});
+
+test('field-only repair still rejects evidence that is absent from the original answer', async () => {
+  let calls = 0;
+  const responseText = '广拓和海康都提供周界方案。';
+  const output = completeOutput({
+    entities: [
+      { name: '广拓', type: 'brand' },
+      { name: '海康', type: 'brand' }
+    ],
+    mentions: [
+      { entity_name: '广拓', surface_forms: ['广拓'] },
+      { entity_name: '海康', surface_forms: ['海康'] }
+    ],
+    target_entity_name: '广拓',
+    competitor_relations: [{
+      entity_name: '海康',
+      relation: 'competitor',
+      reason: '提供同类方案',
+      evidence: ['不存在的首次证据']
+    }],
+    sentiment: {
+      label: 'neutral',
+      reason: '回答客观并列两家公司',
+      evidence: ['广拓和海康都提供周界方案'],
+      risk_terms: []
+    }
+  });
+  const service = new AIResponseAnalysisService({
+    configService: {
+      getAnalysisPlatform: async () => ({
+        code: 'deepseek',
+        adapter_type: 'openai_chat_completions',
+        default_model: 'deepseek-v4-flash'
+      })
+    },
+    requestService: {
+      queryConfig: async () => {
+        calls += 1;
+        return {
+          success: true,
+          data: { choices: [{ finish_reason: 'stop' }] },
+          text: JSON.stringify(calls === 1 ? output : {
+            repairs: [{
+              field: 'competitor_relations[0].evidence',
+              evidence: ['第二次仍然不存在的证据']
+            }]
+          })
+        };
+      }
+    }
+  });
+
+  await assert.rejects(
+    service.analyze({
+      question: '有哪些可选厂商？',
+      responseText,
+      brand: { name: '广拓' }
+    }),
+    (error) => {
+      assert.equal(error.code, 'invalid_analysis_output');
+      assert.match(error.message, /无法在原回答中精确定位/);
+      assert.equal(error.details.attempt_count, 2);
+      return true;
+    }
+  );
+  assert.equal(calls, 2);
 });
 
 test('同一实体保留精确表面词并丢弃无依据附加名称', () => {

@@ -8,7 +8,7 @@ const {
 
 const ANALYSIS_METHOD = CURRENT_ANALYSIS_CONTRACT;
 const STRUCTURE_VERSION = CURRENT_STRUCTURE_VERSION;
-const PROMPT_REVISION = 'semantic_evidence_few_shot_v7';
+const PROMPT_REVISION = 'semantic_evidence_field_repair_v8';
 const VALID_ENTITY_TYPES = new Set(['brand', 'company', 'other_organization']);
 const VALID_COMPETITOR_RELATIONS = new Set(['competitor', 'non_competitor']);
 const VALID_RECOMMENDATION_KINDS = new Set(['explicit']);
@@ -673,6 +673,156 @@ function normalizeEvidence(value, responseText, field, { required = true } = {})
     throw new AIResponseAnalysisError(message);
   }
   return evidence;
+}
+
+function evidenceFieldEntries(parsed) {
+  const fields = [];
+  const append = (root, values) => {
+    if (!Array.isArray(values)) return;
+    values.forEach((item, index) => {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        fields.push({
+          field: `${root}[${index}].evidence`,
+          owner: item,
+          required: true
+        });
+      }
+    });
+  };
+  append('competitor_relations', parsed?.competitor_relations);
+  append('candidate_lists', parsed?.candidate_lists);
+  if (parsed?.sentiment && typeof parsed.sentiment === 'object' && !Array.isArray(parsed.sentiment)) {
+    fields.push({
+      field: 'sentiment.evidence',
+      owner: parsed.sentiment,
+      required: parsed.target_entity_name !== null
+    });
+  }
+  return fields;
+}
+
+function tableEvidenceAnchors(responseText, submittedEvidence) {
+  const submitted = String(submittedEvidence || '').trim();
+  if (!submitted.includes('|')) return null;
+  const segments = submitted.split('|')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && !/^:?-{2,}:?$/u.test(segment));
+  if (segments.length < 2) return null;
+  const anchors = segments.map((segment) => locateOriginalEvidence(responseText, segment));
+  if (anchors.some((anchor) => !anchor)) return null;
+  return [...new Set(anchors)];
+}
+
+function repairDeterministicTableEvidence(parsed, responseText) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const repairs = [];
+  const unresolved = [];
+  for (const entry of evidenceFieldEntries(parsed)) {
+    if (!Array.isArray(entry.owner.evidence) || !entry.owner.evidence.length) {
+      if (entry.required) unresolved.push(entry.field);
+      continue;
+    }
+    const repaired = [];
+    let changed = false;
+    for (const value of entry.owner.evidence) {
+      const original = locateOriginalEvidence(responseText, value);
+      const anchors = original
+        ? [original]
+        : tableEvidenceAnchors(responseText, value);
+      if (!anchors) {
+        changed = true;
+        continue;
+      }
+      if (anchors.length !== 1 || anchors[0] !== String(value || '').trim()) changed = true;
+      for (const anchor of anchors) {
+        if (!repaired.includes(anchor)) repaired.push(anchor);
+      }
+    }
+    if (!repaired.length) {
+      unresolved.push(entry.field);
+      continue;
+    }
+    if (changed) {
+      entry.owner.evidence = repaired;
+      repairs.push({ field: entry.field, repaired_count: repaired.length });
+    }
+  }
+  return { parsed, repairs, unresolved };
+}
+
+function parseRawOutput(outputText) {
+  try {
+    const parsed = JSON.parse(extractJsonObject(outputText));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function buildEvidenceRepairPrompt({ question, responseText, brand, parsed, fields }) {
+  const expectedFields = new Set(fields);
+  const repairFields = evidenceFieldEntries(parsed)
+    .filter((entry) => expectedFields.has(entry.field))
+    .map((entry) => ({
+      field: entry.field,
+      context: Object.fromEntries(
+        Object.entries(entry.owner).filter(([key]) => key !== 'evidence')
+      ),
+      invalid_evidence: entry.owner.evidence
+    }));
+  return [
+    '<evidence_repair_input>',
+    JSON.stringify({
+      question: String(question || ''),
+      target_brand: String(brand?.name || ''),
+      answer: String(responseText || ''),
+      fields: repairFields
+    }, null, 2),
+    '</evidence_repair_input>',
+    '',
+    '<task>',
+    '只修复列出的 evidence 字段。不要重新生成或修改 entities、mentions、关系、候选集合、推荐、声明、情绪标签或其他字段。',
+    '每条 evidence 必须是完整 answer 中连续、逐字存在的原文片段；表格证据只能引用原始行、表头或单元格中的连续文本，不得把表头和其他行单元格拼接成新句子。',
+    `只输出 JSON：${JSON.stringify({ repairs: [{ field: '原样引用输入字段路径', evidence: ['可逐字定位的原文'] }] })}`,
+    'repairs 必须逐一覆盖输入中的全部字段，不得增加其他字段、解释或 Markdown。',
+    '</task>'
+  ].join('\n');
+}
+
+function applyEvidenceRepairOutput(parsed, outputText, fields, responseText) {
+  const repairOutput = parseRawOutput(outputText);
+  if (!repairOutput || !Array.isArray(repairOutput.repairs)) {
+    throw new AIResponseAnalysisError('AI 证据字段修复未返回有效 repairs');
+  }
+  const expectedFields = new Set(fields);
+  const entries = new Map(
+    evidenceFieldEntries(parsed).map((entry) => [entry.field, entry])
+  );
+  const seen = new Set();
+  for (const repair of repairOutput.repairs) {
+    const field = String(repair?.field || '').trim();
+    if (!expectedFields.has(field) || seen.has(field) || !Array.isArray(repair?.evidence)) {
+      throw new AIResponseAnalysisError('AI 证据字段修复包含未知、重复或无效字段');
+    }
+    if (!repair.evidence.length || repair.evidence.length > 20) {
+      throw new AIResponseAnalysisError(`${field} 修复后必须包含 1 至 20 条证据`);
+    }
+    const located = repair.evidence.map((value, index) => {
+      const text = String(value || '').trim();
+      if (!text) throw new AIResponseAnalysisError(`${field}[${index}] 不能为空`);
+      const original = locateOriginalEvidence(responseText, text);
+      if (!original) {
+        throw new AIResponseAnalysisError(`${field}[${index}] 无法在原回答中精确定位`);
+      }
+      return original;
+    });
+    entries.get(field).owner.evidence = [...new Set(located)];
+    seen.add(field);
+  }
+  if (seen.size !== expectedFields.size) {
+    throw new AIResponseAnalysisError('AI 证据字段修复未覆盖全部失败字段');
+  }
+  return parsed;
 }
 
 function normalizeSentiment(value, responseText, targetEntityName) {
@@ -1503,22 +1653,119 @@ class AIResponseAnalysisService {
 
       try {
         this.assertCompleteResponse(connection);
-        const structured = this.parseOutput(connection.text, {
-          responseText: normalizedResponseText,
-          brand
-        });
+        let structured;
+        let analysisAttempts = attempt;
+        let evidenceRepairWarnings = [];
+        try {
+          structured = this.parseOutput(connection.text, {
+            responseText: normalizedResponseText,
+            brand
+          });
+        } catch (error) {
+          if (!validationField(error).includes('evidence')) throw error;
+          const repaired = repairDeterministicTableEvidence(
+            parseRawOutput(connection.text),
+            normalizedResponseText
+          );
+          if (!repaired) throw error;
+          evidenceRepairWarnings = repaired.repairs.map((item) => ({
+            code: 'table_evidence_anchored',
+            field: item.field,
+            repaired_count: item.repaired_count
+          }));
+          if (repaired.unresolved.length) {
+            if (attempt >= ANALYSIS_REQUEST_PROFILE.max_attempts) throw error;
+            const repairConnection = await this.requestService.queryConfig(
+              platform,
+              buildEvidenceRepairPrompt({
+                question: normalizedQuestion,
+                responseText: normalizedResponseText,
+                brand,
+                parsed: repaired.parsed,
+                fields: repaired.unresolved
+              }),
+              {
+                retryCount: 0,
+                requestOptions: this.buildAnalysisRequestOptions(platform),
+                disableWebSearch: true,
+                omitTokenLimit: true,
+                timeoutSeconds: ANALYSIS_REQUEST_PROFILE.timeout_seconds
+              }
+            );
+            analysisAttempts = attempt + 1;
+            if (!repairConnection?.success) {
+              const requestErrorCode = repairConnection?.error_code === 'input_too_long'
+                ? 'analysis_input_too_long'
+                : (repairConnection?.error_code || 'analysis_api_failed');
+              throw new AIResponseAnalysisError(
+                repairConnection?.error || 'AI 证据字段修复调用失败',
+                requestErrorCode,
+                this.buildDiagnostics(repairConnection, platform, analysisAttempts, 'request')
+              );
+            }
+            try {
+              this.assertCompleteResponse(repairConnection);
+              applyEvidenceRepairOutput(
+                repaired.parsed,
+                repairConnection.text,
+                repaired.unresolved,
+                normalizedResponseText
+              );
+              structured = this.parseOutput(JSON.stringify(repaired.parsed), {
+                responseText: normalizedResponseText,
+                brand
+              });
+              evidenceRepairWarnings.push(...repaired.unresolved.map((field) => ({
+                code: 'evidence_field_repaired',
+                field,
+                repaired_count: 1
+              })));
+            } catch (repairError) {
+              if (repairError instanceof AIResponseAnalysisError) {
+                repairError.details = {
+                  ...this.buildDiagnostics(
+                    repairConnection,
+                    platform,
+                    analysisAttempts,
+                    repairError.code === 'analysis_output_truncated'
+                      ? 'completion'
+                      : 'parse_or_validate'
+                  ),
+                  ...repairError.details
+                };
+              }
+              throw repairError;
+            }
+          } else if (repaired.repairs.length) {
+            structured = this.parseOutput(JSON.stringify(repaired.parsed), {
+              responseText: normalizedResponseText,
+              brand
+            });
+          } else {
+            throw error;
+          }
+        }
         const calculated = this.calculate(structured);
+        const normalizationWarnings = [
+          ...(Array.isArray(calculated.analysis_structure?.normalization_warnings)
+            ? calculated.analysis_structure.normalization_warnings
+            : []),
+          ...evidenceRepairWarnings
+        ];
         const result = {
           ...calculated,
           analysis_structure: {
             ...calculated.analysis_structure,
+            ...(normalizationWarnings.length
+              ? { normalization_warnings: normalizationWarnings.slice(0, 50) }
+              : {}),
             prompt_revision: PROMPT_REVISION
           },
           analysis_method: ANALYSIS_METHOD,
           analysis_prompt_revision: PROMPT_REVISION,
           analysis_platform: platform.code,
           analysis_model: platform.default_model,
-          analysis_attempts: attempt
+          analysis_attempts: analysisAttempts
         };
         if (includeRawOutput) result.raw_output = connection.text;
         return result;
@@ -1535,7 +1782,10 @@ class AIResponseAnalysisService {
           ),
           ...error.details
         };
-        if (attempt >= ANALYSIS_REQUEST_PROFILE.max_attempts) throw error;
+        if (
+          Math.max(attempt, Number(error.details?.attempt_count) || 0)
+          >= ANALYSIS_REQUEST_PROFILE.max_attempts
+        ) throw error;
       }
     }
 

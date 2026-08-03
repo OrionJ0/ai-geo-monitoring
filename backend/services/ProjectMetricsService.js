@@ -2,6 +2,7 @@ const PromptCategoryService = require('./PromptCategoryService');
 const CitationMetricSemanticsService = require('./CitationMetricSemanticsService');
 const GeoMetricSemanticsService = require('./GeoMetricSemanticsService');
 const { CURRENT_METRIC_SEMANTICS } = require('./GeoMetricSemanticsService');
+const WebCaptureAnswerQualityService = require('./WebCaptureAnswerQualityService');
 
 class ProjectMetricsService {
   normalizeDays(value, fallback = 30) {
@@ -67,6 +68,36 @@ class ProjectMetricsService {
     const resultDetail = this.plain(row.resultDetail || row.result_detail);
     return typeof resultDetail.ai_response_original === 'string'
       && resultDetail.ai_response_original.trim().length > 0;
+  }
+
+  captureQuality(record) {
+    const row = this.plain(record);
+    const resultDetail = this.plain(row.resultDetail || row.result_detail);
+    return WebCaptureAnswerQualityService.evaluate({
+      platform: row.platform,
+      responseText: resultDetail.ai_response_original,
+      webCapture: row.result_summary?.web_capture
+    });
+  }
+
+  hasAnalysisEligibleAnswer(record) {
+    return this.hasAcquiredAnswer(record)
+      && this.captureQuality(record).status !== 'invalid';
+  }
+
+  withoutInvalidCaptureMetrics(metrics, records) {
+    const invalidRecordIds = new Set(
+      (Array.isArray(records) ? records : [])
+        .map((row) => this.plain(row))
+        .filter((row) => this.captureQuality(row).status === 'invalid')
+        .map((row) => String(row.id))
+    );
+    if (!invalidRecordIds.size) return metrics;
+    return metrics.filter((row) => (
+      row.question_record_id === null
+      || row.question_record_id === undefined
+      || !invalidRecordIds.has(String(row.question_record_id))
+    ));
   }
 
   isCurrentLogicalRecord(record) {
@@ -163,28 +194,38 @@ class ProjectMetricsService {
   }
 
   buildCurrentCitationEvidenceRows({ metrics, records } = {}) {
-    const metricRows = (Array.isArray(metrics) ? metrics : [])
-      .map((row) => this.plain(row))
-      .filter((row) => this.isCurrentMetric(row));
     const recordRows = (Array.isArray(records) ? records : [])
       .map((row) => this.plain(row))
       .filter((row) => this.isCurrentMetric(row))
       .filter((row) => this.isCurrentLogicalRecord(row));
+    const metricRows = this.withoutInvalidCaptureMetrics(
+      (Array.isArray(metrics) ? metrics : [])
+        .map((row) => this.plain(row))
+        .filter((row) => this.isCurrentMetric(row)),
+      recordRows
+    );
     return this.buildCitationEvidenceRows(
       metricRows,
-      recordRows.filter((row) => this.hasAcquiredAnswer(row))
+      recordRows.filter((row) => this.hasAnalysisEligibleAnswer(row))
     );
   }
 
   buildCurrentMetricView({ metrics, records } = {}) {
-    const metricRows = (Array.isArray(metrics) ? metrics : [])
-      .map((row) => this.plain(row))
-      .filter((row) => this.isCurrentMetric(row));
     const recordRows = (Array.isArray(records) ? records : [])
       .map((row) => this.plain(row))
       .filter((row) => this.isCurrentMetric(row))
       .filter((row) => this.isCurrentLogicalRecord(row));
-    const acquiredRows = recordRows.filter((row) => this.hasAcquiredAnswer(row));
+    const metricRows = this.withoutInvalidCaptureMetrics(
+      (Array.isArray(metrics) ? metrics : [])
+        .map((row) => this.plain(row))
+        .filter((row) => this.isCurrentMetric(row)),
+      recordRows
+    );
+    const acquiredRows = recordRows.filter((row) => this.hasAnalysisEligibleAnswer(row));
+    const invalidCaptureRows = recordRows.filter((row) => (
+      this.hasAcquiredAnswer(row)
+      && this.captureQuality(row).status === 'invalid'
+    ));
     const sovValues = metricRows
       .map((row) => {
         const sov = GeoMetricSemanticsService.presentSov(row);
@@ -230,6 +271,7 @@ class ProjectMetricsService {
       metric_semantics_version: CURRENT_METRIC_SEMANTICS,
       valid_answers: total,
       acquired_answers: acquiredRows.length,
+      invalid_captures: invalidCaptureRows.length,
       analysis_coverage_rate: this.nullablePct(total, acquiredRows.length),
       total_checks: total,
       checks: total,
@@ -277,13 +319,16 @@ class ProjectMetricsService {
   }
 
   buildCurrentDashboardSummary({ metrics, records, prompts, sourceAnalysis } = {}) {
-    const metricRows = (Array.isArray(metrics) ? metrics : [])
-      .map((row) => this.plain(row))
-      .filter((row) => this.isCurrentMetric(row));
     const recordRows = (Array.isArray(records) ? records : [])
       .map((row) => this.plain(row))
       .filter((row) => this.isCurrentMetric(row))
       .filter((row) => this.isCurrentLogicalRecord(row));
+    const metricRows = this.withoutInvalidCaptureMetrics(
+      (Array.isArray(metrics) ? metrics : [])
+        .map((row) => this.plain(row))
+        .filter((row) => this.isCurrentMetric(row)),
+      recordRows
+    );
     const promptRows = Array.isArray(prompts) ? prompts : [];
     const source = sourceAnalysis && typeof sourceAnalysis === 'object' ? sourceAnalysis : {};
     const platforms = this.listActualPlatforms(metricRows, recordRows).map((platform) => ({
@@ -371,13 +416,16 @@ class ProjectMetricsService {
 
   buildCurrentPromptPerformance(prompts, metrics, records = []) {
     const promptRows = Array.isArray(prompts) ? prompts : [];
-    const metricRows = (Array.isArray(metrics) ? metrics : [])
-      .map((row) => this.plain(row))
-      .filter((row) => this.isCurrentMetric(row));
     const recordRows = (Array.isArray(records) ? records : [])
       .map((row) => this.plain(row))
       .filter((row) => this.isCurrentMetric(row))
       .filter((row) => this.isCurrentLogicalRecord(row));
+    const metricRows = this.withoutInvalidCaptureMetrics(
+      (Array.isArray(metrics) ? metrics : [])
+        .map((row) => this.plain(row))
+        .filter((row) => this.isCurrentMetric(row)),
+      recordRows
+    );
     const promptIdOf = (row) => {
       const id = row.prompt_id ?? row.tracked_prompt_id;
       return id === null || id === undefined ? null : String(id);

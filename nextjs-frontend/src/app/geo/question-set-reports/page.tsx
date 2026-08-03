@@ -71,6 +71,7 @@ type ReportSummary = {
   valid_analyses?: number;
   valid_answers?: number | null;
   acquired_answers?: number | null;
+  invalid_captures?: number | null;
   analysis_coverage_rate?: number | null;
   brand_mentioned_answers?: number | null;
   recommended_answers?: number | null;
@@ -175,6 +176,10 @@ type ReportRow = {
       total_tokens?: number;
     };
   } | null;
+  capture_quality?: {
+    status?: 'invalid';
+    reason_code?: string;
+  } | null;
   answer?: string;
   answer_format?: 'plain_text' | 'markdown_v1';
   provider_citations?: Array<{
@@ -191,6 +196,10 @@ type ReportRow = {
     selector_version?: string;
     artifact_owner_record_id?: number;
     captured_at?: string;
+    answer_quality?: {
+      status?: 'invalid';
+      reason_code?: string;
+    };
     search?: {
       requested?: boolean;
       observed?: boolean;
@@ -873,10 +882,12 @@ export default function QuestionSetReportsPage() {
       title: '状态',
       dataIndex: 'status',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.status : 90,
-      render: (value: string, row: ReportRow) => value === 'completed'
-        ? <Tag color="success">完成</Tag>
-        : value === 'failed'
-          ? <Tag color="error">失败</Tag>
+      render: (value: string, row: ReportRow) => row.capture_quality?.status === 'invalid'
+        ? <Tag color="warning">采集无效</Tag>
+        : value === 'completed'
+          ? <Tag color="success">完成</Tag>
+          : value === 'failed'
+            ? <Tag color="error">失败</Tag>
           : row.execution_state === 'executing'
             ? <Tag color="processing" icon={<LoadingOutlined spin />}>正在执行</Tag>
             : <Tag>等待处理</Tag>,
@@ -1098,7 +1109,7 @@ export default function QuestionSetReportsPage() {
                         ? formatAnalysisCoverage(summary)
                         : `${summary.valid_analyses || 0} / ${summary.total || 0}`}
                       help={report.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
-                        ? '成功分析数 ÷ 已采集回答数。已保存完整原回答但结构化分析失败的样本只降低覆盖率，不会按品牌未提及、未推荐或 SOV 为 0 计入品牌指标。采集失败且没有原回答的任务不属于分析覆盖率分母。'
+                        ? '成功分析数 ÷ 已采集有效回答数。已保存完整原回答但结构化分析失败的样本只降低覆盖率，不会按品牌未提及、未推荐或 SOV 为 0 计入品牌指标。搜索状态、资料摘要和计划文本会标记为采集无效，不进入分析覆盖率分母。'
                         : '生成当时可用的有效指标样本数 ÷ 本次计划任务数。历史报告保持原有统计口径。'}
                     />
                     <MetricItem
@@ -1198,7 +1209,9 @@ export default function QuestionSetReportsPage() {
                 <section className={styles.resultsSection} aria-labelledby="run-results-title">
                   <div className={styles.resultsHeading}>
                     <Title level={4} id="run-results-title">逐问题结果</Title>
-                    <Text type="secondary">有效分析 {summary.valid_analyses || 0} · 引用 {summary.total_citations || 0}</Text>
+                    <Text type="secondary">
+                      有效分析 {summary.valid_analyses || 0} · 采集无效 {summary.invalid_captures || 0} · 引用 {summary.total_citations || 0}
+                    </Text>
                   </div>
                   <Table<ReportRow>
                     size="small"
@@ -1215,7 +1228,16 @@ export default function QuestionSetReportsPage() {
                         : undefined,
                       expandedRowRender: (row) => (
                         <div className={styles.answerPanel}>
-                          {row.error_message ? <Alert type="error" showIcon title={row.error_message} /> : null}
+                          {row.capture_quality?.status === 'invalid' ? (
+                            <Alert
+                              type="warning"
+                              showIcon
+                              title="采集无效"
+                              description={`监测平台仍处于生成过渡态（${row.capture_quality.reason_code || 'unknown'}），本条不进入结构化分析和分析覆盖率分母。`}
+                            />
+                          ) : row.error_message ? (
+                            <Alert type="error" showIcon title={row.error_message} />
+                          ) : null}
                           {row.analysis_diagnostics ? (
                             <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} bordered>
                               <Descriptions.Item label="错误代码">

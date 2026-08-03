@@ -10,6 +10,7 @@ const QuestionSetRunCsvService = require('./QuestionSetRunCsvService');
 const { repairMojibakeText } = require('./WebSourceText');
 const CitationMetricSemanticsService = require('./CitationMetricSemanticsService');
 const GeoMetricSemanticsService = require('./GeoMetricSemanticsService');
+const WebCaptureAnswerQualityService = require('./WebCaptureAnswerQualityService');
 const {
   CURRENT_METRIC_SEMANTICS,
   LEGACY_METRIC_SEMANTICS
@@ -236,13 +237,20 @@ function summarize(rows) {
   const usesCurrentSemantics = currentScopeRows.length > 0;
   const metricRows = completedRows.filter((row) => (
     row.has_metrics
+    && row.capture_quality?.status !== 'invalid'
     && (
       !usesCurrentSemantics
       || row.metric_semantics_version === CURRENT_METRIC_SEMANTICS
     )
   ));
   const acquiredRows = usesCurrentSemantics
-    ? currentScopeRows.filter((row) => String(row.answer || '').trim())
+    ? currentScopeRows.filter((row) => (
+        String(row.answer || '').trim()
+        && row.capture_quality?.status !== 'invalid'
+      ))
+    : [];
+  const invalidCaptureRows = usesCurrentSemantics
+    ? currentScopeRows.filter((row) => row.capture_quality?.status === 'invalid')
     : [];
   const citationRows = usesCurrentSemantics
     ? acquiredRows.filter((row) => row.citation_evidence_status === 'explicit')
@@ -275,6 +283,7 @@ function summarize(rows) {
     valid_analyses: metricRows.length,
     valid_answers: usesCurrentSemantics ? metricRows.length : null,
     acquired_answers: usesCurrentSemantics ? acquiredRows.length : null,
+    invalid_captures: usesCurrentSemantics ? invalidCaptureRows.length : null,
     analysis_coverage_rate: usesCurrentSemantics
       ? nullablePercent(metricRows.length, acquiredRows.length)
       : null,
@@ -472,6 +481,17 @@ function normalizeWebCapture(value, fallbackRecordId) {
     selector_version: boundedText(value.selector_version, 100),
     artifact_owner_record_id: recordId,
     captured_at: boundedText(value.captured_at || value.completed_at, 80),
+    ...(value.answer_quality?.status === 'invalid'
+      ? {
+          answer_quality: {
+            status: 'invalid',
+            reason_code: boundedText(
+              value.answer_quality.reason_code || 'capture_marked_invalid',
+              80
+            )
+          }
+        }
+      : {}),
     capture_mode: {
       name: boundedText(value.capture_mode?.name, 40),
       observed: value.capture_mode?.observed === true
@@ -531,6 +551,11 @@ function normalizeNativeRow(record) {
   const sov = metric ? GeoMetricSemanticsService.presentSov(metric) : null;
   const analysisDiagnostics = normalizeAnalysisDiagnostics(row.result_summary?.analysis);
   const failure = normalizeFailure(row.result_summary?.failure);
+  const captureQuality = WebCaptureAnswerQualityService.evaluate({
+    platform: row.platform,
+    responseText: detail.ai_response_original,
+    webCapture: row.result_summary?.web_capture
+  });
   const retry = row.result_summary?.retry && typeof row.result_summary.retry === 'object'
     ? {
         previous_record_id: Number(row.result_summary.retry.previous_record_id) || null,
@@ -552,6 +577,9 @@ function normalizeNativeRow(record) {
     failure,
     retry,
     analysis_diagnostics: analysisDiagnostics,
+    ...(captureQuality.status === 'invalid'
+      ? { capture_quality: captureQuality }
+      : {}),
     answer: detail.ai_response_original || '',
     answer_format: row.result_summary?.web_capture?.answer_format === 'markdown_v1'
       ? 'markdown_v1'
@@ -681,6 +709,27 @@ function normalizeStoredWebCapture(row) {
   };
 }
 
+function normalizeCaptureQuality(row) {
+  const quality = WebCaptureAnswerQualityService.evaluate({
+    platform: row?.platform,
+    responseText: row?.answer,
+    webCapture: row?.web_capture
+  });
+  if (quality.status !== 'invalid') return row;
+  return {
+    ...row,
+    capture_quality: quality,
+    ...(row?.web_capture
+      ? {
+          web_capture: {
+            ...row.web_capture,
+            answer_quality: quality
+          }
+        }
+      : {})
+  };
+}
+
 class QuestionSetRunService {
   async findRun({ projectId, runId, repositories = {} }) {
     const Run = repositories.QuestionSetRun || QuestionSetRun;
@@ -733,6 +782,7 @@ class QuestionSetRunService {
           : deriveExecutionState(row)
       }))
       .map(normalizeStoredWebCapture)
+      .map(normalizeCaptureQuality)
       .map((row) => normalizeRowMetricSemantics(row, fallbackMetricSemanticsVersion))
       .map(normalizeCitationSemantics)
       .map((row) => {

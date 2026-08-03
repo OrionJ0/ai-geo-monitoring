@@ -1064,6 +1064,69 @@ test('新口径没有已采集回答时覆盖率和平均 SOV 保持 N/A', () =>
   assert.equal(Object.hasOwn(summary, 'avg_share_of_voice'), false);
 });
 
+test('历史豆包过渡态标记为采集无效且不进入分析覆盖率分母', async () => {
+  const record = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    platform: 'doubao-web',
+    question: '豆包历史搜索状态',
+    brand: project.name,
+    brand_keywords: project.name,
+    analysis_contract_version: 'ai_structured_v4',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    status: 'failed',
+    error_message: 'AI 结构化结果无效',
+    result_summary: {
+      web_capture: {
+        schema_version: 'doubao-web-capture-v1',
+        status: 'completed',
+        artifact_owner_record_id: 1,
+        artifacts: {
+          search_state: { id: '00000000-0000-4000-8000-000000000001' },
+          final_answer: { id: '00000000-0000-4000-8000-000000000002' }
+        }
+      },
+      failure: {
+        stage: 'analysis_validation',
+        error_code: 'invalid_analysis_output'
+      }
+    }
+  });
+  await record.update({
+    result_summary: {
+      ...record.result_summary,
+      web_capture: {
+        ...record.result_summary.web_capture,
+        artifact_owner_record_id: record.id
+      }
+    }
+  });
+  await ResultDetail.create({
+    question_record_id: record.id,
+    ai_response_original: '正在搜索',
+    parsing_status: 'completed'
+  });
+  const run = await createNativeRun(1);
+  await record.update({ question_set_run_id: run.id, run_slot_index: 0 });
+
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: run.id
+  });
+
+  assert.deepEqual(report.rows[0].capture_quality, {
+    status: 'invalid',
+    reason_code: 'transient_search_status'
+  });
+  assert.equal(report.summary.invalid_captures, 1);
+  assert.equal(report.summary.acquired_answers, 0);
+  assert.equal(report.summary.analysis_coverage_rate, null);
+
+  await run.destroy();
+  await record.destroy();
+});
+
 test('执行能力由服务端状态机统一给出暂停和继续条件', () => {
   assert.deepEqual(QuestionSetRunService.deriveCapabilities({
     source: 'native',

@@ -149,7 +149,11 @@ test('新口径运行用已采集回答计算并展示分析覆盖率', () => {
   assert.match(source, /analysis_coverage_rate/);
   assert.match(source, /\? '分析覆盖率'/);
   assert.match(source, /formatAnalysisCoverage/);
-  assert.match(source, /成功分析数.*已采集回答数/);
+  assert.match(source, /成功分析数.*已采集有效回答数/);
+  assert.match(source, /invalid_captures/);
+  assert.match(source, /capture_quality/);
+  assert.match(source, /采集无效/);
+  assert.match(source, /不进入分析覆盖率分母/);
   assert.doesNotMatch(source, /label="有效样本"/);
 });
 

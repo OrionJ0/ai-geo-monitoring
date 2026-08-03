@@ -226,6 +226,53 @@ test('recognizes the Doubao source-search summary as a transient answer block', 
   assert.equal(adapter.isTransientAnswer('这是包含来源链接的最终回答。'), false);
 });
 
+test('does not persist a Doubao planning block before the final answer', async () => {
+  const events = [];
+  let now = 0;
+  const planning = '梳理品牌核心特点我将梳理上海广拓的核心技术、产品系列和功能特点，为后续对比表格制作做准备。';
+  const answer = '这是豆包完成生成后的正式对比回答。';
+  const adapter = new DoubaoWebAdapter({
+    page: page(events, [
+      { assistantTurns: [], generationActive: false, busy: false },
+      { assistantTurns: [], generationActive: false, busy: false },
+      {
+        assistantTurns: [{ id: 'message-1', text: planning }],
+        generationActive: false,
+        busy: false
+      },
+      {
+        assistantTurns: [{ id: 'message-1', text: planning }],
+        generationActive: false,
+        busy: false
+      },
+      {
+        assistantTurns: [{ id: 'message-1', text: answer }],
+        generationActive: false,
+        busy: false
+      },
+      {
+        assistantTurns: [{ id: 'message-1', text: answer }],
+        generationActive: false,
+        busy: false
+      }
+    ]),
+    captureStore: captureStore(events),
+    now: () => now,
+    sleep: async (ms) => { now += ms; },
+    pollMs: 1,
+    stableMs: 1,
+    timeoutMs: 30_000
+  });
+
+  const result = await adapter.capture('测试豆包计划过渡态', {
+    record_id: 25,
+    user_id: 7,
+    project_id: 4
+  });
+
+  assert.equal(result.text, answer);
+});
+
 test('never inserts or sends when Doubao standard mode cannot be verified', async () => {
   const events = [];
   const fakePage = page(events, [
