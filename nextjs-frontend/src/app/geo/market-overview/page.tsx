@@ -184,6 +184,7 @@ export default function MarketOverviewPage() {
       <section aria-labelledby="journey-heading">
         <div className={styles.sectionHeader}>
           <Title level={4} id="journey-heading">全链路概览</Title>
+          <Text type="secondary">各来源独立观察，不构成跨来源归因。</Text>
         </div>
         <div className={styles.journeyGrid}>
           <Card
@@ -243,6 +244,7 @@ export default function MarketOverviewPage() {
               value="—"
               styles={{ content: { color: '#8a94a3' } }}
             />
+            <Text type="secondary">落地页系统尚未提供稳定 API。</Text>
           </Card>
 
           <Card
@@ -256,6 +258,7 @@ export default function MarketOverviewPage() {
               value="—"
               styles={{ content: { color: '#8a94a3' } }}
             />
+            <Text type="secondary">销售系统尚未提供稳定 API。</Text>
           </Card>
         </div>
       </section>

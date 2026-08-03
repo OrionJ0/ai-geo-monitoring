@@ -408,7 +408,7 @@ export default function AdPerformancePage() {
                 <div className={styles.sectionHeading}>
                   <h2 id="campaign-heading">完整明细</h2>
                   <a href="https://www2.baidu.com/" target="_blank" rel="noreferrer">
-                    百度营销
+                    前往百度营销（将离开本站）
                   </a>
                 </div>
                 <div

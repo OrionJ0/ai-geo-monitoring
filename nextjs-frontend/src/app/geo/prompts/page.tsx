@@ -968,6 +968,7 @@ export default function GeoPromptsPage() {
         />
       ) : null}
       <WebPlatformRuntimeStatus platformCodes={selectableCodes} />
+      <Text type="secondary">运行平台由管理员在“AI 平台”中统一启用。</Text>
       {defaultContext.errorMessage ? (
         <Alert type="warning" showIcon title={defaultContext.errorMessage} />
       ) : null}

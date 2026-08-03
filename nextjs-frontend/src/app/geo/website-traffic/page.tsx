@@ -98,6 +98,7 @@ export default function WebsiteTrafficPage() {
 
   return (
     <main className={styles.page} aria-label="网站流量">
+      <p className={styles.notice}>网站流量可与广告数据同期联合观察，但不构成跨来源归因。</p>
       <div className={styles.pageActions} aria-label="数据操作">
         <div className={styles.controlsCompact}>
           <button
