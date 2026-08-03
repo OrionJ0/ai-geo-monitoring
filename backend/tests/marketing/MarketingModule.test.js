@@ -249,7 +249,7 @@ test('pilot data module mounts allowlisted binding and dashboard routes', async 
   await module.shutdown();
 });
 
-test('pilot data route reads the explicitly bound Tongji site when multiple sites are active', async (t) => {
+test('pilot data route uses the separate Tongji token and explicitly bound site', async (t) => {
   const database = await createMarketingTestDatabase(
     'marketing-explicit-tongji-site-'
   );
@@ -270,15 +270,23 @@ test('pilot data route reads the explicitly bound Tongji site when multiple site
   await database.sequelize.query(
     `UPDATE baidu_marketing_connections
      SET access_token_ciphertext = :ciphertext,
+         tongji_account_name = 'shb-广拓信息',
+         tongji_access_token_ciphertext = :tongjiCiphertext,
+         tongji_credential_updated_at = CURRENT_TIMESTAMP,
          access_token_expires_at = '2099-01-01T00:00:00.000Z'
      WHERE id = 'connection-1'`,
     {
       replacements: {
-        ciphertext: encryptSecret('access-token-test', env.CONFIG_ENCRYPTION_KEY)
+        ciphertext: encryptSecret('search-token-test', env.CONFIG_ENCRYPTION_KEY),
+        tongjiCiphertext: encryptSecret(
+          'tongji-token-test',
+          env.CONFIG_ENCRYPTION_KEY
+        )
       }
     }
   );
   const requestedSiteIds = [];
+  const tongjiCredentials = [];
   const module = createMarketingModule({
     env,
     sequelize: database.sequelize,
@@ -291,7 +299,8 @@ test('pilot data route reads the explicitly bound Tongji site when multiple site
           readOnly: true
         }];
       },
-      async listTongjiSites() {
+      async listTongjiSites({ accountName, accessToken }) {
+        tongjiCredentials.push({ accountName, accessToken });
         return [
           { siteId: '11111111', domain: 'other.example', status: 'ACTIVE' },
           { siteId: '23412673', domain: 'gato.com.cn', status: 'ACTIVE' }
@@ -330,6 +339,10 @@ test('pilot data route reads the explicitly bound Tongji site when multiple site
   assert.equal(response.status, 200, JSON.stringify(body));
   assert.equal(body.site.siteId, '23412673');
   assert.deepEqual(requestedSiteIds, ['23412673']);
+  assert.deepEqual(tongjiCredentials, [{
+    accountName: 'shb-广拓信息',
+    accessToken: 'tongji-token-test'
+  }]);
 });
 
 test('the application mounts marketing through its facade without changing global readiness inputs', () => {

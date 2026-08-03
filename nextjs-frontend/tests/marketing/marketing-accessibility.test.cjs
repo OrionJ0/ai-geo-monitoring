@@ -47,6 +47,10 @@ test('market overview keeps authoritative values out of floating point conversio
 });
 
 test('administrator UI exposes the complete account binding lifecycle', () => {
+  assert.match(marketingSettings, /tongji-credential/);
+  assert.match(marketingSettings, /验证并加密保存/);
+  assert.match(marketingSettings, /visibilityToggle=\{false\}/);
+  assert.match(marketingSettings, /页面和接口不会回显 Token/);
   assert.match(marketingSettings, /绑定搜索账户和统计站点/);
   assert.match(marketingSettings, /tongji-sites/);
   assert.match(marketingSettings, /tongjiSiteId: bindingTongjiSiteId/);

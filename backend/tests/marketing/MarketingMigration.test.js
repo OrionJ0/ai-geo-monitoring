@@ -59,7 +59,7 @@ test('root sequelize sync never registers or creates marketing domain tables', (
   }
 });
 
-test('marketing ships the five immutable domain migrations in order', () => {
+test('marketing ships the six immutable domain migrations in order', () => {
   assert.deepEqual(
     loadMarketingMigrations().map((migration) => migration.version),
     [
@@ -67,7 +67,8 @@ test('marketing ships the five immutable domain migrations in order', () => {
       '002-project-bindings',
       '003-campaign-snapshots',
       '004-baidu-oauth-identity',
-      '005-tongji-site-bindings'
+      '005-tongji-site-bindings',
+      '006-tongji-credentials'
     ]
   );
 });
@@ -99,7 +100,8 @@ test('marketing migration audit is read-only and apply creates five domain table
       '002-project-bindings',
       '003-campaign-snapshots',
       '004-baidu-oauth-identity',
-      '005-tongji-site-bindings'
+      '005-tongji-site-bindings',
+      '006-tongji-credentials'
     ]
   });
   assert.deepEqual(await database.getQueryInterface().showAllTables(), []);
@@ -123,6 +125,9 @@ test('marketing migration audit is read-only and apply creates five domain table
   );
   assert.ok(columns.authorized_open_id);
   assert.ok(columns.refresh_token_expires_at);
+  assert.ok(columns.tongji_account_name);
+  assert.ok(columns.tongji_access_token_ciphertext);
+  assert.ok(columns.tongji_credential_updated_at);
   const bindingColumns = await database.getQueryInterface().describeTable(
     'baidu_project_bindings'
   );

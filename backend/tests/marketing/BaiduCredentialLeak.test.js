@@ -34,3 +34,15 @@ test('authorization response contracts never expose credential-shaped fields', (
   );
   assert.doesNotMatch(routes, /\b(accessToken|refreshToken|clientSecret)\b/u);
 });
+
+test('connection directory exposes only sanitized Tongji credential status', () => {
+  const service = fs.readFileSync(
+    path.join(ROOT, 'modules/marketing/services/BaiduAuthorizationService.js'),
+    'utf8'
+  );
+  assert.match(service, /tongjiCredentialConfigured/u);
+  assert.doesNotMatch(
+    service,
+    /tongji_access_token_ciphertext\s+AS\s+[a-z]/iu
+  );
+});

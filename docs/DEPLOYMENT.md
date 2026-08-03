@@ -160,15 +160,16 @@ server {
 
 1. 先完成数据库备份。
 2. 执行 `cd backend && npm run migrate:marketing`。
-3. 执行 `cd backend && npm run audit:marketing`，确认 5 个版本均已应用且无 checksum 漂移。
+3. 执行 `cd backend && npm run audit:marketing`，确认 6 个版本均已应用且无 checksum 漂移。
 4. 保持 `MARKETING_MONITORING_ENABLED=false` 启动并回归 GEO/SEO。
 5. 用公网域名检查 `GET /api/health`、`GET /api/ready`，再确认禁用状态的 callback 空请求返回营销模块 503 而不是 404；反向代理不得记录 callback query。
 6. 新建本项目专用百度应用，把完整 HTTPS callback 登记为 `https://<域名>/api/admin/marketing/baidu/oauth/callback`，审核通过后取得 `appId`、`secretKey` 和授权链接中的只读 `scope`。
 7. 配置 `MARKETING_MONITORING_ENABLED=true`、`MARKETING_MONITORING_PILOT_MODE=true`、试点项目白名单和 `baidu-marketing-docs-2026-07-30`，启动后确认营销状态为 `PILOT_READY`，callback 空请求返回 `OAUTH_CALLBACK_INVALID`。
-8. 完成真实授权并确认账户目录、百度统计站点目录后，部署包含脱敏 fixture 的代码，再把契约切到 `baidu-marketing-pilot-2026-07-30`；状态必须为 `PILOT_DATA_READY`。管理员必须把项目明确绑定到选定的搜索账户与百度统计站点，运行时不得按“唯一活动站点”自动猜测。
-9. 真实 Token 与 Refresh Token 保留在服务器数据库密文中，不复制到本地；本地解析、回归和异常测试只使用脱敏 fixture。
-10. 补全金额、时区、错误与 refresh 轮换证据；新增零 blocker 的 `VERIFIED` 清单后再关闭试点模式。
-11. 生产验收未完成前不添加营销工作台导航；百度不可达不得影响全局 readiness 或旧搜索快照读取。
+8. 完成百度营销 dev2 OAuth 后，在设置中心另行填写百度统计“数据 API”页面签发的商业账号账户名与 Token；保存前系统必须用它实时读取站点目录，验证失败不得落库。两套 Token 属于不同授权体系，不得相互替代。
+9. 确认搜索账户和百度统计站点目录后，部署包含脱敏 fixture 的代码，再把契约切到 `baidu-marketing-pilot-2026-07-30`；状态必须为 `PILOT_DATA_READY`。管理员必须把项目明确绑定到选定的搜索账户与百度统计站点，运行时不得按“唯一活动站点”自动猜测。
+10. 百度营销 Access/Refresh Token 和百度统计 Data API Token 都只保留在服务器数据库密文中，不复制到 Git；本地解析、回归和异常测试只使用脱敏 fixture。临时人工联调文件必须被 Git 忽略并限制为仅当前用户可读。
+11. 补全金额、时区、错误与 refresh 轮换证据；新增零 blocker 的 `VERIFIED` 清单后再关闭试点模式。
+12. 生产验收未完成前不扩大项目白名单；百度不可达不得影响全局 readiness 或旧搜索快照读取。
 
 故障时同时把 `MARKETING_MONITORING_ENABLED` 和 `MARKETING_MONITORING_PILOT_MODE` 恢复为 `false`。若 Token 或主密钥疑似泄露，先阻断连接并在百度控制台撤权，清除本地 Token，轮换应用 Secret 与 `CONFIG_ENCRYPTION_KEY`，然后逐连接重新授权；不得恢复任何旧营销实现或隐式 fallback。
 

@@ -196,6 +196,14 @@ test('administrator completes one-time authorization without exposing credential
   assert.match(connections[0].refresh_token_ciphertext, /^v1:/u);
   assert.ok(connections[0].refresh_token_expires_at);
   assert.doesNotMatch(JSON.stringify(connections), /access-token-canary|refresh-token-canary/iu);
+  await sequelize.query(
+    `UPDATE baidu_marketing_connections
+     SET tongji_account_name = '统计账户',
+         tongji_access_token_ciphertext = 'v1:encrypted-tongji-fixture',
+         tongji_credential_updated_at = CURRENT_TIMESTAMP
+     WHERE id = :connectionId`,
+    { replacements: { connectionId: connections[0].id } }
+  );
 
   const replay = await fetch(
     `${baseUrl}/api/admin/marketing/baidu/oauth/callback?${callbackQuery}`,
@@ -212,12 +220,15 @@ test('administrator completes one-time authorization without exposing credential
   assert.equal((await disconnect.json()).status, 'DISCONNECTED');
   const [disconnectedRows] = await sequelize.query(
     `SELECT status, access_token_ciphertext, refresh_token_ciphertext,
+            tongji_account_name, tongji_access_token_ciphertext,
             auth_generation
      FROM baidu_marketing_connections`
   );
   assert.equal(disconnectedRows[0].status, 'DISCONNECTED');
   assert.equal(disconnectedRows[0].access_token_ciphertext, null);
   assert.equal(disconnectedRows[0].refresh_token_ciphertext, null);
+  assert.equal(disconnectedRows[0].tongji_account_name, null);
+  assert.equal(disconnectedRows[0].tongji_access_token_ciphertext, null);
   assert.equal(disconnectedRows[0].auth_generation, 1);
 });
 

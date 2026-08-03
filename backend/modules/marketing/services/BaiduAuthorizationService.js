@@ -636,10 +636,14 @@ class BaiduAuthorizationService {
   }
 
   async listConnections() {
-    return this.sequelize.query(
+    const rows = await this.sequelize.query(
       `SELECT id, status, authorized_principal_id AS principalId,
               authorized_principal_name AS principalName,
               access_token_expires_at AS accessTokenExpiresAt,
+              tongji_account_name AS "tongjiAccountName",
+              CASE WHEN tongji_access_token_ciphertext IS NULL
+                THEN 0 ELSE 1 END AS "tongjiCredentialConfigured",
+              tongji_credential_updated_at AS "tongjiCredentialUpdatedAt",
               auth_generation AS authGeneration,
               token_version AS tokenVersion,
               last_error_code AS lastErrorCode,
@@ -649,6 +653,10 @@ class BaiduAuthorizationService {
        ORDER BY created_at DESC`,
       { type: QueryTypes.SELECT }
     );
+    return rows.map((row) => ({
+      ...row,
+      tongjiCredentialConfigured: Boolean(row.tongjiCredentialConfigured)
+    }));
   }
 
   async disconnect({ connectionId }) {
@@ -679,6 +687,9 @@ class BaiduAuthorizationService {
                access_token_ciphertext = NULL,
                refresh_token_ciphertext = NULL,
                access_token_expires_at = NULL,
+               tongji_account_name = NULL,
+               tongji_access_token_ciphertext = NULL,
+               tongji_credential_updated_at = NULL,
                refresh_claim_token = NULL,
                refresh_claim_until = NULL,
                auth_generation = auth_generation + 1,

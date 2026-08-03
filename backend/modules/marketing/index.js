@@ -43,6 +43,9 @@ const {
 const {
   BaiduTongjiService
 } = require('./services/BaiduTongjiService');
+const {
+  BaiduTongjiCredentialService
+} = require('./services/BaiduTongjiCredentialService');
 
 function createDefaultMigrationAuditor(sequelize) {
   return {
@@ -155,6 +158,11 @@ function createMarketingModule({
       provider: baiduProvider,
       encryptionKey: env.CONFIG_ENCRYPTION_KEY
     });
+    const tongjiCredentialService = new BaiduTongjiCredentialService({
+      sequelize,
+      provider: baiduProvider,
+      encryptionKey: env.CONFIG_ENCRYPTION_KEY
+    });
     const accountDirectory = {
       async listAccounts({ connection }) {
         return baiduProvider.listAccounts({
@@ -164,11 +172,8 @@ function createMarketingModule({
       }
     };
     const siteDirectory = {
-      async listSites({ connection, account }) {
-        return baiduProvider.listTongjiSites({
-          accountName: account.accountName,
-          accessToken: await connectionService.getAccessToken(connection.id)
-        });
+      async listSites({ connection }) {
+        return tongjiCredentialService.listSites(connection.id);
       }
     };
     const reportProvider = {
@@ -182,26 +187,12 @@ function createMarketingModule({
       }
     };
     const resolveTongjiSite = async (connection) => {
-      const accessToken = await connectionService.getAccessToken(
+      const credential = await tongjiCredentialService.getCredential(
         connection.id
       );
-      const accounts = await baiduProvider.listAccounts({
-        connection,
-        accessToken
-      });
-      const account = accounts.find((item) => (
-        item.accountId === String(connection.external_account_id)
-      ));
-      if (!account) {
-        throw new BaiduMarketingError(
-          '百度统计授权主体不在账户目录中',
-          'BAIDU_TONGJI_ACCOUNT_INVALID',
-          502
-        );
-      }
       const sites = await baiduProvider.listTongjiSites({
-        accountName: account.accountName,
-        accessToken
+        accountName: credential.accountName,
+        accessToken: credential.accessToken
       });
       const site = sites.find((item) => (
         item.siteId === connection.tongji_site_id
@@ -221,8 +212,8 @@ function createMarketingModule({
         );
       }
       return {
-        accountName: account.accountName,
-        accessToken,
+        accountName: credential.accountName,
+        accessToken: credential.accessToken,
         site
       };
     };
@@ -277,6 +268,7 @@ function createMarketingModule({
     }));
     authorizationRouter.use(createBaiduBindingRouter({
       service: bindingService,
+      tongjiCredentialService,
       includeBindings: false,
       accountRoute: '/connections/:connectionId/accounts',
       siteRoute: '/connections/:connectionId/accounts/:accountId/tongji-sites'

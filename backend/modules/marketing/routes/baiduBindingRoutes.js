@@ -26,6 +26,7 @@ function exactBody(body, keys) {
 
 function createBaiduBindingRouter({
   service,
+  tongjiCredentialService = null,
   adminRequired = defaultAdminRequired,
   includeAccounts = true,
   includeBindings = true,
@@ -33,6 +34,30 @@ function createBaiduBindingRouter({
   siteRoute = '/admin/baidu/connections/:connectionId/accounts/:accountId/tongji-sites'
 }) {
   const router = express.Router();
+
+  if (tongjiCredentialService) router.put(
+    '/connections/:connectionId/tongji-credential',
+    adminRequired,
+    async (req, res) => {
+      if (!exactBody(req.body, ['accountName', 'accessToken'])) {
+        return sendError(res, {
+          status: 400,
+          code: 'TONGJI_CREDENTIAL_REQUEST_INVALID',
+          message: '百度统计凭据请求字段无效'
+        });
+      }
+      try {
+        res.set('Cache-Control', 'no-store');
+        return res.json(await tongjiCredentialService.configure({
+          connectionId: req.params.connectionId,
+          accountName: req.body.accountName,
+          accessToken: req.body.accessToken
+        }));
+      } catch (error) {
+        return sendError(res, error);
+      }
+    }
+  );
 
   if (includeAccounts) router.get(
     accountRoute,
