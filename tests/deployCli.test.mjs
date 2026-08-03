@@ -118,7 +118,7 @@ test('deployment check accepts a clean main checkout and rejects local changes',
   );
 });
 
-test('deployment runs the metric migration and audit after backup but before startup', async (t) => {
+test('deployment builds the current frontend before browser acceptance and migrates before startup', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-deploy-flow-'));
   const remoteDirectory = fs.mkdtempSync(
     path.join(os.tmpdir(), 'ai-geo-deploy-flow-remote-')
@@ -206,13 +206,18 @@ test('deployment runs the metric migration and audit after backup but before sta
 
   const trace = fs.readFileSync(tracePath, 'utf8').trim().split('\n');
   const backupIndex = trace.indexOf('backup');
+  const frontendBuildIndex = trace.indexOf('npm:run build');
+  const browserAcceptanceIndex = trace.indexOf('npm:run test:marketing:browser');
   const applyIndex = trace.findIndex((line) => line.startsWith('migration:--apply '));
   const auditIndex = trace.indexOf('migration:');
   const marketingApplyIndex = trace.indexOf('marketing-migration:--apply');
   const marketingAuditIndex = trace.indexOf('marketing-migration:');
   const startIndex = trace.indexOf('production:start');
   assert.ok(backupIndex >= 0);
+  assert.ok(frontendBuildIndex > backupIndex);
+  assert.ok(browserAcceptanceIndex > frontendBuildIndex);
   assert.ok(applyIndex > backupIndex);
+  assert.ok(applyIndex > browserAcceptanceIndex);
   assert.ok(auditIndex > applyIndex);
   assert.ok(marketingApplyIndex > auditIndex);
   assert.ok(marketingAuditIndex > marketingApplyIndex);

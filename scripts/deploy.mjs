@@ -255,24 +255,24 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       cwd: backendDirectory,
       label: '后端营销测试',
     });
-    console.log('6/10 安装并检查前端依赖');
+    console.log('6/10 安装并静态检查前端依赖');
     await run('npm', ['ci'], { cwd: frontendDirectory, label: '前端 npm ci' });
     await run('npm', ['test'], {
       cwd: frontendDirectory,
       label: '前端营销单元测试',
     });
-    await run('npm', ['run', 'test:marketing:browser'], {
-      cwd: frontendDirectory,
-      label: '前端营销浏览器验收',
-    });
     await run('npm', ['run', 'lint'], {
       cwd: frontendDirectory,
       label: '前端 lint',
     });
-    console.log('7/10 构建前端生产产物');
+    console.log('7/10 构建并验收前端生产产物');
     await run('npm', ['run', 'build'], {
       cwd: frontendDirectory,
       label: '前端生产构建',
+    });
+    await run('npm', ['run', 'test:marketing:browser'], {
+      cwd: frontendDirectory,
+      label: '前端营销浏览器验收',
     });
     console.log('8/10 迁移并复审 GEO 指标语义');
     const backendConfig = parseEnvFile(path.join(backendDirectory, '.env'));
