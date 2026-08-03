@@ -399,12 +399,24 @@ class BaiduBindingService {
     });
   }
 
-  async resumeBinding({ projectId, bindingId }) {
+  async resumeBinding({ projectId, bindingId, tongjiSiteId = null }) {
     await this.requireActiveProject(projectId);
     const binding = await this.findBinding(projectId, bindingId);
-    if (!binding.tongjiSiteId) {
+    if (
+      binding.tongjiSiteId
+      && tongjiSiteId
+      && binding.tongjiSiteId !== tongjiSiteId
+    ) {
       throw new MarketingBindingError(
-        '绑定缺少百度统计站点，请重新创建绑定',
+        '已绑定的百度统计站点不能在恢复时更换',
+        'TONGJI_SITE_BINDING_IMMUTABLE',
+        409
+      );
+    }
+    const selectedSiteId = binding.tongjiSiteId || tongjiSiteId;
+    if (!selectedSiteId) {
+      throw new MarketingBindingError(
+        '绑定缺少百度统计站点，请先选择站点',
         'TONGJI_SITE_BINDING_MISSING',
         409
       );
@@ -416,7 +428,7 @@ class BaiduBindingService {
     const account = context.account;
     const site = await this.validateTongjiSite(
       context,
-      binding.tongjiSiteId
+      selectedSiteId
     );
     try {
       return await this.sequelize.transaction(async (transaction) => {
@@ -427,6 +439,16 @@ class BaiduBindingService {
           bindingId,
           transaction
         );
+        if (
+          current.tongjiSiteId
+          && current.tongjiSiteId !== selectedSiteId
+        ) {
+          throw new MarketingBindingError(
+            '绑定的百度统计站点已变化，请刷新后重试',
+            'TONGJI_SITE_BINDING_CHANGED',
+            409
+          );
+        }
         if (current.status === 'ACTIVE') return current;
         const conflicts = await this.sequelize.query(
           `SELECT id
@@ -458,6 +480,7 @@ class BaiduBindingService {
           `UPDATE baidu_project_bindings
            SET status = 'ACTIVE',
                external_account_name = :accountName,
+               tongji_site_id = :tongjiSiteId,
                tongji_site_domain = :tongjiSiteDomain,
                binding_version = binding_version + 1,
                paused_reason = NULL,
@@ -468,6 +491,7 @@ class BaiduBindingService {
               projectId,
               bindingId,
               accountName: account.accountName,
+              tongjiSiteId: site.siteId,
               tongjiSiteDomain: site.domain,
               now
             },

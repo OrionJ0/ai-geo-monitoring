@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { Sequelize } = require('sequelize');
+const { QueryTypes, Sequelize } = require('sequelize');
 
 const {
   createMarketingMigrationRunner
@@ -260,6 +260,54 @@ test('binding rejects forged accounts, unknown fields, and archived projects', a
     }
   );
   assert.equal(archived.status, 409);
+});
+
+test('a paused pre-site binding can be completed and resumed without deletion', async () => {
+  const rows = await sequelize.query(
+    `SELECT id FROM baidu_project_bindings
+     WHERE project_id = 11
+     LIMIT 1`,
+    { type: QueryTypes.SELECT }
+  );
+  const bindingId = rows[0].id;
+  await sequelize.query(
+    `UPDATE baidu_project_bindings
+     SET status = 'PAUSED',
+         paused_reason = 'REAUTH',
+         tongji_site_id = NULL,
+         tongji_site_domain = NULL
+     WHERE id = :bindingId`,
+    { replacements: { bindingId } }
+  );
+
+  const response = await fetch(
+    `${baseUrl}/api/marketing/projects/11/baidu-bindings/${bindingId}/resume`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tongjiSiteId: '23412673' })
+    }
+  );
+  const binding = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(binding));
+  assert.equal(binding.id, bindingId);
+  assert.equal(binding.status, 'ACTIVE');
+  assert.equal(binding.tongjiSiteId, '23412673');
+  assert.equal(binding.tongjiSiteDomain, 'gato.com.cn');
+
+  const mutation = await fetch(
+    `${baseUrl}/api/marketing/projects/11/baidu-bindings/${bindingId}/resume`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tongjiSiteId: '99999999' })
+    }
+  );
+  assert.equal(mutation.status, 409);
+  assert.equal(
+    (await mutation.json()).error.code,
+    'TONGJI_SITE_BINDING_IMMUTABLE'
+  );
 });
 
 test('project allowlist rejects binding before any provider directory call', async () => {

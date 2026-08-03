@@ -147,10 +147,26 @@ function createBaiduBindingRouter({
     '/projects/:projectId/baidu-bindings/:bindingId/resume',
     adminRequired,
     async (req, res) => {
+      const emptyResumeBody = req.body == null || (
+        typeof req.body === 'object'
+        && !Array.isArray(req.body)
+        && Object.keys(req.body).length === 0
+      );
+      if (
+        !emptyResumeBody
+        && !exactBody(req.body, ['tongjiSiteId'])
+      ) {
+        return sendError(res, {
+          status: 400,
+          code: 'BINDING_RESUME_REQUEST_INVALID',
+          message: '恢复绑定请求字段无效'
+        });
+      }
       try {
         return res.json(await service.resumeBinding({
           projectId: req.params.projectId,
-          bindingId: req.params.bindingId
+          bindingId: req.params.bindingId,
+          tongjiSiteId: req.body?.tongjiSiteId || null
         }));
       } catch (error) {
         return sendError(res, error);

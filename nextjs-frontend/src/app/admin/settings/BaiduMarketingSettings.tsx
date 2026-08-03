@@ -321,13 +321,24 @@ export default function BaiduMarketingSettings() {
     setBusy(true);
     setError('');
     try {
+      const pausedLegacyBinding = bindings.find((binding) => (
+        binding.status === 'PAUSED'
+        && binding.connectionId === bindingConnectionId
+        && binding.externalAccountId === bindingAccountId
+        && !binding.tongjiSiteId
+      ));
       await axios.post(
-        `/api/marketing/projects/${encodeURIComponent(projectId)}/baidu-bindings`,
-        {
-          connectionId: bindingConnectionId,
-          externalAccountId: bindingAccountId,
-          tongjiSiteId: bindingTongjiSiteId,
-        }
+        pausedLegacyBinding
+          ? `/api/marketing/projects/${encodeURIComponent(projectId)}`
+            + `/baidu-bindings/${encodeURIComponent(pausedLegacyBinding.id)}/resume`
+          : `/api/marketing/projects/${encodeURIComponent(projectId)}/baidu-bindings`,
+        pausedLegacyBinding
+          ? { tongjiSiteId: bindingTongjiSiteId }
+          : {
+              connectionId: bindingConnectionId,
+              externalAccountId: bindingAccountId,
+              tongjiSiteId: bindingTongjiSiteId,
+            }
       );
       setBindingModalOpen(false);
       await loadBindings(projectId);

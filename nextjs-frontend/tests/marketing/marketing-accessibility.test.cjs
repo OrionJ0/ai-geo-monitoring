@@ -54,6 +54,8 @@ test('administrator UI exposes the complete account binding lifecycle', () => {
   assert.match(marketingSettings, /绑定搜索账户和统计站点/);
   assert.match(marketingSettings, /tongji-sites/);
   assert.match(marketingSettings, /tongjiSiteId: bindingTongjiSiteId/);
+  assert.match(marketingSettings, /pausedLegacyBinding/);
+  assert.match(marketingSettings, /tongjiSiteId: bindingTongjiSiteId \}/);
   assert.match(marketingSettings, /百度统计站点/);
   assert.match(marketingSettings, /\/baidu-bindings/);
   assert.match(marketingSettings, /action: 'pause' \| 'resume'/);
