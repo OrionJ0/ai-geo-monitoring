@@ -212,11 +212,13 @@
     },
     "pilotObserved": {
       "siteCount": 3,
-      "activeSiteCount": 1,
+      "activeSiteCount": 3,
       "siteDirectoryShapeVerified": true,
       "trendResponseShapeVerified": true,
       "dateFormat": "YYYY/MM/DD",
-      "metricWireType": "string",
+      "metricWireType": "safe integer or formatted decimal string",
+      "maxResultsZeroReturnedAll": false,
+      "completeRangeUsesExplicitDayCount": true,
       "noDataMarker": "--"
     }
   },

@@ -313,7 +313,7 @@ function assertDateRange(coverage, maxDays) {
       400
     );
   }
-  return { from, to };
+  return { from, to, days };
 }
 
 function reportIdentifier(value, field) {
@@ -475,6 +475,9 @@ function normalizeTongjiEnvelope(response) {
 
 function normalizeTongjiMetric(value) {
   if (value === '--') return null;
+  if (Number.isSafeInteger(value) && value >= 0) {
+    return String(value);
+  }
   if (
     typeof value !== 'string'
     || !/^\d{1,3}(?:,\d{3})*$|^\d+$/u.test(value)
@@ -957,7 +960,7 @@ class BaiduMarketingClient {
           start_date: range.from.replaceAll('-', ''),
           end_date: range.to.replaceAll('-', ''),
           metrics: metrics.join(','),
-          max_results: 0,
+          max_results: range.days,
           gran: 'day',
           ...(source ? { source } : {})
         }
@@ -978,6 +981,10 @@ class BaiduMarketingClient {
       || !Array.isArray(result.items[0])
       || !Array.isArray(result.items[1])
       || result.items[0].length !== result.items[1].length
+      || !Number.isSafeInteger(result.total)
+      || result.total < 0
+      || result.total !== result.items[0].length
+      || result.offset !== 0
     ) {
       throw new BaiduMarketingError(
         '百度统计趋势响应无效',
@@ -1023,7 +1030,7 @@ class BaiduMarketingClient {
         visits: normalizeTongjiMetric(metricRow[1]),
         visitors: normalizeTongjiMetric(metricRow[2])
       };
-    });
+    }).sort((left, right) => left.date.localeCompare(right.date));
   }
 }
 

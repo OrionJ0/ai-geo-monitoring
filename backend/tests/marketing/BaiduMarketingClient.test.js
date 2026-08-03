@@ -563,12 +563,22 @@ test('Tongji site directory parses the redacted response fixture', async () => {
   });
 });
 
-test('Tongji trend parses exact strings and preserves provider no-data markers', async () => {
+test('Tongji trend parses exact integers and formatted strings without truncating the requested days', async () => {
   let captured;
   const fixture = JSON.parse(fs.readFileSync(path.resolve(
     __dirname,
     '../../modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/fixtures/tongji-trend.success.redacted.json'
   ), 'utf8'));
+  fixture.body.data[0].result.items[0] = [
+    ['2026/07/30'],
+    ['2026/07/29'],
+    ['2026/07/28']
+  ];
+  fixture.body.data[0].result.items[1] = [
+    ['1,234', 56, 40],
+    ['--', '--', '--'],
+    [123, 45, 30]
+  ];
   const client = createClient(async (request) => {
     captured = request;
     return fixture;
@@ -610,9 +620,47 @@ test('Tongji trend parses exact strings and preserves provider no-data markers',
     start_date: '20260701',
     end_date: '20260730',
     metrics: 'pv_count,visit_count,visitor_count',
-    max_results: 0,
+    max_results: 30,
     gran: 'day'
   });
+});
+
+test('Tongji trend rejects truncated and unsafe numeric responses', async () => {
+  const fixture = JSON.parse(fs.readFileSync(path.resolve(
+    __dirname,
+    '../../modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/fixtures/tongji-trend.success.redacted.json'
+  ), 'utf8'));
+  fixture.body.data[0].result.total = 4;
+  const truncatedClient = createClient(async () => fixture);
+
+  await assert.rejects(
+    truncatedClient.fetchTongjiTrend({
+      accountName: '脱敏搜索账户',
+      accessToken: 'access-token-fixture',
+      siteId: '301',
+      coverage: {
+        from: '2026-07-01',
+        to: '2026-07-30'
+      }
+    }),
+    { code: 'BAIDU_TONGJI_RESPONSE_INVALID' }
+  );
+
+  fixture.body.data[0].result.total = 3;
+  fixture.body.data[0].result.items[1][0][0] = Number.MAX_SAFE_INTEGER + 1;
+  const unsafeClient = createClient(async () => fixture);
+  await assert.rejects(
+    unsafeClient.fetchTongjiTrend({
+      accountName: '脱敏搜索账户',
+      accessToken: 'access-token-fixture',
+      siteId: '301',
+      coverage: {
+        from: '2026-07-01',
+        to: '2026-07-30'
+      }
+    }),
+    { code: 'BAIDU_TONGJI_RESPONSE_INVALID' }
+  );
 });
 
 test('Tongji trend accepts only documented stable source filters', async () => {
