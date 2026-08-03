@@ -20,6 +20,7 @@ const QUICK_LINKS = page(
 
 const DELIVERY_ITEMS = Object.freeze([
   page('/ad-performance', '广告表现', '/geo/ad-performance'),
+  page('/search-term-analysis', '搜索词分析', '/geo/search-term-analysis'),
   page('/website-traffic', '网站流量', '/geo/website-traffic')
 ]);
 

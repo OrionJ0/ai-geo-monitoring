@@ -3,47 +3,110 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const pagePath = path.resolve(
-  __dirname,
-  '../../src/app/geo/ad-performance/page.tsx'
+const frontendRoot = path.resolve(__dirname, '../..');
+const read = (relativePath) => fs.readFileSync(
+  path.join(frontendRoot, relativePath),
+  'utf8'
 );
 
-test('advertising page resolves the explicit default project without a selector fallback', () => {
-  const source = fs.readFileSync(pagePath, 'utf8');
+const pageSource = read('src/app/geo/ad-performance/page.tsx');
+const styleSource = read(
+  'src/app/geo/ad-performance/ad-performance.module.css'
+);
+const hookSource = read('src/lib/marketing/useAdPerformance.ts');
+const adapterSource = read('src/lib/marketing/adPerformanceAdapter.ts');
+const fixtureSource = read('src/fixtures/adPerformance.fixture.ts');
 
-  assert.match(source, /useDefaultProjectContext/);
-  assert.match(source, /defaultContext\.project\?\.id/);
-  assert.doesNotMatch(source, /axios\.get\(['"]\/api\/geo-projects['"]\)/);
-  assert.doesNotMatch(source, /projects?\[0\]/);
-  assert.doesNotMatch(source, /<select/);
+test('advertising page uses the default project and the real read-only dashboard endpoint', () => {
+  assert.match(pageSource, /useDefaultProjectContext/);
+  assert.match(pageSource, /defaultContext\.project\?\.id/);
+  assert.match(hookSource, /\/dashboard/);
+  assert.match(hookSource, /axios\.get<MarketingDashboardResponse>/);
+  assert.doesNotMatch(hookSource, /axios\.(?:post|put|patch|delete)\(/);
+  assert.doesNotMatch(pageSource, /立即刷新|最后成功|更新时间|前往百度/);
 });
 
-test('advertising page uses the read capability and existing all-or-nothing snapshot APIs', () => {
-  const source = fs.readFileSync(pagePath, 'utf8');
+test('page follows the approved breadcrumb, date, summary, trend, and drilldown order', () => {
+  const breadcrumb = pageSource.indexOf("{ title: '首页' }");
+  const summary = pageSource.indexOf('周期汇总指标');
+  const trend = pageSource.indexOf("selectedNode?.name || '总体'");
+  const drilldown = pageSource.indexOf('<h2>结构下钻</h2>');
 
-  assert.match(source, /capabilities\.adsRead/);
-  assert.match(source, /\/dashboard/);
-  assert.match(source, /\/refresh-runs/);
-  assert.match(source, /\['QUEUED',\s*'RUNNING'\]/);
-  assert.match(source, /snapshotFreshnessState === 'STALE'/);
-  assert.match(source, /snapshotContentState === 'NONE'/);
+  assert.ok(breadcrumb >= 0 && breadcrumb < summary);
+  assert.ok(summary < trend && trend < drilldown);
+  assert.match(pageSource, /广告表现日期范围/);
+  assert.match(pageSource, /allowEmpty=\{\[true, true\]\}/);
+  assert.match(pageSource, /近 30 天/);
+  assert.match(pageSource, /总消费/);
+  assert.match(pageSource, /总展现/);
+  assert.match(pageSource, /总点击/);
+  assert.doesNotMatch(pageSource, /<h1/);
+  assert.doesNotMatch(pageSource, /总预算/);
 });
 
-test('advertising page preserves exact values and distinguishes account-scoped campaigns', () => {
-  const source = fs.readFileSync(pagePath, 'utf8');
-
-  assert.match(source, /BigInt\(row\.impressions\)/);
-  assert.match(source, /formatScaled/);
-  assert.match(source, /groupDigits/);
-  assert.match(source, /campaign\.accountId.*campaign\.campaignId/s);
-  assert.match(source, /逐日广告指标等价数据表/);
-  assert.match(source, /aria-live="polite"/);
+test('trend offers exactly the five advertising metrics and one selected object', () => {
+  ['消费', '展现', '点击', 'CTR', '平均 CPC'].forEach((label) => {
+    assert.match(pageSource, new RegExp(`label: '${label.replace(' ', '\\s')}'`));
+  });
+  assert.match(pageSource, /currentPeriodLabel/);
+  assert.match(pageSource, /previousPeriodLabel/);
+  assert.match(pageSource, /lineDash/);
+  assert.match(pageSource, /返回总体/);
+  assert.match(pageSource, /current === record\.key \? null : record\.key/);
+  assert.doesNotMatch(pageSource, /selectedNodeKeys|rowSelection/);
 });
 
-test('advertising page remains read-only and sends changes back to Baidu', () => {
-  const source = fs.readFileSync(pagePath, 'utf8');
+test('drilldown table keeps the required columns, hierarchy filters, and parent paths', () => {
+  [
+    '名称', '状态', '预算', '消费', '展现', '点击', 'CTR', '平均 CPC', '详情'
+  ].forEach((title) => assert.match(pageSource, new RegExp(`title: '${title}'`)));
+  ['全部层级', '仅项目', '仅方案', '仅单元'].forEach((label) => {
+    assert.match(pageSource, new RegExp(`label: '${label}'`));
+  });
+  assert.match(pageSource, /filterTree/);
+  assert.match(pageSource, /node\.id\.toLocaleLowerCase/);
+  assert.match(pageSource, /sortTree/);
+  assert.match(pageSource, /event\.stopPropagation\(\)/);
+  assert.match(pageSource, /indentSize: 32/);
+  assert.match(pageSource, /<Tooltip[\s\S]*title=\{name\}/);
+  assert.match(styleSource, /\.nameCell[\s\S]*text-overflow: ellipsis/);
+  assert.match(styleSource, /\.leafConnector::before[\s\S]*border-left/);
+  assert.match(styleSource, /\.selectedRow[\s\S]*#e6f4ff/);
+});
 
-  assert.match(source, /前往百度营销（将离开本站）/);
-  assert.doesNotMatch(source, /预算设置|修改预算|修改出价|编辑推广计划/);
-  assert.doesNotMatch(source, /axios\.(?:put|patch|delete)\(/);
+test('detail popover is viewport-aware, hoverable, keyboard-triggered, and escape-closeable', () => {
+  assert.match(pageSource, /<Popover/);
+  assert.match(pageSource, /trigger=\{\['hover', 'focus'\]\}/);
+  assert.match(pageSource, /autoAdjustOverflow/);
+  assert.match(pageSource, /aria-describedby=\{descriptionId\}/);
+  assert.match(pageSource, /event\.key === 'Escape'/);
+  assert.match(pageSource, /mouseLeaveDelay/);
+  assert.doesNotMatch(pageSource, /Drawer|Modal|进入详情页/);
+});
+
+test('real adapter is honest about missing hierarchy fields and fixture stays isolated', () => {
+  assert.match(adapterSource, /source: 'dashboard'/);
+  assert.match(adapterSource, /dashboard\.campaigns/);
+  assert.match(adapterSource, /level: 'scheme'/);
+  assert.match(adapterSource, /budgetAmountScaled: null/);
+  assert.match(adapterSource, /currentTrend: \[\]/);
+  assert.match(adapterSource, /\{ label: '投放设备', value: '—' \}/);
+  assert.match(fixtureSource, /source: 'development-fixture'/);
+  assert.match(fixtureSource, /\{ label: '下属方案数', value: '2' \}/);
+  assert.doesNotMatch(fixtureSource, /scheme:perimeter-brand|周界报警品牌词/);
+  assert.match(hookSource, /NEXT_PUBLIC_AD_PERFORMANCE_FIXTURE/);
+  assert.match(hookSource, /fixtureEnabled = AD_PERFORMANCE_FIXTURE_ENABLED/);
+  assert.match(pageSource, /process\.env\.NODE_ENV !== 'production'/);
+  assert.match(pageSource, /get\('fixture'\)[\s\S]*=== 'ad-performance'/);
+  assert.doesNotMatch(pageSource, /42752800|8566634|49648/);
+});
+
+test('ratio formatting guards zero denominators and the page excludes funnel metrics', () => {
+  assert.match(pageSource, /impressions === BigInt\(0\)/);
+  assert.match(pageSource, /clicks === BigInt\(0\)/);
+  assert.match(pageSource, /return '—'/);
+  assert.doesNotMatch(
+    `${pageSource}\n${fixtureSource}`,
+    /客服咨询|线索入池|订单|成交金额|转化漏斗|CPL|CPA|ROAS|TOP5|异常诊断/
+  );
 });

@@ -1,0 +1,441 @@
+.page {
+  min-width: 0;
+  min-height: 100%;
+  padding-bottom: 24px;
+  color: #111827;
+  background: #f6f8fb;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.breadcrumbRow {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.breadcrumbRow :global(.ant-breadcrumb) {
+  color: #667085;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.dateRangeControl {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  border: 1px solid #e5eaf1;
+  border-radius: 8px;
+  color: #172b4d;
+  background: #fff;
+}
+
+.dateRangeControl > span {
+  flex: none;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.dateRangeControl :global(.ant-picker) {
+  width: 244px;
+  min-width: 0;
+  padding-left: 0;
+}
+
+.dateRangeControl :global(.ant-picker-input > input) {
+  color: #172b4d;
+  font-variant-numeric: tabular-nums;
+}
+
+.pageAlert {
+  margin-bottom: 16px;
+}
+
+.moduleStack {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.summaryCard,
+.trendCard,
+.tableCard {
+  min-width: 0;
+  border: 1px solid #e5eaf1 !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.summaryCard,
+.trendCard {
+  border-radius: 12px !important;
+}
+
+.tableCard {
+  overflow: hidden;
+  border-radius: 10px !important;
+}
+
+.summaryCard :global(.ant-card-body) {
+  padding: 0;
+}
+
+.summaryGrid {
+  display: grid;
+  min-height: 120px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+}
+
+.summaryItem {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+}
+
+.summaryItem + .summaryItem {
+  border-left: 1px solid #e8edf4;
+}
+
+.summaryItem > span {
+  color: #667085;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.summaryItem > strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: #172b4d;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 36px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trendCard :global(.ant-card-body) {
+  padding: 20px 24px 16px;
+}
+
+.trendHeader,
+.tableToolbar,
+.tableToolbarLeft,
+.trendTitleGroup,
+.metricSelect,
+.tableToolbarLeft label {
+  display: flex;
+  align-items: center;
+}
+
+.trendHeader,
+.tableToolbar {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.trendHeader {
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+
+.trendTitleGroup {
+  min-width: 0;
+  gap: 8px;
+}
+
+.trendHeader h2,
+.tableToolbar h2 {
+  margin: 0;
+  color: #172b4d;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.trendTitleGroup :global(.ant-btn) {
+  padding-inline: 6px;
+}
+
+.metricSelect,
+.tableToolbarLeft label {
+  gap: 8px;
+  color: #667085;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.metricSelect :global(.ant-select) {
+  min-width: 116px;
+}
+
+.chartRegion {
+  width: 100%;
+  min-width: 0;
+  min-height: 250px;
+}
+
+.chartRegion :global(canvas) {
+  display: block;
+}
+
+.trendEmpty {
+  min-height: 250px;
+  padding-top: 56px;
+}
+
+.tableCard :global(.ant-card-body) {
+  padding: 0;
+}
+
+.tableToolbar {
+  min-height: 64px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e8edf4;
+}
+
+.tableToolbarLeft {
+  min-width: 0;
+  gap: 24px;
+}
+
+.tableToolbarLeft :global(.ant-select) {
+  min-width: 120px;
+}
+
+.searchInput {
+  width: 240px;
+}
+
+.structureTable :global(.ant-table) {
+  border-radius: 0;
+}
+
+.structureTable :global(.ant-table-container) {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+
+.structureTable :global(.ant-table-thead > tr > th) {
+  height: 44px;
+  padding: 10px 12px;
+  color: #526071;
+  background: #fbfcfe;
+  border-bottom: 1px solid #e8edf4;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.structureTable :global(.ant-table-tbody > tr > td) {
+  height: 52px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e8edf4;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+}
+
+.structureTable :global(.ant-table-tbody > tr > td:first-child) {
+  white-space: nowrap;
+}
+
+.structureTable :global(.ant-table-tbody > tr) {
+  cursor: pointer;
+}
+
+.structureTable :global(.ant-table-tbody > tr:hover > td) {
+  background: #f5f7fa !important;
+}
+
+.structureTable :global(.ant-table-tbody > tr:focus-visible) {
+  outline: 3px solid rgba(31, 77, 210, 0.42);
+  outline-offset: -3px;
+}
+
+.selectedRow > td,
+.selectedRow:hover > td {
+  background: #e6f4ff !important;
+}
+
+.nameCell {
+  display: inline-block;
+  min-width: 0;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  color: #172b4d;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.structureTable :global(.ant-table-row-level-1) .nameCell {
+  max-width: calc(100% - 56px);
+}
+
+.structureTable :global(.ant-table-row-level-2) .nameCell {
+  max-width: calc(100% - 88px);
+}
+
+.expandButton {
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  padding: 0 !important;
+  color: #667085 !important;
+}
+
+.expandPlaceholder {
+  display: inline-block;
+  position: relative;
+  width: 24px;
+  height: 24px;
+  vertical-align: middle;
+}
+
+.leafConnector::before,
+.leafConnector::after {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+}
+
+.leafConnector::before {
+  top: -14px;
+  bottom: -14px;
+  left: -20px;
+  border-left: 1px solid #eef2f7;
+}
+
+.leafConnector::after {
+  top: 50%;
+  left: -20px;
+  width: 32px;
+  border-top: 1px solid #eef2f7;
+}
+
+.leafConnectorLast::before {
+  bottom: 50%;
+}
+
+.detailDescriptions {
+  width: min(300px, calc(100vw - 48px));
+}
+
+.detailDescriptions :global(.ant-descriptions-item-label) {
+  width: 88px;
+  color: #667085;
+  white-space: nowrap;
+}
+
+.detailDescriptions :global(.ant-descriptions-item-content) {
+  color: #172b4d;
+  word-break: break-word;
+}
+
+@media (max-width: 1100px) {
+  .breadcrumbRow {
+    align-items: flex-start;
+  }
+
+  .dateRangeControl :global(.ant-picker) {
+    width: 224px;
+  }
+
+  .tableToolbar {
+    align-items: flex-start;
+  }
+
+  .tableToolbarLeft {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 767px) {
+  .breadcrumbRow,
+  .trendHeader,
+  .tableToolbar,
+  .tableToolbarLeft {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dateRangeControl,
+  .dateRangeControl :global(.ant-picker),
+  .searchInput {
+    width: 100%;
+  }
+
+  .dateRangeControl > span {
+    display: none;
+  }
+
+  .summaryGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .summaryItem {
+    min-height: 92px;
+  }
+
+  .summaryItem + .summaryItem {
+    border-top: 1px solid #e8edf4;
+    border-left: 0;
+  }
+
+  .trendCard :global(.ant-card-body) {
+    padding: 16px;
+  }
+
+  .trendTitleGroup {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .metricSelect,
+  .metricSelect :global(.ant-select),
+  .tableToolbarLeft label,
+  .tableToolbarLeft :global(.ant-select) {
+    width: 100%;
+  }
+
+  .metricSelect :global(.ant-select),
+  .tableToolbarLeft :global(.ant-select) {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page *,
+  .page *::before,
+  .page *::after {
+    animation: none !important;
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

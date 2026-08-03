@@ -75,3 +75,116 @@
 ## 最终结果
 
 final result: passed
+
+---
+
+# 广告表现页 Design QA
+
+## 验收对象
+
+- 视觉真值：`output/playwright/ad-performance/ad-performance-reference.png`（从本轮用户附件原样提取，`1760×1429`）。
+- 真实页面入口：`/geo/ad-performance`。
+- 默认态实现截图：`output/playwright/ad-performance/ad-performance-1440x1024-final.png`。
+- 同状态实现截图：`output/playwright/ad-performance/ad-performance-1440x1024-popover.png`。
+- 浏览器与运行态：Playwright Chromium；Next.js production build；`1440×1024` CSS 视口；`NEXT_PUBLIC_AD_PERFORMANCE_FIXTURE=true` 的隔离开发 fixture。
+- 设计稿没有应用侧边栏，只包含内容区和顶部蓝色边线；按用户明确要求，实现保留当前 64px 蓝色顶栏和 224px 展开侧栏。并排比较因此统一使用 `1216×960` 内容区裁切，完整工作台外壳另由默认态实现截图验证。
+
+## 对比证据
+
+- 内容区并排同状态比较：`output/playwright/ad-performance/ad-performance-side-by-side-final.png`。
+- 1440×1024 默认态：`output/playwright/ad-performance/ad-performance-1440x1024-final.png`。
+- 1440×1024 方案 Popover：`output/playwright/ad-performance/ad-performance-1440x1024-popover.png`。
+- 1280×1024 响应式：`output/playwright/ad-performance/ad-performance-1280x1024-final.png`。
+- 比较画布源文件：`output/playwright/ad-performance/visual-compare.html`。
+
+## 最终检查
+
+- 字体与排版：沿用项目现有字体和 Ant Design 默认排版；面包屑、模块标题、KPI、辅助文字、表头和表格数字层级清晰，数字使用等宽数字特性。
+- 间距与布局：内容区顺序严格为面包屑/日期、横向三指标、总体趋势、结构下钻；白色容器使用轻边框、10–12px 圆角和 16px 模块间距；普通卡片无常驻阴影。
+- 色彩与 Token：沿用项目蓝色顶栏、`#F6F8FB` 页面底色、蓝色当前周期和灰蓝上一周期；未引入第二套主题、字体、颜色系统或组件库。
+- 图表：当前周期为蓝色实线、上一周期为浅灰虚线；纵轴从 0 开始，图例居中；消费、展现、点击、CTR、平均 CPC 会同步改变纵轴、Tooltip 和格式。
+- 表格：项目 → 方案 → 单元保持同级排序和树路径；名称、详情按 Ant Design Table 能力处理；单元预算为 `—`；当前选中行为克制浅蓝；1280px 页面本身无横向溢出，表格内容在自身容器内滚动（991px 可视宽度、1036px 内容宽度）。
+- 详情浮层：方案字段、层级差异、hover 保持、Tab 聚焦、Escape 关闭和 `aria-describedby` 已验证；1440×1024 实测浮层边界 `left=989, right=1313, top=710, bottom=973`，全部在视口内。
+- 状态与交互：日期快捷范围、三模块联动、五项趋势指标、项目/方案/单元行联动、重复点击恢复总体、返回总体、展开收起、全部/项目/方案/单元层级、名称/ID 搜索父路径、loading/empty/error 均通过 Playwright 验证。
+- 控制台：最终页面为 0 errors；6 条 warning 均为 Next.js production build 的预加载 CSS 未在数秒内使用提示，没有页面脚本错误或新增 404。
+
+## 与设计稿的预期差异
+
+- 面包屑末级按用户最终业务要求为“广告表现”，不是设计图中的历史文字“投放结构”。
+- 设计图示意的 30 天消费曲线约为每日 ¥2,000–¥5,600，但同时展示总消费 ¥427,528，两者无法同时满足求和口径；fixture 优先遵守用户明确的数据真值约束，使 30 个逐日值精确汇总为 ¥427,528，因此消费纵轴范围高于设计示意。没有为了视觉相似伪造不守恒数据。
+- 设计图不含正式工作台外壳；实现按用户要求保留当前顶栏、完整侧栏及其他既有分组。内容区容器、密度、对齐、边框、圆角、图表与表格层级仍按设计目标实现。
+- 表头排序指示符来自现有 Ant Design Table，用于满足同级排序要求；设计图中该状态较弱或不可见。
+
+## 比较历史
+
+### Pass 1
+
+- P1：趋势图使用日期样式字符串作为横轴时，折线未覆盖完整 30 天；改为按周期序号对齐并用真实日期格式化刻度。
+- P2：趋势纵轴自动从中间值开始、图例左对齐；修复为 0 基线和底部居中图例。
+- P1：未实现的“搜索词分析”链接被 Next.js 自动预取并产生 404；关闭该未实现路由的预取，没有新增页面。
+- P1：fixture 状态切换存在旧请求覆盖 loading/error 的竞态；增加请求序列保护，状态不再闪回旧数据。
+
+### Pass 2
+
+- P1：1280px 下树表的最小内容宽度撑大整个内容栈，趋势指标选择器被挤出视口；为页面、模块栈和卡片补充 `min-width: 0`，页面级横向溢出归零，仅表格内部滚动。
+- P2：CTR 表格格式曾显示 4 位小数；收敛为设计目标的 2 位小数，同时保持 BigInt 精确计算和零分母保护。
+- 修复后：同状态并排比较未发现仍需执行的 P0/P1/P2 视觉或交互问题。
+
+## 数据边界
+
+- 无 fixture 时只读真实接口为 `GET /api/marketing/projects/:projectId/dashboard?from&to`；真实 summary、总体 daily trend、campaign 汇总、币种与 cost scale 进入 typed adapter。
+- 真实接口暂缺上一周期、项目/方案预算与详情、单元层、方案/单元逐日趋势；这些字段保持 `—` 或空态，不伪造真实数据。
+- 完整三层结构、预算、详情、上一周期与逐日示例只存在 `src/fixtures/adPerformance.fixture.ts`，且仅在 `NEXT_PUBLIC_AD_PERFORMANCE_FIXTURE=true` 时启用。Playwright 网络记录没有请求真实广告 dashboard。
+
+## 最终结果
+
+final result: passed
+
+---
+
+# 广告表现页树形结构修正 Design QA
+
+## 验收对象与证据
+
+- 本轮视觉真值：`output/playwright/ad-performance/ad-performance-tree-reference.png`（用户附件原样提取，`656×734`）。
+- 最终整页截图：`output/playwright/ad-performance/ad-performance-1440x1024-tree-final.png`；Playwright Chromium，`1440×1024` CSS 视口，`deviceScaleFactor=1`，隔离开发 fixture。
+- 最终表格截图：`output/playwright/ad-performance/ad-performance-tree-table-final.png`（`1036×411`）。
+- 最终名称列聚焦裁切：`output/playwright/ad-performance/ad-performance-tree-name-final.png`（`289×367`）。
+- 同屏比较：`output/playwright/ad-performance/ad-performance-tree-side-by-side-final.png`；将实现裁切等比归一到 `578×734`，与 `656×734` 视觉真值同高并排检查。
+
+## 本轮发现与修复
+
+- [已修复 P1] 名称容器原为块级元素，Ant Design Table 的缩进和展开按钮被挤到名称上一行，导致各层级名称从同一横坐标开始。改为单行内联省略布局，最终实测三层名称起点分别为 `281 / 313 / 345px`，每层递进 `32px`，行高统一为 `52px`。
+- [已修复 P1] fixture 在周界报警项目下多展示一条设计图不存在的“周界报警品牌词”方案。删除该重复示例分支，并把项目详情的下属方案数改为 2；默认可见顺序现在与视觉真值一致。
+- [已修复 P2] 单元层级缺少清晰连接关系。补充极浅灰竖线与横向分支线，最后一个子节点的竖线在行中点收束。
+- [已修复 P2] 超长名称缺少明确的完整文本反馈。名称现在使用 `overflow: hidden; text-overflow: ellipsis; white-space: nowrap`，并用现有 Ant Design Tooltip 在鼠标悬浮时显示完整名称。临时超长文本实测 `clientWidth=217`、`scrollWidth=380`；最终 Tooltip 文本验证为“PC-周界报警-振动光纤-多地域”。
+
+## 最终五项检查
+
+- 字体与排版：继续使用项目字体、13px 表格文字和 500 字重；名称、箭头和状态保持单行垂直居中。
+- 间距与布局：项目、方案、单元每级 32px 缩进；52px BI 行高；长文本不会撑宽或增加行高。
+- 色彩与 Token：连接线使用现有极浅边框色 `#eef2f7`，没有新增层级底色；选中态仍沿用既有浅蓝。
+- 图像与图标：没有新增位图资产；展开箭头继续使用项目现有 Ant Design Icons。
+- 文案与结构：默认路径依次为周界报警 → PC 多地域 → 两个振动光纤单元，随后是 PC 电子围栏、品牌词和室内报警，与本轮视觉真值一致。
+
+## 浏览器验证
+
+- 展开/收起仍只控制当前树分支，不触发行选择。
+- 名称悬浮 Tooltip 已打开并返回完整名称；移开鼠标后关闭。
+- 最终控制台为 0 errors；6 条 warnings 均为既有 Next.js 生产 CSS preload 提示。
+- 聚焦同屏比较未发现剩余可执行 P0/P1/P2 差异；设计图里的方案浅蓝底代表行选中态，页面按原验收要求仍保持默认不选中。
+
+final result: passed
+
+---
+
+# 广告表现页本地交接入口修正
+
+- 原交接地址 `127.0.0.1:3012` 的页面进程正常、直连返回 200，但桌面浏览器链接代理拦截了该本地地址。
+- 增加仅 `NODE_ENV !== 'production'` 时识别的 `?fixture=ad-performance` 查询参数；不新增路由、不修改鉴权、不写 Token 或浏览器 Profile，生产构建不会由该参数启用 fixture。
+- 最终可访问入口：`http://localhost:3001/geo/ad-performance?fixture=ad-performance`。
+- 在用户现有 Chrome 登录态中重新打开并验证：总消费、总体趋势、结构下钻及三级树表均完成渲染；构建后 reload 仍通过，控制台 0 errors。
+- `allowEmpty={[true, true]}` 只修正无默认项目时禁用空日期控件的 Ant Design 开发警告，不改变正常日期范围交互和视觉布局。
+- `npm test` 为 40/40 通过，正常 `npm run build` 通过。
+
+final result: passed
