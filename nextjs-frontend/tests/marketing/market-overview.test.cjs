@@ -92,7 +92,7 @@ test('journey uses fixed stages and never fabricates unsupported attribution', (
   }
   assert.match(source, /可信的按来源关联/);
   assert.doesNotMatch(source, /microFunnel|funnelChart|funnelRate/);
-  for (const label of ['百度推广', '百度搜索', '必应搜索', 'Google 搜索', '其他搜索', '外部引荐', '直接访问', '自然搜索']) {
+  for (const label of ['百度推广', 'BAIDU_SEARCH', 'BING_SEARCH', 'GOOGLE_SEARCH', 'OTHER_SEARCH', 'EXTERNAL_REFERRAL', '直接访问', '自然搜索']) {
     assert.match(source, new RegExp(label));
   }
   assert.doesNotMatch(source, /订单数量|成交订单数/);
@@ -114,8 +114,9 @@ test('journey adds Baidu Tongji source rows as visit-only evidence', () => {
   assert.match(source, /所选区间的百度统计访问次数/);
   assert.doesNotMatch(source, /当前范围未记录访问/);
   assert.match(source, /visibleAlignedFormKeys/);
-  assert.match(source, /百度推广（仅官网表单）/);
-  assert.match(source, /直接访问（仅官网表单）/);
+  assert.match(source, /websiteFormBySource\.get\(PAID_SOURCE\)/);
+  assert.match(source, /websiteFormBySource\.get\(source\.sourceKey\)/);
+  assert.match(source, /MARKETING_SOURCE_LABELS\.UNKNOWN/);
 });
 
 test('selectable headers update only the trend metric', () => {

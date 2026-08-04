@@ -14,8 +14,8 @@ const rows = Array.from({ length: 23 }, (_, index) => ({
     sourceSystem: 'GATO_WEBSITE',
     consultationType: 'WEBSITE_FORM',
     occurredAt: new Date(Date.UTC(2026, 7, 3 - index, 1, 32)).toISOString(),
-    source: { key: 'UNATTRIBUTED', label: '官网表单（来源未提供）' },
-    landingPage: { label: null, path: null },
+    source: { key: 'BING_SEARCH', label: '必应自然搜索' },
+    landingPage: { label: null, path: '/' },
     contentSummary: index === 0
       ? '咨询：工业平板是否支持宽温和串口扩展？'
       : `脱敏表单需求摘要 ${index + 1}`,
@@ -35,7 +35,11 @@ function recordDetail(summary: (typeof rows)[number]) {
     form: {
       content: summary.contentSummary,
       fields: [
-        { label: '需求类型', value: '产品咨询' }
+        { label: '需求类型', value: '产品咨询' },
+        {
+          label: '原始外部来路',
+          value: 'https://cn.bing.com/search?q=industrial+tablet'
+        }
       ]
     }
   };
@@ -73,7 +77,7 @@ function dateSequence(from: string, to: string) {
       sourceBreakdown: [
         { sourceKey: 'BAIDU_PAID', upstreamSources: ['baidu_paid'], attributedFormSubmissionSessions: String(paid) },
         { sourceKey: 'DIRECT', upstreamSources: ['direct'], attributedFormSubmissionSessions: String(direct) },
-        { sourceKey: 'ORGANIC_SEARCH', upstreamSources: ['organic_search'], attributedFormSubmissionSessions: String(organic) }
+        { sourceKey: 'UNKNOWN', upstreamSources: ['organic_search'], attributedFormSubmissionSessions: String(organic) }
       ]
     });
     cursor.setUTCDate(cursor.getUTCDate() + 1);
@@ -411,6 +415,8 @@ test('1440x1024 keeps the table full width and opens an overlay audit drawer', a
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading', { name: '表单内容' })).toBeVisible();
   await expect(dialog.getByText('138****5621')).toBeVisible();
+  await expect(dialog.getByText('原始外部来路')).toBeVisible();
+  await expect(dialog.getByText('https://cn.bing.com/search?q=industrial+tablet')).toBeVisible();
   await expect(dialog.getByText('机器人问候')).toHaveCount(0);
 
   const drawerWrapper = page.locator('.ant-drawer-content-wrapper');
@@ -489,12 +495,12 @@ test('filters, search, sorting, pagination and analysis tabs drive independent s
   await formRequest;
 
   const sourceRequest = page.waitForRequest((request) => (
-    new URL(request.url()).searchParams.get('source') === 'UNATTRIBUTED'
+    new URL(request.url()).searchParams.get('source') === 'BING_SEARCH'
   ));
   await page.getByRole('combobox', { name: '最近咨询来源' })
     .locator('xpath=ancestor::div[contains(@class,"ant-select")][1]')
     .click();
-  await page.getByRole('option', { name: '官网表单（来源未提供）' }).click();
+  await page.getByRole('option', { name: '必应自然搜索' }).click();
   await sourceRequest;
 
   const searchRequest = page.waitForRequest((request) => (

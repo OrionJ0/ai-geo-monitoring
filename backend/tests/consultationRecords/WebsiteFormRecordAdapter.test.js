@@ -18,6 +18,18 @@ const upstreamRecord = Object.freeze({
   company: '测试企业',
   region: '上海',
   detail: '联系电话 13812345678，需要了解周界报警方案',
+  sourceChannel: 'organic_search',
+  firstSourceChannel: 'organic_search',
+  referrer: 'https://cn.bing.com/search?q=industrial+tablet',
+  landingPage: '/',
+  contactClickPage: 'https://gato.com.cn/products/example?ignored=yes',
+  contactClickPosition: 'footer',
+  utmSource: null,
+  utmMedium: null,
+  utmCampaign: null,
+  bdVid: null,
+  sdclkid: null,
+  deviceType: 'desktop',
   status: 'pending',
   createdAt: '2026-08-03T03:08:00.000Z'
 });
@@ -100,6 +112,12 @@ test('website record adapter binds records to the configured project and the con
   });
   const summary = normalizeSummary(rawSummary, '7');
   assert.equal(summary.id, 'website:91');
+  assert.deepEqual(summary.source, {
+    key: 'BING_SEARCH',
+    label: '必应自然搜索'
+  });
+  assert.deepEqual(summary.landingPage, { label: null, path: '/' });
+  assert.equal(summary.device, 'PC');
   assert.equal(summary.maskedContact.displayName, '测**');
   assert.equal(summary.maskedContact.phone, '138****5678');
   assert.equal(summary.maskedContact.email, 'p***@example.com');
@@ -110,7 +128,14 @@ test('website record adapter binds records to the configured project and the con
     recordId: 'website:91'
   });
   const detail = normalizeDetail(rawDetail, adapter.allowedExternalOrigins, '7');
-  assert.equal(detail.form.fields.length, 3);
+  assert.deepEqual(detail.form.fields.slice(3), [
+    {
+      label: '原始外部来路',
+      value: 'https://cn.bing.com/search?q=industrial+tablet'
+    },
+    { label: '咨询触发页面', value: '/products/example' },
+    { label: '咨询触发位置', value: 'footer' }
+  ]);
   assert.match(detail.form.content, /138\*{4}5678/u);
   assert.doesNotMatch(JSON.stringify(detail), /13812345678|person@example\.com/u);
   assert.deepEqual(calls, [

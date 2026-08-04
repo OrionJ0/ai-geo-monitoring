@@ -27,6 +27,7 @@ import useMarketingCapabilities from '@/lib/useMarketingCapabilities';
 import useMarketOverview from '@/lib/marketing/useMarketOverview';
 import { useWebsiteTrafficOverview } from '@/lib/marketing/useWebsiteTraffic';
 import useWebsiteFormConsultations from '@/lib/websiteData/useWebsiteFormConsultations';
+import { MARKETING_SOURCE_LABELS } from '@/lib/marketing/sourceCatalog';
 import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
 import {
   clampMarketingDateRange,
@@ -63,23 +64,18 @@ const TONGJI_SOURCE_KEYS = Object.freeze({
   BAIDU_TONGJI_EXTERNAL_REFERRAL: 'EXTERNAL_REFERRAL'
 });
 const TONGJI_CHANNEL_DEFINITIONS = Object.freeze([
-  { sourceKey: 'BAIDU_PAID', sourceLabel: '百度推广', sourceHost: 'e.baidu.com', sourceType: 'PAID' },
-  { sourceKey: 'DIRECT', sourceLabel: '直接访问', sourceHost: null, sourceType: 'DIRECT' },
-  { sourceKey: 'BAIDU_SEARCH', sourceLabel: '百度搜索', sourceHost: 'baidu.com', sourceType: 'ORGANIC_SEARCH' },
-  { sourceKey: 'BING_SEARCH', sourceLabel: '必应搜索', sourceHost: 'bing.com', sourceType: 'ORGANIC_SEARCH' },
-  { sourceKey: 'GOOGLE_SEARCH', sourceLabel: 'Google 搜索', sourceHost: 'google.com', sourceType: 'ORGANIC_SEARCH' },
-  { sourceKey: 'OTHER_SEARCH', sourceLabel: '其他搜索', sourceHost: '多个搜索引擎', sourceType: 'ORGANIC_SEARCH' },
-  { sourceKey: 'EXTERNAL_REFERRAL', sourceLabel: '外部引荐', sourceHost: '多个网站', sourceType: 'REFERRAL' }
+  { sourceKey: 'BAIDU_PAID', sourceLabel: MARKETING_SOURCE_LABELS.BAIDU_PAID, sourceHost: 'e.baidu.com', sourceType: 'PAID' },
+  { sourceKey: 'DIRECT', sourceLabel: MARKETING_SOURCE_LABELS.DIRECT, sourceHost: null, sourceType: 'DIRECT' },
+  { sourceKey: 'BAIDU_SEARCH', sourceLabel: MARKETING_SOURCE_LABELS.BAIDU_SEARCH, sourceHost: 'baidu.com', sourceType: 'ORGANIC_SEARCH' },
+  { sourceKey: 'BING_SEARCH', sourceLabel: MARKETING_SOURCE_LABELS.BING_SEARCH, sourceHost: 'bing.com', sourceType: 'ORGANIC_SEARCH' },
+  { sourceKey: 'GOOGLE_SEARCH', sourceLabel: MARKETING_SOURCE_LABELS.GOOGLE_SEARCH, sourceHost: 'google.com', sourceType: 'ORGANIC_SEARCH' },
+  { sourceKey: 'OTHER_SEARCH', sourceLabel: MARKETING_SOURCE_LABELS.OTHER_SEARCH, sourceHost: '多个搜索引擎', sourceType: 'ORGANIC_SEARCH' },
+  { sourceKey: 'EXTERNAL_REFERRAL', sourceLabel: MARKETING_SOURCE_LABELS.EXTERNAL_REFERRAL, sourceHost: '多个网站', sourceType: 'REFERRAL' }
 ]);
 const MISSING_ATTRIBUTION = '缺少可信的按来源关联，当前不能计算该指标。';
 const FORM_ONLY_SOURCE_LABELS = Object.freeze({
-  BAIDU_PAID: '百度推广（仅官网表单）',
-  DIRECT: '直接访问（仅官网表单）',
-  ORGANIC_SEARCH: '搜索引擎（官网表单来源未细分）',
-  REFERRAL: '外部推荐（官网表单来源）',
-  CAMPAIGN: '活动来源（官网表单来源）',
-  SOCIAL: '社交媒体（官网表单来源）',
-  UNKNOWN: '未识别来源（官网表单）'
+  UTM_CAMPAIGN: `${MARKETING_SOURCE_LABELS.UTM_CAMPAIGN}（官网表单）`,
+  UNKNOWN: `${MARKETING_SOURCE_LABELS.UNKNOWN}（官网表单）`
 });
 
 const TREND_METRICS = [
@@ -124,12 +120,12 @@ const TRAFFIC_TREND_METRICS = [
 const TREND_SOURCES = [
   { value: PAID_SOURCE, label: '百度推广' },
   { value: TONGJI_ALL_SOURCE, label: '官网全站（百度统计）' },
-  { value: 'BAIDU_TONGJI_DIRECT', label: '直接访问' },
-  { value: 'BAIDU_TONGJI_BAIDU_SEARCH', label: '百度搜索' },
-  { value: 'BAIDU_TONGJI_BING_SEARCH', label: '必应搜索' },
-  { value: 'BAIDU_TONGJI_GOOGLE_SEARCH', label: 'Google 搜索' },
-  { value: 'BAIDU_TONGJI_OTHER_SEARCH', label: '其他搜索' },
-  { value: 'BAIDU_TONGJI_EXTERNAL_REFERRAL', label: '外部引荐' }
+  { value: 'BAIDU_TONGJI_DIRECT', label: MARKETING_SOURCE_LABELS.DIRECT },
+  { value: 'BAIDU_TONGJI_BAIDU_SEARCH', label: MARKETING_SOURCE_LABELS.BAIDU_SEARCH },
+  { value: 'BAIDU_TONGJI_BING_SEARCH', label: MARKETING_SOURCE_LABELS.BING_SEARCH },
+  { value: 'BAIDU_TONGJI_GOOGLE_SEARCH', label: MARKETING_SOURCE_LABELS.GOOGLE_SEARCH },
+  { value: 'BAIDU_TONGJI_OTHER_SEARCH', label: MARKETING_SOURCE_LABELS.OTHER_SEARCH },
+  { value: 'BAIDU_TONGJI_EXTERNAL_REFERRAL', label: MARKETING_SOURCE_LABELS.EXTERNAL_REFERRAL }
 ];
 
 const KPI_DEFINITIONS = [
@@ -708,12 +704,9 @@ export default function MarketOverviewPage() {
       source
     ])
   );
-  const visibleAlignedFormKeys = new Set([
-    ...(['AVAILABLE', 'ZERO', 'STALE'].includes(ad.state) ? [PAID_SOURCE] : []),
-    ...(trafficSources.some((source) => source.sourceKey === 'DIRECT')
-      ? ['DIRECT']
-      : [])
-  ]);
+  const visibleAlignedFormKeys = new Set(
+    TONGJI_CHANNEL_DEFINITIONS.map((source) => source.sourceKey)
+  );
   const formOnlySources = (websiteForms.data?.sourceBreakdown || []).filter(
     (source) => (
       !visibleAlignedFormKeys.has(source.sourceKey)
@@ -1001,9 +994,7 @@ export default function MarketOverviewPage() {
                   <TrafficSourceRow
                     key={source.sourceKey}
                     source={source}
-                    formConsultation={source.sourceKey === 'DIRECT'
-                      ? websiteFormBySource.get('DIRECT')
-                      : null}
+                    formConsultation={websiteFormBySource.get(source.sourceKey)}
                     websiteForms={websiteForms}
                   />
                 ))}

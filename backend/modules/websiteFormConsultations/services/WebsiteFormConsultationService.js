@@ -1,13 +1,17 @@
-const SOURCE_KEYS = Object.freeze({
+const {
+  SOURCE_KEY_SET: CANONICAL_SOURCE_KEYS
+} = require('../../../domain/marketingSourceClassifier');
+
+const UPSTREAM_SOURCE_KEY_MAP = Object.freeze({
   baidu_paid: 'BAIDU_PAID',
   direct: 'DIRECT',
-  organic_search: 'ORGANIC_SEARCH',
-  referral: 'REFERRAL',
-  campaign: 'CAMPAIGN',
-  social: 'SOCIAL',
+  organic_search: 'UNKNOWN',
+  referral: 'UNKNOWN',
+  campaign: 'UTM_CAMPAIGN',
+  social: 'UNKNOWN',
   unknown: 'UNKNOWN'
 });
-const SNAPSHOT_SCHEMA_VERSION = 'website_form_consultations_v1';
+const SNAPSHOT_SCHEMA_VERSION = 'website_form_consultations_v2';
 const SNAPSHOT_KINDS = Object.freeze({ aggregate: 'AGGREGATE', daily: 'DAILY' });
 
 class WebsiteFormConsultationError extends Error {
@@ -72,7 +76,7 @@ function normalizePayload(payload) {
   for (const row of payload.sourceBreakdown) {
     const upstreamSource = String(row?.upstreamSource || '').trim();
     const count = exactCount(row?.attributedFormSubmissionSessions);
-    const sourceKey = SOURCE_KEYS[upstreamSource] || 'UNKNOWN';
+    const sourceKey = UPSTREAM_SOURCE_KEY_MAP[upstreamSource] || 'UNKNOWN';
     const current = grouped.get(sourceKey) || {
       sourceKey,
       upstreamSources: [],
@@ -126,7 +130,7 @@ function normalizeStoredPayload(payload) {
       ? row.upstreamSources.map((value) => String(value).trim())
       : null;
     if (
-      !Object.values(SOURCE_KEYS).includes(sourceKey)
+      !CANONICAL_SOURCE_KEYS.has(sourceKey)
       || seen.has(sourceKey)
       || !upstreamSources
       || upstreamSources.some((value) => !value || value.length > 64)

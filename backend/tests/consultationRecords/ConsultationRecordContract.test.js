@@ -16,7 +16,7 @@ const redactedSummary = Object.freeze({
   sourceSystem: 'GATO_WEBSITE',
   consultationType: 'WEBSITE_FORM',
   occurredAt: '2026-08-03T03:08:00.000Z',
-  source: { key: 'ORGANIC_SEARCH', label: '搜索引擎' },
+  source: { key: 'BING_SEARCH', label: '必应自然搜索' },
   landingPage: { label: '振动光纤', path: '/solutions/fiber' },
   contentSummary: '准备建设周界防护项目，希望了解方案范围。',
   maskedContact: {
@@ -35,7 +35,7 @@ test('normalizes bounded list filters and rejects unsafe query input', () => {
     page: '2',
     pageSize: '20',
     type: 'WEBSITE_FORM',
-    source: 'ORGANIC_SEARCH',
+    source: 'BING_SEARCH',
     device: 'PC',
     q: '  周界  ',
     sortBy: 'occurredAt',
@@ -46,7 +46,7 @@ test('normalizes bounded list filters and rejects unsafe query input', () => {
     page: 2,
     pageSize: 20,
     type: 'WEBSITE_FORM',
-    source: 'ORGANIC_SEARCH',
+    source: 'BING_SEARCH',
     device: 'PC',
     q: '周界',
     sortBy: 'occurredAt',
@@ -68,6 +68,14 @@ test('normalizes bounded list filters and rejects unsafe query input', () => {
       q: 'unsafe\nsearch'
     }),
     /q 参数无效/u
+  );
+  assert.throws(
+    () => normalizeListQuery({
+      from: '2026-08-01',
+      to: '2026-08-03',
+      source: 'ORGANIC_SEARCH'
+    }),
+    /source 参数无效/u
   );
 });
 

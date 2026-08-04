@@ -264,6 +264,18 @@ test('reads paginated website contact records and a detail through allowlisted G
                 company: '测试企业',
                 region: '上海',
                 detail: '需要了解周界报警方案',
+                sourceChannel: 'organic_search',
+                firstSourceChannel: 'organic_search',
+                referrer: 'https://cn.bing.com/',
+                landingPage: '/',
+                contactClickPage: 'https://gato.com.cn/',
+                contactClickPosition: 'footer',
+                utmSource: null,
+                utmMedium: null,
+                utmCampaign: null,
+                bdVid: null,
+                sdclkid: null,
+                deviceType: 'desktop',
                 status: 'pending',
                 createdAt: '2026-08-03T03:08:00.000Z'
               }] : [],
@@ -287,6 +299,18 @@ test('reads paginated website contact records and a detail through allowlisted G
             company: '测试企业',
             region: '上海',
             detail: '需要了解周界报警方案',
+            sourceChannel: 'organic_search',
+            firstSourceChannel: 'organic_search',
+            referrer: 'https://cn.bing.com/',
+            landingPage: '/',
+            contactClickPage: 'https://gato.com.cn/',
+            contactClickPosition: 'footer',
+            utmSource: null,
+            utmMedium: null,
+            utmCampaign: null,
+            bdVid: null,
+            sdclkid: null,
+            deviceType: 'desktop',
             status: 'pending',
             createdAt: '2026-08-03T03:08:00.000Z'
           }
@@ -304,6 +328,11 @@ test('reads paginated website contact records and a detail through allowlisted G
 
   assert.equal(records.length, 1);
   assert.equal(records[0].id, '91');
+  assert.equal(records[0].sourceChannel, 'organic_search');
+  assert.equal(records[0].referrer, 'https://cn.bing.com/');
+  assert.equal(records[0].landingPage, '/');
+  assert.equal(records[0].contactClickPage, 'https://gato.com.cn/');
+  assert.equal(records[0].deviceType, 'desktop');
   assert.equal(detail.id, '91');
   assert.deepEqual(calls.map((call) => new URL(call.url).pathname), [
     '/api/v1/auth/login',

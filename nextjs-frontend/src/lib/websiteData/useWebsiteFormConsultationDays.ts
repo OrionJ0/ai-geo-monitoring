@@ -6,6 +6,7 @@ import type {
   WebsiteFormConsultationData,
   WebsiteFormSource
 } from './useWebsiteFormConsultations';
+import { MARKETING_SOURCE_KEYS } from '@/lib/marketing/sourceCatalog';
 
 export type WebsiteFormConsultationDay = {
   date: string;
@@ -38,16 +39,6 @@ type State = {
   reload: () => Promise<void>;
 };
 
-const SOURCE_KEYS = new Set([
-  'BAIDU_PAID',
-  'DIRECT',
-  'ORGANIC_SEARCH',
-  'REFERRAL',
-  'CAMPAIGN',
-  'SOCIAL',
-  'UNKNOWN'
-]);
-
 function count(value: unknown): value is string {
   return typeof value === 'string' && /^\d+$/u.test(value);
 }
@@ -59,7 +50,7 @@ function sources(value: unknown): value is WebsiteFormSource[] {
     if (
       !row
       || typeof row !== 'object'
-      || !SOURCE_KEYS.has((row as WebsiteFormSource).sourceKey)
+      || !MARKETING_SOURCE_KEYS.has((row as WebsiteFormSource).sourceKey)
       || seen.has((row as WebsiteFormSource).sourceKey)
       || !count((row as WebsiteFormSource).attributedFormSubmissionSessions)
       || !Array.isArray((row as WebsiteFormSource).upstreamSources)

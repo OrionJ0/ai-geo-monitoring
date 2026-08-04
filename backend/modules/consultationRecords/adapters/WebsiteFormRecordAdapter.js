@@ -1,6 +1,10 @@
 const {
   ConsultationRecordError
 } = require('../contracts/consultationRecordContract');
+const {
+  classifyWebsiteAttribution,
+  parseHttpUrl
+} = require('../../../domain/marketingSourceClassifier');
 
 function configuredSourceClient(value) {
   return value
@@ -22,7 +26,26 @@ function content(record) {
   return record.detail || record.demandType;
 }
 
+function originalReferrer(value) {
+  return parseHttpUrl(value) ? String(value).trim() : null;
+}
+
+function contactClickPath(value) {
+  const parsed = parseHttpUrl(value);
+  return parsed?.origin === 'https://gato.com.cn'
+    ? parsed.pathname
+    : null;
+}
+
+function device(value) {
+  if (value === 'desktop') return 'PC';
+  if (value === 'mobile') return 'MOBILE';
+  if (value === 'tablet') return 'OTHER';
+  return 'UNKNOWN';
+}
+
 function summary(record, projectId) {
+  const source = classifyWebsiteAttribution(record);
   return {
     projectId,
     id: `website:${record.id}`,
@@ -30,17 +53,17 @@ function summary(record, projectId) {
     consultationType: 'WEBSITE_FORM',
     occurredAt: record.createdAt,
     source: {
-      key: 'UNATTRIBUTED',
-      label: '官网表单（来源未提供）'
+      key: source.sourceKey,
+      label: source.sourceLabel
     },
-    landingPage: { label: null, path: null },
+    landingPage: { label: null, path: record.landingPage },
     contentSummary: content(record).slice(0, 160),
     maskedContact: {
       displayName: record.name,
       phone: record.phone,
       email: record.email
     },
-    device: 'UNKNOWN',
+    device: device(record.deviceType),
     detailAvailable: true
   };
 }
@@ -151,7 +174,10 @@ class WebsiteFormRecordAdapter {
     const fields = [
       ['需求类型', record.demandType],
       ['企业', record.company],
-      ['区域', record.region]
+      ['区域', record.region],
+      ['原始外部来路', originalReferrer(record.referrer)],
+      ['咨询触发页面', contactClickPath(record.contactClickPage)],
+      ['咨询触发位置', record.contactClickPosition]
     ].filter(([, value]) => value);
     return {
       ...base,

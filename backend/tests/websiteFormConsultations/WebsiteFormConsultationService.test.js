@@ -70,14 +70,9 @@ test('publishes a website-form-only contract with canonical source keys', async 
         attributedFormSubmissionSessions: '2'
       },
       {
-        sourceKey: 'ORGANIC_SEARCH',
-        upstreamSources: ['organic_search'],
-        attributedFormSubmissionSessions: '1'
-      },
-      {
         sourceKey: 'UNKNOWN',
-        upstreamSources: ['future_source'],
-        attributedFormSubmissionSessions: '1'
+        upstreamSources: ['organic_search', 'future_source'],
+        attributedFormSubmissionSessions: '2'
       }
     ],
     cache: {
@@ -87,6 +82,7 @@ test('publishes a website-form-only contract with canonical source keys', async 
     }
   });
   assert.equal(saved.length, 1);
+  assert.equal(saved[0].schemaVersion, 'website_form_consultations_v2');
   assert.equal(JSON.stringify(result).includes('53KF'), false);
   assert.equal(JSON.stringify(result).includes('contact'), false);
 });
@@ -159,7 +155,7 @@ test('publishes a cached daily website-form contract without claiming total form
     day.sourceBreakdown[0].sourceKey
   ]), [
     ['2026-08-01', '2', 'DIRECT'],
-    ['2026-08-02', '1', 'ORGANIC_SEARCH']
+    ['2026-08-02', '1', 'UNKNOWN']
   ]);
   assert.equal(saved.length, 1);
   assert.equal(saved[0].payload.days.length, 2);
@@ -237,7 +233,7 @@ test('falls back to the last matching website-form snapshot after an upstream fa
             attributedFormSubmissionSessions: '1',
             sourceBreakdown: [
               {
-                sourceKey: 'ORGANIC_SEARCH',
+                sourceKey: 'UNKNOWN',
                 upstreamSources: ['organic_search'],
                 attributedFormSubmissionSessions: '1'
               }

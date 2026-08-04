@@ -197,6 +197,50 @@ function boundedContactText(value, field, maximum, { nullable = false } = {}) {
   return normalized;
 }
 
+const WEBSITE_SOURCE_CHANNELS = new Set([
+  'baidu_paid',
+  'organic_search',
+  'direct',
+  'referral',
+  'campaign',
+  'social',
+  'unknown'
+]);
+
+function normalizeSourceChannel(value, field) {
+  const normalized = boundedContactText(value, field, 64, { nullable: true });
+  return normalized && WEBSITE_SOURCE_CHANNELS.has(normalized)
+    ? normalized
+    : null;
+}
+
+function normalizeLandingPath(value) {
+  const normalized = boundedContactText(
+    value,
+    '落地页',
+    1000,
+    { nullable: true }
+  );
+  return normalized
+    && normalized.startsWith('/')
+    && !normalized.startsWith('//')
+    && !/[\u0000-\u001f\u007f\\]/u.test(normalized)
+    ? normalized
+    : null;
+}
+
+function normalizeDeviceType(value) {
+  const normalized = boundedContactText(
+    value,
+    '设备类型',
+    32,
+    { nullable: true }
+  );
+  return normalized && /^[a-z][a-z0-9_-]*$/u.test(normalized)
+    ? normalized
+    : null;
+}
+
 function normalizeContactRecord(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new GatoWebsiteError(
@@ -238,6 +282,43 @@ function normalizeContactRecord(value) {
     company: boundedContactText(value.company, '企业', 200, { nullable: true }),
     region: boundedContactText(value.region, '区域', 100, { nullable: true }),
     detail: boundedContactText(value.detail, '详情', 20000, { nullable: true }),
+    sourceChannel: normalizeSourceChannel(value.sourceChannel, '来源渠道'),
+    firstSourceChannel: normalizeSourceChannel(
+      value.firstSourceChannel,
+      '首次来源渠道'
+    ),
+    referrer: boundedContactText(value.referrer, '外部来路', 2000, {
+      nullable: true
+    }),
+    landingPage: normalizeLandingPath(value.landingPage),
+    contactClickPage: boundedContactText(
+      value.contactClickPage,
+      '咨询触发页面',
+      2000,
+      { nullable: true }
+    ),
+    contactClickPosition: boundedContactText(
+      value.contactClickPosition,
+      '咨询触发位置',
+      100,
+      { nullable: true }
+    ),
+    utmSource: boundedContactText(value.utmSource, 'UTM source', 500, {
+      nullable: true
+    }),
+    utmMedium: boundedContactText(value.utmMedium, 'UTM medium', 500, {
+      nullable: true
+    }),
+    utmCampaign: boundedContactText(value.utmCampaign, 'UTM campaign', 500, {
+      nullable: true
+    }),
+    bdVid: boundedContactText(value.bdVid, '百度点击标识', 1024, {
+      nullable: true
+    }),
+    sdclkid: boundedContactText(value.sdclkid, '百度点击证据', 1024, {
+      nullable: true
+    }),
+    deviceType: normalizeDeviceType(value.deviceType),
     status,
     createdAt
   };

@@ -1,5 +1,9 @@
 const SCHEMA_VERSION = 'consultation_records_v1';
 const TIME_ZONE = 'Asia/Shanghai';
+const {
+  SOURCE_KEY_SET,
+  SOURCE_LABELS
+} = require('../../../domain/marketingSourceClassifier');
 
 const CONSULTATION_TYPES = Object.freeze([
   'WEBSITE_FORM',
@@ -113,10 +117,7 @@ function normalizeListQuery(query = {}) {
     );
   }
   const source = String(query.source || 'ALL').trim();
-  if (
-    source !== 'ALL'
-    && !/^[A-Z][A-Z0-9_]{0,63}$/u.test(source)
-  ) {
+  if (source !== 'ALL' && !SOURCE_KEY_SET.has(source)) {
     throw new ConsultationRecordError(
       'source 参数无效',
       'CONSULTATION_RECORD_QUERY_INVALID',
@@ -352,14 +353,16 @@ function normalizeSummary(value, expectedProjectId = null) {
     (sourceSystem === 'GATO_WEBSITE' && consultationType !== 'WEBSITE_FORM')
     || (sourceSystem === 'KF53' && consultationType !== 'ONLINE_CHAT')
   ) fail('来源系统与咨询类型不一致');
+  const sourceKey = boundedString(value.source?.key, 'source.key', 64);
+  if (!SOURCE_KEY_SET.has(sourceKey)) fail('source.key 字段无效');
   return {
     id: boundedString(value.id, 'id', 128),
     sourceSystem,
     consultationType,
     occurredAt: isoDateTime(value.occurredAt, 'occurredAt'),
     source: {
-      key: boundedString(value.source?.key, 'source.key', 64),
-      label: sanitizePublicText(value.source?.label, 'source.label', 80)
+      key: sourceKey,
+      label: SOURCE_LABELS[sourceKey]
     },
     landingPage: normalizeLandingPage(value.landingPage),
     contentSummary: sanitizePublicText(

@@ -268,7 +268,7 @@ const websiteForms = {
       attributedFormSubmissionSessions: '1'
     },
     {
-      sourceKey: 'ORGANIC_SEARCH',
+      sourceKey: 'UNKNOWN',
       upstreamSources: ['organic_search'],
       attributedFormSubmissionSessions: '4'
     }
@@ -516,20 +516,20 @@ test('desktop layout matches the final structure and is keyboard/axe clean', asy
   const selectedSourceRequest = page.waitForRequest((request) => (
     new URL(request.url()).searchParams.get('source') === 'BAIDU_SEARCH'
   ));
-  await page.getByRole('option', { name: '百度搜索' }).click();
+  await page.getByRole('option', { name: '百度自然搜索' }).click();
   expect(
     new URL((await selectedSourceRequest).url()).searchParams.get('device')
   ).toBe('pc');
   await expect(page.getByRole('img', { name: /访问次数每日趋势/u })).toBeVisible();
   await page.getByRole('button', { name: '选择访问作为趋势指标' }).click();
-  await expect(trendSourceControl).toContainText('百度搜索');
+  await expect(trendSourceControl).toContainText('百度自然搜索');
   await trendSourceControl.click();
   await page.getByRole('option', { name: '百度推广' }).click();
   await expect(trendSourceControl).toContainText('百度推广');
   await expect(page.getByRole('img', { name: /访问每日趋势/u })).toBeVisible();
   await expect(page.getByText('自然搜索', { exact: true })).toHaveCount(4);
   await expect(page.getByRole('columnheader', { name: '官网表单咨询' })).toBeVisible();
-  await expect(page.getByText('搜索引擎（官网表单来源未细分）')).toBeVisible();
+  await expect(page.getByText('未知来源（官网表单）')).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '整体转换率' })).toBeVisible();
   await expect(page.locator('[class*="microFunnel"], [class*="funnelChart"]')).toHaveCount(0);
 

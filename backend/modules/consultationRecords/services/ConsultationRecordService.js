@@ -67,7 +67,7 @@ function compareRecords(left, right, query) {
 function canUseDirectPage(adapter, query) {
   return typeof adapter.listRecordPage === 'function'
     && !query.q
-    && ['ALL', 'UNATTRIBUTED'].includes(query.source)
+    && query.source === 'ALL'
     && ['ALL', 'UNKNOWN'].includes(query.device)
     && query.sortBy === 'occurredAt'
     && query.sortOrder === 'desc';

@@ -2,15 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from '@/lib/axiosConfig';
+import {
+  MARKETING_SOURCE_KEYS,
+  type MarketingSourceKey
+} from '@/lib/marketing/sourceCatalog';
 
-export type WebsiteFormSourceKey =
-  | 'BAIDU_PAID'
-  | 'DIRECT'
-  | 'ORGANIC_SEARCH'
-  | 'REFERRAL'
-  | 'CAMPAIGN'
-  | 'SOCIAL'
-  | 'UNKNOWN';
+export type WebsiteFormSourceKey = MarketingSourceKey;
 
 export type WebsiteFormSource = {
   sourceKey: WebsiteFormSourceKey;
@@ -43,16 +40,6 @@ type WebsiteFormConsultationState = {
   reload: () => Promise<void>;
 };
 
-const SOURCE_KEYS = new Set<WebsiteFormSourceKey>([
-  'BAIDU_PAID',
-  'DIRECT',
-  'ORGANIC_SEARCH',
-  'REFERRAL',
-  'CAMPAIGN',
-  'SOCIAL',
-  'UNKNOWN'
-]);
-
 function exactCount(value: unknown): value is string {
   return typeof value === 'string' && /^\d+$/u.test(value);
 }
@@ -83,7 +70,7 @@ function validResponse(
   let sourceTotal = BigInt(0);
   for (const row of data.sourceBreakdown) {
     if (
-      !SOURCE_KEYS.has(row?.sourceKey)
+      !MARKETING_SOURCE_KEYS.has(row?.sourceKey)
       || seen.has(row.sourceKey)
       || !Array.isArray(row?.upstreamSources)
       || row.upstreamSources.some((source: unknown) => (

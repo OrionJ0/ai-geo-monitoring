@@ -41,6 +41,7 @@ import { useMarketingFilters } from '@/components/marketing/MarketingFiltersCont
 import MarketingMetricCard, {
   MarketingMetricGrid
 } from '@/components/marketing/MarketingMetricCard';
+import { MARKETING_SOURCE_LABELS } from '@/lib/marketing/sourceCatalog';
 import styles from './consultations.module.css';
 const { Text, Title } = Typography;
 
@@ -50,14 +51,7 @@ const TYPE_LABELS: Record<ConsultationType, string> = {
 };
 
 const SOURCE_LABELS: Record<string, string> = {
-  BAIDU_PAID: '百度推广',
-  DIRECT: '直接访问',
-  ORGANIC_SEARCH: '搜索引擎',
-  REFERRAL: '外部链接',
-  CAMPAIGN: '活动来源',
-  SOCIAL: '社交媒体',
-  UNATTRIBUTED: '官网表单（来源未提供）',
-  UNKNOWN: '来源未知'
+  ...MARKETING_SOURCE_LABELS
 };
 
 const DEVICE_LABELS: Record<string, string> = {
@@ -844,7 +838,6 @@ export default function ConsultationsPage() {
       <MarketingMetricGrid ariaLabel="咨询数据周期汇总指标">
         <MarketingMetricCard
           title="表单咨询"
-          metricKey="FORM"
           current={formCount == null ? null : formatCount(formCount)}
           previous={previousFormCount == null ? null : formatCount(previousFormCount)}
           change={formatCountChange(formCount, previousFormCount)}
@@ -858,7 +851,6 @@ export default function ConsultationsPage() {
         />
         <MarketingMetricCard
           title="在线客服有效对话"
-          metricKey="53KF CHAT"
           current={chatCountValue == null ? null : formatCount(chatCountValue)}
           previous={previousChatCountValue == null ? null : formatCount(previousChatCountValue)}
           change={formatCountChange(chatCountValue, previousChatCountValue)}

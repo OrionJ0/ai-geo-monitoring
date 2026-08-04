@@ -17,7 +17,7 @@ function summary(overrides = {}) {
     sourceSystem: 'GATO_WEBSITE',
     consultationType: 'WEBSITE_FORM',
     occurredAt: '2026-08-03T03:08:00.000Z',
-    source: { key: 'ORGANIC_SEARCH', label: '搜索引擎' },
+    source: { key: 'BING_SEARCH', label: '必应自然搜索' },
     landingPage: { label: '振动光纤', path: '/solutions/fiber' },
     contentSummary: '准备建设周界防护项目，希望了解方案范围。',
     maskedContact: {
@@ -242,7 +242,7 @@ test('filters, sorts and paginates only validated redacted summaries', async () 
     query: normalizeListQuery({
       from: '2026-08-01',
       to: '2026-08-03',
-      source: 'ORGANIC_SEARCH',
+      source: 'BING_SEARCH',
       q: '周界',
       pageSize: '1'
     })
