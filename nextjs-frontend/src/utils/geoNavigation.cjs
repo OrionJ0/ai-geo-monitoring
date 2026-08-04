@@ -18,6 +18,12 @@ const QUICK_LINKS = page(
   '/geo/quick-links'
 );
 
+const MARKETING_AI_ANALYSIS = page(
+  '/marketing-ai-analysis',
+  'AI 数据分析',
+  '/geo/marketing-ai-analysis'
+);
+
 const DELIVERY_ITEMS = Object.freeze([
   page('/ad-performance', '广告表现', '/geo/ad-performance'),
   page('/keyword-analysis', '关键词分析', '/geo/keyword-analysis'),
@@ -38,7 +44,7 @@ const MONITORING_TASK_ITEMS = Object.freeze([
   page('/question-set-reports', '运行报告', '/geo/question-set-reports')
 ]);
 
-function buildGeoNavigation() {
+function buildGeoNavigation(options = {}) {
   const navigation = [
     MARKET_OVERVIEW,
     group('delivery', '投放与流量', DELIVERY_ITEMS),
@@ -47,6 +53,10 @@ function buildGeoNavigation() {
       page('/order-results', '订单结果', '/geo/order-results')
     ])
   ];
+
+  if (options.marketingAiAnalysisEnabled === true) {
+    navigation.push(MARKETING_AI_ANALYSIS);
+  }
 
   navigation.push(group(
     'monitoring-tasks',

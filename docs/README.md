@@ -62,6 +62,9 @@
 - `VERCEL.md`：前后端分离时的可选 Vercel 前端方案；不是当前正式发布路径
 - `SECURITY.md`：安全加固说明与最佳实践
 - `adr/0001-marketing-funnel-data-source-of-truth.md`：营销漏斗唯一主数据源、指标语义、官网聚合接口无侵入接入合同、运行态证据和完成门禁
+- `adr/0002-marketing-ai-analysis-read-only-tool-boundary.md`：固定营销 AI 报告由应用构建证据包；首版不使用 Agent 或模型工具调用
+- `adr/0003-versioned-chart-intent-for-frozen-marketing-ai-reports.md`：不可变报告的版本化图表意图、单来源数据集与局部降级边界
+- `adr/0004-minimized-search-term-sample-for-marketing-ai-reports.md`：进入模型的搜索词最小化、脱敏、确定性采样和覆盖声明
 - `visual-design-spec.md`：全项目通用视觉、布局、组件、数据展示、交互、动效、响应式与无障碍标准
 - `closed-2026-07-23-002-ai-platform-settings/`：全局 AI 平台设置中心、临时模型目录、分析结构化协议与 OpenAI 兼容协议收敛的已完成需求
 - `active-2026-07-23-004-question-set-run-reports/`：单问题与问题集独立运行报告、AI 实体/关系结构化指标、失败重试可靠性、标准 CSV 往返与 A4 竖版 PDF 的当前修复需求
@@ -74,6 +77,7 @@
 - `active-2026-07-29-001-marketing-monitoring/`：只读市场数据监控定位下的百度第一期；四份搜索推广层级报告及百度统计来源、质量和页面报告已通过严格合同、真实 Token 与正式入口验收，`PILOT_DATA_READY` 仍只向项目白名单开放；Refresh Token 轮换与币种/时区外部确认仍需持续运维
 - `active-2026-07-31-001-market-monitoring-frontend-ia/`：工作台信息架构与 2026-08-03 按来源完整链路的新版首页视觉/交互已部署，设计稿见[`assets/market-overview-home-final-2026-08-03.png`](active-2026-07-31-001-market-monitoring-frontend-ia/assets/market-overview-home-final-2026-08-03.png)。官网代码已部署并与百度 API 分离，但生产只读凭据尚未配置；53KF、线索/订单数据和依赖 KPI 仍待外部条件解除
   - 2026-08-04 真实数据接入逐页盘点见[`data-integration-matrix.md`](active-2026-07-31-001-market-monitoring-frontend-ia/data-integration-matrix.md)，后续薄切由 issues 013–016 跟踪。
+- `active-2026-08-04-001-marketing-ai-analysis-report/`：营销数据 AI 分析报告的已确认 PRD、Tech Spec 与实施 issues；当前实施前端展示页，后端生成链路尚未实现或生产验证
 - `closed-2026-07-31-002-single-brand-platform-runtime/`：已完成的单品牌管理员工作台、全局启用平台运行范围、不可用平台部分跳过、原始失败快照重试，以及默认品牌和历史监测数据保护
 - `closed-2026-07-31-003-question-set-report-trustworthiness/`：问题集报告可信度修复已完成；豆包过渡态在分析前按“采集无效”排除，表格 evidence 使用严格确定性锚定与字段级修复，生产 Flash 真实样本 20 / 20 通过并完成正式入口验收
 - `solutions/2026-07-22-seo-audit-mvp.md`：历史/已退役的单页 SEO MVP 竞品调研、规则范围和验证记录
