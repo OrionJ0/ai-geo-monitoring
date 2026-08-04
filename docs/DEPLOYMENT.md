@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 切换时源码版本 | 服务器 `HEAD=f5138ea`。域名切换是基础设施变更，没有同步之后的 `main`；是否最新必须现场比较服务器 `HEAD` 与 `origin/main` |
+| 当前已验证源码版本 | 2026-08-04 Git Bundle workflow `30876793311` 已部署 `f265bd365e563e828a82dca51028f3d3d4dc40dc`；是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -34,18 +34,13 @@ ssh ubuntu@182.254.140.163 'cd /opt/ai-geo-monitoring && git status --short --br
 环境已经切换，但控制台新地址尚未得到人工确认；完成确认前，现有服务器密文
 Token 应继续保留，但不得宣称在新域名上重新授权已经通过。
 
-### 2026-08-03 只读运行态复核
+### 2026-08-04 Git Bundle 正式发布与验收
 
-- `https://insight.guangtuo.com/api/ready` 返回 `ready`，SQLite 为 WAL，两个 systemd 服务均为 `active`。
-- 服务器项目工作区干净，`HEAD=59a9ca33eabc4a37f8d295267ad0cd7762d711da`；服务器本地 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629`，因此现场显示 `main...origin/main [ahead 5]`。这反映服务器的远端引用未更新，不能据此判断 GitHub 或本地开发工作区版本。
-- 该 `HEAD` 不包含 `/api/website-data/.../form-consultation-days` 或 `baidu_search_term_daily_metrics`。第二阶段业务变更中的百度四层报告、百度统计质量/页面读取和官网逐日表单实现尚未推送或部署，当前正式入口不会使用这些新增实现。
-- 本次复核只读取 Git、systemd 和正式 `/api/ready`，没有修改服务器源码、环境、数据库或服务。
-
-### 2026-08-04 Git Bundle 发布尝试
-
-- GitHub `main` 已推进到只包含候选部署桥接的 `2bbd8c4`，市场工作台第二阶段业务改动尚未推送。
-- workflow `30842859133` 因 `AI_GEO_DEPLOY_ENABLED=false` 安全跳过；临时开启后，`30842939667` 在 SCP 前发现 production Environment 的 `AI_GEO_DEPLOY_HOST`、`AI_GEO_DEPLOY_USER`、`AI_GEO_DEPLOY_SSH_KEY`、`AI_GEO_DEPLOY_KNOWN_HOSTS` 均未配置而失败。没有建立服务器连接，没有上传 Bundle、快进代码、停止服务或执行迁移。
-- 发布开关已恢复为 false。运维配置受限部署密钥和预核验主机指纹后，必须先单独发布 `2bbd8c4` 并从正式域名验证健康；在桥接成功前不得推送市场工作台业务提交。
+- GitHub Actions workflow `30876793311` 的 verify 与 deploy 均成功；校验后的 Git Bundle 把服务器 `main` 快进到 `f265bd365e563e828a82dca51028f3d3d4dc40dc`，没有直接编辑服务器源码。
+- 发布前备份为 `/opt/ai-geo-monitoring/backend/releases/database.pre-f265bd365e563e828a82dca51028f3d3d4dc40dc.sqlite`。营销迁移 `001`–`013`、官网迁移 `001`–`003` 和咨询详情审计迁移均已应用且无待执行项。
+- `ai-geo-backend.service` 与 `ai-geo-frontend.service` 均由 systemd 正常启动；`/api/ready` 返回 `ready`，SQLite 为 WAL 且 scheduler 已启动；`/api/frontend-health` 返回完整 revision `f265bd365e563e828a82dca51028f3d3d4dc40dc`。
+- 登录后的正式关键词页显示“百度推广 · 真实数据 · 数据截至 2026-08-03”，共有 863 条有展现关键词、237 条有点击关键词；页面不再出现“广告关键词数据尚未开放”。广告表现返回消费、展现、点击和严格下钻入口，网站流量返回百度统计访问、UV、PV、质量和页面数据。
+- 官网代码与迁移已经部署，但生产 `GATO_WEBSITE_FORM_*` 未配置完整，模块保持 `DISABLED`；53KF 保持 `NOT_CONNECTED`；订单页继续诚实显示销售系统 `UNAVAILABLE`。这三项不是部署失败，也不得用 fixture 或假 API 填充。
 
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`
