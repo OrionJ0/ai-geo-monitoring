@@ -153,6 +153,7 @@ function dashboardFixture(stale = false) {
     projectName: fixture.projectName,
     revision: 'keyword-analysis-fixture-revision',
     states: {
+      projectState: 'ACTIVE',
       snapshotContentState: 'DATA',
       snapshotFreshnessState: stale ? 'STALE' : 'FRESH'
     },
@@ -238,6 +239,32 @@ function keywordMetric(page: Page, title: string) {
     .locator('xpath=ancestor::div[contains(@class,"ant-card")][1]');
 }
 
+async function clickScatterPointNear(
+  page: Page,
+  title: string,
+  expected: { x: number; y: number }
+) {
+  const tooltipTitle = page.locator('.g2-tooltip-title').filter({ hasText: title });
+  for (let radius = 0; radius <= 25; radius += 5) {
+    for (let yOffset = -radius; yOffset <= radius; yOffset += 5) {
+      for (let xOffset = -radius; xOffset <= radius; xOffset += 5) {
+        if (radius > 0 && Math.abs(xOffset) < radius && Math.abs(yOffset) < radius) {
+          continue;
+        }
+        const x = expected.x + xOffset;
+        const y = expected.y + yOffset;
+        await page.mouse.move(x, y);
+        await page.waitForTimeout(8);
+        if (await tooltipTitle.isVisible().catch(() => false)) {
+          await page.mouse.click(x, y);
+          return;
+        }
+      }
+    }
+  }
+  throw new Error(`未在预期区域找到散点：${title}`);
+}
+
 test.beforeEach(async ({ page }) => {
   await installRoutes(page);
   await page.setViewportSize({ width: 1488, height: 1058 });
@@ -252,17 +279,32 @@ test('confirmed keyword analysis visual keeps selection, donut, task filters, an
   await expect(keywordMetric(page, '未获点击')).toContainText('251');
   await expect(page.getByText('百度推广 · 真实数据 · 数据截至 2026-08-03')).toBeVisible();
   await expect(page.getByText('当前选中关键词')).toBeVisible();
-  await expect(page.getByText('行动建议分布')).toBeVisible();
+  await expect(page.getByText('优化标签分布')).toBeVisible();
   await expect(page.getByText('振动光纤价格').first()).toBeVisible();
 
+  const scatterRegion = page.getByRole('img', {
+    name: /关键词效率分布，共 51 个有点击关键词/u
+  });
+  const scatterBox = await scatterRegion.boundingBox();
+  expect(scatterBox).not.toBeNull();
+  if (scatterBox) {
+    const plotWidth = scatterBox.width - 56 - 20;
+    const plotHeight = 300 - 8 - 36;
+    await clickScatterPointNear(page, '电子围栏厂家', {
+      x: scatterBox.x + 56 + (1.3762272089761571 / 7) * plotWidth,
+      y: scatterBox.y + 8 + (1 - 109.10828025477707 / 120) * plotHeight
+    });
+  }
+  await expect(page.locator('aside').getByText('电子围栏厂家')).toBeVisible();
+
   const selectedRow = page.locator('tr[aria-selected="true"]');
-  await expect(selectedRow).toContainText('振动光纤 / 价格词');
+  await expect(selectedRow).toContainText('电子围栏厂家');
   await expect(selectedRow).not.toContainText('推广单元');
 
-  const electronicRow = page.getByRole('row', { name: /电子围栏厂家/ });
-  await electronicRow.click();
-  await expect(page.locator('aside').getByText('电子围栏厂家')).toBeVisible();
-  await expect(electronicRow).toHaveAttribute('aria-selected', 'true');
+  const alarmRow = page.getByRole('row', { name: /周界报警系统/ });
+  await alarmRow.click();
+  await expect(page.locator('aside').getByText('周界报警系统')).toBeVisible();
+  await expect(alarmRow).toHaveAttribute('aria-selected', 'true');
 
   await page.getByText('密度', { exact: true }).click();
   await expect(page.locator('.ant-segmented-item-selected')).toContainText('密度');
@@ -297,7 +339,7 @@ test('keyword analysis keeps page width stable at 1280px', async ({ page }) => {
   await page.goto('/geo/keyword-analysis');
 
   await expect(page.getByText('关键词效率分布')).toBeVisible();
-  await expect(page.getByText('行动建议分布')).toBeVisible();
+  await expect(page.getByText('优化标签分布')).toBeVisible();
   expect(await page.evaluate(() => ({
     viewport: window.innerWidth,
     pageWidth: document.documentElement.scrollWidth
@@ -307,6 +349,25 @@ test('keyword analysis keeps page width stable at 1280px', async ({ page }) => {
     path: path.join(artifactDirectory, 'keyword-analysis-1280.png'),
     fullPage: true
   });
+});
+
+test('ad delivery detail defaults to campaigns and keeps unsupported lower-level status honest', async ({ page }) => {
+  await page.goto('/geo/ad-performance');
+
+  await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
+  const table = page.getByRole('table', { name: '广告投放明细表格' });
+  await expect(table.getByText('PC-周界报警', { exact: true }).first()).toBeVisible();
+  await expect(table.getByText('移动-周界报警', { exact: true }).first()).toBeVisible();
+  await expect(table.getByText('电子围栏 / 意向词', { exact: true })).toHaveCount(0);
+  await expect(table.getByText('投放中', { exact: true })).toHaveCount(0);
+  await expect(table.getByText('未提供', { exact: true })).toHaveCount(7);
+
+  const rowsBeforeCampaignExpansion = await table.getByRole('row').count();
+  await page.getByRole('button', { name: '展开PC-周界报警' }).first().click();
+  await expect.poll(() => table.getByRole('row').count())
+    .toBeGreaterThan(rowsBeforeCampaignExpansion);
+  await expect.poll(() => table.getByText('未提供', { exact: true }).count())
+    .toBeGreaterThan(7);
 });
 
 test('rejects a structurally valid dashboard with orphan keywords', async ({ page }) => {
@@ -398,7 +459,7 @@ test('stale snapshot warns and preserves advertising data with retry', async ({ 
   await expect(warning).toContainText('截至 2026-08-03');
   await expect(warning.getByRole('button', { name: /重\s*试/u })).toBeVisible();
   await expect(page.getByText('总展现')).toBeVisible();
-  await expect(page.getByText('结构下钻')).toBeVisible();
+  await expect(page.getByText('投放明细')).toBeVisible();
 });
 
 test('keyword page rejects a dashboard belonging to another project', async ({ page }) => {

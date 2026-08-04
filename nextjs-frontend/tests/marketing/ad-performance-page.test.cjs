@@ -41,7 +41,7 @@ test('page follows the approved breadcrumb, date, summary, trend, and drilldown 
   const breadcrumb = pageSource.indexOf("{ title: '首页' }");
   const summary = pageSource.indexOf('周期汇总指标');
   const trend = pageSource.indexOf("selectedNode?.name || '总体'");
-  const drilldown = pageSource.indexOf('<h2>结构下钻</h2>');
+  const drilldown = pageSource.indexOf('<h2>投放明细</h2>');
 
   assert.ok(breadcrumb >= 0 && breadcrumb < summary);
   assert.ok(summary < trend && trend < drilldown);
@@ -72,7 +72,7 @@ test('trend offers exactly the five advertising metrics and one selected object'
 
 test('drilldown table keeps the required columns, hierarchy filters, and parent paths', () => {
   [
-    '名称', '状态', '预算', '消费', '展现', '点击', 'CTR', '平均 CPC', '详情'
+    '名称', '投放状态', '预算', '消费', '展现', '点击', 'CTR', '平均 CPC', '详情'
   ].forEach((title) => assert.match(pageSource, new RegExp(`title: '${title}'`)));
   ['全部层级', '仅项目', '仅计划', '仅单元', '仅关键词'].forEach((label) => {
     assert.match(pageSource, new RegExp(`label: '${label}'`));
@@ -82,10 +82,22 @@ test('drilldown table keeps the required columns, hierarchy filters, and parent 
   assert.match(pageSource, /sortTree/);
   assert.match(pageSource, /event\.stopPropagation\(\)/);
   assert.match(pageSource, /indentSize: 32/);
+  assert.match(pageSource, /defaultExpandedKeys/);
+  assert.match(pageSource, /setExpandedKeys\(defaultExpandedKeys\)/);
+  assert.doesNotMatch(pageSource, /DEFAULT_EXPANDED_KEYS/);
   assert.match(pageSource, /<Tooltip[\s\S]*title=\{name\}/);
   assert.match(styleSource, /\.nameCell[\s\S]*text-overflow: ellipsis/);
   assert.match(styleSource, /\.leafConnector::before[\s\S]*border-left/);
   assert.match(styleSource, /\.selectedRow[\s\S]*#e6f4ff/);
+});
+
+test('unavailable lower-level delivery status stays explicit instead of being inferred from historical metrics', () => {
+  assert.match(pageSource, /当前百度报表未提供该层级的实时投放状态/);
+  assert.match(pageSource, />未提供</);
+  assert.match(adapterSource, /status: 'unknown'/);
+  assert.doesNotMatch(adapterSource, /impressions[^\n]+\? 'active'/);
+  assert.doesNotMatch(adapterSource, /projectState === 'ACTIVE' \? 'active'/);
+  assert.match(adapterSource, /label: '项目状态'/);
 });
 
 test('detail popover is viewport-aware, hover-only, and escape-closeable', () => {

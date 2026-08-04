@@ -67,16 +67,11 @@ const TREND_OPTIONS: Array<{ value: TrendMetric; label: string }> = [
 ];
 
 const AD_SUMMARY_PLACEHOLDERS = Object.freeze([
-  { title: '总消费', metricKey: 'COST' },
-  { title: '总展现', metricKey: 'IMPRESSIONS' },
-  { title: '总点击', metricKey: 'CLICKS' },
+  { title: '总消费' },
+  { title: '总展现' },
+  { title: '总点击' },
   { title: '平均点击成本', metricKey: 'CPC' }
 ]);
-
-const DEFAULT_EXPANDED_KEYS = [
-  'project:perimeter-alarm',
-  'scheme:pc-multi-region'
-];
 
 function groupDigits(value: string): string {
   return BigInt(value).toString().replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
@@ -364,11 +359,17 @@ function formatChartValue(
 function statusLabel(status: AdDeliveryStatus): string {
   if (status === 'active') return '投放中';
   if (status === 'paused') return '已暂停';
-  return '—';
+  return '未提供';
 }
 
 function StatusBadge({ status }: { status: AdDeliveryStatus }) {
-  if (status === 'unknown') return <span>—</span>;
+  if (status === 'unknown') {
+    return (
+      <Tooltip title="当前百度报表未提供该层级的实时投放状态。" trigger={['hover']}>
+        <span className={styles.unknownStatus}>未提供</span>
+      </Tooltip>
+    );
+  }
   return (
     <Badge
       status={status === 'active' ? 'success' : 'default'}
@@ -467,9 +468,7 @@ export default function AdPerformancePage() {
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
   const [displayLevel, setDisplayLevel] = useState<DisplayLevel>('all');
   const [searchValue, setSearchValue] = useState('');
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(
-    DEFAULT_EXPANDED_KEYS
-  );
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [openPopoverKey, setOpenPopoverKey] = useState<string | null>(null);
   const [sortState, setSortState] = useState<{
     field: string | null;
@@ -590,6 +589,16 @@ export default function AdPerformancePage() {
     () => lastChildKeys(treeData),
     [treeData]
   );
+  const defaultExpandedKeys = useMemo(
+    () => (performance.data?.structure || [])
+      .filter((node) => Boolean(node.children?.length))
+      .map((node) => node.key),
+    [performance.data?.structure]
+  );
+
+  useEffect(() => {
+    setExpandedKeys(defaultExpandedKeys);
+  }, [defaultExpandedKeys]);
 
   useEffect(() => {
     if (!searchValue || displayLevel !== 'all') return;
@@ -622,7 +631,7 @@ export default function AdPerformancePage() {
         )
       },
       {
-        title: '状态',
+        title: '投放状态',
         dataIndex: 'status',
         key: 'status',
         width: 88,
@@ -788,7 +797,7 @@ export default function AdPerformancePage() {
           <MarketingMetricGrid ariaLabel="广告表现周期汇总指标">
             {[
               {
-                title: '总消费', key: 'COST',
+                title: '总消费', key: 'cost', metricKey: undefined,
                 current: formatMoney(currentOverviewMetrics.costAmountScaled, performance.data.costScale, 0, performance.data.currency),
                 previous: formatMoney(previousOverviewMetrics.costAmountScaled, performance.data.costScale, 0, performance.data.currency),
                 change: formatExactChange(currentOverviewMetrics.costAmountScaled, previousOverviewMetrics.costAmountScaled),
@@ -796,21 +805,21 @@ export default function AdPerformancePage() {
                 info: '所选周期的百度推广消费。'
               },
               {
-                title: '总展现', key: 'IMPRESSIONS',
+                title: '总展现', key: 'impressions', metricKey: undefined,
                 current: groupDigits(currentOverviewMetrics.impressions),
                 previous: groupDigits(previousOverviewMetrics.impressions),
                 change: formatExactChange(currentOverviewMetrics.impressions, previousOverviewMetrics.impressions),
                 info: '所选周期的百度推广展现数。'
               },
               {
-                title: '总点击', key: 'CLICKS',
+                title: '总点击', key: 'clicks', metricKey: undefined,
                 current: groupDigits(currentOverviewMetrics.clicks),
                 previous: groupDigits(previousOverviewMetrics.clicks),
                 change: formatExactChange(currentOverviewMetrics.clicks, previousOverviewMetrics.clicks),
                 info: '百度推广点击数，不等于站内访问数。'
               },
               {
-                title: '平均点击成本', key: 'CPC',
+                title: '平均点击成本', key: 'cpc', metricKey: 'CPC',
                 current: calculateCpc(currentOverviewMetrics, performance.data.costScale, performance.data.currency),
                 previous: calculateCpc(previousOverviewMetrics, performance.data.costScale, performance.data.currency),
                 change: formatRatioChange(
@@ -826,7 +835,7 @@ export default function AdPerformancePage() {
               <MarketingMetricCard
                 key={item.key}
                 title={item.title}
-                metricKey={item.key}
+                metricKey={item.metricKey}
                 current={item.current === '—' ? null : item.current}
                 previous={item.previous === '—' ? null : item.previous}
                 change={item.change}
@@ -955,7 +964,7 @@ export default function AdPerformancePage() {
           <Card className={styles.tableCard}>
             <div className={styles.tableToolbar}>
               <div className={styles.tableToolbarLeft}>
-                <h2>结构下钻</h2>
+                <h2>投放明细</h2>
                 <label>
                   <span>显示层级：</span>
                   <Select<DisplayLevel>
@@ -981,7 +990,7 @@ export default function AdPerformancePage() {
               />
             </div>
             <Table<AdHierarchyNode>
-              aria-label="广告结构下钻表格"
+              aria-label="广告投放明细表格"
               className={styles.structureTable}
               rowKey="key"
               columns={columns}

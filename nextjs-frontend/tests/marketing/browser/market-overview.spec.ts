@@ -554,6 +554,26 @@ test('desktop layout matches the final structure and is keyboard/axe clean', asy
   await page.screenshot({ path: artifact('market-overview-desktop-1440x1024.png') });
 });
 
+test('full-journey table uses channel branding without redundant Tongji copy', async ({ page }) => {
+  await installDashboard(page);
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await page.goto('/geo/market-overview');
+  await expect(page.locator('.ant-skeleton')).toHaveCount(0);
+
+  const journeyTable = page.getByRole('region', { name: '全链路数据表格' });
+  await expect(journeyTable.getByText('所选区间的百度统计访问次数')).toHaveCount(0);
+  await expect(journeyTable.getByText('来自百度统计', { exact: true })).toHaveCount(0);
+  for (const [label, brand] of [
+    ['百度推广', 'baidu'],
+    ['百度自然搜索', 'baidu'],
+    ['必应自然搜索', 'bing'],
+    ['Google 自然搜索', 'google']
+  ]) {
+    await expect(journeyTable.getByRole('img', { name: `${label}渠道图标` }))
+      .toHaveAttribute('data-brand', brand);
+  }
+});
+
 test('390x844 keeps page width stable and uses an overlay sidebar', async ({ page }) => {
   const consoleErrors = collectConsoleErrors(page);
   await installDashboard(page);

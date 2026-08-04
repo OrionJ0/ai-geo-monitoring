@@ -380,37 +380,37 @@ export default function WebsiteTrafficPage() {
           <MarketingMetricGrid ariaLabel="网站流量周期汇总指标">
             {[
               {
-                title: '访问次数', key: 'VISITS',
+                title: '访问次数', key: 'visits', metricKey: undefined,
                 current: groupDigits(summary?.visits.current || null),
                 previous: groupDigits(summary?.visits.previous || null),
                 change: formatPercentChange(summary?.visits.changePercent || null)
               },
               {
-                title: '访客数', key: 'UV',
+                title: '访客数', key: 'visitors', metricKey: 'UV',
                 current: groupDigits(summary?.visitors.current || null),
                 previous: groupDigits(summary?.visitors.previous || null),
                 change: formatPercentChange(summary?.visitors.changePercent || null)
               },
               {
-                title: '浏览量', key: 'PV',
+                title: '浏览量', key: 'pageviews', metricKey: 'PV',
                 current: groupDigits(summary?.pageviews.current || null),
                 previous: groupDigits(summary?.pageviews.previous || null),
                 change: formatPercentChange(summary?.pageviews.changePercent || null)
               },
               {
-                title: '跳出率', key: 'BOUNCE', lowerIsBetter: true,
+                title: '跳出率', key: 'bounce', metricKey: undefined, lowerIsBetter: true,
                 current: formatRate(summary?.bounceRate.current || null),
                 previous: formatRate(summary?.bounceRate.previous || null),
                 change: formatPointChange(summary?.bounceRate.changePoints || null)
               },
               {
-                title: '平均访问时长', key: 'DURATION',
+                title: '平均访问时长', key: 'duration', metricKey: undefined,
                 current: formatDuration(summary?.averageVisitTime.current || null),
                 previous: formatDuration(summary?.averageVisitTime.previous || null),
                 change: formatDurationChange(summary?.averageVisitTime.changeSeconds || null)
               },
               {
-                title: '平均访问页数', key: 'PAGES',
+                title: '平均访问页数', key: 'pages', metricKey: undefined,
                 current: formatPages(summary?.averageVisitPages.current || null),
                 previous: formatPages(summary?.averageVisitPages.previous || null),
                 change: formatPagesChange(summary?.averageVisitPages.changePages || null)
@@ -419,7 +419,7 @@ export default function WebsiteTrafficPage() {
               <MarketingMetricCard
                 key={item.key}
                 title={item.title}
-                metricKey={item.key}
+                metricKey={item.metricKey}
                 current={item.current === '—' ? null : item.current}
                 previous={item.previous === '—' ? null : item.previous}
                 change={item.change === '—' ? null : item.change}

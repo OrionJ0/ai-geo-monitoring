@@ -79,6 +79,39 @@ test('all marketing pages use the shared period-comparison metric cards', () => 
   assert.match(card, />较上一周期</);
 });
 
+test('overview cards only show established metric abbreviations', () => {
+  const forbiddenEnglishLabels = [
+    'COST',
+    'IMPRESSIONS',
+    'CLICKS',
+    'IMPRESSION KEYWORDS',
+    'CLICKED KEYWORDS',
+    'CLICK COVERAGE',
+    'NO CLICK',
+    'VISITS',
+    'BOUNCE',
+    'DURATION',
+    'PAGES',
+    'FORM',
+    '53KF CHAT',
+    'ORDERS',
+    'AMOUNT',
+    'ATTRIBUTED',
+    'PENDING'
+  ];
+  const source = pages.map(pageSource).join('\n');
+  for (const label of forbiddenEnglishLabels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.doesNotMatch(
+      source,
+      new RegExp(`metricKey(?:=|:)\\s*["']${escaped}["']`)
+    );
+  }
+  for (const abbreviation of ['CPC', 'UV', 'PV', 'ROAS', 'CPL', 'CPA']) {
+    assert.match(source, new RegExp(`["']${abbreviation}["']`));
+  }
+});
+
 test('unsupported device dimensions stay visible without breaking global selection', () => {
   for (const page of ['ad-performance', 'keyword-analysis', 'order-results']) {
     assert.match(pageSource(page), /availableDevices=\{\['all'\]\}/);

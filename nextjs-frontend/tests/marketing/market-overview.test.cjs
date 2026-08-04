@@ -111,7 +111,13 @@ test('journey adds Baidu Tongji source rows as visit-only evidence', () => {
   assert.match(source, /paidVisits/);
   assert.match(source, /不能用广告点击代替/);
   assert.match(source, /currentTotals[\s\S]*hasCompletePeriod\([\s\S]*period\.current/);
-  assert.match(source, /所选区间的百度统计访问次数/);
+  assert.doesNotMatch(source, /所选区间的百度统计访问次数/);
+  assert.doesNotMatch(source, />来自百度统计</);
+  assert.match(source, /BaiduOutlined/);
+  assert.match(source, /GoogleOutlined/);
+  assert.match(source, /function BingBrandIcon/);
+  assert.match(source, /sourceKey === 'BAIDU_SEARCH' \|\| sourceKey === PAID_SOURCE/);
+  assert.match(source, /aria-label=\{`\$\{label\}渠道图标`\}/);
   assert.doesNotMatch(source, /当前范围未记录访问/);
   assert.match(source, /visibleAlignedFormKeys/);
   assert.match(source, /websiteFormBySource\.get\(PAID_SOURCE\)/);

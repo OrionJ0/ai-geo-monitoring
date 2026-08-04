@@ -16,8 +16,9 @@ import {
   Typography
 } from 'antd';
 import {
-  FundProjectionScreenOutlined,
+  BaiduOutlined,
   GlobalOutlined,
+  GoogleOutlined,
   InfoCircleOutlined,
   LinkOutlined,
   SearchOutlined
@@ -271,21 +272,18 @@ function SourceIdentity({
 }) {
   let icon = <GlobalOutlined aria-hidden="true" />;
   let brand = 'site';
-  if (sourceKey === 'BAIDU_SEARCH') {
-    icon = <span aria-hidden="true">度</span>;
+  if (sourceKey === 'BAIDU_SEARCH' || sourceKey === PAID_SOURCE) {
+    icon = <BaiduOutlined aria-hidden="true" />;
     brand = 'baidu';
   } else if (sourceKey === 'BING_SEARCH') {
-    icon = <span aria-hidden="true">b</span>;
+    icon = <BingBrandIcon />;
     brand = 'bing';
   } else if (sourceKey === 'GOOGLE_SEARCH') {
-    icon = <span aria-hidden="true">G</span>;
+    icon = <GoogleOutlined aria-hidden="true" />;
     brand = 'google';
   } else if (sourceKey === 'OTHER_SEARCH' || sourceKey === 'EXTERNAL_REFERRAL') {
     icon = <LinkOutlined aria-hidden="true" />;
     brand = 'other';
-  } else if (sourceKey === PAID_SOURCE) {
-    icon = <FundProjectionScreenOutlined aria-hidden="true" />;
-    brand = 'paid';
   } else if (sourceKey === 'SEARCH') {
     icon = <SearchOutlined aria-hidden="true" />;
   }
@@ -302,7 +300,14 @@ function SourceIdentity({
   );
   return (
     <span className={styles.sourceIdentity}>
-      <span className={styles.sourceIcon} data-brand={brand}>{icon}</span>
+      <span
+        className={styles.sourceIcon}
+        data-brand={brand}
+        role="img"
+        aria-label={`${label}渠道图标`}
+      >
+        {icon}
+      </span>
       <span className={styles.sourceCopy}>
         <strong>{label}</strong>
         <span className={styles.sourceMeta}>
@@ -313,6 +318,17 @@ function SourceIdentity({
         </span>
       </span>
     </span>
+  );
+}
+
+function BingBrandIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M5 2.5v14.7l5.2 3 8.8-5.1v-5l-5.8-3.3v4.7l2.2 1.3-5.2 3-2-1.2V3.7L5 2.5Z"
+      />
+    </svg>
   );
 }
 
@@ -365,7 +381,6 @@ function TrafficSourceRow({
         <strong>{visits == null
           ? <MissingValue label={`${source.sourceLabel}访问`} />
           : groupDigits(visits)}</strong>
-        <small>所选区间的百度统计访问次数</small>
       </td>
       <td className={styles.metricCell}>
         <WebsiteFormConsultationCell
@@ -969,7 +984,6 @@ export default function MarketOverviewPage() {
                     <strong>{paidVisits == null
                       ? <MissingValue reason="百度统计付费搜索访问暂时不可用，不能用广告点击代替。" label="百度推广访问" />
                       : groupDigits(paidVisits)}</strong>
-                    <small>来自百度统计</small>
                   </td>
                   <td className={styles.metricCell}>
                     <WebsiteFormConsultationCell

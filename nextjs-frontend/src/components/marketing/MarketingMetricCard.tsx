@@ -42,7 +42,7 @@ export function MarketingMetricPlaceholderGrid({
   loading = false,
   missingReason
 }: {
-  items: ReadonlyArray<{ title: string; metricKey: string }>;
+  items: ReadonlyArray<{ title: string; metricKey?: string }>;
   ariaLabel: string;
   loading?: boolean;
   missingReason?: React.ReactNode;
@@ -51,7 +51,7 @@ export function MarketingMetricPlaceholderGrid({
     <MarketingMetricGrid ariaLabel={ariaLabel}>
       {items.map(({ title, metricKey }) => (
         <MarketingMetricCard
-          key={metricKey}
+          key={metricKey || title}
           title={title}
           metricKey={metricKey}
           current={null}

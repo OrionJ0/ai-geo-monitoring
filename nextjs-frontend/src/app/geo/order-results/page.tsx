@@ -498,7 +498,6 @@ function OrderResultsContent() {
       <MarketingMetricGrid ariaLabel="订单结果周期汇总指标">
         <MarketingMetricCard
           title="成交订单"
-          metricKey="ORDERS"
           current={dataSource.state === 'UNAVAILABLE' ? null : String(view.summary.totalCount)}
           previous={dataSource.state === 'UNAVAILABLE' ? null : previousCount}
           change={dataSource.state === 'UNAVAILABLE' ? null : countChange}
@@ -510,7 +509,6 @@ function OrderResultsContent() {
         />
         <MarketingMetricCard
           title="签订金额"
-          metricKey="AMOUNT"
           current={dataSource.state === 'UNAVAILABLE' ? null : formatAmount(view.summary.signedAmountYuan)}
           previous={dataSource.state === 'UNAVAILABLE' ? null : formatAmount(previousAmount)}
           change={dataSource.state === 'UNAVAILABLE' ? null : amountChange}
@@ -522,7 +520,6 @@ function OrderResultsContent() {
         />
         <MarketingMetricCard
           title="已关联订单"
-          metricKey="ATTRIBUTED"
           current={dataSource.state === 'UNAVAILABLE'
             ? null
             : `${view.summary.trustedCount} / ${view.summary.totalCount}`}
@@ -536,7 +533,6 @@ function OrderResultsContent() {
         />
         <MarketingMetricCard
           title="待关联订单"
-          metricKey="PENDING"
           current={dataSource.state === 'UNAVAILABLE' ? null : String(view.summary.unresolvedCount)}
           previous={null}
           change={null}

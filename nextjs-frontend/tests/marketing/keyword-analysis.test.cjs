@@ -239,7 +239,7 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(pageSource, /useMarketingCapabilities/);
   assert.match(pageSource, /首页/);
   assert.match(pageSource, /投放与流量/);
-  assert.match(pageSource, /关键词分析/);
+  assert.match(pageSource, /广告关键词/);
   assert.doesNotMatch(pageSource, /搜索词分析|SearchTermAnalysis|searchTermAnalysis/);
   assert.doesNotMatch(pageSource, /当前真实百度数据只到推广计划|关键词数据尚未接入/);
   assert.match(pageSource, /有展现关键词/);
@@ -247,7 +247,7 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(pageSource, /点击覆盖率/);
   assert.match(pageSource, /未获点击/);
   assert.match(pageSource, /推广单元/);
-  assert.match(pageSource, /优化建议/);
+  assert.match(pageSource, /优化标签/);
   assert.match(pageSource, /消费区间/);
   assert.match(pageSource, /CTR\/CPC 异常/);
   assert.match(pageSource, /搜索投放关键词/);
@@ -257,7 +257,7 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(pageSource, /散点/);
   assert.match(pageSource, /密度/);
   assert.match(pageSource, /当前选中关键词/);
-  assert.match(pageSource, /行动建议分布/);
+  assert.match(pageSource, /优化标签分布/);
   assert.match(pageSource, /全部关键词明细/);
   assert.match(pageSource, /record\.unitName/);
   assert.match(pageSource, /rowClassName/);
@@ -265,7 +265,14 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(pageSource, /\bHeatmap\b/);
   assert.match(pageSource, /type:\s*'sqrt'/);
   assert.match(pageSource, /range:\s*\[3,\s*11\]/);
-  assert.match(pageSource, /fillOpacity:\s*0\.56/);
+  assert.match(pageSource, /datum\.key === selectedKeywordKey \? 0\.96 : 0\.56/);
+  assert.match(pageSource, /event\.type !== 'click'/);
+  assert.match(pageSource, /event\.data\?\.data\?\.key/);
+  assert.doesNotMatch(pageSource, /selectedPointOverlay|selectedPointMarker/);
+  assert.doesNotMatch(pageSource, /const plotLeft = 56/);
+  assert.match(pageSource, /当前百度关键词报告不提供优化标签/);
+  assert.match(pageSource, /不会按象限自动生成/);
+  assert.match(pageSource, /暂无已配置标签/);
   assert.match(pageSource, /<MarketingPageFilters/);
   assert.match(pageSource, /availableDevices=\{\['all'\]\}/);
   assert.doesNotMatch(pageSource, /MORE_FILTER_OPTIONS|更多筛选/);

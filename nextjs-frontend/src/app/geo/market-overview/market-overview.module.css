@@ -300,15 +300,23 @@
 .sourceIcon[data-brand="baidu"] {
   color: #2f6bff;
   background: #edf3ff;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 17px;
 }
 
 .sourceIcon[data-brand="bing"] {
   color: #007f75;
   background: #e8f7f3;
+}
+
+.sourceIcon[data-brand="bing"] svg {
+  width: 18px;
+  height: 18px;
+}
+
+.sourceIcon[data-brand="google"] {
+  color: #4285f4;
+  background: #f3f7ff;
   font-size: 17px;
-  font-weight: 700;
 }
 
 .sourceIcon[data-brand="site"] {
@@ -319,11 +327,6 @@
 .sourceIcon[data-brand="other"] {
   color: #475467;
   background: #f2f4f7;
-}
-
-.sourceIcon[data-brand="paid"] {
-  color: #2f6bff;
-  background: #e6f4ff;
 }
 
 .sourceIdentity {

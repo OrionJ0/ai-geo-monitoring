@@ -24,7 +24,7 @@ test('workspace always shows the complete agreed information architecture', () =
   assert.deepEqual(labels, [
     '市场总览',
     '广告表现',
-    '关键词分析',
+    '广告关键词',
     '网站流量',
     '咨询数据',
     '订单结果',
@@ -61,7 +61,7 @@ test('workspace navigation groups use the approved order and names', () => {
   assert.deepEqual(items.slice(0, 4).map((item) => item.label), [
     '市场总览',
     '广告表现',
-    '关键词分析',
+    '广告关键词',
     '网站流量',
   ]);
   assert.equal(navigation.at(-2).label, '常用网站');

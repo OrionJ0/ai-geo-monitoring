@@ -206,6 +206,12 @@
   background: #e6f4ff !important;
 }
 
+.unknownStatus {
+  color: #7b8799;
+  border-bottom: 1px dotted #aab4c3;
+  cursor: help;
+}
+
 .nameCell {
   display: inline-block;
   min-width: 0;

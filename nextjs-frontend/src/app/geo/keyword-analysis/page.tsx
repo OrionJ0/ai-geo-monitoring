@@ -58,10 +58,10 @@ import sharedStyles from '../ad-performance/ad-performance.module.css';
 import styles from './keyword-analysis.module.css';
 
 const KEYWORD_SUMMARY_PLACEHOLDERS = Object.freeze([
-  { title: '有展现关键词', metricKey: 'IMPRESSION KEYWORDS' },
-  { title: '有点击关键词', metricKey: 'CLICKED KEYWORDS' },
-  { title: '点击覆盖率', metricKey: 'CLICK COVERAGE' },
-  { title: '未获点击', metricKey: 'NO CLICK' }
+  { title: '有展现关键词' },
+  { title: '有点击关键词' },
+  { title: '点击覆盖率' },
+  { title: '未获点击' }
 ]);
 type TagFilter = 'all' | KeywordTag;
 type BenchmarkMode = 'median' | 'account-average';
@@ -69,7 +69,7 @@ type ChartMode = 'scatter' | 'density';
 
 const TYPED_KEYWORD_TAGS = KEYWORD_TAGS as readonly KeywordTag[];
 
-const TAG_OPTIONS = [
+const CONFIGURED_TAG_OPTIONS = [
   { value: 'all', label: '全部' },
   ...TYPED_KEYWORD_TAGS.map((tag) => ({ value: tag, label: tag }))
 ];
@@ -157,7 +157,13 @@ function fixtureStateFromLocation(): KeywordFixtureState {
 }
 
 function KeywordTagValue({ tag }: { tag: KeywordTag | null }) {
-  if (!tag) return <span className={styles.mutedValue}>—</span>;
+  if (!tag) {
+    return (
+      <Tooltip title="当前百度关键词报告不提供优化标签。" trigger={['hover']}>
+        <span className={`${styles.keywordTag} ${styles.tagUnconfigured}`}>未配置</span>
+      </Tooltip>
+    );
+  }
   return <span className={`${styles.keywordTag} ${TAG_CLASS_NAMES[tag]}`}>{tag}</span>;
 }
 
@@ -172,7 +178,7 @@ function LoadingPage() {
       <Card className={styles.filterCard}><Skeleton.Input active block size="small" /></Card>
       <Card className={styles.analysisCard}><Skeleton active title paragraph={{ rows: 12 }} /></Card>
       <Card className={styles.tableCard}><Skeleton active title paragraph={{ rows: 6 }} /></Card>
-      <span className={sharedStyles.visuallyHidden}>正在加载关键词分析</span>
+      <span className={sharedStyles.visuallyHidden}>正在加载广告关键词</span>
     </div>
   );
 }
@@ -233,6 +239,13 @@ export default function KeywordAnalysisPage() {
   });
   const model = analysis.data;
   const rows = useMemo<KeywordAggregateRow[]>(() => model?.rows || [], [model?.rows]);
+  const hasConfiguredTags = useMemo(
+    () => rows.some((row) => row.tag !== null),
+    [rows]
+  );
+  const tagOptions = hasConfiguredTags
+    ? CONFIGURED_TAG_OPTIONS
+    : [{ value: 'all' as const, label: '暂无已配置标签' }];
 
   const unitOptions = useMemo(() => {
     const units = new Map<string, string>();
@@ -367,7 +380,7 @@ export default function KeywordAnalysisPage() {
         )
       },
       {
-        title: '标签',
+        title: '优化标签',
         dataIndex: 'tag',
         key: 'tag',
         width: 126,
@@ -437,7 +450,7 @@ export default function KeywordAnalysisPage() {
 
   const chartRows = useMemo(() => scatterPoints.map((point) => ({
     ...point,
-    actionLabel: point.tag || '未分类',
+    actionLabel: point.tag || '未配置',
     pointColor: point.tag ? TAG_COLORS[point.tag] : '#aab2bf',
     unitName: rowByKey.get(point.key)?.unitName || '—',
     costDisplay: model
@@ -469,10 +482,6 @@ export default function KeywordAnalysisPage() {
     () => buildDensityRows(scatterPoints, xMax, yMax),
     [scatterPoints, xMax, yMax]
   );
-  const selectedPoint = selectedKeywordKey
-    ? scatterPoints.find((point) => point.key === selectedKeywordKey) || null
-    : null;
-
   const annotations = scatterPoints.length && baselineCtr != null && baselineCpc != null
     ? [
         {
@@ -517,7 +526,7 @@ export default function KeywordAnalysisPage() {
   const distributionRows = [
     ...distribution.items,
     ...(distribution.unclassifiedCount
-      ? [{ tag: '未分类', count: distribution.unclassifiedCount }]
+      ? [{ tag: '未配置', count: distribution.unclassifiedCount }]
       : [])
   ];
   const donutRows = distributionRows.filter((item) => item.count > 0);
@@ -538,12 +547,12 @@ export default function KeywordAnalysisPage() {
     : analysis.error;
 
   return (
-    <section ref={pageRef} className={styles.page} aria-label="关键词分析">
+    <section ref={pageRef} className={styles.page} aria-label="广告关键词">
       <div className={sharedStyles.breadcrumbRow}>
         <Breadcrumb items={[
           { title: '首页' },
           { title: '投放与流量' },
-          { title: '关键词分析' }
+          { title: '广告关键词' }
         ]} />
         <MarketingPageFilters
           device={device}
@@ -554,7 +563,7 @@ export default function KeywordAnalysisPage() {
             clearFilters();
             setDateRange(nextRange);
           }}
-          dateAriaLabel="关键词分析日期范围"
+          dateAriaLabel="广告关键词日期范围"
           minDate={model?.availableFrom || null}
           maxDate={model?.availableTo || null}
           presetAnchor={model?.availableTo || KEYWORD_FIXTURE_RANGE.to}
@@ -592,7 +601,6 @@ export default function KeywordAnalysisPage() {
           <MarketingMetricGrid ariaLabel="关键词覆盖摘要">
             <MarketingMetricCard
               title="有展现关键词"
-              metricKey="IMPRESSION KEYWORDS"
               current={String(model.coverage.impressionKeywordCount)}
               previous={null}
               change={null}
@@ -604,7 +612,6 @@ export default function KeywordAnalysisPage() {
             />
             <MarketingMetricCard
               title="有点击关键词"
-              metricKey="CLICKED KEYWORDS"
               current={String(model.coverage.clickedKeywordCount)}
               previous={null}
               change={null}
@@ -616,7 +623,6 @@ export default function KeywordAnalysisPage() {
             />
             <MarketingMetricCard
               title="点击覆盖率"
-              metricKey="CLICK COVERAGE"
               current={model.coverage.clickCoverageRate == null
                 ? null
                 : formatPercent(model.coverage.clickCoverageRate * 100)}
@@ -629,7 +635,6 @@ export default function KeywordAnalysisPage() {
             />
             <MarketingMetricCard
               title="未获点击"
-              metricKey="NO CLICKS"
               current={String(model.coverage.unclickedKeywordCount)}
               previous={null}
               change={null}
@@ -657,11 +662,12 @@ export default function KeywordAnalysisPage() {
                 />
               </label>
               <label className={styles.filterField}>
-                <span>优化建议：</span>
+                <span>优化标签：</span>
                 <Select<TagFilter>
-                  aria-label="优化建议"
+                  aria-label="优化标签"
                   value={tagFilter}
-                  options={TAG_OPTIONS}
+                  options={tagOptions}
+                  disabled={!hasConfiguredTags}
                   onChange={setTagFilter}
                   popupMatchSelectWidth={false}
                 />
@@ -731,31 +737,6 @@ export default function KeywordAnalysisPage() {
                       role="img"
                       aria-label={`关键词效率分布，共 ${scatterPoints.length} 个有点击关键词。`}
                       aria-describedby="scatter-equivalent-note"
-                      onClick={(event) => {
-                        const bounds = event.currentTarget.getBoundingClientRect();
-                        const plotLeft = 56;
-                        const plotRight = 20;
-                        const plotTop = 8;
-                        const plotBottom = 36;
-                        const plotWidth = bounds.width - plotLeft - plotRight;
-                        const plotHeight = bounds.height - plotTop - plotBottom;
-                        const pointerX = event.clientX - bounds.left;
-                        const pointerY = event.clientY - bounds.top;
-                        const nearest = scatterPoints.reduce<{
-                          point: KeywordScatterPoint;
-                          distance: number;
-                        } | null>((current, point) => {
-                          const pointX = plotLeft + (point.ctrPercent / xMax) * plotWidth;
-                          const pointY = plotTop + (1 - point.averageCpc / yMax) * plotHeight;
-                          const distance = Math.hypot(pointerX - pointX, pointerY - pointY);
-                          return !current || distance < current.distance
-                            ? { point, distance }
-                            : current;
-                        }, null);
-                        if (nearest && nearest.distance <= 24) {
-                          setSelectedKeywordKey(nearest.point.key);
-                        }
-                      }}
                     >
                       <span className={styles.chartYTitle} aria-hidden="true">平均 CPC (¥)</span>
                       <span className={styles.chartXTitle} aria-hidden="true">CTR</span>
@@ -779,7 +760,7 @@ export default function KeywordAnalysisPage() {
                           yField="averageCpc"
                           colorField="actionLabel"
                           sizeField="clicks"
-                          height={350}
+                          height={300}
                           paddingLeft={56}
                           paddingRight={20}
                           paddingTop={8}
@@ -789,7 +770,7 @@ export default function KeywordAnalysisPage() {
                             y: { domainMin: 0, domainMax: yMax, tickCount: 7 },
                             size: { type: 'sqrt', range: [3, 11] },
                             color: {
-                              domain: [...TYPED_KEYWORD_TAGS, '未分类'],
+                              domain: [...TYPED_KEYWORD_TAGS, '未配置'],
                               range: [...TYPED_KEYWORD_TAGS.map((tag) => TAG_COLORS[tag]), '#aab2bf']
                             }
                           }}
@@ -811,11 +792,24 @@ export default function KeywordAnalysisPage() {
                             fill: (datum: Record<string, unknown>) => String(
                               datum.pointColor || '#aab2bf'
                             ),
-                            fillOpacity: 0.56,
-                            stroke: '#ffffff',
-                            lineWidth: 1
+                            fillOpacity: (datum: Record<string, unknown>) => (
+                              datum.key === selectedKeywordKey ? 0.96 : 0.56
+                            ),
+                            stroke: (datum: Record<string, unknown>) => (
+                              datum.key === selectedKeywordKey ? '#0f5bd3' : '#ffffff'
+                            ),
+                            lineWidth: (datum: Record<string, unknown>) => (
+                              datum.key === selectedKeywordKey ? 3 : 1
+                            )
                           }}
                           interaction={{ elementHighlight: true }}
+                          onEvent={(_, event) => {
+                            if (event.type !== 'click') return;
+                            const key = event.data?.data?.key;
+                            if (typeof key === 'string' && rowByKey.has(key)) {
+                              setSelectedKeywordKey(key);
+                            }
+                          }}
                           tooltip={{
                             title: { field: 'keyword' },
                             items: [
@@ -836,7 +830,7 @@ export default function KeywordAnalysisPage() {
                           yField="averageCpc"
                           colorField="count"
                           mark="cell"
-                          height={350}
+                          height={300}
                           paddingLeft={56}
                           paddingRight={20}
                           paddingTop={8}
@@ -868,17 +862,6 @@ export default function KeywordAnalysisPage() {
                           animate={false}
                         />
                       )}
-                      {selectedPoint ? (
-                        <div className={styles.selectedPointOverlay} aria-hidden="true">
-                          <span
-                            className={styles.selectedPointMarker}
-                            style={{
-                              left: `${Math.min(Math.max(selectedPoint.ctrPercent / xMax * 100, 0), 100)}%`,
-                              top: `${Math.min(Math.max((1 - selectedPoint.averageCpc / yMax) * 100, 0), 100)}%`
-                            }}
-                          />
-                        </div>
-                      ) : null}
                   </div>
                 ) : (
                   <Empty
@@ -917,13 +900,13 @@ export default function KeywordAnalysisPage() {
                 </div>
 
                 <div className={styles.distributionSection}>
-                  <span className={styles.detailEyebrow}>行动建议分布</span>
-                  {donutRows.length ? (
+                  <span className={styles.detailEyebrow}>优化标签分布</span>
+                  {hasConfiguredTags && donutRows.length ? (
                     <div className={styles.distributionContent}>
                       <div
                         className={styles.donutChart}
                         role="img"
-                        aria-label={`行动建议分布，共 ${distribution.total} 个关键词`}
+                        aria-label={`优化标签分布，共 ${distribution.total} 个关键词`}
                       >
                         <Pie
                           data={donutRows}
@@ -931,12 +914,12 @@ export default function KeywordAnalysisPage() {
                           colorField="tag"
                           innerRadius={0.63}
                           radius={0.9}
-                          height={142}
+                          height={112}
                           legend={false}
                           label={false}
                           scale={{
                             color: {
-                              domain: [...TYPED_KEYWORD_TAGS, '未分类'],
+                              domain: [...TYPED_KEYWORD_TAGS, '未配置'],
                               range: [...TYPED_KEYWORD_TAGS.map((tag) => TAG_COLORS[tag]), '#7f8a9b']
                             }
                           }}
@@ -954,7 +937,7 @@ export default function KeywordAnalysisPage() {
                           <div key={item.tag}>
                             <span
                               className={styles.distributionDot}
-                              style={{ background: item.tag === '未分类'
+                              style={{ background: item.tag === '未配置'
                                 ? '#7f8a9b'
                                 : TAG_COLORS[item.tag as KeywordTag] }}
                               aria-hidden="true"
@@ -970,7 +953,10 @@ export default function KeywordAnalysisPage() {
                       </div>
                     </div>
                   ) : (
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无行动标签" />
+                    <div className={styles.noTagState}>
+                      <strong>{distribution.total} 个关键词未配置</strong>
+                      <span>当前接入的百度关键词报告不提供优化标签，不会按象限自动生成。</span>
+                    </div>
                   )}
                 </div>
               </aside>

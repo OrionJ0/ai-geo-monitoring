@@ -548,9 +548,10 @@ export function adaptMarketingDashboard(
       keyword
     );
   }
-  const projectStatus: AdDeliveryStatus = (
-    dashboard.states?.projectState === 'ACTIVE' ? 'active' : 'unknown'
-  );
+  const projectStatus: AdDeliveryStatus = 'unknown';
+  const projectStateLabel = dashboard.states?.projectState === 'ACTIVE'
+    ? '已启用'
+    : dashboard.states?.projectState === 'ARCHIVED' ? '已归档' : '—';
   const schemeNodes: AdHierarchyNode[] = campaigns.map((campaign) => {
     const campaignKey = hierarchyKey(
       campaign.accountId,
@@ -641,12 +642,13 @@ export function adaptMarketingDashboard(
     previousTrend: [],
     details: [
       { label: '项目 ID', value: String(dashboard.projectId) },
+      { label: '项目状态', value: projectStateLabel },
       { label: '优化目标', value: '—' },
       { label: '项目预算', value: '—' },
       { label: '下属计划数', value: String(schemeNodes.length) },
       {
         label: '投放状态',
-        value: projectStatus === 'active' ? '投放中' : '—',
+        value: '—',
         status: projectStatus
       }
     ],
