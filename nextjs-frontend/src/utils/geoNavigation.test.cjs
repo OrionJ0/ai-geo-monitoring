@@ -37,6 +37,7 @@ test('workspace always shows the complete agreed information architecture', () =
     '个人中心'
   ]);
   assert.match(hrefs.join(' '), /market-overview|quick-links|ad-performance|keyword-analysis|website-traffic|consultations|order-results/);
+  assert.equal(hrefs.includes('/geo/marketing-ai-analysis'), false);
   assert.equal(hrefs.includes('/admin/settings'), false);
   assert.equal(resolveGeoDefaultRoute({ formalNavigation: false }), '/geo/market-overview');
 });
@@ -68,6 +69,32 @@ test('workspace navigation groups use the approved order and names', () => {
   assert.equal(navigation.at(-1).label, '设置');
   assert.equal(resolveGeoDefaultRoute({ formalNavigation: true }), '/geo/market-overview');
   assert.equal(items.some((item) => item.href === '/geo/notice'), false);
+});
+
+test('marketing AI analysis preview is opt-in and keeps the formal default route', () => {
+  const hiddenItems = flattenGeoNavigation(buildGeoNavigation());
+  const previewItems = flattenGeoNavigation(buildGeoNavigation({
+    marketingAiAnalysisEnabled: true
+  }));
+
+  assert.equal(
+    hiddenItems.some((item) => item.href === '/geo/marketing-ai-analysis'),
+    false
+  );
+  assert.equal(
+    previewItems.some((item) => (
+      item.label === 'AI 数据分析'
+      && item.href === '/geo/marketing-ai-analysis'
+    )),
+    true
+  );
+  assert.equal(
+    resolveGeoLocation('/geo/marketing-ai-analysis', {
+      marketingAiAnalysisEnabled: true
+    }).selectedKey,
+    '/marketing-ai-analysis'
+  );
+  assert.equal(resolveGeoDefaultRoute(), '/geo/market-overview');
 });
 
 test('workspace settings group does not jump into the administrator console', () => {

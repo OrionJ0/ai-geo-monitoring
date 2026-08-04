@@ -20,6 +20,7 @@ import {
   MessageOutlined,
   ProfileOutlined,
   ReadOutlined,
+  RobotOutlined,
   SearchOutlined,
   ShoppingOutlined,
   UserOutlined
@@ -61,6 +62,7 @@ const navigationIcons: Record<string, React.ReactNode> = {
   '/website-traffic': <GlobalOutlined />,
   '/consultations': <MessageOutlined />,
   '/order-results': <ShoppingOutlined />,
+  '/marketing-ai-analysis': <RobotOutlined />,
   '/project-dashboard': <SearchOutlined />,
   '/sources': <LinkOutlined />,
   '/seo-audit': <FileSearchOutlined />,
@@ -93,13 +95,17 @@ export default function GeoLayout({
     }
   }, [pathname]);
 
+  const marketingAiAnalysisEnabled = process.env.NODE_ENV !== 'production';
+  const navigationOptions = useMemo(() => ({
+    marketingAiAnalysisEnabled
+  }), [marketingAiAnalysisEnabled]);
   const navigation = useMemo(
-    () => buildGeoNavigation(),
-    []
+    () => buildGeoNavigation(navigationOptions),
+    [navigationOptions]
   ) as Array<NavigationPage | NavigationGroup>;
   const location = useMemo(
-    () => resolveGeoLocation(pathname),
-    [pathname]
+    () => resolveGeoLocation(pathname, navigationOptions),
+    [navigationOptions, pathname]
   );
   const menuItems = useMemo(() => navigation.map((item) => {
     if (item.type === 'group') {
