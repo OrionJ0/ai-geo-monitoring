@@ -450,6 +450,7 @@ test('exposes full paths on hover without serious axe findings', async ({ page }
   await longPath.hover();
   await expect(page.getByRole('tooltip')).toContainText('industrial-very-long-path');
   await page.mouse.move(0, 0);
+  await expect(page.getByRole('tooltip')).toBeHidden();
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations.filter((violation) => (
     ['critical', 'serious'].includes(violation.impact || '')
