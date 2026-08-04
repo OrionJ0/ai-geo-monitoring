@@ -138,7 +138,7 @@ GATO_WEBSITE_FORM_HTTP_TIMEOUT_MS=10000
 GATO_WEBSITE_FORM_CACHE_TTL_MS=600000
 ```
 
-`npm run audit:website-data` 只审计官网数据自己的迁移账本。该模块只保存日期范围、来源键、可归因成功表单提交会话数与缓存时间，不保存联系人、表单内容、访客/会话明细或官网 JWT。
+`npm run audit:website-data` 只审计官网数据自己的迁移账本。该模块分页读取联系人列表计算全部表单记录的九键统计，单次最多 10,000 条；快照只保存日期范围、来源键、表单记录数与缓存时间，不保存联系人、表单内容、原始 `referrer`、访客/会话明细或官网 JWT。
 
 ## SEO 设置（可选）
 - `SEO_TITLE` 网站 SEO 标题

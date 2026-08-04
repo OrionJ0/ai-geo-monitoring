@@ -23,19 +23,18 @@ test('persists aggregate and daily website-form snapshots without overwriting ea
   const snapshot = {
     projectId: '11',
     payloadKind: 'AGGREGATE',
-    schemaVersion: 'website_form_consultations_v1',
+    schemaVersion: 'website_form_consultations_v3',
     coverage: {
       from: '2026-08-01',
       to: '2026-08-03',
       timeZone: 'Asia/Shanghai'
     },
     payload: {
-      attributedFormSubmissionSessions: '2',
+      formConsultationRecords: '2',
       sourceBreakdown: [
         {
           sourceKey: 'DIRECT',
-          upstreamSources: ['direct'],
-          attributedFormSubmissionSessions: '2'
+          formConsultationRecords: '2'
         }
       ]
     },
@@ -52,17 +51,17 @@ test('persists aggregate and daily website-form snapshots without overwriting ea
       days: [
         {
           date: '2026-08-01',
-          attributedFormSubmissionSessions: '2',
+          formConsultationRecords: '2',
           sourceBreakdown: snapshot.payload.sourceBreakdown
         },
         {
           date: '2026-08-02',
-          attributedFormSubmissionSessions: '0',
+          formConsultationRecords: '0',
           sourceBreakdown: []
         },
         {
           date: '2026-08-03',
-          attributedFormSubmissionSessions: '0',
+          formConsultationRecords: '0',
           sourceBreakdown: []
         }
       ]
@@ -71,13 +70,13 @@ test('persists aggregate and daily website-form snapshots without overwriting ea
   const result = await repository.read({
     projectId: '11',
     payloadKind: 'AGGREGATE',
-    schemaVersion: 'website_form_consultations_v1',
+    schemaVersion: 'website_form_consultations_v3',
     coverage: snapshot.coverage
   });
   const daily = await repository.read({
     projectId: '11',
     payloadKind: 'DAILY',
-    schemaVersion: 'website_form_consultations_v1',
+    schemaVersion: 'website_form_consultations_v3',
     coverage: snapshot.coverage
   });
 
@@ -109,10 +108,10 @@ test('prunes only snapshots older than the configured maximum stale window', asy
   const base = {
     projectId: '11',
     payloadKind: 'AGGREGATE',
-    schemaVersion: 'website_form_consultations_v1',
+    schemaVersion: 'website_form_consultations_v3',
     coverage: { from: '2026-07-01', to: '2026-07-01' },
     payload: {
-      attributedFormSubmissionSessions: '0',
+      formConsultationRecords: '0',
       sourceBreakdown: []
     },
     refreshedAt: '2026-07-01T00:00:00.000Z',
@@ -142,10 +141,10 @@ test('does not let an older refresh overwrite a newer website snapshot', async (
   const base = {
     projectId: '11',
     payloadKind: 'AGGREGATE',
-    schemaVersion: 'website_form_consultations_v1',
+    schemaVersion: 'website_form_consultations_v3',
     coverage: { from: '2026-08-03', to: '2026-08-03' },
     payload: {
-      attributedFormSubmissionSessions: '2',
+      formConsultationRecords: '2',
       sourceBreakdown: []
     },
     refreshedAt: '2026-08-03T12:00:00.000Z',
@@ -155,7 +154,7 @@ test('does not let an older refresh overwrite a newer website snapshot', async (
   await repository.save({
     ...base,
     payload: {
-      attributedFormSubmissionSessions: '1',
+      formConsultationRecords: '1',
       sourceBreakdown: []
     },
     refreshedAt: '2026-08-03T11:00:00.000Z',
@@ -168,7 +167,7 @@ test('does not let an older refresh overwrite a newer website snapshot', async (
     schemaVersion: base.schemaVersion,
     coverage: base.coverage
   });
-  assert.equal(result.payload.attributedFormSubmissionSessions, '2');
+  assert.equal(result.payload.formConsultationRecords, '2');
   assert.equal(result.refreshedAt, base.refreshedAt);
 });
 
@@ -185,7 +184,7 @@ test('treats corrupt cached JSON as a miss so a fresh upstream read can repair i
        coverage_start, coverage_end, payload_json,
        refreshed_at, expires_at, created_at, updated_at
      ) VALUES (
-       'corrupt', '11', 'AGGREGATE', 'website_form_consultations_v1',
+       'corrupt', '11', 'AGGREGATE', 'website_form_consultations_v3',
        '2026-08-01', '2026-08-03', '{broken',
        '2026-08-03T12:00:00.000Z', '2026-08-03T12:10:00.000Z',
        '2026-08-03T12:00:00.000Z', '2026-08-03T12:00:00.000Z'
@@ -194,7 +193,7 @@ test('treats corrupt cached JSON as a miss so a fresh upstream read can repair i
   const result = await repository.read({
     projectId: '11',
     payloadKind: 'AGGREGATE',
-    schemaVersion: 'website_form_consultations_v1',
+    schemaVersion: 'website_form_consultations_v3',
     coverage: { from: '2026-08-01', to: '2026-08-03' }
   });
   assert.equal(result, null);

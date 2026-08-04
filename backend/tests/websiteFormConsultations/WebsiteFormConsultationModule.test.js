@@ -32,7 +32,7 @@ test('website-form module has an independent fail-closed lifecycle', async () =>
         return { ready: true };
       }
     },
-    sourceClient: { async readFormConsultations() {} },
+    sourceClient: { async readContactRecords() { return []; } },
     snapshotRepository: { async read() {}, async save() {} }
   });
   assert.deepEqual(await ready.getStatus(), {
@@ -52,7 +52,7 @@ test('website-form module reports its own schema state, not marketing state', as
         return { ready: false };
       }
     },
-    sourceClient: { async readFormConsultations() {} },
+    sourceClient: { async readContactRecords() { return []; } },
     snapshotRepository: { async read() {}, async save() {} }
   });
 

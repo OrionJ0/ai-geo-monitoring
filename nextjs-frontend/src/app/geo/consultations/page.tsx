@@ -408,10 +408,10 @@ export default function ConsultationsPage() {
     ? String(previousChatCount.data?.pagination.totalItems ?? 0)
     : null;
   const formCount = device === 'all'
-    ? formDays.data?.summary.attributedFormSubmissionSessions || null
+    ? formDays.data?.summary.formConsultationRecords || null
     : null;
   const previousFormCount = device === 'all'
-    ? previousFormDays.data?.summary.attributedFormSubmissionSessions || null
+    ? previousFormDays.data?.summary.formConsultationRecords || null
     : null;
   const recordSourceWarnings = (records.data?.sources || []).filter((source) => (
     source.recordCoverage !== 'FULL'
@@ -431,10 +431,10 @@ export default function ConsultationsPage() {
     if (!formDays.data || device !== 'all') return [];
     return formDays.data.days.map((day) => {
       const value = analysisSource === 'ALL'
-        ? day.attributedFormSubmissionSessions
+        ? day.formConsultationRecords
         : day.sourceBreakdown.find((source) => (
           source.sourceKey === analysisSource
-        ))?.attributedFormSubmissionSessions || '0';
+        ))?.formConsultationRecords || '0';
       return {
         date: day.date.slice(5),
         actualDate: day.date,
@@ -450,7 +450,7 @@ export default function ConsultationsPage() {
       .filter((source) => analysisSource === 'ALL' || source.sourceKey === analysisSource)
       .map((source) => ({
         source: SOURCE_LABELS[source.sourceKey] || source.sourceKey,
-        value: Number(source.attributedFormSubmissionSessions),
+        value: Number(source.formConsultationRecords),
         type: '表单咨询'
       }));
   }, [analysisSource, device, formDays.data]);

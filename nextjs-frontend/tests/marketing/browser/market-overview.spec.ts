@@ -247,30 +247,26 @@ const websiteForms = {
   projectId: '11',
   sourceSystem: 'GATO_WEBSITE',
   consultationType: 'WEBSITE_FORM',
-  dataCoverage: 'ATTRIBUTED_SESSION_SUBMISSIONS_ONLY',
-  formRecordTotalAvailable: false,
+  dataCoverage: 'ALL_FORM_RECORDS',
   coverage: {
     from: '2026-07-05',
     to: '2026-08-03',
     timeZone: 'Asia/Shanghai'
   },
   dataState: 'DATA',
-  summary: { attributedFormSubmissionSessions: '7' },
+  summary: { formConsultationRecords: '7' },
   sourceBreakdown: [
     {
       sourceKey: 'BAIDU_PAID',
-      upstreamSources: ['baidu_paid'],
-      attributedFormSubmissionSessions: '2'
+      formConsultationRecords: '2'
     },
     {
       sourceKey: 'DIRECT',
-      upstreamSources: ['direct'],
-      attributedFormSubmissionSessions: '1'
+      formConsultationRecords: '1'
     },
     {
       sourceKey: 'UNKNOWN',
-      upstreamSources: ['organic_search'],
-      attributedFormSubmissionSessions: '4'
+      formConsultationRecords: '4'
     }
   ],
   cache: {

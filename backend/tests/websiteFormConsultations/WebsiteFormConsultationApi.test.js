@@ -40,7 +40,7 @@ test('website-form API is independent and authorizes before reading aggregates',
         return {
           sourceSystem: 'GATO_WEBSITE',
           consultationType: 'WEBSITE_FORM',
-          summary: { attributedFormSubmissionSessions: '3' }
+          summary: { formConsultationRecords: '3' }
         };
       }
     }
@@ -58,7 +58,7 @@ test('website-form API is independent and authorizes before reading aggregates',
   assert.deepEqual(await response.json(), {
     sourceSystem: 'GATO_WEBSITE',
     consultationType: 'WEBSITE_FORM',
-    summary: { attributedFormSubmissionSessions: '3' }
+    summary: { formConsultationRecords: '3' }
   });
   assert.equal(response.headers.get('cache-control'), 'private, max-age=60');
   assert.deepEqual(calls, [
@@ -158,7 +158,7 @@ test('website-form daily API stays in the website namespace and authorizes first
           consultationType: 'WEBSITE_FORM',
           days: [{
             date: '2026-08-01',
-            attributedFormSubmissionSessions: '1'
+            formConsultationRecords: '1'
           }]
         };
       }

@@ -820,7 +820,7 @@ GET /api/website-data/projects/:projectId/form-consultations?from=YYYY-MM-DD&to=
 GET /api/website-data/projects/:projectId/form-consultation-days?from=YYYY-MM-DD&to=YYYY-MM-DD
 ```
 
-第一个接口读取最长 180 日的区间聚合；第二个接口读取最长 31 个连续上海自然日，并以单批最多 4 日的并发调用构建 `days[]`。两者使用同一独立缓存仓储和相同来源语义，逐日合计必须等于同响应的区间汇总。
+第一个接口读取最长 180 日的联系人列表并聚合；第二个接口从同一批记录构建最长 31 个连续上海自然日的 `days[]`。两者使用同一独立缓存仓储和相同九键来源语义，逐日合计必须等于同响应的区间汇总。
 
 该接口由独立的 `backend/modules/websiteFormConsultations/` 模块承载，不挂载在百度营销 router 下。官网模块与 `backend/modules/marketing/` 分别拥有自己的配置、adapter、service、route、错误码和测试；两者只共享应用级登录鉴权与项目访问控制，任一来源失败不得阻断另一来源。
 
@@ -828,18 +828,18 @@ GET /api/website-data/projects/:projectId/form-consultation-days?from=YYYY-MM-DD
 
 - `sourceSystem = GATO_WEBSITE`；
 - `consultationType = WEBSITE_FORM`；
-- `summary.attributedFormSubmissionSessions`：官网聚合接口能够按会话来源证明的成功表单提交会话；
-- `sourceBreakdown[].sourceKey/upstreamSources/attributedFormSubmissionSessions`：官网一方来源归属，不代表百度统计访问归因；
-- `dataCoverage = ATTRIBUTED_SESSION_SUBMISSIONS_ONLY`：明确不包含缺少会话来源字段的历史表单记录，也不包含 53KF 对话；
-- `capabilities.dailyBreakdown = true`；上游聚合接口不能证明全部表单记录总数，因此 `formRecordTotal`、未归因记录数和归因率能力为 `false`，对应值固定为 `null`；
+- `summary.formConsultationRecords`：所选区间全部表单记录数；
+- `sourceBreakdown[].sourceKey/formConsultationRecords`：官网一方记录级来源归属，不代表百度统计访问归因；
+- `dataCoverage = ALL_FORM_RECORDS`：全部表单记录都进入统计，缺少可信来源的记录进入 `UNKNOWN`，但不包含 53KF 对话；
+- `days[].formConsultationRecords/sourceBreakdown`：按 `Asia/Shanghai` 归日，逐日和来源合计必须与区间总数一致；
 - `cache`：最后成功快照的新鲜度或失败回退状态。
 
-该接口不得返回官网访问量、联系入口点击、姓名、电话、邮箱、IP、表单内容、访客 ID、会话 ID或 53KF 数据。首页必须使用“官网表单咨询”或“可归因官网表单咨询”命名，不得把该字段标成“客服咨询”“咨询总数”或“有效线索”。未来 53KF 必须使用独立接口；没有经过批准的跨渠道去重合同前，展示层也不得把两者自动相加。
+该接口不得返回官网访问量、联系入口点击、姓名、电话、邮箱、IP、表单内容、原始 `referrer`、访客 ID、会话 ID 或 53KF 数据。首页必须使用“官网表单咨询”或“官网表单咨询记录”命名，不得把该字段标成“客服咨询”“有效线索”或与 53KF 自动合计。单次联系人列表超过 10,000 条时整体失败，不得返回部分统计。
 
 2026-08-04 实现与发布状态：
 
 - 应用正式代码入口已挂载 `/api/website-data`，百度仍挂载 `/api/marketing`；架构守卫测试禁止互相引用适配器。
 - 官网模块拥有独立配置、外部客户端、服务、路由、聚合仓储、`website_data_schema_migrations` 迁移账本和 `migrate:website-data` 命令，不进入营销迁移账本。
-- `BAIDU_PAID` 只对齐百度推广，`DIRECT` 只对齐直接访问；`ORGANIC_SEARCH`、`REFERRAL`、`CAMPAIGN`、`SOCIAL`、`UNKNOWN` 有值时单独成行，不映射为百度/必应自然来源。
-- 后端 994/994、营销 144/144、前端合同 72/72、部署 26/26、Playwright 27/27 通过；lint 和 Next.js 38 路由生产构建通过。2026-08-01 至 2026-08-04 的官网逐日合计 3 与同区间汇总 3 一致。
+- 正式来源键为 `BAIDU_PAID`、`DIRECT`、`BAIDU_SEARCH`、`BING_SEARCH`、`GOOGLE_SEARCH`、`OTHER_SEARCH`、`EXTERNAL_REFERRAL`、`UTM_CAMPAIGN`、`UNKNOWN`；原始 `referrer`、UTM、百度点击标识按统一分类器判定。
+- 2026-08-04 本地后端官网统计 31/31、咨询记录 35/35、前端合同 83/83 通过，lint 和 Next.js 38 路由生产构建通过。2026-07-05 至 2026-08-04 的 21 条官网表单逐日合计与区间汇总一致。
 - 百度与百度统计实现已从 `https://insight.guangtuo.com` 验收；官网代码和迁移已部署，但生产缺专用项目与只读账号凭据，模块保持 `DISABLED`。53KF 与销售链路仍未接入。

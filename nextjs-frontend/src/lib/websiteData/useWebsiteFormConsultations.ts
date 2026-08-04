@@ -11,19 +11,17 @@ export type WebsiteFormSourceKey = MarketingSourceKey;
 
 export type WebsiteFormSource = {
   sourceKey: WebsiteFormSourceKey;
-  upstreamSources: string[];
-  attributedFormSubmissionSessions: string;
+  formConsultationRecords: string;
 };
 
 export type WebsiteFormConsultationData = {
   projectId: string;
   sourceSystem: 'GATO_WEBSITE';
   consultationType: 'WEBSITE_FORM';
-  dataCoverage: 'ATTRIBUTED_SESSION_SUBMISSIONS_ONLY';
-  formRecordTotalAvailable: false;
+  dataCoverage: 'ALL_FORM_RECORDS';
   coverage: { from: string; to: string; timeZone: 'Asia/Shanghai' };
   dataState: 'DATA' | 'ZERO';
-  summary: { attributedFormSubmissionSessions: string };
+  summary: { formConsultationRecords: string };
   sourceBreakdown: WebsiteFormSource[];
   cache: {
     state: 'HIT' | 'REFRESHED' | 'FALLBACK';
@@ -55,14 +53,13 @@ function validResponse(
   if (
     data.sourceSystem !== 'GATO_WEBSITE'
     || data.consultationType !== 'WEBSITE_FORM'
-    || data.dataCoverage !== 'ATTRIBUTED_SESSION_SUBMISSIONS_ONLY'
-    || data.formRecordTotalAvailable !== false
+    || data.dataCoverage !== 'ALL_FORM_RECORDS'
     || String(data.projectId) !== projectId
     || data.coverage?.from !== from
     || data.coverage?.to !== to
     || data.coverage?.timeZone !== 'Asia/Shanghai'
     || !['DATA', 'ZERO'].includes(data.dataState)
-    || !exactCount(data.summary?.attributedFormSubmissionSessions)
+    || !exactCount(data.summary?.formConsultationRecords)
     || !Array.isArray(data.sourceBreakdown)
     || !['HIT', 'REFRESHED', 'FALLBACK'].includes(data.cache?.state)
   ) return false;
@@ -72,18 +69,15 @@ function validResponse(
     if (
       !MARKETING_SOURCE_KEYS.has(row?.sourceKey)
       || seen.has(row.sourceKey)
-      || !Array.isArray(row?.upstreamSources)
-      || row.upstreamSources.some((source: unknown) => (
-        typeof source !== 'string' || !source || source.length > 64
-      ))
-      || !exactCount(row?.attributedFormSubmissionSessions)
+      || !exactCount(row?.formConsultationRecords)
+      || BigInt(row.formConsultationRecords) === BigInt(0)
     ) return false;
     seen.add(row.sourceKey);
-    sourceTotal += BigInt(row.attributedFormSubmissionSessions);
+    sourceTotal += BigInt(row.formConsultationRecords);
   }
-  return sourceTotal === BigInt(
-    data.summary.attributedFormSubmissionSessions
-  );
+  const total = BigInt(data.summary.formConsultationRecords);
+  return sourceTotal === total
+    && data.dataState === (total === BigInt(0) ? 'ZERO' : 'DATA');
 }
 
 function errorDetails(error: unknown) {

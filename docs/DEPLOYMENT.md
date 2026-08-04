@@ -188,8 +188,8 @@ server {
 2. 执行 `cd backend && npm run audit:website-data`，确认仓库现列 `001` 至 `003` 全部应用到 `website_data_schema_migrations` 且 checksum 无漂移；再执行 `npm run audit:consultation-records`，确认咨询详情审计迁移已应用且 checksum 无漂移。
 3. 由部署环境注入官网只读服务身份；不得把账号、密码或官网 JWT 写入 Git、部署日志或前端。共享管理员身份只允许短期试点。
 4. 配置官网模块开关、固定官网根地址、唯一项目 ID、超时和缓存 TTL；先检查 `GET /api/website-data/status` 返回 `READY`。
-5. 以有权访问该项目的 GoodieAI 用户分别请求区间接口 `GET /api/website-data/projects/:projectId/form-consultations?from=YYYY-MM-DD&to=YYYY-MM-DD` 和最长 31 日的逐日接口 `GET /api/website-data/projects/:projectId/form-consultation-days?from=YYYY-MM-DD&to=YYYY-MM-DD`。确认两者的 `sourceSystem=GATO_WEBSITE`、`consultationType=WEBSITE_FORM`，逐日合计等于同区间汇总；`formRecordTotal`、未归因数和归因率在上游不可证明时必须为 `null`，且响应不包含联系人、官网流量或 53KF 字段。
-6. 从正式首页确认表头为“官网表单咨询”：`BAIDU_PAID` 只进入百度推广，`DIRECT` 只进入直接访问，未细分搜索等来源单独成行；不得出现把官网 `organic_search` 映射为百度或必应自然搜索的结果。
+5. 以有权访问该项目的 GoodieAI 用户分别请求区间接口 `GET /api/website-data/projects/:projectId/form-consultations?from=YYYY-MM-DD&to=YYYY-MM-DD` 和最长 31 日的逐日接口 `GET /api/website-data/projects/:projectId/form-consultation-days?from=YYYY-MM-DD&to=YYYY-MM-DD`。确认两者的 `sourceSystem=GATO_WEBSITE`、`consultationType=WEBSITE_FORM`、`dataCoverage=ALL_FORM_RECORDS`，逐日合计等于同区间汇总，九键合计等于 `summary.formConsultationRecords`，且响应不包含联系人、原始 URL、官网流量或 53KF 字段。
+6. 从正式首页和咨询页确认表单总数、来源分布使用同一合同：有有效必应 `referrer` 的记录进入 `BING_SEARCH`，其他搜索引擎和外部引荐按严格主机规则分类，缺少可信来源证据的全部进入 `UNKNOWN`，不得丢弃。
 7. 官网接口故障时只允许回退相同项目、相同日期范围的最后成功聚合快照，不得影响百度 API 或全局 `/api/ready`。需要停用时仅设置 `GATO_WEBSITE_FORM_ENABLED=false`，不要回滚百度模块。
 
 ## 安全与合规建议

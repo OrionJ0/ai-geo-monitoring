@@ -323,8 +323,8 @@ function WebsiteFormConsultationCell({ source, websiteForms, label }) {
   if (source) {
     return (
       <>
-        <strong>{groupDigits(source.attributedFormSubmissionSessions)}</strong>
-        <small>官网可归因成功提交会话</small>
+        <strong>{groupDigits(source.formConsultationRecords)}</strong>
+        <small>官网表单咨询记录</small>
       </>
     );
   }
@@ -710,7 +710,7 @@ export default function MarketOverviewPage() {
   const formOnlySources = (websiteForms.data?.sourceBreakdown || []).filter(
     (source) => (
       !visibleAlignedFormKeys.has(source.sourceKey)
-      && BigInt(source.attributedFormSubmissionSessions) > BigInt(0)
+      && BigInt(source.formConsultationRecords) > BigInt(0)
     )
   );
   const paidTrafficTrend = paidTrafficData?.selectedTrend?.sourceKey === PAID_SOURCE

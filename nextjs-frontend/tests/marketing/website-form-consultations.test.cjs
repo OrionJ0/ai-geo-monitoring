@@ -28,8 +28,9 @@ test('website form consultations use an independent client and strict contract',
   assert.doesNotMatch(source, /\/api\/marketing/u);
   assert.match(source, /sourceSystem !== 'GATO_WEBSITE'/u);
   assert.match(source, /consultationType !== 'WEBSITE_FORM'/u);
-  assert.match(source, /ATTRIBUTED_SESSION_SUBMISSIONS_ONLY/u);
-  assert.match(source, /formRecordTotalAvailable !== false/u);
+  assert.match(source, /ALL_FORM_RECORDS/u);
+  assert.match(source, /formConsultationRecords/u);
+  assert.doesNotMatch(source, /attributedFormSubmissionSessions/u);
   assert.match(source, /sourceBreakdown/u);
   assert.match(source, /10 \* 60 \* 1000/u);
 });
@@ -64,4 +65,5 @@ test('market overview labels website forms clearly and only merges exact source 
   assert.match(source, /不包含 53KF 客服咨询/u);
   assert.doesNotMatch(source, />客服咨询<\/th>/u);
   assert.match(source, /websiteFormBySource\.get\(source\.sourceKey\)/u);
+  assert.match(source, /官网表单咨询记录/u);
 });

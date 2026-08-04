@@ -375,16 +375,16 @@ Authorization: Bearer <token>
 官网数据与百度数据是两套独立 API。官网表单由 `backend/modules/websiteFormConsultations` 承载并固定挂载在 `/api/website-data`；百度营销与百度统计继续由 `backend/modules/marketing` 承载并挂载在 `/api/marketing`。两者不共用外部客户端、服务、响应合同、模块状态、快照表或迁移账本，只共享应用登录鉴权和项目访问控制。
 
 - `GET /api/website-data/status`：读取官网表单模块自己的 `DISABLED`、`MISCONFIGURED`、`SCHEMA_MISSING` 或 `READY` 状态，不探测百度接口。
-- `GET /api/website-data/projects/:projectId/form-consultations?from=YYYY-MM-DD&to=YYYY-MM-DD`：返回指定日期范围内可按官网会话来源证明的成功表单提交会话及来源分组；先校验用户对项目的访问权，再读取上游或独立聚合快照。
-- `GET /api/website-data/projects/:projectId/form-consultation-days?from=YYYY-MM-DD&to=YYYY-MM-DD`：使用官网同一只读聚合接口按上海自然日构建逐日表单提交会话，闭区间最长 31 日；返回 `days[]`、区间汇总和来源汇总。`capabilities.formRecordTotal=false` 时，`attributionCoverage.formRecordTotal`、`unattributedFormRecords` 与 `attributionRatePercent` 必须为 `null`，不能由可归因提交会话反推全部表单记录。
+- `GET /api/website-data/projects/:projectId/form-consultations?from=YYYY-MM-DD&to=YYYY-MM-DD`：后端分页读取指定日期范围内的全部官网联系人记录，逐条执行九键来源分类后返回总数和来源分组；闭区间最长 180 日。
+- `GET /api/website-data/projects/:projectId/form-consultation-days?from=YYYY-MM-DD&to=YYYY-MM-DD`：从同一批联系人记录按 `Asia/Shanghai` 构建 `days[]`、区间汇总和来源汇总；闭区间最长 31 日，逐日合计必须等于区间总数。
 
-该合同固定返回 `sourceSystem=GATO_WEBSITE`、`consultationType=WEBSITE_FORM` 和 `dataCoverage=ATTRIBUTED_SESSION_SUBMISSIONS_ONLY`。它不是 53KF 客服咨询，也不是全部联系人或全部表单记录；响应不得包含姓名、电话、邮箱、IP、表单内容、访客/会话 ID、官网流量或 53KF 数据。`BAIDU_PAID` 和 `DIRECT` 只在来源键精确匹配时供首页对齐；`ORGANIC_SEARCH` 等无法精确对应百度统计来源的记录必须独立展示，不得推断或混算。
+该合同固定返回 `sourceSystem=GATO_WEBSITE`、`consultationType=WEBSITE_FORM`、`dataCoverage=ALL_FORM_RECORDS` 和 `summary.formConsultationRecords`。每条表单记录必须且只能进入九键之一，来源缺失、无效或无法识别时进入 `UNKNOWN`。响应不得包含姓名、电话、邮箱、IP、表单内容、访客/会话 ID、原始 `referrer` URL、官网流量或 53KF 数据；单次超过 10,000 条时整体失败，不返回部分统计。
 
 官网模块默认关闭。相关代码与 website-data 迁移已部署，但正式启用前仍必须注入服务端专用只读凭据并确认 `/api/website-data/status` 为 `READY`；截至 2026-08-04，生产模块保持 `DISABLED`，不得把“代码已部署”描述为“官网数据已上线”。
 
 ## 原始咨询记录（需认证）
 
-原始咨询记录由独立 `backend/modules/consultationRecords` 模块承载并固定挂载在 `/api/consultations`。该模块只聚合只读记录摘要与按需详情，不进入 `/api/marketing`，也不修改既有 `/api/website-data` 官网表单聚合合同。官网表单和 53KF 使用各自独立的 adapter、来源合同与覆盖状态；没有真实明细接口时返回明确的部分覆盖状态，不生成占位记录或合计两类咨询。该组敏感读取接口只接受 `Authorization: Bearer`，明确拒绝 URL Query 或 Cookie 中的 JWT，避免凭据进入浏览器历史和代理日志。
+原始咨询记录由独立 `backend/modules/consultationRecords` 模块承载并固定挂载在 `/api/consultations`。该模块提供脱敏记录摘要与按需详情，不进入 `/api/marketing`，也不参与 `/api/website-data` 的统计计算。官网表单和 53KF 使用各自独立的 adapter、来源合同与覆盖状态；没有真实明细接口时返回明确的部分覆盖状态，不生成占位记录或合计两类咨询。该组敏感读取接口只接受 `Authorization: Bearer`，明确拒绝 URL Query 或 Cookie 中的 JWT，避免凭据进入浏览器历史和代理日志。
 
 - `GET /api/consultations/status`：读取记录模块能力、审计 schema 状态，以及官网表单和 53KF 各自的 `sourceState`、`recordCoverage` 与稳定 `reasonCode`。该接口不调用第三方网络。
 - `GET /api/consultations/projects/:projectId/records`：分页读取咨询摘要。请求前先校验用户对项目的访问权。

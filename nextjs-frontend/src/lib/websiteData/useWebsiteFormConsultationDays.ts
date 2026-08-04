@@ -10,24 +10,11 @@ import { MARKETING_SOURCE_KEYS } from '@/lib/marketing/sourceCatalog';
 
 export type WebsiteFormConsultationDay = {
   date: string;
-  attributedFormSubmissionSessions: string;
+  formConsultationRecords: string;
   sourceBreakdown: WebsiteFormSource[];
 };
 
 export type WebsiteFormConsultationDaysData = WebsiteFormConsultationData & {
-  capabilities: {
-    dailyBreakdown: true;
-    formRecordTotal: false;
-    unattributedFormRecords: false;
-    attributionRate: false;
-  };
-  attributionCoverage: {
-    state: 'FORM_RECORD_TOTAL_UNAVAILABLE';
-    attributedFormSubmissionSessions: string;
-    formRecordTotal: null;
-    unattributedFormRecords: null;
-    attributionRatePercent: null;
-  };
   days: WebsiteFormConsultationDay[];
 };
 
@@ -52,8 +39,8 @@ function sources(value: unknown): value is WebsiteFormSource[] {
       || typeof row !== 'object'
       || !MARKETING_SOURCE_KEYS.has((row as WebsiteFormSource).sourceKey)
       || seen.has((row as WebsiteFormSource).sourceKey)
-      || !count((row as WebsiteFormSource).attributedFormSubmissionSessions)
-      || !Array.isArray((row as WebsiteFormSource).upstreamSources)
+      || !count((row as WebsiteFormSource).formConsultationRecords)
+      || BigInt((row as WebsiteFormSource).formConsultationRecords) === BigInt(0)
     ) return false;
     seen.add((row as WebsiteFormSource).sourceKey);
     return true;
@@ -71,17 +58,27 @@ function validResponse(
   if (
     data.sourceSystem !== 'GATO_WEBSITE'
     || data.consultationType !== 'WEBSITE_FORM'
-    || data.dataCoverage !== 'ATTRIBUTED_SESSION_SUBMISSIONS_ONLY'
-    || data.formRecordTotalAvailable !== false
+    || data.dataCoverage !== 'ALL_FORM_RECORDS'
     || String(data.projectId) !== projectId
     || data.coverage?.from !== from
     || data.coverage?.to !== to
     || data.coverage?.timeZone !== 'Asia/Shanghai'
-    || !count(data.summary?.attributedFormSubmissionSessions)
+    || !['DATA', 'ZERO'].includes(data.dataState)
+    || !count(data.summary?.formConsultationRecords)
     || !sources(data.sourceBreakdown)
     || !Array.isArray(data.days)
-    || data.capabilities?.dailyBreakdown !== true
+    || !['HIT', 'REFRESHED', 'FALLBACK'].includes(data.cache?.state)
   ) return false;
+  const expectedDayCount = (
+    Date.parse(`${to}T00:00:00.000Z`)
+    - Date.parse(`${from}T00:00:00.000Z`)
+  ) / 86400000 + 1;
+  if (data.days.length !== expectedDayCount) return false;
+  const sourceTotal = data.sourceBreakdown.reduce(
+    (sum, row) => sum + BigInt(row.formConsultationRecords),
+    BigInt(0)
+  );
+  if (sourceTotal !== BigInt(data.summary.formConsultationRecords)) return false;
   const expected = new Date(`${from}T00:00:00.000Z`);
   let total = BigInt(0);
   for (const [index, day] of data.days.entries()) {
@@ -89,12 +86,19 @@ function validResponse(
     date.setUTCDate(date.getUTCDate() + index);
     if (
       day?.date !== date.toISOString().slice(0, 10)
-      || !count(day.attributedFormSubmissionSessions)
+      || !count(day.formConsultationRecords)
       || !sources(day.sourceBreakdown)
     ) return false;
-    total += BigInt(day.attributedFormSubmissionSessions);
+    const dailySourceTotal = day.sourceBreakdown.reduce(
+      (sum, row) => sum + BigInt(row.formConsultationRecords),
+      BigInt(0)
+    );
+    if (dailySourceTotal !== BigInt(day.formConsultationRecords)) return false;
+    total += BigInt(day.formConsultationRecords);
   }
-  return total === BigInt(data.summary.attributedFormSubmissionSessions);
+  const summaryTotal = BigInt(data.summary.formConsultationRecords);
+  return total === summaryTotal
+    && data.dataState === (summaryTotal === BigInt(0) ? 'ZERO' : 'DATA');
 }
 
 function errorDetails(error: unknown) {

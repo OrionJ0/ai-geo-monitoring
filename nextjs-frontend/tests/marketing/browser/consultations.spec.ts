@@ -58,11 +58,10 @@ function dateSequence(from: string, to: string) {
   const end = new Date(`${to}T00:00:00.000Z`);
   const days: Array<{
     date: string;
-    attributedFormSubmissionSessions: string;
+    formConsultationRecords: string;
     sourceBreakdown: Array<{
       sourceKey: string;
-      upstreamSources: string[];
-      attributedFormSubmissionSessions: string;
+      formConsultationRecords: string;
     }>;
   }> = [];
   let index = 0;
@@ -73,12 +72,12 @@ function dateSequence(from: string, to: string) {
     const organic = total - paid - direct;
     days.push({
       date: cursor.toISOString().slice(0, 10),
-      attributedFormSubmissionSessions: String(total),
+      formConsultationRecords: String(total),
       sourceBreakdown: [
-        { sourceKey: 'BAIDU_PAID', upstreamSources: ['baidu_paid'], attributedFormSubmissionSessions: String(paid) },
-        { sourceKey: 'DIRECT', upstreamSources: ['direct'], attributedFormSubmissionSessions: String(direct) },
-        { sourceKey: 'UNKNOWN', upstreamSources: ['organic_search'], attributedFormSubmissionSessions: String(organic) }
-      ]
+        { sourceKey: 'BAIDU_PAID', formConsultationRecords: String(paid) },
+        { sourceKey: 'DIRECT', formConsultationRecords: String(direct) },
+        { sourceKey: 'UNKNOWN', formConsultationRecords: String(organic) }
+      ].filter((source) => Number(source.formConsultationRecords) > 0)
     });
     cursor.setUTCDate(cursor.getUTCDate() + 1);
     index += 1;
@@ -113,42 +112,27 @@ async function installRoutes(page: Page) {
     const to = params.get('to') || '';
     const days = dateSequence(from, to);
     const total = days.reduce((sum, day) => (
-      sum + Number(day.attributedFormSubmissionSessions)
+      sum + Number(day.formConsultationRecords)
     ), 0);
     const sourceTotals = new Map<string, number>();
     days.forEach((day) => day.sourceBreakdown.forEach((source) => {
       sourceTotals.set(
         source.sourceKey,
         (sourceTotals.get(source.sourceKey) || 0)
-          + Number(source.attributedFormSubmissionSessions)
+          + Number(source.formConsultationRecords)
       );
     }));
     return json(route, {
       projectId: '11',
       sourceSystem: 'GATO_WEBSITE',
       consultationType: 'WEBSITE_FORM',
-      dataCoverage: 'ATTRIBUTED_SESSION_SUBMISSIONS_ONLY',
-      formRecordTotalAvailable: false,
+      dataCoverage: 'ALL_FORM_RECORDS',
       coverage: { from, to, timeZone: 'Asia/Shanghai' },
       dataState: 'DATA',
-      capabilities: {
-        dailyBreakdown: true,
-        formRecordTotal: false,
-        unattributedFormRecords: false,
-        attributionRate: false
-      },
-      attributionCoverage: {
-        state: 'FORM_RECORD_TOTAL_UNAVAILABLE',
-        attributedFormSubmissionSessions: String(total),
-        formRecordTotal: null,
-        unattributedFormRecords: null,
-        attributionRatePercent: null
-      },
-      summary: { attributedFormSubmissionSessions: String(total) },
+      summary: { formConsultationRecords: String(total) },
       sourceBreakdown: [...sourceTotals].map(([sourceKey, value]) => ({
         sourceKey,
-        upstreamSources: [sourceKey.toLowerCase()],
-        attributedFormSubmissionSessions: String(value)
+        formConsultationRecords: String(value)
       })),
       days,
       cache: {
@@ -270,31 +254,28 @@ async function installUnavailableRoutes(page: Page, options: {
     const to = params.get('to') || '';
     const days = dateSequence(from, to);
     const total = days.reduce((sum, day) => (
-      sum + Number(day.attributedFormSubmissionSessions)
+      sum + Number(day.formConsultationRecords)
     ), 0);
+    const sourceTotals = new Map<string, number>();
+    days.forEach((day) => day.sourceBreakdown.forEach((source) => {
+      sourceTotals.set(
+        source.sourceKey,
+        (sourceTotals.get(source.sourceKey) || 0)
+          + Number(source.formConsultationRecords)
+      );
+    }));
     return json(route, {
       projectId: '11',
       sourceSystem: 'GATO_WEBSITE',
       consultationType: 'WEBSITE_FORM',
-      dataCoverage: 'ATTRIBUTED_SESSION_SUBMISSIONS_ONLY',
-      formRecordTotalAvailable: false,
+      dataCoverage: 'ALL_FORM_RECORDS',
       coverage: { from, to, timeZone: 'Asia/Shanghai' },
       dataState: 'DATA',
-      capabilities: {
-        dailyBreakdown: true,
-        formRecordTotal: false,
-        unattributedFormRecords: false,
-        attributionRate: false
-      },
-      attributionCoverage: {
-        state: 'FORM_RECORD_TOTAL_UNAVAILABLE',
-        attributedFormSubmissionSessions: String(total),
-        formRecordTotal: null,
-        unattributedFormRecords: null,
-        attributionRatePercent: null
-      },
-      summary: { attributedFormSubmissionSessions: String(total) },
-      sourceBreakdown: [],
+      summary: { formConsultationRecords: String(total) },
+      sourceBreakdown: [...sourceTotals].map(([sourceKey, value]) => ({
+        sourceKey,
+        formConsultationRecords: String(value)
+      })),
       days,
       cache: {
         state: 'HIT',
@@ -538,10 +519,15 @@ test('filters, search, sorting, pagination and analysis tabs drive independent s
   await expect(page.locator('[aria-label="咨询来源分布图"]')).toBeVisible();
   await expect(page.locator('[aria-label="咨询趋势图"]')).toBeHidden();
 
-  await page.getByRole('combobox', { name: '设备' })
-    .locator('xpath=ancestor::div[contains(@class,"ant-select")][1]')
-    .click();
-  await page.getByRole('option', { name: '移动端' }).click();
+  const deviceControl = page.getByRole('combobox', { name: '设备' })
+    .locator('xpath=ancestor::div[contains(@class,"ant-select")][1]');
+  await expect(async () => {
+    if (!(await deviceControl.textContent())?.includes('移动端')) {
+      await deviceControl.click();
+      await page.getByRole('option', { name: '移动端' }).click();
+    }
+    await expect(deviceControl).toContainText('移动端');
+  }).toPass({ timeout: 5_000 });
   await expect(page.getByRole('tabpanel', { name: '来源分布' })
     .getByText(/不会按总量推断设备分布/u)).toBeVisible();
 });

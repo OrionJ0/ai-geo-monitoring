@@ -86,24 +86,6 @@ async function defaultTransport({
   return { status: response.status, body };
 }
 
-function exactCount(value) {
-  const normalized = typeof value === 'number' ? String(value) : value;
-  if (typeof normalized !== 'string' || !/^\d+$/u.test(normalized)) {
-    throw new GatoWebsiteError(
-      '官网表单聚合响应无效',
-      'GATO_WEBSITE_FORM_RESPONSE_INVALID'
-    );
-  }
-  const count = BigInt(normalized);
-  if (count > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new GatoWebsiteError(
-      '官网表单聚合响应超出安全范围',
-      'GATO_WEBSITE_FORM_RESPONSE_INVALID'
-    );
-  }
-  return count.toString();
-}
-
 function responseData(response) {
   if (
     !response
@@ -117,46 +99,6 @@ function responseData(response) {
     );
   }
   return response.data;
-}
-
-function normalizeFormConsultations(response) {
-  const conversion = responseData(response).conversion;
-  if (
-    !conversion
-    || typeof conversion !== 'object'
-    || !conversion.summary
-    || typeof conversion.summary !== 'object'
-    || !Array.isArray(conversion.source_channels)
-  ) {
-    throw new GatoWebsiteError(
-      '官网表单聚合响应无效',
-      'GATO_WEBSITE_FORM_RESPONSE_INVALID'
-    );
-  }
-  const seen = new Set();
-  const sourceBreakdown = conversion.source_channels.map((row) => {
-    const upstreamSource = String(row?.source || '').trim();
-    if (
-      !/^[a-z][a-z0-9_]{0,63}$/u.test(upstreamSource)
-      || seen.has(upstreamSource)
-    ) {
-      throw new GatoWebsiteError(
-        '官网表单来源响应无效',
-        'GATO_WEBSITE_FORM_RESPONSE_INVALID'
-      );
-    }
-    seen.add(upstreamSource);
-    return {
-      upstreamSource,
-      attributedFormSubmissionSessions: exactCount(row?.submissions)
-    };
-  });
-  return {
-    attributedFormSubmissionSessions: exactCount(
-      conversion.summary.submission_sessions
-    ),
-    sourceBreakdown
-  };
 }
 
 function exactSafeInteger(value, field) {
@@ -383,40 +325,6 @@ function validContactRange(from, to) {
   }
 }
 
-function boundedDailyDates(from, to) {
-  const valid = (value) => {
-    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
-      return false;
-    }
-    const parsed = new Date(`${value}T00:00:00.000Z`);
-    return !Number.isNaN(parsed.getTime())
-      && parsed.toISOString().slice(0, 10) === value;
-  };
-  if (!valid(from) || !valid(to) || from > to) {
-    throw new GatoWebsiteError(
-      '官网表单逐日范围无效',
-      'GATO_WEBSITE_FORM_DATE_RANGE_INVALID',
-      422
-    );
-  }
-  const days = (
-    Date.parse(`${to}T00:00:00.000Z`)
-    - Date.parse(`${from}T00:00:00.000Z`)
-  ) / 86400000 + 1;
-  if (days > 31) {
-    throw new GatoWebsiteError(
-      '官网表单逐日范围超过 31 天',
-      'GATO_WEBSITE_FORM_DAILY_RANGE_TOO_LARGE',
-      422
-    );
-  }
-  return Array.from({ length: days }, (_value, index) => {
-    const date = new Date(`${from}T00:00:00.000Z`);
-    date.setUTCDate(date.getUTCDate() + index);
-    return date.toISOString().slice(0, 10);
-  });
-}
-
 class GatoWebsiteClient {
   constructor({
     baseUrl,
@@ -492,37 +400,6 @@ class GatoWebsiteClient {
     }
     this.token = token;
     return token;
-  }
-
-  async requestDashboard({ from, to, retryAuthorization = true }) {
-    const token = this.token || await this.login();
-    const url = new URL('/api/v1/admin/stats/dashboard', this.origin);
-    url.searchParams.set('start_date', from);
-    url.searchParams.set('end_date', to);
-    const result = await this.transport({
-      method: 'GET',
-      url: url.toString(),
-      headers: { Authorization: `Bearer ${token}` },
-      timeoutMs: this.timeoutMs
-    });
-    if (result?.status === 401 && retryAuthorization) {
-      this.token = null;
-      await this.login();
-      return this.requestDashboard({
-        from,
-        to,
-        retryAuthorization: false
-      });
-    }
-    if (result?.status !== 200) {
-      throw new GatoWebsiteError(
-        '官网表单聚合接口暂时不可用',
-        'GATO_WEBSITE_FORM_UPSTREAM_FAILED',
-        502,
-        result?.status === 429 || result?.status >= 500
-      );
-    }
-    return result.body;
   }
 
   async requestContactPath(url, retryAuthorization = true) {
@@ -659,47 +536,10 @@ class GatoWebsiteClient {
     return response === null ? null : normalizeContactRecord(responseData(response));
   }
 
-  async readFormConsultations({ from, to }) {
-    return normalizeFormConsultations(await this.requestDashboard({ from, to }));
-  }
-
-  async readFormConsultationDays({ from, to }) {
-    const dates = boundedDailyDates(from, to);
-    if (!this.token) await this.login();
-    const days = [];
-    for (let offset = 0; offset < dates.length; offset += 4) {
-      const batch = dates.slice(offset, offset + 4);
-      days.push(...await Promise.all(batch.map(async (date) => ({
-        date,
-        ...await this.readFormConsultations({ from: date, to: date })
-      }))));
-    }
-    const sources = new Map();
-    let total = 0n;
-    for (const day of days) {
-      total += BigInt(day.attributedFormSubmissionSessions);
-      for (const row of day.sourceBreakdown) {
-        sources.set(
-          row.upstreamSource,
-          (sources.get(row.upstreamSource) || 0n)
-            + BigInt(row.attributedFormSubmissionSessions)
-        );
-      }
-    }
-    return {
-      attributedFormSubmissionSessions: total.toString(),
-      sourceBreakdown: [...sources].map(([upstreamSource, count]) => ({
-        upstreamSource,
-        attributedFormSubmissionSessions: count.toString()
-      })),
-      days
-    };
-  }
 }
 
 module.exports = {
   GatoWebsiteClient,
   GatoWebsiteError,
-  normalizeContactRecord,
-  normalizeFormConsultations
+  normalizeContactRecord
 };

@@ -76,6 +76,13 @@ test('uses paid and UTM evidence before the referrer', () => {
   );
   assert.equal(
     classifyWebsiteAttribution({
+      sdclkid: 'synthetic-search-click-id',
+      referrer: 'https://cn.bing.com/'
+    }).sourceKey,
+    'BAIDU_PAID'
+  );
+  assert.equal(
+    classifyWebsiteAttribution({
       utmSource: 'baidu',
       utmMedium: 'cpc',
       referrer: 'https://partner.example.com/'

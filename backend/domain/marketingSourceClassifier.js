@@ -86,7 +86,7 @@ function result(sourceKey, evidenceType, evidenceValue = null) {
 }
 
 function classifyWebsiteAttribution(record = {}) {
-  if (nullableText(record.bdVid)) {
+  if (nullableText(record.bdVid) || nullableText(record.sdclkid)) {
     return result('BAIDU_PAID', 'BAIDU_CLICK_ID');
   }
   if (isBaiduPaidUtm(record)) {

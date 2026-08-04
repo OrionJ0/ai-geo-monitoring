@@ -5,29 +5,87 @@ const {
   WebsiteFormConsultationService
 } = require('../../modules/websiteFormConsultations/services/WebsiteFormConsultationService');
 
-test('publishes a website-form-only contract with canonical source keys', async () => {
+function record(overrides = {}) {
+  return {
+    id: '1',
+    createdAt: '2026-08-01T01:00:00.000Z',
+    sourceChannel: 'direct',
+    firstSourceChannel: 'direct',
+    referrer: null,
+    utmSource: null,
+    utmMedium: null,
+    utmCampaign: null,
+    bdVid: null,
+    sdclkid: null,
+    name: '不应进入快照',
+    phone: '13800000000',
+    detail: '不应进入快照的咨询内容',
+    ...overrides
+  };
+}
+
+function serviceWith({
+  records,
+  snapshot = null,
+  clock = () => Date.parse('2026-08-03T12:00:00.000Z'),
+  readError = null
+}) {
+  const calls = [];
   const saved = [];
   const service = new WebsiteFormConsultationService({
     sourceClient: {
-      async readFormConsultations() {
-        return {
-          attributedFormSubmissionSessions: '4',
-          sourceBreakdown: [
-            { upstreamSource: 'direct', attributedFormSubmissionSessions: '2' },
-            { upstreamSource: 'organic_search', attributedFormSubmissionSessions: '1' },
-            { upstreamSource: 'future_source', attributedFormSubmissionSessions: '1' }
-          ]
-        };
+      async readContactRecords(value) {
+        calls.push(value);
+        if (readError) throw readError;
+        return records;
       }
     },
     snapshotRepository: {
-      async read() { return null; },
-      async save(snapshot) { saved.push(snapshot); }
+      async read(value) {
+        calls.push({ cacheRead: value });
+        return snapshot;
+      },
+      async save(value) { saved.push(value); }
     },
     configuredProjectId: '11',
     cacheTtlMs: 600000,
-    clock: () => Date.parse('2026-08-03T12:00:00.000Z')
+    clock
   });
+  return { calls, saved, service };
+}
+
+test('aggregates every form record into the canonical nine-key contract', async () => {
+  const records = [
+    record(),
+    record({
+      id: '2',
+      referrer: 'https://cn.bing.com/search?q=industrial+tablet',
+      sourceChannel: 'organic_search',
+      firstSourceChannel: 'organic_search'
+    }),
+    record({
+      id: '3',
+      createdAt: '2026-08-02T02:00:00.000Z',
+      sourceChannel: 'campaign',
+      firstSourceChannel: 'campaign',
+      utmSource: 'newsletter',
+      utmCampaign: 'summer'
+    }),
+    record({
+      id: '4',
+      createdAt: '2026-08-02T03:00:00.000Z',
+      sourceChannel: null,
+      firstSourceChannel: null
+    }),
+    record({
+      id: '5',
+      createdAt: '2026-08-03T04:00:00.000Z',
+      sourceChannel: 'referral',
+      firstSourceChannel: 'referral',
+      referrer: 'https://partner.example.com/article'
+    })
+  ];
+  const { calls, saved, service } = serviceWith({ records });
 
   const result = await service.read({
     projectId: '11',
@@ -39,41 +97,20 @@ test('publishes a website-form-only contract with canonical source keys', async 
     projectId: '11',
     sourceSystem: 'GATO_WEBSITE',
     consultationType: 'WEBSITE_FORM',
-    dataCoverage: 'ATTRIBUTED_SESSION_SUBMISSIONS_ONLY',
-    formRecordTotalAvailable: false,
+    dataCoverage: 'ALL_FORM_RECORDS',
     coverage: {
       from: '2026-08-01',
       to: '2026-08-03',
       timeZone: 'Asia/Shanghai'
     },
     dataState: 'DATA',
-    summary: {
-      attributedFormSubmissionSessions: '4'
-    },
-    capabilities: {
-      dailyBreakdown: true,
-      formRecordTotal: false,
-      unattributedFormRecords: false,
-      attributionRate: false
-    },
-    attributionCoverage: {
-      state: 'FORM_RECORD_TOTAL_UNAVAILABLE',
-      attributedFormSubmissionSessions: '4',
-      formRecordTotal: null,
-      unattributedFormRecords: null,
-      attributionRatePercent: null
-    },
+    summary: { formConsultationRecords: '5' },
     sourceBreakdown: [
-      {
-        sourceKey: 'DIRECT',
-        upstreamSources: ['direct'],
-        attributedFormSubmissionSessions: '2'
-      },
-      {
-        sourceKey: 'UNKNOWN',
-        upstreamSources: ['organic_search', 'future_source'],
-        attributedFormSubmissionSessions: '2'
-      }
+      { sourceKey: 'DIRECT', formConsultationRecords: '1' },
+      { sourceKey: 'BING_SEARCH', formConsultationRecords: '1' },
+      { sourceKey: 'EXTERNAL_REFERRAL', formConsultationRecords: '1' },
+      { sourceKey: 'UTM_CAMPAIGN', formConsultationRecords: '1' },
+      { sourceKey: 'UNKNOWN', formConsultationRecords: '1' }
     ],
     cache: {
       state: 'REFRESHED',
@@ -81,123 +118,91 @@ test('publishes a website-form-only contract with canonical source keys', async 
       expiresAt: '2026-08-03T12:10:00.000Z'
     }
   });
+  assert.deepEqual(calls[1], {
+    from: '2026-08-01',
+    to: '2026-08-03',
+    maxRecords: 10000
+  });
   assert.equal(saved.length, 1);
-  assert.equal(saved[0].schemaVersion, 'website_form_consultations_v2');
-  assert.equal(JSON.stringify(result).includes('53KF'), false);
-  assert.equal(JSON.stringify(result).includes('contact'), false);
+  assert.equal(saved[0].schemaVersion, 'website_form_consultations_v3');
+  assert.doesNotMatch(
+    JSON.stringify(saved[0].payload),
+    /不应进入快照|13800000000|industrial\+tablet/u
+  );
 });
 
-test('publishes a cached daily website-form contract without claiming total form coverage', async () => {
-  const saved = [];
-  const service = new WebsiteFormConsultationService({
-    sourceClient: {
-      async readFormConsultations() {
-        assert.fail('daily interface must use the bounded daily source method');
-      },
-      async readFormConsultationDays() {
-        return {
-          attributedFormSubmissionSessions: '3',
-          sourceBreakdown: [
-            { upstreamSource: 'direct', attributedFormSubmissionSessions: '2' },
-            { upstreamSource: 'organic_search', attributedFormSubmissionSessions: '1' }
-          ],
-          days: [
-            {
-              date: '2026-08-01',
-              attributedFormSubmissionSessions: '2',
-              sourceBreakdown: [
-                { upstreamSource: 'direct', attributedFormSubmissionSessions: '2' }
-              ]
-            },
-            {
-              date: '2026-08-02',
-              attributedFormSubmissionSessions: '1',
-              sourceBreakdown: [
-                { upstreamSource: 'organic_search', attributedFormSubmissionSessions: '1' }
-              ]
-            }
-          ]
-        };
-      }
-    },
-    snapshotRepository: {
-      async read() { return null; },
-      async save(snapshot) { saved.push(snapshot); }
-    },
-    configuredProjectId: '11',
-    cacheTtlMs: 600000,
-    clock: () => Date.parse('2026-08-03T12:00:00.000Z')
+test('builds the daily contract from one bounded contact-list read in Shanghai time', async () => {
+  const { calls, saved, service } = serviceWith({
+    records: [
+      record({
+        id: '1',
+        createdAt: '2026-07-31T16:30:00.000Z'
+      }),
+      record({
+        id: '2',
+        createdAt: '2026-08-01T16:30:00.000Z',
+        referrer: 'https://www.baidu.com/s?wd=test',
+        sourceChannel: 'organic_search',
+        firstSourceChannel: 'organic_search'
+      })
+    ]
   });
 
   const result = await service.readDaily({
     projectId: '11',
     from: '2026-08-01',
-    to: '2026-08-02'
+    to: '2026-08-03'
   });
 
-  assert.equal(result.formRecordTotalAvailable, false);
-  assert.deepEqual(result.capabilities, {
-    dailyBreakdown: true,
-    formRecordTotal: false,
-    unattributedFormRecords: false,
-    attributionRate: false
-  });
-  assert.deepEqual(result.attributionCoverage, {
-    state: 'FORM_RECORD_TOTAL_UNAVAILABLE',
-    attributedFormSubmissionSessions: '3',
-    formRecordTotal: null,
-    unattributedFormRecords: null,
-    attributionRatePercent: null
-  });
-  assert.deepEqual(result.days.map((day) => [
-    day.date,
-    day.attributedFormSubmissionSessions,
-    day.sourceBreakdown[0].sourceKey
-  ]), [
-    ['2026-08-01', '2', 'DIRECT'],
-    ['2026-08-02', '1', 'UNKNOWN']
+  assert.equal(result.summary.formConsultationRecords, '2');
+  assert.deepEqual(result.days, [
+    {
+      date: '2026-08-01',
+      formConsultationRecords: '1',
+      sourceBreakdown: [
+        { sourceKey: 'DIRECT', formConsultationRecords: '1' }
+      ]
+    },
+    {
+      date: '2026-08-02',
+      formConsultationRecords: '1',
+      sourceBreakdown: [
+        { sourceKey: 'BAIDU_SEARCH', formConsultationRecords: '1' }
+      ]
+    },
+    {
+      date: '2026-08-03',
+      formConsultationRecords: '0',
+      sourceBreakdown: []
+    }
   ]);
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0].payload.days.length, 2);
+  assert.deepEqual(calls[1], {
+    from: '2026-08-01',
+    to: '2026-08-03',
+    maxRecords: 10000
+  });
+  assert.equal(saved[0].payload.days.length, 3);
 });
 
-test('returns a fresh persisted website-form snapshot without calling the website', async () => {
-  const service = new WebsiteFormConsultationService({
-    sourceClient: {
-      async readFormConsultations() {
-        assert.fail('fresh cache must avoid an upstream website request');
-      }
-    },
-    snapshotRepository: {
-      async read() {
-        return {
-          projectId: '11',
-          coverage: {
-            from: '2026-08-01',
-            to: '2026-08-03',
-            timeZone: 'Asia/Shanghai'
-          },
-          payload: {
-            attributedFormSubmissionSessions: '2',
-            sourceBreakdown: [
-              {
-                sourceKey: 'DIRECT',
-                upstreamSources: ['direct'],
-                attributedFormSubmissionSessions: '2'
-              }
-            ]
-          },
-          refreshedAt: '2026-08-03T11:59:00.000Z',
-          expiresAt: '2026-08-03T12:09:00.000Z'
-        };
+test('returns a fresh v3 snapshot without calling the contact list', async () => {
+  const { calls, service } = serviceWith({
+    records: [],
+    snapshot: {
+      projectId: '11',
+      coverage: {
+        from: '2026-08-01',
+        to: '2026-08-03',
+        timeZone: 'Asia/Shanghai'
       },
-      async save() {
-        assert.fail('fresh cache must not be rewritten');
-      }
-    },
-    configuredProjectId: '11',
-    cacheTtlMs: 600000,
-    clock: () => Date.parse('2026-08-03T12:00:00.000Z')
+      payload: {
+        formConsultationRecords: '2',
+        sourceBreakdown: [
+          { sourceKey: 'DIRECT', formConsultationRecords: '2' }
+        ]
+      },
+      refreshedAt: '2026-08-03T11:59:00.000Z',
+      expiresAt: '2026-08-03T12:09:00.000Z'
+    }
   });
 
   const result = await service.read({
@@ -206,50 +211,36 @@ test('returns a fresh persisted website-form snapshot without calling the websit
     to: '2026-08-03'
   });
 
-  assert.equal(result.summary.attributedFormSubmissionSessions, '2');
+  assert.equal(result.summary.formConsultationRecords, '2');
   assert.equal(result.cache.state, 'HIT');
-  assert.equal(result.cache.refreshedAt, '2026-08-03T11:59:00.000Z');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cacheRead.schemaVersion, 'website_form_consultations_v3');
 });
 
-test('falls back to the last matching website-form snapshot after an upstream failure', async () => {
-  const service = new WebsiteFormConsultationService({
-    sourceClient: {
-      async readFormConsultations() {
-        const error = new Error('upstream unavailable');
-        error.code = 'GATO_WEBSITE_FORM_UPSTREAM_UNAVAILABLE';
-        throw error;
-      }
+test('falls back only to a recent matching v3 snapshot after an upstream failure', async () => {
+  const upstreamError = Object.assign(new Error('upstream unavailable'), {
+    code: 'GATO_WEBSITE_CONTACT_UPSTREAM_FAILED'
+  });
+  const snapshot = {
+    projectId: '11',
+    coverage: {
+      from: '2026-08-01',
+      to: '2026-08-03',
+      timeZone: 'Asia/Shanghai'
     },
-    snapshotRepository: {
-      async read() {
-        return {
-          projectId: '11',
-          coverage: {
-            from: '2026-08-01',
-            to: '2026-08-03',
-            timeZone: 'Asia/Shanghai'
-          },
-          payload: {
-            attributedFormSubmissionSessions: '1',
-            sourceBreakdown: [
-              {
-                sourceKey: 'UNKNOWN',
-                upstreamSources: ['organic_search'],
-                attributedFormSubmissionSessions: '1'
-              }
-            ]
-          },
-          refreshedAt: '2026-08-03T11:40:00.000Z',
-          expiresAt: '2026-08-03T11:50:00.000Z'
-        };
-      },
-      async save() {
-        assert.fail('a failed refresh must not replace the last success');
-      }
+    payload: {
+      formConsultationRecords: '1',
+      sourceBreakdown: [
+        { sourceKey: 'UNKNOWN', formConsultationRecords: '1' }
+      ]
     },
-    configuredProjectId: '11',
-    cacheTtlMs: 600000,
-    clock: () => Date.parse('2026-08-03T12:00:00.000Z')
+    refreshedAt: '2026-08-03T11:40:00.000Z',
+    expiresAt: '2026-08-03T11:50:00.000Z'
+  };
+  const { service } = serviceWith({
+    records: [],
+    snapshot,
+    readError: upstreamError
   });
 
   const result = await service.read({
@@ -257,55 +248,44 @@ test('falls back to the last matching website-form snapshot after an upstream fa
     from: '2026-08-01',
     to: '2026-08-03'
   });
-
-  assert.equal(result.summary.attributedFormSubmissionSessions, '1');
+  assert.equal(result.summary.formConsultationRecords, '1');
   assert.equal(result.cache.state, 'FALLBACK');
-  assert.equal(result.cache.refreshedAt, '2026-08-03T11:40:00.000Z');
-});
 
-test('does not serve a website-form fallback older than the configured maximum', async () => {
-  const upstreamError = Object.assign(new Error('upstream unavailable'), {
-    code: 'GATO_WEBSITE_FORM_UPSTREAM_UNAVAILABLE'
-  });
-  const service = new WebsiteFormConsultationService({
-    sourceClient: {
-      async readFormConsultations() { throw upstreamError; }
+  const stale = serviceWith({
+    records: [],
+    snapshot: {
+      ...snapshot,
+      refreshedAt: '2026-08-02T11:59:59.000Z',
+      expiresAt: '2026-08-02T12:09:59.000Z'
     },
-    snapshotRepository: {
-      async read() {
-        return {
-          projectId: '11',
-          coverage: {
-            from: '2026-08-01',
-            to: '2026-08-03',
-            timeZone: 'Asia/Shanghai'
-          },
-          payload: {
-            attributedFormSubmissionSessions: '1',
-            sourceBreakdown: [{
-              sourceKey: 'DIRECT',
-              upstreamSources: ['direct'],
-              attributedFormSubmissionSessions: '1'
-            }]
-          },
-          refreshedAt: '2026-08-02T11:59:59.000Z',
-          expiresAt: '2026-08-02T12:09:59.000Z'
-        };
-      },
-      async save() { assert.fail('a failed refresh must not save'); }
-    },
-    configuredProjectId: '11',
-    cacheTtlMs: 600000,
-    maxStaleMs: 86400000,
-    clock: () => Date.parse('2026-08-03T12:00:00.000Z')
-  });
-
+    readError: upstreamError
+  }).service;
   await assert.rejects(
-    service.read({
+    stale.read({
       projectId: '11',
       from: '2026-08-01',
       to: '2026-08-03'
     }),
     (error) => error === upstreamError
   );
+});
+
+test('rejects duplicate, out-of-range or over-budget contact records', async () => {
+  for (const records of [
+    [record(), record()],
+    [record({ createdAt: '2026-07-31T15:59:59.000Z' })],
+    Array.from({ length: 10001 }, (_, index) => record({
+      id: String(index + 1)
+    }))
+  ]) {
+    const { service } = serviceWith({ records });
+    await assert.rejects(
+      service.read({
+        projectId: '11',
+        from: '2026-08-01',
+        to: '2026-08-03'
+      }),
+      { code: 'WEBSITE_FORM_CONTACT_RECORDS_INVALID' }
+    );
+  }
 });

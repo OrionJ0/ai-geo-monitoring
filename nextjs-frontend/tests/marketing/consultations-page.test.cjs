@@ -94,7 +94,8 @@ test('reads real contracts and validates all responses at the browser boundary',
   assert.match(recordsHook, /contact\.phone\.includes\('\*'\)/);
   assert.match(recordsHook, /containsRawPii/);
   assert.match(dailyHook, /form-consultation-days/);
-  assert.match(dailyHook, /ATTRIBUTED_SESSION_SUBMISSIONS_ONLY/);
+  assert.match(dailyHook, /ALL_FORM_RECORDS/);
+  assert.match(dailyHook, /formConsultationRecords/);
   assert.doesNotMatch(recordsHook, /138\d{8}|@gato\.com\.cn/);
   assert.doesNotMatch(dailyHook, /138\d{8}|@gato\.com\.cn/);
 });

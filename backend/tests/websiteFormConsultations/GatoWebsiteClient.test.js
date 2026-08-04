@@ -5,134 +5,9 @@ const {
   GatoWebsiteClient
 } = require('../../modules/websiteFormConsultations/adapters/GatoWebsiteClient');
 
-test('reads only attributed website form consultations from the aggregate dashboard', async () => {
-  const calls = [];
-  const transport = async (request) => {
-    calls.push(request);
-    const pathname = new URL(request.url).pathname;
-    if (pathname === '/api/v1/auth/login') {
-      return {
-        status: 201,
-        body: {
-          data: {
-            token: 'website-jwt-test'
-          }
-        }
-      };
-    }
-    assert.equal(pathname, '/api/v1/admin/stats/dashboard');
-    assert.equal(request.headers.Authorization, 'Bearer website-jwt-test');
-    return {
-      status: 200,
-      body: {
-        data: {
-          conversion: {
-            summary: {
-              visit_sessions: 1103,
-              contact_click_sessions: 34,
-              submission_sessions: 3
-            },
-            source_channels: [
-              { source: 'direct', visits: 470, clicks: 9, submissions: 2 },
-              { source: 'organic_search', visits: 530, clicks: 20, submissions: 1 },
-              { source: 'baidu_paid', visits: 60, clicks: 3, submissions: 0 }
-            ]
-          }
-        }
-      }
-    };
-  };
-  const client = new GatoWebsiteClient({
-    baseUrl: 'https://gato.com.cn',
-    username: 'website-reader',
-    password: 'secret-from-test-only',
-    timeoutMs: 1000,
-    transport
-  });
-
-  const result = await client.readFormConsultations({
-    from: '2026-07-05',
-    to: '2026-08-03'
-  });
-
-  assert.deepEqual(result, {
-    attributedFormSubmissionSessions: '3',
-    sourceBreakdown: [
-      { upstreamSource: 'direct', attributedFormSubmissionSessions: '2' },
-      { upstreamSource: 'organic_search', attributedFormSubmissionSessions: '1' },
-      { upstreamSource: 'baidu_paid', attributedFormSubmissionSessions: '0' }
-    ]
-  });
-  assert.equal(calls.length, 2);
-  assert.equal(JSON.stringify(result).includes('contact_click'), false);
-  assert.equal(JSON.stringify(result).includes('visit_sessions'), false);
-});
-
-test('builds a bounded daily website-form series from aggregate-only reads', async () => {
-  const dashboardDates = [];
-  const client = new GatoWebsiteClient({
-    baseUrl: 'https://gato.com.cn',
-    username: 'website-reader',
-    password: 'secret-from-test-only',
-    timeoutMs: 1000,
-    transport: async (request) => {
-      const url = new URL(request.url);
-      if (url.pathname === '/api/v1/auth/login') {
-        return { status: 200, body: { data: { token: 'daily-jwt' } } };
-      }
-      const date = url.searchParams.get('start_date');
-      assert.equal(url.searchParams.get('end_date'), date);
-      dashboardDates.push(date);
-      const submissions = date === '2026-08-02' ? 1 : 2;
-      return {
-        status: 200,
-        body: {
-          data: {
-            conversion: {
-              summary: { submission_sessions: submissions },
-              source_channels: [
-                { source: 'direct', submissions }
-              ]
-            }
-          }
-        }
-      };
-    }
-  });
-
-  const result = await client.readFormConsultationDays({
-    from: '2026-08-01',
-    to: '2026-08-02'
-  });
-
-  assert.deepEqual(dashboardDates, ['2026-08-01', '2026-08-02']);
-  assert.deepEqual(result, {
-    attributedFormSubmissionSessions: '3',
-    sourceBreakdown: [
-      { upstreamSource: 'direct', attributedFormSubmissionSessions: '3' }
-    ],
-    days: [
-      {
-        date: '2026-08-01',
-        attributedFormSubmissionSessions: '2',
-        sourceBreakdown: [
-          { upstreamSource: 'direct', attributedFormSubmissionSessions: '2' }
-        ]
-      },
-      {
-        date: '2026-08-02',
-        attributedFormSubmissionSessions: '1',
-        sourceBreakdown: [
-          { upstreamSource: 'direct', attributedFormSubmissionSessions: '1' }
-        ]
-      }
-    ]
-  });
-});
-
 test('re-authenticates once after an expired website token', async () => {
   let loginCount = 0;
-  let dashboardCount = 0;
+  let contactListCount = 0;
   const client = new GatoWebsiteClient({
     baseUrl: 'https://gato.com.cn',
     username: 'website-reader',
@@ -147,31 +22,28 @@ test('re-authenticates once after an expired website token', async () => {
           body: { data: { token: `website-jwt-${loginCount}` } }
         };
       }
-      dashboardCount += 1;
-      if (dashboardCount === 1) return { status: 401, body: {} };
+      assert.equal(pathname, '/api/v1/admin/contact/list');
+      contactListCount += 1;
+      if (contactListCount === 1) return { status: 401, body: {} };
       assert.equal(request.headers.Authorization, 'Bearer website-jwt-2');
       return {
         status: 200,
         body: {
-          data: {
-            conversion: {
-              summary: { submission_sessions: 0 },
-              source_channels: []
-            }
-          }
+          data: { list: [], total: 0, page: 1, pageSize: 100 }
         }
       };
     }
   });
 
-  const result = await client.readFormConsultations({
+  const result = await client.readContactRecords({
     from: '2026-08-01',
-    to: '2026-08-03'
+    to: '2026-08-03',
+    maxRecords: 10000
   });
 
-  assert.equal(result.attributedFormSubmissionSessions, '0');
+  assert.deepEqual(result, []);
   assert.equal(loginCount, 2);
-  assert.equal(dashboardCount, 2);
+  assert.equal(contactListCount, 2);
 });
 
 test('uses the bounded HTTP transport against the two allowlisted website paths', async () => {
@@ -191,14 +63,7 @@ test('uses the bounded HTTP transport against the two allowlisted website paths'
         });
       }
       return new Response(JSON.stringify({
-        data: {
-          conversion: {
-            summary: { submission_sessions: 1 },
-            source_channels: [
-              { source: 'direct', submissions: 1 }
-            ]
-          }
-        }
+        data: { list: [], total: 0, page: 1, pageSize: 100 }
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
@@ -206,17 +71,20 @@ test('uses the bounded HTTP transport against the two allowlisted website paths'
     }
   });
 
-  const result = await client.readFormConsultations({
+  const result = await client.readContactRecords({
     from: '2026-08-01',
-    to: '2026-08-03'
+    to: '2026-08-03',
+    maxRecords: 10000
   });
 
-  assert.equal(result.attributedFormSubmissionSessions, '1');
+  assert.deepEqual(result, []);
   assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
     '/api/v1/auth/login',
-    '/api/v1/admin/stats/dashboard'
+    '/api/v1/admin/contact/list'
   ]);
   assert.equal(requests[1].options.headers.Authorization, 'Bearer fetch-jwt');
+  assert.equal(client.readFormConsultations, undefined);
+  assert.equal(client.readFormConsultationDays, undefined);
 });
 
 test('rejects a website client origin outside the official host', () => {
