@@ -139,6 +139,45 @@ function dashboardFixture(stale = false) {
     impressions: fact.impressions,
     clicks: fact.clicks
   }));
+  const searchTerms = [
+    {
+      keywordName: '电子围栏厂家',
+      searchTerm: '电子围栏厂家报价',
+      queryStatus: 'NOT_ADDED',
+      matchType: 'PHRASE',
+      costAmountScaled: '186000',
+      impressions: '1260',
+      clicks: '18'
+    },
+    {
+      keywordName: '电子围栏厂家',
+      searchTerm: '电子围栏生产厂家',
+      queryStatus: 'ADDED',
+      matchType: 'EXACT',
+      costAmountScaled: '124000',
+      impressions: '840',
+      clicks: '12'
+    },
+    {
+      keywordName: '周界报警系统',
+      searchTerm: '周界报警系统方案',
+      queryStatus: 'NOT_ADDED',
+      matchType: 'PHRASE',
+      costAmountScaled: '98000',
+      impressions: '620',
+      clicks: '9'
+    }
+  ].flatMap((example) => {
+    const keyword = keywords.find((row) => row.keywordName === example.keywordName);
+    return keyword ? [{
+      accountId: keyword.accountId,
+      campaignId: keyword.campaignId,
+      campaignName: keyword.campaignName,
+      adGroupId: keyword.adGroupId,
+      adGroupName: keyword.adGroupName,
+      ...example
+    }] : [];
+  });
   const total = (field: 'costAmountScaled' | 'impressions' | 'clicks') => (
     keywords.reduce((sum: bigint, row: Record<string, string>) => (
       sum + BigInt(row[field])
@@ -174,12 +213,12 @@ function dashboardFixture(stale = false) {
     campaigns,
     adGroups,
     keywords,
-    searchTerms: [],
+    searchTerms,
     hierarchyCounts: {
       campaigns: campaigns.length,
       adGroups: adGroups.length,
       keywords: keywords.length,
-      searchTerms: 0
+      searchTerms: searchTerms.length
     },
     lastRun: {
       runId: stale ? 'failed-refresh-run' : 'successful-refresh-run',
@@ -187,6 +226,16 @@ function dashboardFixture(stale = false) {
       failureCode: stale ? 'BAIDU_REPORT_SNAPSHOT_UNSTABLE' : null
     }
   };
+}
+
+function alignDashboardFilterToRequest<
+  T extends ReturnType<typeof dashboardFixture>
+>(body: T, requestUrl: string): T {
+  const request = new URL(requestUrl);
+  const from = request.searchParams.get('from');
+  const to = request.searchParams.get('to');
+  if (from && to) body.filter = { from, to };
+  return body;
 }
 
 async function installRoutes(page: Page) {
@@ -229,7 +278,10 @@ async function installRoutes(page: Page) {
   }));
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify(dashboardFixture())
+    body: JSON.stringify(alignDashboardFilterToRequest(
+      dashboardFixture(),
+      route.request().url()
+    ))
   }));
 }
 
@@ -290,6 +342,176 @@ test('confirmed keyword analysis visual keeps selection, donut, task filters, an
   expect(accessibilityScanResults.violations.filter((violation) => (
     violation.impact === 'critical' || violation.impact === 'serious'
   ))).toEqual([]);
+});
+
+test('keyword evidence opens scoped real search terms and invalid scope never expands to all rows', async ({ page }) => {
+  await page.goto('/geo/keyword-analysis');
+
+  await expect(page.getByRole('columnheader', { name: '命中广告搜索词' }))
+    .toBeVisible();
+  const electronicRow = page.getByRole('row', { name: /电子围栏厂家/u });
+  await expect(electronicRow).toContainText('查看 2 个');
+  await electronicRow.getByRole('link', {
+    name: '查看“电子围栏厂家”命中的 2 个广告搜索词'
+  }).click();
+
+  await expect(page).toHaveURL(/\/geo\/keyword-analysis\/search-terms\?accountId=.*&keywordId=/u);
+  await expect(page.getByText('当前广告关键词')).toBeVisible();
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
+  await expect(page.getByText('电子围栏生产厂家', { exact: true })).toBeVisible();
+  await expect(page.getByText('周界报警系统方案', { exact: true })).toHaveCount(0);
+
+  await page.goto('/geo/keyword-analysis/search-terms');
+  await expect(page.getByRole('alert').filter({ hasText: '下钻范围无效' }))
+    .toContainText('下钻范围无效');
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toHaveCount(0);
+
+  await page.goto('/geo/keyword-analysis/search-terms?accountId=invalid&keywordId=invalid');
+  await expect(page.getByRole('alert').filter({ hasText: '下钻范围无效' }))
+    .toContainText('下钻范围无效');
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('周界报警系统方案', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('link', { name: '查看全部广告搜索词' }).click();
+  await expect(page).toHaveURL('/geo/keyword-analysis/search-terms?view=all');
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
+  await expect(page.getByText('周界报警系统方案', { exact: true })).toBeVisible();
+
+  const accessibility = await new AxeBuilder({ page })
+    .disableRules(['landmark-one-main'])
+    .analyze();
+  expect(accessibility.violations.filter((violation) => (
+    violation.impact === 'critical' || violation.impact === 'serious'
+  ))).toEqual([]);
+});
+
+test('search-term comparison refuses dashboard responses from different revisions', async ({ page }) => {
+  let dashboardRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    const body = alignDashboardFilterToRequest(
+      dashboardFixture(),
+      route.request().url()
+    );
+    dashboardRequestCount += 1;
+    if (dashboardRequestCount === 2) {
+      body.revision = 'keyword-analysis-previous-revision';
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis/search-terms?view=all');
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
+  const previous = page.getByLabel('广告搜索词数上期：暂无数据');
+  await previous.hover();
+  await expect(page.getByRole('tooltip'))
+    .toContainText('本期与上期广告快照版本不一致，无法进行周期比较');
+});
+
+test('search-term comparison refuses a same-revision response for the wrong period', async ({ page }) => {
+  let dashboardRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    dashboardRequestCount += 1;
+    const body = dashboardRequestCount === 1
+      ? alignDashboardFilterToRequest(dashboardFixture(), route.request().url())
+      : dashboardFixture();
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis/search-terms?view=all');
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
+  await expect.poll(() => dashboardRequestCount).toBe(2);
+  const previous = page.getByLabel('广告搜索词数上期：暂无数据');
+  await previous.hover();
+  await expect(page.getByRole('tooltip'))
+    .toContainText('上一周期广告搜索词响应范围与请求不一致');
+});
+
+test('search-term page rejects a current response for a different requested period', async ({ page }) => {
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    const body = dashboardFixture();
+    body.filter = { from: '2026-07-01', to: '2026-07-07' };
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis/search-terms?view=all');
+  await expect(page.getByText('广告搜索词数据读取失败，请稍后重试。'))
+    .toBeVisible();
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toHaveCount(0);
+});
+
+test('current search-term data renders while previous-period comparison is pending', async ({ page }) => {
+  let releasePrevious: (() => void) | undefined;
+  let dashboardRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', async (route) => {
+    const body = alignDashboardFilterToRequest(
+      dashboardFixture(),
+      route.request().url()
+    );
+    dashboardRequestCount += 1;
+    if (dashboardRequestCount === 2) {
+      await new Promise<void>((resolve) => {
+        releasePrevious = resolve;
+      });
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis/search-terms?view=all');
+  await expect(page.getByText('电子围栏厂家报价', { exact: true }))
+    .toBeVisible({ timeout: 2_000 });
+  expect(releasePrevious).toBeDefined();
+  releasePrevious?.();
+});
+
+test('scoped comparison resolves each revision by keyword ID before name evidence', async ({ page }) => {
+  let dashboardRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    const body = alignDashboardFilterToRequest(
+      dashboardFixture(),
+      route.request().url()
+    );
+    dashboardRequestCount += 1;
+    if (dashboardRequestCount === 3) {
+      body.keywords = body.keywords.map((keyword) => keyword.keywordName === '电子围栏厂家'
+        ? { ...keyword, keywordName: '电子围栏厂家旧称' }
+        : keyword);
+      body.searchTerms = body.searchTerms.map((term) => term.keywordName === '电子围栏厂家'
+        ? { ...term, keywordName: '电子围栏厂家旧称' }
+        : term);
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  const electronicRow = page.getByRole('row', { name: /电子围栏厂家/u });
+  await electronicRow.getByRole('link', {
+    name: '查看“电子围栏厂家”命中的 2 个广告搜索词'
+  }).click();
+
+  const countCard = page.getByRole('heading', { name: /广告搜索词数/u })
+    .locator('xpath=ancestor::div[contains(@class,"ant-card")][1]');
+  await expect(countCard).toContainText(/本期\s*2\s*上期\s*2/u);
+  await expect(page.getByText('电子围栏厂家旧称', { exact: true })).toHaveCount(0);
 });
 
 test('keyword analysis keeps page width stable at 1280px', async ({ page }) => {

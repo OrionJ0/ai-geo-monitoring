@@ -25,6 +25,19 @@ export type KeywordAggregateRow = Omit<KeywordDailyFact, 'date'> & {
   path: string;
 };
 
+export type KeywordSearchTermEvidence = {
+  searchTerm: string;
+  queryStatus: 'ADDED' | 'NOT_ADDED' | 'NOT_ADDABLE';
+  matchType: string;
+  costAmountScaled: string;
+  impressions: string;
+  clicks: string;
+};
+
+export type KeywordAnalysisRow = KeywordAggregateRow & {
+  matchedSearchTerms: KeywordSearchTermEvidence[];
+};
+
 export type KeywordCoverage = {
   impressionKeywordCount: number;
   clickedKeywordCount: number;

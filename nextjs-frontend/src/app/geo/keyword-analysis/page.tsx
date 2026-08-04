@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import dayjs from 'dayjs';
 import { Heatmap, Pie, Scatter } from '@ant-design/plots';
 import {
@@ -31,8 +32,8 @@ import {
   filterKeywordRows
 } from '@/utils/keywordAnalysis.cjs';
 import type {
-  KeywordAggregateRow,
   KeywordActionDistribution,
+  KeywordAnalysisRow,
   KeywordAnomaly,
   KeywordBenchmark,
   KeywordCostRange,
@@ -161,6 +162,28 @@ function KeywordTagValue({ tag }: { tag: KeywordTag | null }) {
   return <span className={`${styles.keywordTag} ${TAG_CLASS_NAMES[tag]}`}>{tag}</span>;
 }
 
+function MatchedSearchTermsValue({ record }: { record: KeywordAnalysisRow }) {
+  const terms = record.matchedSearchTerms;
+  if (!terms.length) return <span className={styles.mutedValue}>—</span>;
+  return (
+    <Link
+      href={{
+        pathname: '/geo/keyword-analysis/search-terms',
+        query: {
+          accountId: record.accountId,
+          keywordId: record.keywordId
+        }
+      }}
+      className={styles.searchTermLink}
+      aria-label={`查看“${record.keyword}”命中的 ${terms.length} 个广告搜索词`}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      查看 {terms.length} 个
+    </Link>
+  );
+}
+
 function LoadingPage() {
   return (
     <div className={styles.moduleStack} aria-busy="true">
@@ -232,7 +255,7 @@ export default function KeywordAnalysisPage() {
     onDateRangeAdjusted: setDateRange
   });
   const model = analysis.data;
-  const rows = useMemo<KeywordAggregateRow[]>(() => model?.rows || [], [model?.rows]);
+  const rows = useMemo<KeywordAnalysisRow[]>(() => model?.rows || [], [model?.rows]);
 
   const unitOptions = useMemo(() => {
     const units = new Map<string, string>();
@@ -245,14 +268,14 @@ export default function KeywordAnalysisPage() {
     ];
   }, [rows]);
 
-  const baseRows = useMemo<KeywordAggregateRow[]>(() => filterKeywordRows(rows, {
+  const baseRows = useMemo<KeywordAnalysisRow[]>(() => filterKeywordRows(rows, {
     stage: stageFilter,
     unitId: unitFilter,
     tag: tagFilter,
     costRange,
     costScale: model?.costScale,
     search: searchValue
-  }) as KeywordAggregateRow[], [
+  }) as KeywordAnalysisRow[], [
     costRange,
     model?.costScale,
     rows,
@@ -277,11 +300,11 @@ export default function KeywordAnalysisPage() {
         averageCpc: baseScatter.medianAverageCpc
       };
 
-  const filteredRows = useMemo<KeywordAggregateRow[]>(() => filterKeywordRows(baseRows, {
+  const filteredRows = useMemo<KeywordAnalysisRow[]>(() => filterKeywordRows(baseRows, {
     anomaly: anomalyFilter,
     benchmarkCtrPercent: benchmark.ctrPercent,
     benchmarkAverageCpc: benchmark.averageCpc
-  }) as KeywordAggregateRow[], [
+  }) as KeywordAnalysisRow[], [
     anomalyFilter,
     baseRows,
     benchmark.averageCpc,
@@ -348,7 +371,7 @@ export default function KeywordAnalysisPage() {
     ? rowByKey.get(selectedKeywordKey) || null
     : null;
 
-  const columns = useMemo<TableProps<KeywordAggregateRow>['columns']>(() => {
+  const columns = useMemo<TableProps<KeywordAnalysisRow>['columns']>(() => {
     if (!model) return [];
     return [
       {
@@ -365,6 +388,13 @@ export default function KeywordAnalysisPage() {
             </span>
           </Tooltip>
         )
+      },
+      {
+        title: '命中广告搜索词',
+        key: 'matchedSearchTerms',
+        width: 170,
+        fixed: 'left',
+        render: (_, record) => <MatchedSearchTermsValue record={record} />
       },
       {
         title: '标签',
@@ -982,7 +1012,7 @@ export default function KeywordAnalysisPage() {
               <h2>全部关键词明细</h2>
               <span>{filteredRows.length} 条</span>
             </div>
-            <Table<KeywordAggregateRow>
+            <Table<KeywordAnalysisRow>
               aria-label="全部关键词明细表"
               className={styles.keywordTable}
               rowKey="key"
@@ -990,7 +1020,7 @@ export default function KeywordAnalysisPage() {
               dataSource={filteredRows}
               tableLayout="fixed"
               size="middle"
-              scroll={{ x: 1016, y: 312 }}
+              scroll={{ x: 1186, y: 312 }}
               rowClassName={(record) => record.key === selectedKeywordKey ? styles.selectedRow : ''}
               onRow={(record) => ({
                 tabIndex: 0,

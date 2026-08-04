@@ -1,17 +1,19 @@
 import type {
   KeywordCoverage,
   KeywordDailyFact,
-  KeywordAggregateRow,
+  KeywordAnalysisRow,
   KeywordScatter,
   KeywordTag
 } from '@/lib/marketing/keywordAnalysisTypes';
 import {
   aggregateKeywordFacts,
+  attachKeywordSearchTermEvidence,
   buildKeywordCoverage,
   buildKeywordScatter,
   explicitKeywordTagStrategy
 } from '@/utils/keywordAnalysis.cjs';
 import type {
+  DashboardSearchTerm,
   MarketingDashboardResponse
 } from '@/lib/marketing/adPerformanceAdapter';
 
@@ -26,6 +28,7 @@ export type KeywordAnalysisPayload = {
   availableFrom: string;
   availableTo: string;
   facts: KeywordDailyFact[];
+  searchTerms?: DashboardSearchTerm[];
 };
 
 export type KeywordAnalysisModel = Omit<
@@ -33,7 +36,7 @@ export type KeywordAnalysisModel = Omit<
   'facts'
 > & {
   range: { from: string; to: string };
-  rows: KeywordAggregateRow[];
+  rows: KeywordAnalysisRow[];
   coverage: KeywordCoverage;
   scatter: KeywordScatter;
 };
@@ -59,11 +62,11 @@ export function adaptKeywordAnalysis(
   range: { from: string; to: string },
   tagStrategy: KeywordTagStrategy = sourceProvidedKeywordTagStrategy
 ): KeywordAnalysisModel {
-  const rows = aggregateKeywordFacts(payload.facts, {
+  const rows = attachKeywordSearchTermEvidence(aggregateKeywordFacts(payload.facts, {
     ...range,
     costScale: payload.costScale,
     tagStrategy: (fact: Partial<KeywordDailyFact>) => tagStrategy.resolve(fact)
-  }) as KeywordAggregateRow[];
+  }), payload.searchTerms || []) as KeywordAnalysisRow[];
   return {
     source: payload.source,
     dataState: rows.length ? payload.dataState : 'empty',
@@ -132,6 +135,7 @@ export function adaptMarketingDashboardKeywords(
       costAmountScaled: keyword.costAmountScaled,
       impressions: keyword.impressions,
       clicks: keyword.clicks
-    }))
+    })),
+    searchTerms: dashboard.searchTerms || []
   }, range);
 }

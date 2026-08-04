@@ -24,6 +24,67 @@ function keywordEntityKey(fact) {
   ].join('\u0000');
 }
 
+function keywordSearchTermEvidenceKey(row, source) {
+  const accountId = String(row?.accountId || '');
+  const campaignId = String(
+    source === 'keyword' ? row?.schemeId : row?.campaignId || ''
+  );
+  const adGroupId = String(
+    source === 'keyword' ? row?.unitId : row?.adGroupId || ''
+  );
+  const keywordName = String(
+    source === 'keyword' ? row?.keyword : row?.keywordName || ''
+  );
+  if (!accountId || !campaignId || !adGroupId || !keywordName) return null;
+  return [accountId, campaignId, adGroupId, keywordName].join('\u0000');
+}
+
+function attachKeywordSearchTermEvidence(rows, searchTerms) {
+  const termsByKeywordEvidence = new Map();
+  for (const row of searchTerms || []) {
+    const key = keywordSearchTermEvidenceKey(row, 'search-term');
+    if (
+      !key
+      || typeof row?.searchTerm !== 'string'
+      || !row.searchTerm
+      || !['ADDED', 'NOT_ADDED', 'NOT_ADDABLE'].includes(row.queryStatus)
+      || typeof row.matchType !== 'string'
+      || !row.matchType
+    ) continue;
+    const evidence = {
+      searchTerm: row.searchTerm,
+      queryStatus: row.queryStatus,
+      matchType: row.matchType,
+      costAmountScaled: exactNonNegativeInteger(row.costAmountScaled),
+      impressions: exactNonNegativeInteger(row.impressions),
+      clicks: exactNonNegativeInteger(row.clicks)
+    };
+    const current = termsByKeywordEvidence.get(key);
+    if (current) current.push(evidence);
+    else termsByKeywordEvidence.set(key, [evidence]);
+  }
+  for (const terms of termsByKeywordEvidence.values()) {
+    terms.sort((left, right) => {
+      const clickDifference = BigInt(right.clicks) - BigInt(left.clicks);
+      if (clickDifference !== 0n) return clickDifference > 0n ? 1 : -1;
+      const impressionDifference = BigInt(right.impressions) - BigInt(left.impressions);
+      if (impressionDifference !== 0n) {
+        return impressionDifference > 0n ? 1 : -1;
+      }
+      return left.searchTerm.localeCompare(right.searchTerm, 'zh-CN');
+    });
+  }
+  return (rows || []).map((row) => {
+    const key = keywordSearchTermEvidenceKey(row, 'keyword');
+    return {
+      ...row,
+      matchedSearchTerms: key
+        ? [...(termsByKeywordEvidence.get(key) || [])]
+        : []
+    };
+  });
+}
+
 function finiteRatio(numerator, denominator, precision = 1_000_000) {
   if (denominator === 0n) return null;
   const scaled = (numerator * BigInt(precision)) / denominator;
@@ -289,6 +350,7 @@ function filterKeywordRows(rows, filters = {}) {
 module.exports = {
   KEYWORD_TAGS,
   aggregateKeywordFacts,
+  attachKeywordSearchTermEvidence,
   buildKeywordActionDistribution,
   buildKeywordAverageBenchmark,
   buildKeywordCoverage,

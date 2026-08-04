@@ -7,6 +7,7 @@ const frontendRoot = path.resolve(__dirname, '../..');
 
 const {
   aggregateKeywordFacts,
+  attachKeywordSearchTermEvidence,
   buildKeywordActionDistribution,
   buildKeywordAverageBenchmark,
   buildKeywordCoverage,
@@ -69,6 +70,45 @@ test('keyword identity prefers account, unit, and keyword IDs over visible text'
   assert.equal(rows[0].impressions, '180');
   assert.equal(rows[0].clicks, '9');
   assert.equal(rows[0].costAmountScaled, '1800');
+});
+
+test('paid search terms attach only by exact account, campaign, ad group, and keyword-name evidence', () => {
+  const rows = aggregateKeywordFacts([
+    fact({ unitId: 'unit-1', keywordId: 'keyword-1', keyword: '电子围栏厂家' }),
+    fact({ unitId: 'unit-2', keywordId: 'keyword-2', keyword: '电子围栏厂家' }),
+    fact({ unitId: 'unit-1', keywordId: 'keyword-3', keyword: '周界报警系统' })
+  ], { from: '2026-07-05', to: '2026-07-05', costScale: 2 });
+  const enriched = attachKeywordSearchTermEvidence(rows, [
+    {
+      accountId: 'account-1', campaignId: 'scheme-1', adGroupId: 'unit-1',
+      keywordName: '电子围栏厂家', searchTerm: '电子围栏生产厂家',
+      queryStatus: 'NOT_ADDED', matchType: 'PHRASE',
+      costAmountScaled: '1200', impressions: '30', clicks: '3'
+    },
+    {
+      accountId: 'account-1', campaignId: 'scheme-1', adGroupId: 'unit-2',
+      keywordName: '电子围栏厂家', searchTerm: '电子围栏安装公司',
+      queryStatus: 'ADDED', matchType: 'EXACT',
+      costAmountScaled: '300', impressions: '10', clicks: '1'
+    },
+    {
+      accountId: 'account-1', campaignId: 'scheme-1', adGroupId: 'unit-1',
+      keywordName: '电子围栏厂家 ', searchTerm: '不应按近似名称关联',
+      queryStatus: 'NOT_ADDED', matchType: 'PHRASE',
+      costAmountScaled: '0', impressions: '0', clicks: '0'
+    }
+  ]);
+
+  assert.deepEqual(
+    enriched[0].matchedSearchTerms.map((term) => term.searchTerm),
+    ['电子围栏生产厂家']
+  );
+  assert.deepEqual(
+    enriched[1].matchedSearchTerms.map((term) => term.searchTerm),
+    ['电子围栏安装公司']
+  );
+  assert.deepEqual(enriched[2].matchedSearchTerms, []);
+  assert.equal('keywordId' in enriched[0].matchedSearchTerms[0], false);
 });
 
 test('coverage counts unique entities and keeps a missing denominator honest', () => {
@@ -259,6 +299,9 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(pageSource, /当前选中关键词/);
   assert.match(pageSource, /行动建议分布/);
   assert.match(pageSource, /全部关键词明细/);
+  assert.match(pageSource, /命中广告搜索词/);
+  assert.match(pageSource, /keyword-analysis\/search-terms/);
+  assert.match(pageSource, /analysis\.warning/);
   assert.match(pageSource, /record\.unitName/);
   assert.match(pageSource, /rowClassName/);
   assert.match(pageSource, /\bPie\b/);
