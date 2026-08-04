@@ -16,7 +16,7 @@ scope: system
 
 ### 1.1 实施状态与设计参考
 
-- 本规范与指标口径已经确认。当前工作区的 `nextjs-frontend/src/app/geo/market-overview/page.tsx` 已实现新版结构，并能展示百度推广广告事实、CPC、百度统计可信站内来源访问，以及来自独立 `/api/website-data` 的“官网表单咨询”。官网表单字段只覆盖可归因成功提交会话，不包含 53KF，也不等于全部表单记录；只有 `BAIDU_PAID` 和 `DIRECT` 做精确来源对齐，未细分搜索等来源单独成行。第二阶段业务变更尚未推送、部署或完成生产验收。53KF、线索/订单真实数据及其依赖指标仍未接入。数据源权威和语义见 `adr/0001-marketing-funnel-data-source-of-truth.md`。
+- 本规范与指标口径已经确认。`nextjs-frontend/src/app/geo/market-overview/page.tsx` 的新版结构已部署，正式页面已真实展示百度推广广告事实、CPC 与百度统计可信站内来源访问。独立 `/api/website-data` 的“官网表单咨询”代码也已部署，但生产因缺少专用项目与只读账号凭据保持 `DISABLED`；该字段只覆盖可归因成功提交会话，不包含 53KF，也不等于全部表单记录。只有 `BAIDU_PAID` 和 `DIRECT` 做精确来源对齐，未细分搜索等来源单独成行。53KF、线索/订单真实数据及其依赖指标仍未接入。数据源权威和语义见 `adr/0001-marketing-funnel-data-source-of-truth.md`。
 - 其他市场页面的本地实现与数据成熟度统一见 `README.md` 的“当前前端页面实施状态”，浏览器视觉证据见 `active-2026-07-31-001-market-monitoring-frontend-ia/design-qa.md`。本规范不把页面已实现、fixture 已验收、真实数据已接入和生产已生效合并为同一状态。
 - 最终首页设计参考图：[market-overview-home-final-2026-08-03.png](active-2026-07-31-001-market-monitoring-frontend-ia/assets/market-overview-home-final-2026-08-03.png)。该图定义结构、密度和视觉方向，不构成真实数据或上线证据。
 

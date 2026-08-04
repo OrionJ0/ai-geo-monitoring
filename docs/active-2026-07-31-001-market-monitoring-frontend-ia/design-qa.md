@@ -2,11 +2,11 @@
 
 ## 当前验收总览
 
-本文件记录 2026-08-04 前本地页面与设计稿的浏览器验收证据，不是部署或生产真实数据证明。隔离 fixture 只用于覆盖完整视觉和交互状态；生产路径必须继续遵守各页面的数据缺失边界。
+本文件主体记录 2026-08-04 前本地页面与设计稿的浏览器验收证据；末尾补充同日正式域名的真实数据验收。隔离 fixture 只用于覆盖完整视觉和交互状态，不能替代生产证据；生产路径继续遵守各页面的数据缺失边界。
 
 | 页面 | 本地设计实现 | 数据 / 证据边界 |
 | --- | --- | --- |
-| 市场总览 | 浏览器视觉、交互、响应式、axe 已通过 | 无 fixture 的本地 production build 已请求真实官网聚合 API 并显示 3 个可归因会话；百度本机无凭据，生产仍待验收 |
+| 市场总览 | 浏览器视觉、交互、响应式、axe 已通过 | 无 fixture 的本地 production build 已请求真实官网聚合 API 并显示 3 个可归因会话；百度营销与百度统计随后已从正式域名真实验收，官网生产因凭据缺失保持 `DISABLED` |
 | 原始咨询 | 浏览器视觉、抽屉、响应式、axe 已通过 | 官网记录级 adapter 已完成真实只读与脱敏验证；53KF 仍为独立 `NOT_CONNECTED` |
 | 网站流量 | 浏览器视觉、交互、响应式、axe 已通过 | 真实合同已验证，隔离响应只用于可重复视觉验收 |
 | 关键词分析 | 浏览器视觉、图表、交互、axe 已通过 | 完整 302/51 数据与行动标签来自开发 fixture；生产读取 Dashboard 关键词且不补造标签 |
@@ -86,8 +86,16 @@
 - 本地 production build 通过 `/geo/market-overview` 登录进入，截图为 `output/playwright/market-overview-real-1440x1024.png`、`output/playwright/market-overview-real-390x844.png` 和 `output/playwright/market-overview-real-mobile-sidebar-390x844.png`。
 - 2026-08-04 使用本地 production build、默认项目 `6` 和独立官网只读凭据复验；页面请求正式内部 `/api/website-data/projects/6/form-consultations`，所选 30 日区间展示两条官网来源行、合计 3 个可归因成功提交会话。
 - 同一会话进入原始咨询页，请求 `/api/consultations/projects/6/records`；官网记录可用，53KF 明确未接入。页面没有注入 fixture，浏览器控制台无错误。
-- 本机没有百度真实凭据，因此广告表现、关键词分析和网站流量只验证能力门与诚实缺失态；生产真实百度证据必须在服务器现有 Token 不出库的前提下完成。
+- 本机没有百度真实凭据，因此这部分本地证据只验证能力门与诚实缺失态；百度真实账号证据随后已在服务器现有 Token 不出库的前提下通过正式域名补充完成。
 - 控制台唯一错误是 `GET /api/geo-projects/default-context` 返回预期的 `409 Conflict`；其余是 Next.js 对预加载 CSS 的未使用警告，不是页面脚本异常。
+
+## 正式域名补充证据（2026-08-04）
+
+- workflow `30878470753` 已通过正式 Git Bundle 流程部署 revision `5ea8551`；`/api/frontend-health` 返回同一 revision，`/api/ready` 返回 SQLite WAL 与 scheduler 均 ready。
+- 登录 `https://insight.guangtuo.com` 后，市场总览显示百度推广消费 ¥13,057.37、展现 51,976、点击 13,692、CPC ¥0.95；官网表单模块明确不可用，线索与订单依赖指标保持缺失。
+- 广告表现显示同区间真实汇总与账户层级；关键词分析显示 863 条有展现关键词、237 条有点击关键词、27.46% 点击覆盖率，不再出现“广告关键词数据尚未开放”。
+- 网站流量显示访问 53、UV 45、PV 112、跳出率 54.0%、平均访问时长 03:32、平均 2.11 页/会话及 22 条入口页记录。
+- 原始咨询页分别显示官网 `DISABLED` 与 53KF `NOT_CONNECTED`；订单结果继续显示销售数据源未接入。新建生产浏览器标签页的关键词页控制台无 error / warn，未启用 fixture。
 
 ## 最终结果
 

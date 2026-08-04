@@ -379,7 +379,7 @@ Authorization: Bearer <token>
 
 该合同固定返回 `sourceSystem=GATO_WEBSITE`、`consultationType=WEBSITE_FORM` 和 `dataCoverage=ATTRIBUTED_SESSION_SUBMISSIONS_ONLY`。它不是 53KF 客服咨询，也不是全部联系人或全部表单记录；响应不得包含姓名、电话、邮箱、IP、表单内容、访客/会话 ID、官网流量或 53KF 数据。`BAIDU_PAID` 和 `DIRECT` 只在来源键精确匹配时供首页对齐；`ORGANIC_SEARCH` 等无法精确对应百度统计来源的记录必须独立展示，不得推断或混算。
 
-官网模块默认关闭，正式启用前必须单独执行 `npm run migrate:website-data`、注入服务端凭据并确认 `/api/website-data/status` 为 `READY`。本地实现完成不代表生产已启用；第二阶段业务变更尚未推送、部署或从正式域名验收。
+官网模块默认关闭。相关代码与 website-data 迁移已部署，但正式启用前仍必须注入服务端专用只读凭据并确认 `/api/website-data/status` 为 `READY`；截至 2026-08-04，生产模块保持 `DISABLED`，不得把“代码已部署”描述为“官网数据已上线”。
 
 ## 原始咨询记录（需认证）
 
