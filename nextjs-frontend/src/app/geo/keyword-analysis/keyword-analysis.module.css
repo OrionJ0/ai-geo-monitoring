@@ -529,6 +529,19 @@
   color: #5f6878;
 }
 
+.searchTermLink {
+  color: #0f5bd3;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.searchTermLink:hover,
+.searchTermLink:focus-visible {
+  color: #0b4aa8;
+  text-decoration: underline;
+}
+
 @media (max-width: 1280px) {
   .filterRow {
     flex-wrap: wrap;

@@ -25,6 +25,15 @@ export type KeywordAggregateRow = Omit<KeywordDailyFact, 'date'> & {
   path: string;
 };
 
+export type KeywordSearchTermEvidence = {
+  searchTerm: string;
+  queryStatus: 'ADDED' | 'NOT_ADDED' | 'NOT_ADDABLE';
+  matchType: string;
+  costAmountScaled: string;
+  impressions: string;
+  clicks: string;
+};
+
 export type KeywordCoverage = {
   impressionKeywordCount: number;
   clickedKeywordCount: number;
@@ -83,6 +92,26 @@ export function aggregateKeywordFacts(
     ) => KeywordTag | null;
   }
 ): KeywordAggregateRow[];
+export function attachKeywordSearchTermEvidence<
+  T extends Pick<
+    KeywordAggregateRow,
+    'accountId' | 'schemeId' | 'unitId' | 'keyword'
+  >
+>(
+  rows: T[],
+  searchTerms: Array<{
+    accountId: string;
+    campaignId: string;
+    adGroupId: string;
+    keywordName: string;
+    searchTerm: string;
+    queryStatus: KeywordSearchTermEvidence['queryStatus'];
+    matchType: string;
+    costAmountScaled: string;
+    impressions: string;
+    clicks: string;
+  }>
+): Array<T & { matchedSearchTerms: KeywordSearchTermEvidence[] }>;
 export function buildKeywordCoverage(
   rows: Array<Pick<KeywordAggregateRow, 'impressions' | 'clicks'>>
 ): KeywordCoverage;
