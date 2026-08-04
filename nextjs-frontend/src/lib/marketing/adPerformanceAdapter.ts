@@ -84,15 +84,18 @@ export type DashboardSearchTerm = DashboardAdGroup & {
 export type MarketingDashboardResponse = {
   projectId: string;
   projectName?: string;
+  revision: string | null;
   states?: {
     projectState?: string;
     snapshotContentState?: string;
+    snapshotFreshnessState?: 'NA' | 'FRESH' | 'STALE';
   };
   coverage: {
     from: string;
     to: string;
     currency: string;
     costScale: number;
+    lastSuccessfulAt?: string;
   } | null;
   filter?: {
     from: string;
@@ -114,6 +117,11 @@ export type MarketingDashboardResponse = {
     keywords: number;
     searchTerms: number;
   };
+  lastRun?: {
+    runId: string;
+    status: string;
+    failureCode: string | null;
+  } | null;
 };
 
 const EMPTY_METRICS: AdExactMetrics = Object.freeze({
@@ -297,27 +305,51 @@ function dashboardSemanticsValid(value: MarketingDashboardResponse): boolean {
 }
 
 export function assertMarketingDashboardResponse(
-  value: unknown
+  value: unknown,
+  expectedProjectId: string
 ): asserts value is MarketingDashboardResponse {
-  if (!objectRecord(value) || !text(value.projectId, 128)) {
+  if (
+    !objectRecord(value)
+    || !text(value.projectId, 128)
+    || value.projectId !== expectedProjectId
+  ) {
     invalidDashboard();
   }
   const states = value.states;
   const snapshotState = objectRecord(states)
     ? states.snapshotContentState
     : null;
+  const freshnessState = objectRecord(states)
+    ? states.snapshotFreshnessState
+    : null;
   if (!['NONE', 'ZERO', 'DATA'].includes(String(snapshotState))) {
+    invalidDashboard();
+  }
+  if (!['NA', 'FRESH', 'STALE'].includes(String(freshnessState))) {
     invalidDashboard();
   }
   const coverage = value.coverage;
   if (snapshotState === 'NONE') {
-    if (coverage !== null) invalidDashboard();
+    if (
+      coverage !== null
+      || value.revision !== null
+      || freshnessState !== 'NA'
+    ) invalidDashboard();
   } else if (
-    !objectRecord(coverage)
+    !text(value.revision, 128)
+    || !['FRESH', 'STALE'].includes(String(freshnessState))
+    || !objectRecord(coverage)
     || !dateText(coverage.from)
     || !dateText(coverage.to)
     || coverage.from > coverage.to
     || !text(coverage.currency, 16)
+    || (
+      coverage.lastSuccessfulAt !== undefined
+      && (
+        !text(coverage.lastSuccessfulAt, 64)
+        || !Number.isFinite(Date.parse(coverage.lastSuccessfulAt))
+      )
+    )
     || !Number.isSafeInteger(coverage.costScale)
     || Number(coverage.costScale) < 0
     || Number(coverage.costScale) > 12
@@ -330,6 +362,7 @@ export function assertMarketingDashboardResponse(
   const adGroups = value.adGroups;
   const keywords = value.keywords;
   const searchTerms = value.searchTerms;
+  const lastRun = value.lastRun;
   if (
     !Array.isArray(bindings)
     || !bindings.every((row) => objectRecord(row)
@@ -343,10 +376,35 @@ export function assertMarketingDashboardResponse(
     || value.hierarchyCounts.adGroups !== adGroups.length
     || value.hierarchyCounts.keywords !== keywords.length
     || value.hierarchyCounts.searchTerms !== searchTerms.length
+    || (
+      lastRun !== undefined
+      && lastRun !== null
+      && (
+        !objectRecord(lastRun)
+        || !text(lastRun.runId, 128)
+        || !text(lastRun.status, 32)
+        || (
+          lastRun.failureCode !== null
+          && !text(lastRun.failureCode, 128)
+        )
+      )
+    )
   ) invalidDashboard();
   if (!dashboardSemanticsValid(value as MarketingDashboardResponse)) {
     invalidDashboard();
   }
+}
+
+export function marketingSnapshotWarning(
+  dashboard: MarketingDashboardResponse
+): string {
+  if (dashboard.states?.snapshotFreshnessState !== 'STALE') return '';
+  const cutoff = dashboard.coverage?.to;
+  const failureCode = dashboard.lastRun?.failureCode;
+  const cutoffText = cutoff ? `截至 ${cutoff}` : '最后成功';
+  return failureCode
+    ? `广告快照刷新失败（${failureCode}），当前展示${cutoffText}的数据。`
+    : `广告快照已过期，当前展示${cutoffText}的数据。`;
 }
 export function shiftIsoDate(value: string, days: number): string {
   const date = new Date(`${value}T00:00:00.000Z`);

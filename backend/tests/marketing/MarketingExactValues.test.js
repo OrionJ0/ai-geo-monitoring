@@ -6,6 +6,7 @@ const {
   normalizeMetricText
 } = require('../../modules/marketing/domain/exactValues');
 const {
+  fixedCompletedShanghaiWindow,
   fixedShanghaiWindow
 } = require('../../modules/marketing/domain/syncWindow');
 const {
@@ -27,9 +28,13 @@ test('exact metric values remain decimal strings beyond Number safe range', () =
   });
 });
 
-test('sync window is exactly 30 Asia Shanghai calendar days', () => {
-  const window = fixedShanghaiWindow(Date.parse('2026-07-29T16:30:00.000Z'));
-  assert.deepEqual(window, {
+test('marketing sync window contains the last 30 completed Shanghai days', () => {
+  const now = Date.parse('2026-07-29T16:30:00.000Z');
+  assert.deepEqual(fixedCompletedShanghaiWindow(now), {
+    from: '2026-06-30',
+    to: '2026-07-29'
+  });
+  assert.deepEqual(fixedShanghaiWindow(now), {
     from: '2026-07-01',
     to: '2026-07-30'
   });

@@ -22,8 +22,12 @@ test('advertising page uses the default project and the real read-only dashboard
   assert.match(pageSource, /defaultContext\.project\?\.id/);
   assert.match(hookSource, /\/dashboard/);
   assert.match(hookSource, /axios\.get<MarketingDashboardResponse>/);
-  assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data\)/);
+  assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data, projectId\)/);
+  assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);
+  assert.match(pageSource, /performance\.warning/);
   assert.match(adapterSource, /MARKETING_DASHBOARD_RESPONSE_INVALID/);
+  assert.match(adapterSource, /value\.projectId !== expectedProjectId/);
+  assert.match(adapterSource, /value\.revision !== null/);
   assert.doesNotMatch(adapterSource, /return '0';/);
   assert.doesNotMatch(hookSource, /axios\.(?:post|put|patch|delete)\(/);
   assert.doesNotMatch(pageSource, /立即刷新|最后成功|更新时间|前往百度/);

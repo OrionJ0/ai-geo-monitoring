@@ -17,7 +17,7 @@ function refreshService(sequelize, reportProvider) {
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6,
-    clock: () => Date.parse('2026-07-29T04:00:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
   });
 }
 
@@ -64,6 +64,35 @@ test('all bindings replace one project snapshot atomically', async (t) => {
     ),
     /constraint|check/iu
   );
+});
+
+test('all bindings in one refresh share the same provider resource budget', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-shared-budget-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  await seedConnectionAndBinding(database.sequelize, {
+    bindingId: 'binding-2',
+    connectionId: 'connection-2',
+    accountId: 'account-2'
+  });
+  const budget = { marker: 'one-refresh-budget' };
+  const observedBudgets = [];
+  const service = refreshService(database.sequelize, {
+    createSearchReportBudget() { return budget; },
+    async fetchSearchReports({ budget: requestBudget }) {
+      observedBudgets.push(requestBudget);
+      return campaignOnlyReports();
+    }
+  });
+
+  const run = await service.createRun({
+    projectId: 11,
+    triggerType: 'MANUAL',
+    userId: 2
+  });
+  await service.executeRun(run.runId);
+
+  assert.deepEqual(observedBudgets, [budget, budget]);
 });
 
 test('rejects legacy duplicate active bindings for the same upstream account', async (t) => {

@@ -10,7 +10,7 @@ const {
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
 
-test('concurrent refresh creation returns one active run with a fixed window', async (t) => {
+test('concurrent refresh creation returns one active run for completed days', async (t) => {
   const database = await createMarketingTestDatabase();
   t.after(database.close);
   await seedConnectionAndBinding(database.sequelize);
@@ -31,8 +31,8 @@ test('concurrent refresh creation returns one active run with a fixed window', a
   ]);
   assert.equal(runs[0].runId, runs[1].runId);
   assert.deepEqual(runs[0].coverage, {
-    from: '2026-06-30',
-    to: '2026-07-29'
+    from: '2026-06-29',
+    to: '2026-07-28'
   });
   const [rows] = await database.sequelize.query(
     'SELECT id FROM baidu_marketing_refresh_runs'

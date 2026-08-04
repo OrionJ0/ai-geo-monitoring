@@ -14,6 +14,11 @@ function fixedShanghaiWindow(epochMilliseconds = Date.now()) {
   };
 }
 
+function fixedCompletedShanghaiWindow(epochMilliseconds = Date.now()) {
+  return fixedShanghaiWindow(epochMilliseconds - DAY_MS);
+}
+
 module.exports = {
+  fixedCompletedShanghaiWindow,
   fixedShanghaiWindow
 };

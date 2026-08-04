@@ -12,6 +12,40 @@ const {
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
 
+function completeReportSet(binding, campaignName = '计划甲') {
+  const common = {
+    accountId: binding.accountId,
+    campaignId: '101',
+    campaignName,
+    metricDate: '2026-07-29',
+    impressions: '10',
+    clicks: '2',
+    costAmountScaled: '350'
+  };
+  const adGroup = {
+    ...common,
+    adGroupId: '201',
+    adGroupName: '单元甲'
+  };
+  return {
+    campaigns: [common],
+    adGroups: [adGroup],
+    keywords: [{
+      ...adGroup,
+      keywordId: '301',
+      keywordName: '周界报警系统',
+      targetingType: 'KEYWORD'
+    }],
+    searchTerms: [{
+      ...adGroup,
+      keywordName: '周界报警系统',
+      searchTerm: '周界报警系统厂家',
+      queryStatus: 'NOT_ADDED',
+      matchType: 'PHRASE'
+    }]
+  };
+}
+
 test('one refresh commits campaign, ad group, keyword and search-term facts atomically', async (t) => {
   const database = await createMarketingTestDatabase('marketing-hierarchy-refresh-');
   t.after(database.close);
@@ -22,43 +56,13 @@ test('one refresh commits campaign, ad group, keyword and search-term facts atom
     sequelize: database.sequelize,
     reportProvider: {
       async fetchSearchReports({ binding }) {
-        const common = {
-          accountId: binding.accountId,
-          campaignId: '101',
-          campaignName: '计划甲',
-          metricDate: '2026-07-29',
-          impressions: '10',
-          clicks: '2',
-          costAmountScaled: '350'
-        };
-        const adGroup = {
-          ...common,
-          adGroupId: '201',
-          adGroupName: '单元甲'
-        };
-        return {
-          campaigns: [common],
-          adGroups: [adGroup],
-          keywords: [{
-            ...adGroup,
-            keywordId: '301',
-            keywordName: '周界报警系统',
-            targetingType: 'KEYWORD'
-          }],
-          searchTerms: [{
-            ...adGroup,
-            keywordName: '周界报警系统',
-            searchTerm: '周界报警系统厂家',
-            queryStatus: 'NOT_ADDED',
-            matchType: 'PHRASE'
-          }]
-        };
+        return completeReportSet(binding);
       }
     },
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 2,
-    clock: () => Date.parse('2026-07-29T04:00:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
   });
 
   const run = await service.createRun({
@@ -90,7 +94,7 @@ test('one refresh commits campaign, ad group, keyword and search-term facts atom
 
   const dashboard = await new MarketingDashboardService({
     sequelize: database.sequelize,
-    clock: () => Date.parse('2026-07-29T04:01:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:01:00.000Z')
   }).read({ projectId: 11 });
   assert.deepEqual(dashboard.hierarchyCounts, {
     campaigns: 1,
@@ -162,6 +166,94 @@ test('one refresh commits campaign, ad group, keyword and search-term facts atom
   assert.equal('keywordId' in dashboard.searchTerms[0], false);
 });
 
+test('an unstable verification read fails the run and preserves the complete active revision', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-unstable-refresh-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize, { accountId: '1234' });
+
+  const successful = new MarketingRefreshService({
+    sequelize: database.sequelize,
+    reportProvider: {
+      async fetchSearchReports({ binding }) {
+        return completeReportSet(binding, '旧快照');
+      }
+    },
+    contractVersion: 'fixture-contract-v1',
+    currencyCode: 'CNY',
+    costScale: 2,
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
+  });
+  const oldRun = await successful.createRun({
+    projectId: 11,
+    triggerType: 'MANUAL',
+    userId: 2
+  });
+  await successful.executeRun(oldRun.runId);
+
+  const warnings = [];
+  const unstable = new MarketingRefreshService({
+    sequelize: database.sequelize,
+    reportProvider: {
+      async fetchSearchReports() {
+        const error = new Error('上游快照漂移');
+        error.code = 'BAIDU_REPORT_SNAPSHOT_UNSTABLE';
+        throw error;
+      }
+    },
+    contractVersion: 'fixture-contract-v1',
+    currencyCode: 'CNY',
+    costScale: 2,
+    clock: () => Date.parse('2026-07-30T04:01:00.000Z'),
+    logger: { warn: (entry) => warnings.push(entry) }
+  });
+  const failedRun = await unstable.createRun({
+    projectId: 11,
+    triggerType: 'MANUAL',
+    userId: 2
+  });
+  await assert.rejects(
+    unstable.executeRun(failedRun.runId),
+    { code: 'BAIDU_REPORT_SNAPSHOT_UNSTABLE' }
+  );
+  assert.deepEqual(
+    (await unstable.getRun(11, failedRun.runId)).failure,
+    { code: 'BAIDU_REPORT_SNAPSHOT_UNSTABLE' }
+  );
+  assert.deepEqual(warnings, [{
+    event: 'marketing_refresh_failed',
+    projectId: '11',
+    runId: failedRun.runId,
+    coverage: failedRun.coverage,
+    failureCode: 'BAIDU_REPORT_SNAPSHOT_UNSTABLE',
+    durationMs: 0
+  }]);
+
+  for (const table of [
+    'baidu_campaign_daily_metrics',
+    'baidu_ad_group_daily_metrics',
+    'baidu_keyword_daily_metrics',
+    'baidu_search_term_daily_metrics'
+  ]) {
+    const [rows] = await database.sequelize.query(
+      `SELECT refresh_run_id FROM ${table}`
+    );
+    assert.equal(rows.length, 1, table);
+    assert.equal(rows[0].refresh_run_id, oldRun.runId, table);
+  }
+
+  const dashboard = await new MarketingDashboardService({
+    sequelize: database.sequelize,
+    clock: () => Date.parse('2026-07-30T04:02:00.000Z')
+  }).read({ projectId: 11 });
+  assert.equal(dashboard.revision, oldRun.runId);
+  assert.deepEqual(dashboard.hierarchyCounts, {
+    campaigns: 1,
+    adGroups: 1,
+    keywords: 1,
+    searchTerms: 1
+  });
+});
+
 test('refresh rejects orphan hierarchy rows instead of hiding them in the UI', async (t) => {
   const database = await createMarketingTestDatabase('marketing-hierarchy-orphan-');
   t.after(database.close);
@@ -197,7 +289,7 @@ test('refresh rejects orphan hierarchy rows instead of hiding them in the UI', a
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 2,
-    clock: () => Date.parse('2026-07-29T04:00:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
   });
   const run = await service.createRun({
     projectId: 11,

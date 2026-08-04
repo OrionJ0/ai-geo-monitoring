@@ -499,6 +499,14 @@ function StatusMessages({
       description: overview.ad.errorMessage || '无法读取广告快照。',
       action: <Button size="small" onClick={overview.reload}>重试</Button>
     });
+  } else if (overview.ad.state === 'STALE') {
+    messages.push({
+      key: 'ad-stale',
+      type: 'warning',
+      title: '广告快照刷新失败',
+      description: overview.ad.errorMessage || '当前展示最后一份成功快照。',
+      action: <Button size="small" onClick={overview.reload}>重试</Button>
+    });
   }
   if (overview.traffic.state === 'SOURCE_ERROR') {
     messages.push({
@@ -693,7 +701,7 @@ export default function MarketOverviewPage() {
     ])
   );
   const visibleAlignedFormKeys = new Set([
-    ...(['AVAILABLE', 'ZERO'].includes(ad.state) ? [PAID_SOURCE] : []),
+    ...(['AVAILABLE', 'ZERO', 'STALE'].includes(ad.state) ? [PAID_SOURCE] : []),
     ...(trafficSources.some((source) => source.sourceKey === 'DIRECT')
       ? ['DIRECT']
       : [])
@@ -801,7 +809,7 @@ export default function MarketOverviewPage() {
     || marketing.loading
     || (enabled && overview.status === 'LOADING' && !ad.data)
   );
-  const canShowAdRow = ['AVAILABLE', 'ZERO'].includes(ad.state);
+  const canShowAdRow = ['AVAILABLE', 'ZERO', 'STALE'].includes(ad.state);
   const canShowTrafficSourceRows = ['AVAILABLE', 'NO_DATA'].includes(
     overview.trafficSources.state
   ) && trafficSources.length > 0;

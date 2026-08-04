@@ -117,3 +117,56 @@ test('dashboard refreshes advertising only when requested and reuses it for ten 
   assert.notEqual(refreshed.revision, first.revision);
   assert.equal(refreshed.summary.impressions, '2');
 });
+
+test('dashboard returns an old revision with an explicit stale failure state', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-on-demand-stale-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  let now = Date.parse('2026-08-03T04:00:00.000Z');
+  let providerCalls = 0;
+  const refreshService = new MarketingRefreshService({
+    sequelize: database.sequelize,
+    reportProvider: {
+      async fetchSearchReports({ binding, coverage }) {
+        providerCalls += 1;
+        if (providerCalls > 1) {
+          const error = new Error('上游快照漂移');
+          error.code = 'BAIDU_REPORT_SNAPSHOT_UNSTABLE';
+          throw error;
+        }
+        return campaignOnlyReports([{
+          accountId: binding.accountId,
+          campaignId: 'old-campaign',
+          campaignName: '旧快照',
+          metricDate: coverage.to,
+          impressions: '1',
+          clicks: '1',
+          costAmountScaled: '1'
+        }]);
+      }
+    },
+    contractVersion: 'fixture-contract-v1',
+    currencyCode: 'CNY',
+    costScale: 6,
+    clock: () => now
+  });
+  const dashboardReader = new MarketingDashboardService({
+    sequelize: database.sequelize,
+    clock: () => now
+  });
+  const service = new MarketingOnDemandDashboardService({
+    dashboardService: dashboardReader,
+    refreshService,
+    executeRefresh: (runId) => refreshService.executeRun(runId)
+  });
+
+  const first = await service.read({ projectId: 11 });
+  now += 11 * 60 * 1000;
+  const fallback = await service.read({ projectId: 11 });
+  assert.equal(fallback.revision, first.revision);
+  assert.equal(fallback.states.snapshotFreshnessState, 'STALE');
+  assert.equal(
+    fallback.lastRun.failureCode,
+    'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
+  );
+});

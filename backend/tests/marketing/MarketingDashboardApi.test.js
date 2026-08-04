@@ -48,7 +48,7 @@ test('dashboard returns one revision and exact aggregates without provider calls
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6,
-    clock: () => Date.parse('2026-07-29T04:00:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
   });
   const run = await refresh.createRun({
     projectId: 11,
@@ -60,7 +60,7 @@ test('dashboard returns one revision and exact aggregates without provider calls
 
   const dashboardService = new MarketingDashboardService({
     sequelize: database.sequelize,
-    clock: () => Date.parse('2026-07-29T04:05:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:05:00.000Z')
   });
   const dashboard = await dashboardService.read({
     projectId: 11,
@@ -96,7 +96,7 @@ test('dashboard rejects filters outside the saved coverage', async (t) => {
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6,
-    clock: () => Date.parse('2026-07-29T04:00:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
   });
   const run = await refresh.createRun({
     projectId: 11,
@@ -139,7 +139,7 @@ test('restoring an old binding fingerprint does not revive deleted facts', async
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6,
-    clock: () => Date.parse('2026-07-29T04:00:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
   });
   const first = await refresh.createRun({
     projectId: 11,

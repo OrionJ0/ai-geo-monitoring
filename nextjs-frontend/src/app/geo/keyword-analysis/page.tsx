@@ -626,8 +626,19 @@ export default function KeywordAnalysisPage() {
           title={pageError}
           action={<Button size="small" onClick={() => void analysis.reload()}>重试</Button>}
         />
-      ) : shellLoading || analysis.loading || !model ? (
-        <LoadingPage />
+      ) : null}
+
+      {!pageError && analysis.warning ? (
+        <Alert
+          type="warning"
+          showIcon
+          title={analysis.warning}
+          action={<Button size="small" onClick={() => void analysis.reload()}>重试</Button>}
+        />
+      ) : null}
+
+      {shellLoading || analysis.loading || !model ? (
+        pageError ? null : <LoadingPage />
       ) : (
         <div className={styles.moduleStack}>
           <Card className={styles.coverageCard}>

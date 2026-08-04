@@ -42,7 +42,7 @@ test('project archived before final commit rejects late provider results', async
     contractVersion: 'fixture-contract-v1',
     currencyCode: 'CNY',
     costScale: 6,
-    clock: () => Date.parse('2026-07-29T04:00:00.000Z')
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
   });
   const run = await refresh.createRun({
     projectId: 11,

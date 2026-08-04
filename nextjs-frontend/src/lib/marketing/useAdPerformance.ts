@@ -5,6 +5,7 @@ import axios from '@/lib/axiosConfig';
 import {
   adaptMarketingDashboard,
   assertMarketingDashboardResponse,
+  marketingSnapshotWarning,
   type AdPerformanceModel,
   type MarketingDashboardResponse
 } from '@/lib/marketing/adPerformanceAdapter';
@@ -27,6 +28,7 @@ type UseAdPerformanceState = {
   data: AdPerformanceModel | null;
   loading: boolean;
   error: string;
+  warning: string;
   reload: () => Promise<void>;
 };
 
@@ -47,12 +49,14 @@ export default function useAdPerformance({
   const [data, setData] = useState<AdPerformanceModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const requestSequence = useRef(0);
 
   const reload = useCallback(async () => {
     const requestId = ++requestSequence.current;
     if (fixtureEnabled) {
       setError('');
+      setWarning('');
       if (fixtureState === 'loading') {
         setData(null);
         setLoading(true);
@@ -75,11 +79,13 @@ export default function useAdPerformance({
 
     if (!enabled || !projectId) {
       setData(null);
+      setWarning('');
       setLoading(false);
       return;
     }
     setLoading(true);
     setError('');
+    setWarning('');
     try {
       const response = await axios.get<MarketingDashboardResponse>(
         `/api/marketing/projects/${encodeURIComponent(projectId)}/dashboard`,
@@ -88,7 +94,8 @@ export default function useAdPerformance({
           : undefined
       );
       if (requestId !== requestSequence.current) return;
-      assertMarketingDashboardResponse(response.data);
+      assertMarketingDashboardResponse(response.data, projectId);
+      setWarning(marketingSnapshotWarning(response.data));
       setData(adaptMarketingDashboard(response.data, projectName));
     } catch (requestError: unknown) {
       if (requestId !== requestSequence.current) return;
@@ -101,6 +108,7 @@ export default function useAdPerformance({
       );
       const message = response?.data?.error?.message;
       setData(null);
+      setWarning('');
       setError(
         typeof message === 'string'
           ? message
@@ -115,5 +123,5 @@ export default function useAdPerformance({
     void reload();
   }, [reload]);
 
-  return { data, loading, error, reload };
+  return { data, loading, error, warning, reload };
 }

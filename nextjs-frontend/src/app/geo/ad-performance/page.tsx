@@ -744,6 +744,20 @@ export default function AdPerformancePage() {
         />
       ) : null}
 
+      {!pageError && performance.warning ? (
+        <Alert
+          className={styles.pageAlert}
+          type="warning"
+          showIcon
+          title={performance.warning}
+          action={(
+            <Button size="small" onClick={() => void performance.reload()}>
+              重试
+            </Button>
+          )}
+        />
+      ) : null}
+
       {shellLoading || performance.loading || !performance.data ? (
         pageError ? null : <LoadingPage dateRange={dateRange} />
       ) : (

@@ -14,6 +14,7 @@ import {
 } from '@/lib/marketing/keywordAnalysisAdapter';
 import {
   assertMarketingDashboardResponse,
+  marketingSnapshotWarning,
   type MarketingDashboardResponse
 } from '@/lib/marketing/adPerformanceAdapter';
 
@@ -32,6 +33,7 @@ type UseKeywordAnalysisState = {
   data: KeywordAnalysisModel | null;
   loading: boolean;
   error: string;
+  warning: string;
   fixtureEnabled: boolean;
   reload: () => Promise<void>;
 };
@@ -53,6 +55,7 @@ export default function useKeywordAnalysis({
   const [data, setData] = useState<KeywordAnalysisModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const requestSequence = useRef(0);
 
   const reload = useCallback(async () => {
@@ -60,10 +63,12 @@ export default function useKeywordAnalysis({
     if (!fixtureEnabled && (!enabled || !projectId)) {
       setData(null);
       setError('');
+      setWarning('');
       setLoading(false);
       return;
     }
     setError('');
+    setWarning('');
     if (fixtureEnabled && fixtureState === 'loading') {
       setData(null);
       setLoading(true);
@@ -98,7 +103,8 @@ export default function useKeywordAnalysis({
           : undefined
       );
       if (requestId !== requestSequence.current) return;
-      assertMarketingDashboardResponse(response.data);
+      assertMarketingDashboardResponse(response.data, projectId);
+      setWarning(marketingSnapshotWarning(response.data));
       setData(adaptMarketingDashboardKeywords(
         response.data,
         projectName,
@@ -117,6 +123,7 @@ export default function useKeywordAnalysis({
       );
       const message = response?.data?.error?.message;
       setData(null);
+      setWarning('');
       setError(
         typeof message === 'string'
           ? message
@@ -142,6 +149,7 @@ export default function useKeywordAnalysis({
     data,
     loading,
     error,
+    warning,
     fixtureEnabled,
     reload
   };

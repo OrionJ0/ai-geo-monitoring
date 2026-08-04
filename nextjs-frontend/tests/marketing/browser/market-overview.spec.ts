@@ -36,14 +36,16 @@ function dashboard(options: {
   return {
     projectId: '11',
     projectName: '上海广拓',
-    revision: 'market-overview-visual-fixture',
+    revision: content === 'NONE' ? null : 'market-overview-visual-fixture',
     states: {
       moduleState: 'READY',
       projectState: 'ACTIVE',
       sourceSummaryState: 'CONNECTED',
       bindingSummaryState: 'ACTIVE',
       snapshotContentState: content,
-      snapshotFreshnessState: options.freshness || 'FRESH',
+      snapshotFreshnessState: content === 'NONE'
+        ? 'NA'
+        : options.freshness || 'FRESH',
       refreshState: 'SUCCEEDED'
     },
     bindings: [{
@@ -89,8 +91,10 @@ function dashboard(options: {
     activeRun: null,
     lastRun: {
       runId: 'run-fixture-1',
-      status: 'SUCCEEDED',
-      failureCode: null
+      status: options.freshness === 'STALE' ? 'FAILED' : 'SUCCEEDED',
+      failureCode: options.freshness === 'STALE'
+        ? 'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
+        : null
     }
   };
 }
@@ -571,14 +575,19 @@ test('partial source error preserves the page and reports the failed source', as
   await page.screenshot({ path: artifact('market-overview-partial-error-1440x1024.png') });
 });
 
-test('stale snapshot metadata does not create a normal-page warning', async ({ page }) => {
+test('stale snapshot warns, preserves old overview data, and offers retry', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installDashboard(page, dashboard({ freshness: 'STALE' }));
   await page.setViewportSize({ width: 1440, height: 1024 });
   await page.goto('/geo/market-overview');
-  await expect(page.getByText('广告数据陈旧')).toHaveCount(0);
+  const warning = page.getByRole('alert').filter({
+    hasText: 'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
+  });
+  await expect(warning).toContainText('广告快照刷新失败');
+  await expect(warning).toContainText('截至 2026-08-03');
+  await expect(warning.getByRole('button', { name: /重\s*试/u })).toBeVisible();
   await expect(page.getByRole('row', { name: /百度推广/u })).toBeVisible();
-  await page.screenshot({ path: artifact('market-overview-stale-hidden-1440x1024.png') });
+  await page.screenshot({ path: artifact('market-overview-stale-1440x1024.png') });
 });
 
 test('permission blocking state stops data access without exposing a false dashboard', async ({ page }) => {

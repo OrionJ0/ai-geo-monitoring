@@ -2,12 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from '@/lib/axiosConfig';
-import { assertMarketingDashboardResponse } from './adPerformanceAdapter';
+import {
+  assertMarketingDashboardResponse,
+  marketingSnapshotWarning,
+  type MarketingDashboardResponse
+} from './adPerformanceAdapter';
 
 type SourceSlotState =
   | 'IDLE'
   | 'LOADING'
   | 'AVAILABLE'
+  | 'STALE'
   | 'ZERO'
   | 'NO_DATA'
   | 'SOURCE_ERROR';
@@ -57,17 +62,19 @@ function rejectedSlot(reason: unknown, fallback: string): SourceSlot {
   };
 }
 
-function adSlot(data: Record<string, any>, readAt: string): SourceSlot {
+function adSlot(data: MarketingDashboardResponse, readAt: string): SourceSlot {
   const content = data?.states?.snapshotContentState;
+  const stale = data?.states?.snapshotFreshnessState === 'STALE';
+  const warning = marketingSnapshotWarning(data);
   return {
-    state: content === 'ZERO'
+    state: stale ? 'STALE' : content === 'ZERO'
       ? 'ZERO'
       : content === 'NONE'
         ? 'NO_DATA'
         : 'AVAILABLE',
     data,
-    errorCode: null,
-    errorMessage: null,
+    errorCode: stale ? data.lastRun?.failureCode || null : null,
+    errorMessage: warning || null,
     readAt: data?.coverage?.lastSuccessfulAt || readAt
   };
 }
@@ -141,9 +148,13 @@ function assertTongjiOverviewResponse(
   }
 }
 
-function fulfilledAdSlot(value: unknown, readAt: string): SourceSlot {
+function fulfilledAdSlot(
+  value: unknown,
+  readAt: string,
+  projectId: string
+): SourceSlot {
   try {
-    assertMarketingDashboardResponse(value);
+    assertMarketingDashboardResponse(value, projectId);
     return adSlot(value, readAt);
   } catch (error) {
     return rejectedSlot(error, '广告快照响应合同无效');
@@ -235,7 +246,7 @@ export default function useMarketOverview({
     if (sequence !== requestSequence.current) return;
     const readAt = new Date().toISOString();
     const nextAd = adResult.status === 'fulfilled'
-      ? fulfilledAdSlot(adResult.value.data, readAt)
+      ? fulfilledAdSlot(adResult.value.data, readAt, projectId)
       : rejectedSlot(adResult.reason, '广告快照读取失败');
     const nextTraffic = trafficResult.status === 'fulfilled'
       ? fulfilledTrafficSlot(

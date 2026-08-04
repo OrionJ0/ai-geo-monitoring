@@ -46,7 +46,7 @@ function metricStrings(metrics: MetricRollup) {
   };
 }
 
-function dashboardFixture() {
+function dashboardFixture(stale = false) {
   const fixture = buildKeywordFixture(false);
   const facts = fixture.facts as FixtureFact[];
   const bindings = [...new Map(facts.map((fact) => [fact.accountId, {
@@ -151,10 +151,15 @@ function dashboardFixture() {
   return {
     projectId: '11',
     projectName: fixture.projectName,
-    states: { snapshotContentState: 'DATA' },
+    revision: 'keyword-analysis-fixture-revision',
+    states: {
+      snapshotContentState: 'DATA',
+      snapshotFreshnessState: stale ? 'STALE' : 'FRESH'
+    },
     coverage: {
       from: fixture.availableFrom,
       to: fixture.availableTo,
+      lastSuccessfulAt: '2026-08-03T03:58:00.000Z',
       currency: fixture.currency,
       costScale: fixture.costScale
     },
@@ -175,6 +180,11 @@ function dashboardFixture() {
       adGroups: adGroups.length,
       keywords: keywords.length,
       searchTerms: 0
+    },
+    lastRun: {
+      runId: stale ? 'failed-refresh-run' : 'successful-refresh-run',
+      status: stale ? 'FAILED' : 'SUCCEEDED',
+      failureCode: stale ? 'BAIDU_REPORT_SNAPSHOT_UNSTABLE' : null
     }
   };
 }
@@ -310,4 +320,72 @@ test('rejects a structurally valid dashboard with orphan keywords', async ({ pag
     .toBeVisible();
   await expect(page.getByText('百度推广 · 真实数据', { exact: false }))
     .toHaveCount(0);
+});
+
+test('stale snapshot warns and preserves keyword data with retry', async ({ page }) => {
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(dashboardFixture(true))
+  }));
+  await page.goto('/geo/keyword-analysis');
+
+  const warning = page.getByRole('alert').filter({
+    hasText: 'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
+  });
+  await expect(warning).toContainText('截至 2026-08-03');
+  await expect(warning.getByRole('button', { name: /重\s*试/u })).toBeVisible();
+  await expect(page.getByText('有展现关键词')).toContainText('302');
+  await expect(page.getByText('振动光纤价格').first()).toBeVisible();
+});
+
+test('stale snapshot warns and preserves advertising data with retry', async ({ page }) => {
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(dashboardFixture(true))
+  }));
+  await page.goto('/geo/ad-performance');
+
+  const warning = page.getByRole('alert').filter({
+    hasText: 'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
+  });
+  await expect(warning).toContainText('截至 2026-08-03');
+  await expect(warning.getByRole('button', { name: /重\s*试/u })).toBeVisible();
+  await expect(page.getByText('总展现')).toBeVisible();
+  await expect(page.getByText('结构下钻')).toBeVisible();
+});
+
+test('keyword page rejects a dashboard belonging to another project', async ({ page }) => {
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    const invalid = dashboardFixture();
+    invalid.projectId = '12';
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(invalid)
+    });
+  });
+  await page.goto('/geo/keyword-analysis');
+
+  await expect(page.getByText('关键词数据读取失败，请稍后重试。'))
+    .toBeVisible();
+  await expect(page.getByText('有展现关键词')).toHaveCount(0);
+});
+
+test('advertising page rejects an impossible data-with-NA state', async ({ page }) => {
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    const invalid = dashboardFixture();
+    invalid.states.snapshotFreshnessState = 'NA';
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(invalid)
+    });
+  });
+  await page.goto('/geo/ad-performance');
+
+  await expect(page.getByText('广告数据读取失败，请稍后重试。'))
+    .toBeVisible();
+  await expect(page.getByText('周期汇总指标')).toHaveCount(0);
 });

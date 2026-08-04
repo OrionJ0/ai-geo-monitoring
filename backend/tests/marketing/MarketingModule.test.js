@@ -243,6 +243,7 @@ test('pilot data module mounts allowlisted binding and dashboard routes', async 
     `${baseUrl}/api/marketing/projects/11/dashboard`
   );
   assert.equal(dashboard.status, 200);
+  assert.equal(dashboard.headers.get('cache-control'), 'private, no-store');
   assert.equal(
     (await dashboard.json()).states.moduleState,
     'PILOT_DATA_READY'

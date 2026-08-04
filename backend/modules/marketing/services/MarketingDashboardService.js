@@ -2,7 +2,9 @@ const { Transaction, QueryTypes } = require('sequelize');
 const { bindingFingerprint } = require('../domain/bindingFingerprint');
 const { addDecimalText } = require('../domain/exactValues');
 const { MarketingRefreshError } = require('./MarketingRefreshService');
-const { fixedShanghaiWindow } = require('../domain/syncWindow');
+const {
+  fixedCompletedShanghaiWindow
+} = require('../domain/syncWindow');
 const {
   parseProjectAllowlist,
   projectAllowed
@@ -389,7 +391,7 @@ class MarketingDashboardService {
       (binding) => binding.connection_status === 'CONNECTED'
     );
     const lastSuccessfulAt = snapshotRun?.finished_at || null;
-    const currentWindow = fixedShanghaiWindow(this.clock());
+    const currentWindow = fixedCompletedShanghaiWindow(this.clock());
     const coverageRolled = (
       project.status === 'active'
       && snapshotRun

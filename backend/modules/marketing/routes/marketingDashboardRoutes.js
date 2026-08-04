@@ -30,11 +30,13 @@ function createMarketingDashboardRouter({
         projectId: req.params.projectId,
         user: req.user
       });
-      return res.json(await dashboardService.read({
+      const result = await dashboardService.read({
         projectId: req.params.projectId,
         from: req.query.from,
         to: req.query.to
-      }));
+      });
+      res.set('Cache-Control', 'private, no-store');
+      return res.json(result);
     } catch (error) {
       return sendError(res, error);
     }

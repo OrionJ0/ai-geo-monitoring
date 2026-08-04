@@ -11,7 +11,7 @@
 
 ## 1. 目标与边界
 
-第一期在现有 Express + Sequelize + Next.js 应用中增加一个轻量、只读的百度搜索推广监控模块。模块读取百度广告数据，保存当前项目最近 30 个自然日的本地快照，并提供项目汇总、按日趋势和按推广计划明细。
+第一期在现有 Express + Sequelize + Next.js 应用中增加一个轻量、只读的百度搜索推广监控模块。模块读取百度广告数据，保存当前项目最近 30 个已结束自然日的本地快照，并提供项目汇总、按日趋势和按推广计划明细。
 
 明确边界：
 
@@ -93,11 +93,13 @@ backend/modules/marketing/contracts/baidu/
 
 ### 3.3 固定 30 天快照
 
-- 同步窗口：当前日期及向前共 30 个 `Asia/Shanghai` 自然日。
+- 同步窗口：最近 30 个已结束的 `Asia/Shanghai` 自然日，不含当天。
 - 刷新接口不接受起止日期。
+- 推广计划、推广单元、关键词和搜索词四份报告必须连续读取两次且规范化事实集完全一致；不一致时返回 `BAIDU_REPORT_SNAPSHOT_UNSTABLE` 并保留上一份完整快照。
+- 两轮分页共享合同 `qps` 限速器；同一项目刷新的所有账户绑定还共享 512 次请求、25 万规范化行、64 MiB 规范化响应体和 120 秒整轮预算。单请求超时覆盖响应头与完整流式正文读取。首轮仅保留无序 SHA-256 摘要，第二轮才保留待入库事实。
 - 页面日期筛选只在本地覆盖范围内计算。
 - 每次成功刷新整体替换项目当前活动快照。
-- 失败、中断或归档竞争时不写入新事实。
+- 失败、中断或归档竞争时不写入新事实；已有旧快照时按需页面读取仍返回该 revision，但必须同时返回并显示 `snapshotFreshnessState=STALE`、`lastRun.failureCode` 和数据截止日期。
 
 这避免历史回补、范围任务复用和混合新鲜度。
 
@@ -302,7 +304,7 @@ JSON 固定包含版本号和按 `bindingId` 排序的 `{bindingId,connectionId,
 | `active_project_key` | 非终态为项目 ID，终态为空 |
 | `execution_token` | 本次单进程执行防护令牌 |
 | `binding_fingerprint` | 发起时活动绑定指纹 |
-| `coverage_start` / `coverage_end` | 固定 30 天窗口 |
+| `coverage_start` / `coverage_end` | 最近 30 个已结束的上海自然日；不包含查询时所在当天 |
 | `contract_version` | 本快照使用的不可变百度契约版本 |
 | `currency_code` / `cost_scale` | 本快照金额解释 |
 | `started_at` / `finished_at` | 生命周期时间 |

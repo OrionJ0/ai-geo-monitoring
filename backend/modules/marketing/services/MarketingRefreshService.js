@@ -2,7 +2,9 @@ const crypto = require('node:crypto');
 const { QueryTypes, Transaction } = require('sequelize');
 const { bindingFingerprint } = require('../domain/bindingFingerprint');
 const { normalizeMetricText } = require('../domain/exactValues');
-const { fixedShanghaiWindow } = require('../domain/syncWindow');
+const {
+  fixedCompletedShanghaiWindow
+} = require('../domain/syncWindow');
 
 class MarketingRefreshError extends Error {
   constructor(message, code, status = 400, retryable = false) {
@@ -267,7 +269,8 @@ class MarketingRefreshService {
     costScale,
     clock = () => Date.now(),
     maxRows = 100000,
-    maxTotalRows = 250000
+    maxTotalRows = 250000,
+    logger = null
   }) {
     this.sequelize = sequelize;
     this.reportProvider = reportProvider;
@@ -277,6 +280,7 @@ class MarketingRefreshService {
     this.clock = clock;
     this.maxRows = maxRows;
     this.maxTotalRows = maxTotalRows;
+    this.logger = logger;
   }
 
   async getProject(projectId, transaction, lock = false) {
@@ -382,7 +386,7 @@ class MarketingRefreshService {
 
     const id = crypto.randomUUID();
     const now = new Date(this.clock()).toISOString();
-    const coverage = fixedShanghaiWindow(this.clock());
+    const coverage = fixedCompletedShanghaiWindow(this.clock());
     const sequenceRows = await this.sequelize.query(
       `SELECT MAX(project_run_sequence) AS max_sequence
        FROM baidu_marketing_refresh_runs
@@ -538,7 +542,8 @@ class MarketingRefreshService {
         409
       );
     }
-    const startedAt = new Date(this.clock()).toISOString();
+    const executionStartedAt = this.clock();
+    const startedAt = new Date(executionStartedAt).toISOString();
     const [, claimed] = await this.sequelize.query(
       `UPDATE baidu_marketing_refresh_runs
        SET status = 'RUNNING', started_at = COALESCE(started_at, :startedAt),
@@ -578,9 +583,11 @@ class MarketingRefreshService {
       const factKeys = Object.fromEntries(
         Object.keys(REPORT_LEVELS).map((level) => [level, new Set()])
       );
+      const budget = this.reportProvider.createSearchReportBudget?.() || null;
       let totalRows = 0;
       for (const binding of bindings) {
         const reportSet = await this.reportProvider.fetchSearchReports({
+          budget,
           binding: {
             id: binding.id,
             accountId: binding.external_account_id,
@@ -645,7 +652,23 @@ class MarketingRefreshService {
       await this.commitSnapshot({ run, normalizedReports });
       return this.getRun(run.project_id, run.id);
     } catch (error) {
-      await this.failRun(run.id, error?.code || 'REFRESH_FAILED');
+      const failureCode = error?.code || 'REFRESH_FAILED';
+      await this.failRun(run.id, failureCode);
+      try {
+        this.logger?.warn?.({
+          event: 'marketing_refresh_failed',
+          projectId: String(run.project_id),
+          runId: run.id,
+          coverage: {
+            from: run.coverage_start,
+            to: run.coverage_end
+          },
+          failureCode,
+          durationMs: Math.max(0, this.clock() - executionStartedAt)
+        });
+      } catch {
+        // Observability must never replace the stable refresh outcome.
+      }
       throw error;
     }
   }

@@ -8,6 +8,73 @@ const {
   createMarketingDashboardRouter
 } = require('../../modules/marketing/routes/marketingDashboardRoutes');
 
+test('dashboard HTTP contract preserves stale revisions and fails without a snapshot', async (t) => {
+  let reads = 0;
+  const app = express();
+  app.use((req, _res, next) => {
+    req.user = { id: 7, role: 'admin' };
+    next();
+  });
+  app.use('/api/marketing', createMarketingDashboardRouter({
+    dashboardService: {
+      async assertAccess() {},
+      async read() {
+        reads += 1;
+        if (reads === 1) {
+          return {
+            projectId: '11',
+            revision: 'previous-successful-run',
+            states: {
+              snapshotContentState: 'DATA',
+              snapshotFreshnessState: 'STALE'
+            },
+            lastRun: {
+              runId: 'failed-refresh-run',
+              status: 'FAILED',
+              failureCode: 'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
+            }
+          };
+        }
+        throw Object.assign(new Error('provider detail must stay private'), {
+          code: 'BAIDU_REPORT_FAILED',
+          status: 502
+        });
+      }
+    },
+    refreshService: {}
+  }));
+  const server = http.createServer(app);
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const stale = await fetch(`${baseUrl}/api/marketing/projects/11/dashboard`);
+  assert.equal(stale.status, 200);
+  assert.equal(stale.headers.get('cache-control'), 'private, no-store');
+  const staleBody = await stale.json();
+  assert.equal(staleBody.revision, 'previous-successful-run');
+  assert.equal(staleBody.states.snapshotFreshnessState, 'STALE');
+  assert.equal(
+    staleBody.lastRun.failureCode,
+    'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
+  );
+
+  const unavailable = await fetch(
+    `${baseUrl}/api/marketing/projects/11/dashboard`
+  );
+  assert.equal(unavailable.status, 502);
+  assert.equal(unavailable.headers.get('cache-control'), 'private, no-store');
+  assert.deepEqual(await unavailable.json(), {
+    error: {
+      code: 'BAIDU_REPORT_FAILED',
+      message: '营销看板暂时不可用'
+    }
+  });
+});
+
 test('Tongji source API authorizes the project and returns source trends', async (t) => {
   const calls = [];
   const app = express();

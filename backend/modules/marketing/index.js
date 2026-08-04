@@ -180,6 +180,9 @@ function createMarketingModule({
       }
     };
     const reportProvider = {
+      createSearchReportBudget() {
+        return baiduProvider.createSearchReportBudget?.() || null;
+      },
       async fetchSearchReports(request) {
         return baiduProvider.fetchSearchReports({
           ...request,
@@ -443,7 +446,8 @@ function createMarketingModule({
         reportProvider,
         contractVersion: manifest.contractVersion,
         currencyCode: manifest.money?.currencyCode,
-        costScale: manifest.money?.costScale
+        costScale: manifest.money?.costScale,
+        logger: console
       });
       const tongjiService = new BaiduTongjiService({
         sequelize,

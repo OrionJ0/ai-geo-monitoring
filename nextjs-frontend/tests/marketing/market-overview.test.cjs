@@ -21,6 +21,7 @@ test('overview independently settles advertising, traffic and traffic-source rea
 
   assert.match(source, /Promise\.allSettled/);
   assert.match(source, /assertMarketingDashboardResponse/);
+  assert.match(source, /assertMarketingDashboardResponse\(value, projectId\)/);
   assert.match(source, /assertTongjiOverviewResponse/);
   assert.match(source, /\/dashboard/);
   assert.match(source, /\/tongji-trend/);
@@ -32,9 +33,12 @@ test('overview independently settles advertising, traffic and traffic-source rea
   assert.match(source, /10 \* 60 \* 1000/);
   assert.doesNotMatch(source, /setInterval/);
   assert.match(source, /visibilitychange/);
+  assert.match(source, /snapshotFreshnessState/);
+  assert.match(source, /state: stale \? 'STALE'/);
   const page = fs.readFileSync(pagePath, 'utf8');
   assert.match(page, /websiteFallbackRange/);
   assert.match(page, /disabled=\{!projectId\}/);
+  assert.match(page, /广告快照刷新失败/);
 });
 
 test('overview implements the final three-section visual hierarchy', () => {

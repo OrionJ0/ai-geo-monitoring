@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const {
   verifyBaiduCallbackSignature
 } = require('../domain/baiduOAuthSignature');
@@ -6,6 +7,17 @@ const ONE_MEBIBYTE = 1024 * 1024;
 const REPORT_RESPONSE_BUDGET = 8 * ONE_MEBIBYTE;
 const TONGJI_RESPONSE_BUDGET = 2 * ONE_MEBIBYTE;
 const TONGJI_PAGE_REPORT_TIME_BUDGET_MS = 30_000;
+const SEARCH_REPORT_REQUEST_BUDGET = 512;
+const SEARCH_REPORT_ROW_BUDGET = 250_000;
+const SEARCH_REPORT_RESPONSE_BUDGET = 64 * ONE_MEBIBYTE;
+const SEARCH_REPORT_TIME_BUDGET_MS = 120_000;
+const RAW_RESPONSE_BYTES = Symbol('baiduRawResponseBytes');
+const SEARCH_REPORT_BUDGET_LIMITS = Object.freeze({
+  maxRequests: SEARCH_REPORT_REQUEST_BUDGET,
+  maxRows: SEARCH_REPORT_ROW_BUDGET,
+  maxResponseBytes: SEARCH_REPORT_RESPONSE_BUDGET,
+  maxDurationMs: SEARCH_REPORT_TIME_BUDGET_MS
+});
 const REAUTHORIZATION_CODES = new Set(['894062', '894063', '894064']);
 const TONGJI_SOURCE_FILTERS = Object.freeze({
   ALL: null,
@@ -49,6 +61,124 @@ class BaiduContractBlockedError extends BaiduMarketingError {
       503
     );
   }
+}
+
+const SEARCH_REPORT_LEVELS = Object.freeze([
+  'campaigns',
+  'adGroups',
+  'keywords',
+  'searchTerms'
+]);
+
+function reportRowsSummary(rows) {
+  const rowHashes = rows.map((row) => crypto
+    .createHash('sha256')
+    .update(JSON.stringify(row))
+    .digest('hex'))
+    .sort();
+  const digest = crypto.createHash('sha256');
+  digest.update(`${rowHashes.length}\n`);
+  for (const rowHash of rowHashes) digest.update(rowHash);
+  return {
+    rowCount: rowHashes.length,
+    digest: digest.digest('hex')
+  };
+}
+
+function assertStableSearchReport(firstSummary, secondRows) {
+  const secondSummary = reportRowsSummary(secondRows);
+  if (
+    firstSummary.rowCount !== secondSummary.rowCount
+    || firstSummary.digest !== secondSummary.digest
+  ) {
+    throw new BaiduMarketingError(
+      '百度搜索报告两次读取结果不一致',
+      'BAIDU_REPORT_SNAPSHOT_UNSTABLE',
+      502
+    );
+  }
+}
+
+function monotonicMilliseconds() {
+  return Number(process.hrtime.bigint() / 1_000_000n);
+}
+
+function waitForMilliseconds(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function normalizeSearchReportBudgetLimits(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const limits = { ...SEARCH_REPORT_BUDGET_LIMITS, ...value };
+  return Object.entries(SEARCH_REPORT_BUDGET_LIMITS).every(
+    ([key, maximum]) => (
+      Number.isSafeInteger(limits[key])
+      && limits[key] > 0
+      && limits[key] <= maximum
+    )
+  ) ? limits : null;
+}
+
+function createSearchReportBudget(clock, limits) {
+  const startedAt = clock();
+  let requestCount = 0;
+  let rowCount = 0;
+  let responseBytes = 0;
+
+  const remainingMilliseconds = () => {
+    const remaining = limits.maxDurationMs - (clock() - startedAt);
+    if (remaining <= 0) {
+      throw new BaiduMarketingError(
+        '百度搜索报告超过整轮时间预算',
+        'BAIDU_REPORT_DEADLINE_EXCEEDED',
+        504
+      );
+    }
+    return remaining;
+  };
+
+  return {
+    beginRequest() {
+      const remaining = remainingMilliseconds();
+      requestCount += 1;
+      if (requestCount > limits.maxRequests) {
+        throw new BaiduMarketingError(
+          '百度搜索报告超过整轮请求预算',
+          'BAIDU_REPORT_RESOURCE_BUDGET_EXCEEDED',
+          502
+        );
+      }
+      return remaining;
+    },
+    remainingResponseBytes() {
+      remainingMilliseconds();
+      const remaining = limits.maxResponseBytes - responseBytes;
+      if (remaining <= 0) {
+        throw new BaiduMarketingError(
+          '百度搜索报告超过整轮资源预算',
+          'BAIDU_REPORT_RESOURCE_BUDGET_EXCEEDED',
+          502
+        );
+      }
+      return remaining;
+    },
+    recordResponse(response, pageRows) {
+      remainingMilliseconds();
+      rowCount += pageRows;
+      responseBytes += response?.[RAW_RESPONSE_BYTES]
+        ?? Buffer.byteLength(JSON.stringify(response), 'utf8');
+      if (
+        rowCount > limits.maxRows
+        || responseBytes > limits.maxResponseBytes
+      ) {
+        throw new BaiduMarketingError(
+          '百度搜索报告超过整轮资源预算',
+          'BAIDU_REPORT_RESOURCE_BUDGET_EXCEEDED',
+          502
+        );
+      }
+    }
+  };
 }
 
 function text(value) {
@@ -122,7 +252,7 @@ function assertString(value, code) {
 }
 
 async function readBoundedBody(response, maxResponseBytes) {
-  if (!response.body) return '';
+  if (!response.body) return { source: '', totalBytes: 0 };
   const reader = response.body.getReader();
   const chunks = [];
   let totalBytes = 0;
@@ -144,7 +274,18 @@ async function readBoundedBody(response, maxResponseBytes) {
     }
     chunks.push(Buffer.from(value));
   }
-  return Buffer.concat(chunks, totalBytes).toString('utf8');
+  return {
+    source: Buffer.concat(chunks, totalBytes).toString('utf8'),
+    totalBytes
+  };
+}
+
+async function cancelResponseBody(response) {
+  try {
+    await response?.body?.cancel?.();
+  } catch {
+    // The original bounded transport failure remains the stable outcome.
+  }
 }
 
 async function defaultTransport({
@@ -157,22 +298,59 @@ async function defaultTransport({
 }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method,
       headers,
       body: method === 'GET' ? undefined : JSON.stringify(json),
       signal: controller.signal,
       redirect: 'error'
     });
+    if (!response.ok) {
+      await cancelResponseBody(response);
+      throw new BaiduMarketingError(
+        '百度接口返回 HTTP 错误',
+        'BAIDU_HTTP_ERROR',
+        502,
+        response.status === 429 || response.status >= 500
+      );
+    }
+    const contentLength = Number(response.headers.get('content-length') || 0);
+    if (contentLength > maxResponseBytes) {
+      await cancelResponseBody(response);
+      throw new BaiduMarketingError(
+        '百度接口响应超过大小预算',
+        'BAIDU_RESPONSE_TOO_LARGE',
+        502
+      );
+    }
+    const { source, totalBytes } = await readBoundedBody(
+      response,
+      maxResponseBytes
+    );
+    try {
+      const parsed = JSON.parse(source);
+      if (parsed && typeof parsed === 'object') {
+        Object.defineProperty(parsed, RAW_RESPONSE_BYTES, {
+          value: totalBytes,
+          enumerable: false
+        });
+      }
+      return parsed;
+    } catch {
+      throw new BaiduMarketingError(
+        '百度接口返回非 JSON 响应',
+        'BAIDU_RESPONSE_INVALID',
+        502
+      );
+    }
   } catch (error) {
+    if (error instanceof BaiduMarketingError) throw error;
     if (error?.name === 'AbortError') {
       throw new BaiduMarketingError(
         '百度接口请求超时',
-        'OUTCOME_UNKNOWN',
-        504,
-        false
+        'BAIDU_REQUEST_TIMEOUT',
+        504
       );
     }
     throw new BaiduMarketingError(
@@ -183,44 +361,6 @@ async function defaultTransport({
     );
   } finally {
     clearTimeout(timeout);
-  }
-
-  if (!response.ok) {
-    throw new BaiduMarketingError(
-      '百度接口返回 HTTP 错误',
-      'BAIDU_HTTP_ERROR',
-      502,
-      response.status === 429 || response.status >= 500
-    );
-  }
-  const contentLength = Number(response.headers.get('content-length') || 0);
-  if (contentLength > maxResponseBytes) {
-    throw new BaiduMarketingError(
-      '百度接口响应超过大小预算',
-      'BAIDU_RESPONSE_TOO_LARGE',
-      502
-    );
-  }
-  let source;
-  try {
-    source = await readBoundedBody(response, maxResponseBytes);
-  } catch (error) {
-    if (error instanceof BaiduMarketingError) throw error;
-    throw new BaiduMarketingError(
-      '百度接口响应读取失败',
-      'BAIDU_UPSTREAM_UNAVAILABLE',
-      502,
-      true
-    );
-  }
-  try {
-    return JSON.parse(source);
-  } catch {
-    throw new BaiduMarketingError(
-      '百度接口返回非 JSON 响应',
-      'BAIDU_RESPONSE_INVALID',
-      502
-    );
   }
 }
 
@@ -927,7 +1067,10 @@ class BaiduMarketingClient {
     scope,
     redirectUri,
     timeoutMs = 10000,
-    transport = defaultTransport
+    transport = defaultTransport,
+    monotonicClock = monotonicMilliseconds,
+    wait = waitForMilliseconds,
+    searchReportBudgetLimits = SEARCH_REPORT_BUDGET_LIMITS
   }) {
     this.allowlist = new Set(documentedAllowlist(manifest));
     this.manifest = manifest;
@@ -937,6 +1080,13 @@ class BaiduMarketingClient {
     this.redirectUri = text(redirectUri);
     this.timeoutMs = Number(timeoutMs);
     this.transport = transport;
+    this.monotonicClock = monotonicClock;
+    this.wait = wait;
+    this.searchReportBudgetLimits = normalizeSearchReportBudgetLimits(
+      searchReportBudgetLimits
+    );
+    this.reportNextRequestAt = new Map();
+    this.reportRateLimitChains = new Map();
     let parsedRedirectUri = null;
     try {
       parsedRedirectUri = new URL(this.redirectUri);
@@ -958,12 +1108,51 @@ class BaiduMarketingClient {
       || this.timeoutMs < 100
       || this.timeoutMs > 60000
       || typeof this.transport !== 'function'
+      || typeof this.monotonicClock !== 'function'
+      || typeof this.wait !== 'function'
+      || !this.searchReportBudgetLimits
     ) {
       throw new BaiduMarketingError(
         '百度营销客户端配置无效',
         'BAIDU_CLIENT_CONFIG_INVALID',
         500
       );
+    }
+  }
+
+  createSearchReportBudget() {
+    return createSearchReportBudget(
+      this.monotonicClock,
+      this.searchReportBudgetLimits
+    );
+  }
+
+  async acquireSearchReportSlot(report) {
+    const key = String(report.reportType);
+    const intervalMilliseconds = Math.ceil(1000 / report.qps);
+    const previous = this.reportRateLimitChains.get(key) || Promise.resolve();
+    let release;
+    const slot = new Promise((resolve) => { release = resolve; });
+    const chain = previous.then(() => slot);
+    this.reportRateLimitChains.set(key, chain);
+    await previous;
+    try {
+      const nextAllowedAt = this.reportNextRequestAt.get(key)
+        ?? this.monotonicClock();
+      let now = this.monotonicClock();
+      while (now < nextAllowedAt) {
+        await this.wait(Math.ceil(nextAllowedAt - now));
+        now = this.monotonicClock();
+      }
+      this.reportNextRequestAt.set(
+        key,
+        Math.max(now, nextAllowedAt) + intervalMilliseconds
+      );
+    } finally {
+      release();
+      if (this.reportRateLimitChains.get(key) === chain) {
+        this.reportRateLimitChains.delete(key);
+      }
     }
   }
 
@@ -1202,7 +1391,8 @@ class BaiduMarketingClient {
     binding,
     accessToken,
     coverage,
-    normalizeRow
+    normalizeRow,
+    budget
   }) {
     const range = assertDateRange(
       coverage,
@@ -1229,6 +1419,9 @@ class BaiduMarketingClient {
         !== 'https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData'
       || !Number.isSafeInteger(report?.reportType)
       || report?.timeUnit !== 'DAY'
+      || !Number.isSafeInteger(report?.qps)
+      || report.qps <= 0
+      || report.qps > 1000
       || !Array.isArray(report?.columns)
       || !report.columns.length
       || !Number.isSafeInteger(pageSize)
@@ -1245,10 +1438,18 @@ class BaiduMarketingClient {
     const normalizedRows = [];
     let expectedTotal = null;
     for (let startRow = 0; startRow <= maxRows; startRow += pageSize) {
+      await this.acquireSearchReportSlot(report);
+      const remainingMilliseconds = budget?.beginRequest();
+      const remainingResponseBytes = budget?.remainingResponseBytes();
       const response = await this.requestJson({
         method: report.method,
         url: report.url,
-        maxResponseBytes: REPORT_RESPONSE_BUDGET,
+        maxResponseBytes: remainingResponseBytes == null
+          ? REPORT_RESPONSE_BUDGET
+          : Math.min(REPORT_RESPONSE_BUDGET, remainingResponseBytes),
+        timeoutMs: remainingMilliseconds == null
+          ? this.timeoutMs
+          : Math.max(1, Math.min(this.timeoutMs, remainingMilliseconds)),
         json: {
           header: {
             userName: accountName,
@@ -1269,6 +1470,7 @@ class BaiduMarketingClient {
         }
       });
       const page = normalizeReportPage(response);
+      budget?.recordResponse(response, page.rowCount);
       if (expectedTotal == null) expectedTotal = page.totalRowCount;
       if (
         page.totalRowCount !== expectedTotal
@@ -1338,12 +1540,25 @@ class BaiduMarketingClient {
     });
   }
 
-  async fetchSearchReports(request) {
-    const campaigns = await this.fetchSearchReport(request);
-    const adGroups = await this.fetchSearchAdGroupReport(request);
-    const keywords = await this.fetchSearchKeywordReport(request);
-    const searchTerms = await this.fetchSearchTermReport(request);
-    return { campaigns, adGroups, keywords, searchTerms };
+  async fetchSearchReports({ budget: sharedBudget = null, ...request }) {
+    const budget = sharedBudget || this.createSearchReportBudget();
+    const readers = {
+      campaigns: () => this.fetchSearchReport({ ...request, budget }),
+      adGroups: () => this.fetchSearchAdGroupReport({ ...request, budget }),
+      keywords: () => this.fetchSearchKeywordReport({ ...request, budget }),
+      searchTerms: () => this.fetchSearchTermReport({ ...request, budget })
+    };
+    const firstSummaries = {};
+    for (const level of SEARCH_REPORT_LEVELS) {
+      firstSummaries[level] = reportRowsSummary(await readers[level]());
+    }
+    const second = {};
+    for (const level of SEARCH_REPORT_LEVELS) {
+      const rows = await readers[level]();
+      assertStableSearchReport(firstSummaries[level], rows);
+      second[level] = rows;
+    }
+    return second;
   }
 
   async listTongjiSites({ accountName, accessToken }) {

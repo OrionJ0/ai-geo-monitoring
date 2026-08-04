@@ -217,7 +217,11 @@ test('keyword analysis page implements the confirmed task-focused visual and int
     path.join(frontendRoot, 'src/lib/marketing/useKeywordAnalysis.ts'),
     'utf8'
   );
-  assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data\)/);
+  assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data, projectId\)/);
+  assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);
+  assert.match(pageSource, /analysis\.warning/);
+  assert.match(pageSource, /!pageError && analysis\.warning/);
+  assert.match(pageSource, /shellLoading \|\| analysis\.loading \|\| !model/);
 
   assert.match(hookSource, /NEXT_PUBLIC_KEYWORD_ANALYSIS_FIXTURE/);
   assert.match(hookSource, /process\.env\.NODE_ENV !== 'production'/);

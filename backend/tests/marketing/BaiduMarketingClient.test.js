@@ -1106,3 +1106,159 @@ test('authorization-code transport uncertainty is not downgraded to a safe failu
     )
   );
 });
+
+test('report timeout covers a response body that never finishes', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  global.fetch = async (_url, options) => ({
+    ok: true,
+    headers: { get: () => null },
+    body: {
+      getReader() {
+        return {
+          read() {
+            return new Promise((_resolve, reject) => {
+              options.signal.addEventListener('abort', () => {
+                const error = new Error('aborted');
+                error.name = 'AbortError';
+                reject(error);
+              }, { once: true });
+            });
+          },
+          async cancel() {}
+        };
+      }
+    }
+  });
+  const client = new BaiduMarketingClient({
+    manifest,
+    ...config,
+    timeoutMs: 100
+  });
+
+  let safetyTimeout;
+  try {
+    await assert.rejects(
+      Promise.race([
+        client.fetchSearchReport({
+          binding: {
+            accountId: '1234',
+            accountName: '脱敏搜索账户'
+          },
+          accessToken: 'access-token-fixture',
+          coverage: { from: '2026-07-05', to: '2026-08-03' }
+        }),
+        new Promise((_, reject) => {
+          safetyTimeout = setTimeout(() => {
+            reject(Object.assign(new Error('测试未观测到超时'), {
+              code: 'TEST_TIMEOUT_NOT_ENFORCED'
+            }));
+          }, 500);
+        })
+      ]),
+      { code: 'BAIDU_REQUEST_TIMEOUT' }
+    );
+  } finally {
+    clearTimeout(safetyTimeout);
+  }
+});
+
+test('search-report aggregate byte budget counts raw response bytes and cancels the reader', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const response = {
+    header: { status: 0, failures: [] },
+    body: {
+      data: [{
+        rowCount: 1,
+        totalRowCount: 1,
+        rows: [{
+          userId: 1234,
+          userName: '脱敏搜索账户',
+          date: '2026-08-03',
+          campaignId: 1,
+          campaignNameStatus: '品牌推广',
+          impression: 10,
+          click: 2,
+          cost: 1
+        }]
+      }]
+    }
+  };
+  const compact = JSON.stringify(response);
+  const maxResponseBytes = Buffer.byteLength(compact, 'utf8') + 32;
+  const raw = Buffer.from(`${compact}${' '.repeat(64)}`, 'utf8');
+  let cancelled = false;
+  global.fetch = async () => ({
+    ok: true,
+    headers: { get: () => null },
+    body: {
+      getReader() {
+        let read = false;
+        return {
+          async read() {
+            if (read) return { done: true, value: undefined };
+            read = true;
+            return { done: false, value: raw };
+          },
+          async cancel() { cancelled = true; }
+        };
+      }
+    }
+  });
+  const client = new BaiduMarketingClient({
+    manifest,
+    ...config,
+    searchReportBudgetLimits: {
+      maxRequests: 10,
+      maxRows: 10,
+      maxResponseBytes,
+      maxDurationMs: 1000
+    }
+  });
+
+  await assert.rejects(
+    client.fetchSearchReport({
+      binding: {
+        accountId: '1234',
+        accountName: '脱敏搜索账户'
+      },
+      accessToken: 'access-token-fixture',
+      coverage: { from: '2026-07-05', to: '2026-08-03' },
+      budget: client.createSearchReportBudget()
+    }),
+    { code: 'BAIDU_RESPONSE_TOO_LARGE' }
+  );
+  assert.equal(cancelled, true);
+});
+
+test('transport cancels unread bodies on HTTP and Content-Length rejection', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const cancellations = [];
+  const responses = [
+    { ok: false, status: 503, contentLength: null, label: 'http' },
+    { ok: true, status: 200, contentLength: String(2 * 1024 * 1024), label: 'length' }
+  ];
+  global.fetch = async () => {
+    const response = responses.shift();
+    return {
+      ok: response.ok,
+      status: response.status,
+      headers: { get: () => response.contentLength },
+      body: {
+        async cancel() { cancellations.push(response.label); }
+      }
+    };
+  };
+  const client = new BaiduMarketingClient({ manifest, ...config });
+  const request = () => client.requestJson({
+    method: 'POST',
+    url: manifest.oauth.token.url,
+    json: {}
+  });
+
+  await assert.rejects(request(), { code: 'BAIDU_HTTP_ERROR' });
+  await assert.rejects(request(), { code: 'BAIDU_RESPONSE_TOO_LARGE' });
+  assert.deepEqual(cancellations, ['http', 'length']);
+});
