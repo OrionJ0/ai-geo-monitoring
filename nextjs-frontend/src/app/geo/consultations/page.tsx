@@ -8,7 +8,6 @@ import {
   Breadcrumb,
   Button,
   Card,
-  DatePicker,
   Descriptions,
   Drawer,
   Empty,
@@ -25,9 +24,7 @@ import {
 import type { TableColumnsType, TableProps } from 'antd';
 import {
   ExportOutlined,
-  FormOutlined,
   LineChartOutlined,
-  MessageOutlined,
   SearchOutlined
 } from '@ant-design/icons';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
@@ -39,9 +36,12 @@ import useConsultationRecords, {
   type ConsultationRecordSummary,
   type ConsultationType
 } from '@/lib/consultations/useConsultationRecords';
+import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
+import { useMarketingFilters } from '@/components/marketing/MarketingFiltersContext';
+import MarketingMetricCard, {
+  MarketingMetricGrid
+} from '@/components/marketing/MarketingMetricCard';
 import styles from './consultations.module.css';
-
-const { RangePicker } = DatePicker;
 const { Text, Title } = Typography;
 
 const TYPE_LABELS: Record<ConsultationType, string> = {
@@ -70,6 +70,23 @@ const DEVICE_LABELS: Record<string, string> = {
 function formatCount(value: string | null | undefined) {
   if (!value) return '—';
   return BigInt(value).toLocaleString('zh-CN');
+}
+
+function formatCountChange(
+  current: string | null | undefined,
+  previous: string | null | undefined
+) {
+  if (current == null || previous == null || BigInt(previous) === BigInt(0)) return null;
+  const currentValue = BigInt(current);
+  const previousValue = BigInt(previous);
+  const difference = currentValue - previousValue;
+  const absoluteDifference = difference < BigInt(0) ? -difference : difference;
+  const tenths = (
+    (absoluteDifference * BigInt(1000) * BigInt(2) + previousValue)
+    / (previousValue * BigInt(2))
+  );
+  const sign = difference > BigInt(0) ? '+' : difference < BigInt(0) ? '-' : '';
+  return `${sign}${tenths / BigInt(10)}.${tenths % BigInt(10)}%`;
 }
 
 function formatTime(value: string) {
@@ -244,13 +261,9 @@ function DetailDrawer({
 
 export default function ConsultationsPage() {
   const defaultContext = useDefaultProjectContext();
-  const [dateRange, setDateRange] = useState<[string, string]>(() => [
-    dayjs().subtract(29, 'day').format('YYYY-MM-DD'),
-    dayjs().format('YYYY-MM-DD')
-  ]);
+  const { device, setDevice, dateRange, setDateRange } = useMarketingFilters();
   const [analysisView, setAnalysisView] = useState<'trend' | 'distribution'>('trend');
   const [analysisSource, setAnalysisSource] = useState('ALL');
-  const [analysisDevice, setAnalysisDevice] = useState('ALL');
   const [typeFilter, setTypeFilter] = useState<'ALL' | ConsultationType>('ALL');
   const [sourceFilter, setSourceFilter] = useState('ALL');
   const [searchInput, setSearchInput] = useState('');
@@ -266,6 +279,15 @@ export default function ConsultationsPage() {
   const returnFocusRef = useRef<HTMLButtonElement | null>(null);
   const returnFocusRecordIdRef = useRef<string | null>(null);
   const projectId = defaultContext.project?.id || '';
+  const queryDevice = device === 'all' ? 'ALL' : device === 'pc' ? 'PC' : 'MOBILE';
+  const previousDateRange = useMemo<[string, string]>(() => {
+    const days = dayjs(dateRange[1]).diff(dayjs(dateRange[0]), 'day') + 1;
+    const previousTo = dayjs(dateRange[0]).subtract(1, 'day');
+    return [
+      previousTo.subtract(days - 1, 'day').format('YYYY-MM-DD'),
+      previousTo.format('YYYY-MM-DD')
+    ];
+  }, [dateRange]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -328,11 +350,11 @@ export default function ConsultationsPage() {
     pageSize,
     type: typeFilter,
     source: sourceFilter,
-    device: 'ALL',
+    device: queryDevice,
     q: searchQuery,
     sortBy,
     sortOrder
-  }), [dateRange, page, pageSize, searchQuery, sortBy, sortOrder, sourceFilter, typeFilter]);
+  }), [dateRange, page, pageSize, queryDevice, searchQuery, sortBy, sortOrder, sourceFilter, typeFilter]);
   const chatCountQuery = useMemo<ConsultationRecordQuery>(() => ({
     from: dateRange[0],
     to: dateRange[1],
@@ -340,17 +362,28 @@ export default function ConsultationsPage() {
     pageSize: 1,
     type: 'ONLINE_CHAT',
     source: 'ALL',
-    device: 'ALL',
+    device: queryDevice,
     q: '',
     sortBy: 'occurredAt',
     sortOrder: 'desc'
-  }), [dateRange]);
+  }), [dateRange, queryDevice]);
+  const previousChatCountQuery = useMemo<ConsultationRecordQuery>(() => ({
+    ...chatCountQuery,
+    from: previousDateRange[0],
+    to: previousDateRange[1]
+  }), [chatCountQuery, previousDateRange]);
 
   const formDays = useWebsiteFormConsultationDays({
     projectId,
     enabled: Boolean(projectId),
     from: dateRange[0],
     to: dateRange[1]
+  });
+  const previousFormDays = useWebsiteFormConsultationDays({
+    projectId,
+    enabled: Boolean(projectId),
+    from: previousDateRange[0],
+    to: previousDateRange[1]
   });
   const records = useConsultationRecords({
     projectId,
@@ -362,17 +395,33 @@ export default function ConsultationsPage() {
     enabled: Boolean(projectId),
     query: chatCountQuery
   });
+  const previousChatCount = useConsultationRecords({
+    projectId,
+    enabled: Boolean(projectId),
+    query: previousChatCountQuery
+  });
 
-  const websiteRecordStatus = records.data?.sources.find((source) => (
-    source.sourceSystem === 'GATO_WEBSITE'
-  ));
   const chatRecordStatus = chatCount.data?.sources.find((source) => (
     source.sourceSystem === 'KF53'
   ));
   const chatCountValue = chatRecordStatus?.recordCoverage === 'FULL'
     ? String(chatCount.data?.pagination.totalItems ?? 0)
     : null;
-  const formCount = formDays.data?.summary.attributedFormSubmissionSessions || null;
+  const previousChatRecordStatus = previousChatCount.data?.sources.find((source) => (
+    source.sourceSystem === 'KF53'
+  ));
+  const previousChatCountValue = previousChatRecordStatus?.recordCoverage === 'FULL'
+    ? String(previousChatCount.data?.pagination.totalItems ?? 0)
+    : null;
+  const formCount = device === 'all'
+    ? formDays.data?.summary.attributedFormSubmissionSessions || null
+    : null;
+  const previousFormCount = device === 'all'
+    ? previousFormDays.data?.summary.attributedFormSubmissionSessions || null
+    : null;
+  const recordSourceWarnings = (records.data?.sources || []).filter((source) => (
+    source.recordCoverage !== 'FULL'
+  ));
 
   const sourceOptions = useMemo(() => {
     const keys = new Set<string>();
@@ -385,7 +434,7 @@ export default function ConsultationsPage() {
   }, [formDays.data?.sourceBreakdown, records.data?.items]);
 
   const websiteTrend = useMemo(() => {
-    if (!formDays.data || analysisDevice !== 'ALL') return [];
+    if (!formDays.data || device !== 'all') return [];
     return formDays.data.days.map((day) => {
       const value = analysisSource === 'ALL'
         ? day.attributedFormSubmissionSessions
@@ -399,10 +448,10 @@ export default function ConsultationsPage() {
         type: '表单咨询'
       };
     });
-  }, [analysisDevice, analysisSource, formDays.data]);
+  }, [analysisSource, device, formDays.data]);
 
   const distribution = useMemo(() => {
-    if (!formDays.data || analysisDevice !== 'ALL') return [];
+    if (!formDays.data || device !== 'all') return [];
     return formDays.data.sourceBreakdown
       .filter((source) => analysisSource === 'ALL' || source.sourceKey === analysisSource)
       .map((source) => ({
@@ -410,7 +459,7 @@ export default function ConsultationsPage() {
         value: Number(source.attributedFormSubmissionSessions),
         type: '表单咨询'
       }));
-  }, [analysisDevice, analysisSource, formDays.data]);
+  }, [analysisSource, device, formDays.data]);
 
   const chatTrendStatus = chatRecordStatus?.recordCoverage === 'FULL'
     ? '逐条记录已接入，但当前分析合同尚未提供 53KF 逐日序列。'
@@ -433,7 +482,7 @@ export default function ConsultationsPage() {
           description={formDays.errorMessage || '官网表单逐日数据读取失败'}
           action={<Button size="small" onClick={() => void formDays.reload()}>重试</Button>}
         />
-      ) : analysisDevice !== 'ALL' ? (
+      ) : device !== 'all' ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description="当前官网表单聚合合同未提供设备维度；不会按总量推断设备分布。"
@@ -510,7 +559,7 @@ export default function ConsultationsPage() {
           description={formDays.errorMessage || '官网表单来源数据读取失败'}
           action={<Button size="small" onClick={() => void formDays.reload()}>重试</Button>}
         />
-      ) : analysisDevice !== 'ALL' ? (
+      ) : device !== 'all' ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description="当前官网表单聚合合同未提供设备维度；不会按总量推断设备分布。"
@@ -652,7 +701,7 @@ export default function ConsultationsPage() {
       width: 152,
       ellipsis: true,
       render: (_, record) => (
-        <Tooltip title={record.landingPage.path || undefined}>
+        <Tooltip title={record.landingPage.path || undefined} trigger={['hover']}>
           <span>{record.landingPage.label || record.landingPage.path || '—'}</span>
         </Tooltip>
       )
@@ -675,38 +724,48 @@ export default function ConsultationsPage() {
       key: 'view',
       width: 72,
       align: 'center',
-      render: (_, record) => record.detailAvailable ? (
-        <Button
-          type="link"
-          size="small"
-          data-consultation-record-id={record.id}
-          aria-label={`查看 ${fullTime(record.occurredAt)} 的${TYPE_LABELS[record.consultationType]}详情`}
-          onClick={(event) => void openDetail(
-            record,
-            event.currentTarget as HTMLButtonElement
-          )}
-        >
-          查看
-        </Button>
-      ) : (
-        <span className={styles.unavailableAction}>
-          <Button
-            type="link"
-            size="small"
-            aria-disabled="true"
-            aria-describedby={`detail-unavailable-${record.id.replace(/[^A-Za-z0-9_-]/gu, '-')}`}
-            onClick={(event) => event.preventDefault()}
-          >
-            查看
-          </Button>
-          <span
-            id={`detail-unavailable-${record.id.replace(/[^A-Za-z0-9_-]/gu, '-')}`}
-            className={styles.visuallyHidden}
-          >
-            来源明细接口尚未验证，当前不能查看详情。
-          </span>
-        </span>
-      )
+      render: (_, record) => {
+        if (record.detailAvailable) {
+          return (
+            <Button
+              type="link"
+              size="small"
+              data-consultation-record-id={record.id}
+              aria-label={`查看 ${fullTime(record.occurredAt)} 的${TYPE_LABELS[record.consultationType]}详情`}
+              onClick={(event) => void openDetail(
+                record,
+                event.currentTarget as HTMLButtonElement
+              )}
+            >
+              查看
+            </Button>
+          );
+        }
+        const reasonId = `consultation-detail-unavailable-${record.id.replace(/[^a-zA-Z0-9_-]/gu, '-')}`;
+        return (
+          <Tooltip title="来源明细接口尚未验证，当前不能查看详情。" trigger={['hover']}>
+            <span className={styles.unavailableAction}>
+              <Button
+                type="link"
+                size="small"
+                aria-disabled="true"
+                aria-describedby={reasonId}
+                onClick={(event) => event.preventDefault()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                查看
+              </Button>
+              <span id={reasonId} className={styles.visuallyHidden}>
+                来源明细接口尚未验证，当前不能查看详情。
+              </span>
+            </span>
+          </Tooltip>
+        );
+      }
     }
   ];
 
@@ -731,30 +790,29 @@ export default function ConsultationsPage() {
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.visuallyHidden}>原始咨询</h1>
+      <h1 className={styles.visuallyHidden}>咨询数据</h1>
       <div className={styles.breadcrumbRow}>
         <Breadcrumb items={[
           { title: '首页' },
           { title: '转化结果' },
-          { title: '原始咨询' }
+          { title: '咨询数据' }
         ]} />
-        <div className={styles.dateRangeGroup} role="group" aria-label="咨询日期范围">
-          <RangePicker
-            placeholder={['咨询开始日期', '咨询结束日期']}
-            value={[dayjs(dateRange[0]), dayjs(dateRange[1])]}
-            format="YYYY-MM-DD"
-            separator="至"
-            allowClear={false}
-            onChange={(values) => {
-              if (!values?.[0] || !values?.[1]) return;
-              setDateRange([
-                values[0].format('YYYY-MM-DD'),
-                values[1].format('YYYY-MM-DD')
-              ]);
-              setPage(1);
-            }}
-          />
-        </div>
+        <MarketingPageFilters
+          device={device}
+          onDeviceChange={(nextDevice) => {
+            setDevice(nextDevice);
+            setPage(1);
+          }}
+          dateRange={dateRange}
+          onDateRangeChange={(nextRange) => {
+            setDateRange(nextRange);
+            setPage(1);
+          }}
+          dateAriaLabel="咨询数据日期范围"
+          maxDate={dayjs().format('YYYY-MM-DD')}
+          presetAnchor={dayjs().format('YYYY-MM-DD')}
+          presetDays={[7, 14, 30]}
+        />
       </div>
 
       <div className={styles.visuallyHidden} aria-live="polite" aria-atomic="true">
@@ -781,44 +839,51 @@ export default function ConsultationsPage() {
         />
       ) : null}
 
-      <Card className={styles.summaryCard}>
-        <div className={styles.summaryGrid}>
-          <section className={styles.summaryMetric} aria-labelledby="form-summary-title">
-            <div className={styles.metricTitleRow}>
-              <FormOutlined aria-hidden="true" />
-              <span id="form-summary-title">表单咨询</span>
-              <Tag>可归因会话</Tag>
-            </div>
-            {formDays.state === 'LOADING' ? (
-              <Skeleton.Input active size="small" />
-            ) : (
-              <strong>{formatCount(formCount)}</strong>
-            )}
-            <p>
-              {formDays.state === 'SOURCE_ERROR'
-                ? formDays.errorMessage
-                : websiteRecordStatus
-                  ? sourceReadyMessage(websiteRecordStatus)
-                  : '来自官网成功写入且具备会话归因的表单提交。'}
-            </p>
-          </section>
-          <section className={styles.summaryMetric} aria-labelledby="chat-summary-title">
-            <div className={styles.metricTitleRow}>
-              <MessageOutlined aria-hidden="true" />
-              <span id="chat-summary-title">在线客服有效对话</span>
-              <Tag color={chatRecordStatus?.recordCoverage === 'FULL' ? 'success' : 'default'}>
-                {chatRecordStatus?.recordCoverage === 'FULL' ? '已接入' : '未验证'}
-              </Tag>
-            </div>
-            {chatCount.state === 'LOADING' ? (
-              <Skeleton.Input active size="small" />
-            ) : (
-              <strong>{formatCount(chatCountValue)}</strong>
-            )}
-            <p>{sourceReadyMessage(chatRecordStatus)}</p>
-          </section>
+      <div className={styles.metricSummary}>
+      <h2 className={styles.visuallyHidden}>周期汇总</h2>
+      <MarketingMetricGrid ariaLabel="咨询数据周期汇总指标">
+        <MarketingMetricCard
+          title="表单咨询"
+          metricKey="FORM"
+          current={formCount == null ? null : formatCount(formCount)}
+          previous={previousFormCount == null ? null : formatCount(previousFormCount)}
+          change={formatCountChange(formCount, previousFormCount)}
+          loading={formDays.state === 'LOADING' || previousFormDays.state === 'LOADING'}
+          info="官网成功提交且能识别来源的表单数。"
+          currentMissingReason={device !== 'all'
+            ? '官网表单聚合合同不提供设备维度，不会用总量推断。'
+            : formDays.errorMessage || '当前没有可用的表单咨询数据。'}
+          previousMissingReason={previousFormDays.errorMessage || '上一周期表单咨询不可用。'}
+          changeMissingReason="本期或上期数据不完整，无法比较。"
+        />
+        <MarketingMetricCard
+          title="在线客服有效对话"
+          metricKey="53KF CHAT"
+          current={chatCountValue == null ? null : formatCount(chatCountValue)}
+          previous={previousChatCountValue == null ? null : formatCount(previousChatCountValue)}
+          change={formatCountChange(chatCountValue, previousChatCountValue)}
+          loading={chatCount.state === 'LOADING' || previousChatCount.state === 'LOADING'}
+          info="访客主动发过消息的 53KF 对话；不含机器人和系统消息。"
+          currentMissingReason={sourceReadyMessage(chatRecordStatus)}
+          previousMissingReason={sourceReadyMessage(previousChatRecordStatus)}
+          changeMissingReason="53KF 本期或上期有效对话不完整，无法比较。"
+        />
+      </MarketingMetricGrid>
+      </div>
+
+      {recordSourceWarnings.length > 0 ? (
+        <div className={styles.sourceStatusStack} aria-label="咨询来源接入状态">
+          {recordSourceWarnings.map((source) => (
+            <Alert
+              key={`${source.sourceSystem}:${source.consultationType}`}
+              type="warning"
+              showIcon
+              title={`${TYPE_LABELS[source.consultationType]}数据范围受限`}
+              description={sourceStatusMessage(source.reasonCode)}
+            />
+          ))}
         </div>
-      </Card>
+      ) : null}
 
       <Card className={styles.analysisCard}>
         <div className={styles.analysisShell} onKeyDown={handleAnalysisKeyDown}>
@@ -830,20 +895,6 @@ export default function ConsultationsPage() {
                 value={analysisSource}
                 onChange={setAnalysisSource}
                 options={[{ value: 'ALL', label: '全部来源' }, ...sourceOptions]}
-                popupMatchSelectWidth={false}
-              />
-            </label>
-            <label>
-              <span>设备</span>
-              <Select
-                aria-label="咨询分析设备"
-                value={analysisDevice}
-                onChange={setAnalysisDevice}
-                options={[
-                  { value: 'ALL', label: '全部设备' },
-                  { value: 'PC', label: 'PC' },
-                  { value: 'MOBILE', label: '移动端' }
-                ]}
                 popupMatchSelectWidth={false}
               />
             </label>

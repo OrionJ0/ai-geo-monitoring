@@ -61,6 +61,77 @@ function createDefaultMigrationAuditor(sequelize) {
   };
 }
 
+function createTongjiQueueError(code, message) {
+  return Object.assign(new Error(message), {
+    code,
+    status: 503,
+    retryAfterSeconds: 2
+  });
+}
+
+function createConcurrencyGate(
+  limit = 2,
+  { maxQueue = 32, waitTimeoutMs = 15_000 } = {}
+) {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new TypeError('Concurrency limit must be a positive integer');
+  }
+  if (!Number.isSafeInteger(maxQueue) || maxQueue < 1) {
+    throw new TypeError('Concurrency queue size must be a positive integer');
+  }
+  if (!Number.isSafeInteger(waitTimeoutMs) || waitTimeoutMs < 1) {
+    throw new TypeError('Concurrency wait timeout must be a positive integer');
+  }
+
+  let active = 0;
+  const queue = [];
+  const drain = () => {
+    while (active < limit && queue.length) {
+      const entry = queue.shift();
+      if (entry.settled) continue;
+      entry.settled = true;
+      clearTimeout(entry.timeout);
+      active += 1;
+      Promise.resolve()
+        .then(entry.task)
+        .then(entry.resolve, entry.reject)
+        .finally(() => {
+          active -= 1;
+          drain();
+        });
+    }
+  };
+  return (task) => new Promise((resolve, reject) => {
+    if (active >= limit && queue.length >= maxQueue) {
+      reject(createTongjiQueueError(
+        'BAIDU_TONGJI_QUEUE_FULL',
+        '百度统计请求队列已满，请稍后重试'
+      ));
+      return;
+    }
+
+    const entry = {
+      task,
+      resolve,
+      reject,
+      settled: false,
+      timeout: null
+    };
+    entry.timeout = setTimeout(() => {
+      if (entry.settled) return;
+      entry.settled = true;
+      const index = queue.indexOf(entry);
+      if (index >= 0) queue.splice(index, 1);
+      reject(createTongjiQueueError(
+        'BAIDU_TONGJI_QUEUE_TIMEOUT',
+        '百度统计请求排队超时，请稍后重试'
+      ));
+    }, waitTimeoutMs);
+    queue.push(entry);
+    drain();
+  });
+}
+
 function createMarketingModule({
   env = process.env,
   sequelize = null,
@@ -156,6 +227,7 @@ function createMarketingModule({
       redirectUri: env.BAIDU_MARKETING_REDIRECT_URI,
       timeoutMs: Number(env.BAIDU_MARKETING_HTTP_TIMEOUT_MS)
     });
+    const runTongjiRequest = createConcurrencyGate(2);
     const connectionService = new BaiduConnectionService({
       sequelize,
       provider: baiduProvider,
@@ -196,10 +268,10 @@ function createMarketingModule({
       const credential = await tongjiCredentialService.getCredential(
         connection.id
       );
-      const sites = await baiduProvider.listTongjiSites({
+      const sites = await runTongjiRequest(() => baiduProvider.listTongjiSites({
         accountName: credential.accountName,
         accessToken: credential.accessToken
-      });
+      }));
       const site = sites.find((item) => (
         item.siteId === connection.tongji_site_id
       ));
@@ -259,24 +331,24 @@ function createMarketingModule({
           sourceSummaries,
           engineSummaries
         ] = await Promise.all([
-          baiduProvider.fetchTongjiTrend(common),
+          runTongjiRequest(() => baiduProvider.fetchTongjiTrend(common)),
           includeQuality
             && manifest.tongji?.qualityMetrics?.runtimeEnabled === true
-            ? baiduProvider.fetchTongjiQualityTrend(common)
+            ? runTongjiRequest(() => baiduProvider.fetchTongjiQualityTrend(common))
             : Promise.resolve(null),
           includeSources
             && manifest.tongji?.sourceReports?.runtimeEnabled === true
-            ? baiduProvider.fetchTongjiSourceSummary({
+            ? runTongjiRequest(() => baiduProvider.fetchTongjiSourceSummary({
                 ...common,
                 reportKey: 'ALL'
-              })
+              }))
             : Promise.resolve([]),
           includeSources
             && manifest.tongji?.sourceReports?.runtimeEnabled === true
-            ? baiduProvider.fetchTongjiSourceSummary({
+            ? runTongjiRequest(() => baiduProvider.fetchTongjiSourceSummary({
                 ...common,
                 reportKey: 'ENGINE'
-              })
+              }))
             : Promise.resolve([])
         ]);
         return {
@@ -303,10 +375,10 @@ function createMarketingModule({
           coverage,
           device
         };
-        const read = (key) => baiduProvider.fetchTongjiTrend({
+        const read = (key) => runTongjiRequest(() => baiduProvider.fetchTongjiTrend({
           ...common,
           sourceKey: key
-        });
+        }));
         const dates = [];
         const coverageEnd = Date.parse(`${coverage.to}T00:00:00.000Z`);
         for (
@@ -342,7 +414,9 @@ function createMarketingModule({
           visitors: null
         }));
         let rows;
-        if (sourceKey === 'BAIDU_SEARCH') {
+        if (sourceKey === 'BAIDU_PAID') {
+          rows = await read('BAIDU_PAID');
+        } else if (sourceKey === 'BAIDU_SEARCH') {
           rows = await read('BAIDU_NATURAL');
         } else if (sourceKey === 'DIRECT') {
           rows = await read('DIRECT');
@@ -351,30 +425,34 @@ function createMarketingModule({
             (selectors?.bingEngineIds || []).map((id) => read(`ENGINE:${id}`))
           );
           rows = bingSeries.length ? sumRows(bingSeries) : missingRows();
-        } else if (sourceKey === 'OTHER') {
-          const [otherSearch, external, ...bingSeries] = await Promise.all([
+        } else if (sourceKey === 'GOOGLE_SEARCH') {
+          const googleSeries = await Promise.all(
+            (selectors?.googleEngineIds || []).map((id) => read(`ENGINE:${id}`))
+          );
+          rows = googleSeries.length ? sumRows(googleSeries) : missingRows();
+        } else if (sourceKey === 'OTHER_SEARCH') {
+          const bingIds = selectors?.bingEngineIds || [];
+          const googleIds = selectors?.googleEngineIds || [];
+          const [otherSearch, ...knownEngineSeries] = await Promise.all([
             read('OTHER_SEARCH'),
-            read('EXTERNAL'),
-            ...(selectors?.bingEngineIds || []).map((id) => read(`ENGINE:${id}`))
+            ...[...bingIds, ...googleIds].map((id) => read(`ENGINE:${id}`))
           ]);
-          const bing = bingSeries.length
-            ? sumRows(bingSeries)
+          const knownEngines = knownEngineSeries.length
+            ? sumRows(knownEngineSeries)
             : missingRows();
           const otherByDate = new Map(otherSearch.map((row) => [row.date, row]));
-          const externalByDate = new Map(external.map((row) => [row.date, row]));
-          const bingByDate = new Map(bing.map((row) => [row.date, row]));
+          const knownByDate = new Map(knownEngines.map((row) => [row.date, row]));
           rows = dates.map((date) => {
-            const subtractBing = (metric) => {
+            const subtractKnownEngines = (metric) => {
               const values = [
                 otherByDate.get(date)?.[metric],
-                externalByDate.get(date)?.[metric],
-                bingByDate.get(date)?.[metric]
+                knownByDate.get(date)?.[metric]
               ];
               if (values.some((value) => value == null)) return null;
-              return BigInt(values[0]) + BigInt(values[1]) - BigInt(values[2]);
+              return BigInt(values[0]) - BigInt(values[1]);
             };
-            const pageviews = subtractBing('pageviews');
-            const visits = subtractBing('visits');
+            const pageviews = subtractKnownEngines('pageviews');
+            const visits = subtractKnownEngines('visits');
             if (pageviews < 0n || visits < 0n) {
               throw new BaiduMarketingError(
                 '百度统计来源拆分结果无效',
@@ -389,6 +467,8 @@ function createMarketingModule({
               visitors: null
             };
           });
+        } else if (sourceKey === 'EXTERNAL_REFERRAL') {
+          rows = await read('EXTERNAL');
         } else {
           throw new BaiduMarketingError(
             '百度统计来源筛选无效',
@@ -400,14 +480,14 @@ function createMarketingModule({
       },
       async readPageReport({ connection, coverage, device, view }) {
         const context = await readBoundTongjiContext(connection);
-        return baiduProvider.fetchTongjiPageReport({
+        return runTongjiRequest(() => baiduProvider.fetchTongjiPageReport({
           accountName: context.accountName,
           accessToken: context.accessToken,
           siteId: context.site.siteId,
           coverage,
           device,
           view
-        });
+        }));
       }
     };
     const authorizationService = new BaiduAuthorizationService({
@@ -529,5 +609,6 @@ function createMarketingModule({
 }
 
 module.exports = {
+  createConcurrencyGate,
   createMarketingModule
 };

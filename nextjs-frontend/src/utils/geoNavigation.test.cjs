@@ -26,15 +26,14 @@ test('workspace always shows the complete agreed information architecture', () =
     '广告表现',
     '关键词分析',
     '网站流量',
-    '原始咨询',
+    '咨询数据',
     '订单结果',
-    'AI 搜索表现',
-    '引用来源分析',
-    'SEO 健康检测',
     '问题库',
     '运行报告',
+    '总体表现',
+    '引用来源分析',
+    'SEO 健康检测',
     '常用网站',
-    '系统通知',
     '个人中心'
   ]);
   assert.match(hrefs.join(' '), /market-overview|quick-links|ad-performance|keyword-analysis|website-traffic|consultations|order-results/);
@@ -53,9 +52,9 @@ test('workspace navigation groups use the approved order and names', () => {
     '市场总览',
     '投放与流量',
     '转化结果',
-    'AI 品牌监测',
-    '网站诊断',
     '监测任务',
+    'GEO 监测',
+    '网站诊断',
     '常用网站',
     '设置'
   ]);
@@ -68,6 +67,7 @@ test('workspace navigation groups use the approved order and names', () => {
   assert.equal(navigation.at(-2).label, '常用网站');
   assert.equal(navigation.at(-1).label, '设置');
   assert.equal(resolveGeoDefaultRoute({ formalNavigation: true }), '/geo/market-overview');
+  assert.equal(items.some((item) => item.href === '/geo/notice'), false);
 });
 
 test('workspace settings group does not jump into the administrator console', () => {

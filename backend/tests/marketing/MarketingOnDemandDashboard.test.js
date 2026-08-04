@@ -157,7 +157,8 @@ test('dashboard returns an old revision with an explicit stale failure state', a
   const service = new MarketingOnDemandDashboardService({
     dashboardService: dashboardReader,
     refreshService,
-    executeRefresh: (runId) => refreshService.executeRun(runId)
+    executeRefresh: (runId) => refreshService.executeRun(runId),
+    clock: () => now
   });
 
   const first = await service.read({ projectId: 11 });
@@ -169,4 +170,74 @@ test('dashboard returns an old revision with an explicit stale failure state', a
     fallback.lastRun.failureCode,
     'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
   );
+  const repeatedFallback = await service.read({ projectId: 11 });
+  assert.equal(repeatedFallback.revision, first.revision);
+  assert.equal(providerCalls, 2, '失败冷却内不得重复调用百度四份报告');
+});
+
+test('crossed-day stale recovery refreshes once before coverage discovery and clamped read', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-on-demand-crossed-day-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  let now = Date.parse('2026-08-03T04:00:00.000Z');
+  let providerCalls = 0;
+  const refreshService = new MarketingRefreshService({
+    sequelize: database.sequelize,
+    reportProvider: {
+      async fetchSearchReports({ binding, coverage }) {
+        providerCalls += 1;
+        if (providerCalls > 1) {
+          const error = new Error('上游快照漂移');
+          error.code = 'BAIDU_REPORT_SNAPSHOT_UNSTABLE';
+          throw error;
+        }
+        return campaignOnlyReports([{
+          accountId: binding.accountId,
+          campaignId: 'old-campaign',
+          campaignName: '旧快照',
+          metricDate: coverage.to,
+          impressions: '1',
+          clicks: '1',
+          costAmountScaled: '1'
+        }]);
+      }
+    },
+    contractVersion: 'fixture-contract-v1',
+    currencyCode: 'CNY',
+    costScale: 6,
+    clock: () => now
+  });
+  const service = new MarketingOnDemandDashboardService({
+    dashboardService: new MarketingDashboardService({
+      sequelize: database.sequelize,
+      clock: () => now
+    }),
+    refreshService,
+    executeRefresh: (runId) => refreshService.executeRun(runId),
+    clock: () => now
+  });
+
+  const first = await service.read({ projectId: 11 });
+  now += 24 * 60 * 60 * 1000 + 11 * 60 * 1000;
+  await assert.rejects(
+    service.read({
+      projectId: 11,
+      from: first.coverage.from,
+      to: '2026-08-03'
+    }),
+    { code: 'DASHBOARD_DATE_OUT_OF_RANGE', status: 422 }
+  );
+  const coverage = await service.read({ projectId: 11 });
+  const clamped = await service.read({
+    projectId: 11,
+    from: coverage.coverage.from,
+    to: coverage.coverage.to
+  });
+
+  assert.equal(clamped.revision, first.revision);
+  assert.deepEqual(clamped.filter, {
+    from: first.coverage.from,
+    to: first.coverage.to
+  });
+  assert.equal(providerCalls, 2, '范围发现与钳制读取不得重复刷新上游');
 });

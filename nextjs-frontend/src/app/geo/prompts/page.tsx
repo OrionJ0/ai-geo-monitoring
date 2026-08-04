@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, Descriptions, Empty, Form, Input, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Descriptions, Empty, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import axios from '@/lib/axiosConfig';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
@@ -23,12 +23,17 @@ import {
   shouldResetPromptListFilters,
   shouldResetPromptSelection
 } from '@/utils/promptSelection.cjs';
-import { filterPromptRows } from '@/utils/promptListFilters.cjs';
+import {
+  filterPromptRows,
+  retainVisiblePromptSelection,
+  sortPromptRowsStable
+} from '@/utils/promptListFilters.cjs';
 import { parseBatchQuestions } from '@/utils/questionBatchParser.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import WebCaptureEvidence from '@/components/WebCaptureEvidence';
 import WebPlatformRuntimeStatus from '@/components/WebPlatformRuntimeStatus';
+import WorkspacePageHeader from '@/components/WorkspacePageHeader';
 
 const { Text } = Typography;
 
@@ -57,12 +62,12 @@ const percent = (value) => {
 
 const formatRank = (value) => {
   const n = Number(value || 0);
-  return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '-';
+  return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '—';
 };
 
 const formatPerformanceRate = (value, numerator, denominator) => {
   if (value === null || value === undefined || value === '') {
-    return `N/A（有效回答 ${Number(denominator || 0)}）`;
+    return `—（有效回答 ${Number(denominator || 0)}）`;
   }
   return `${percent(value)}（${Number(numerator || 0)} / ${Number(denominator || 0)}）`;
 };
@@ -71,7 +76,7 @@ const formatSovSummary = (summary) => {
   const value = summary?.average;
   const count = Number(summary?.calculable_answers || 0);
   return value === null || value === undefined
-    ? `N/A（有效回答 ${count}）`
+    ? `—（有效回答 ${count}）`
     : `${percent(value)}（有效回答 ${count}）`;
 };
 
@@ -99,10 +104,13 @@ export default function GeoPromptsPage() {
   const [editingQuestionSet, setEditingQuestionSet] = useState(null);
   const [savingQuestionSet, setSavingQuestionSet] = useState(false);
   const [runningQuestionSetId, setRunningQuestionSetId] = useState(null);
+  const [addToQuestionSetOpen, setAddToQuestionSetOpen] = useState(false);
+  const [addToQuestionSetId, setAddToQuestionSetId] = useState(null);
+  const [addingToQuestionSet, setAddingToQuestionSet] = useState(false);
   const [selectedPromptIds, setSelectedPromptIds] = useState([]);
   const [promptSearch, setPromptSearch] = useState('');
   const [promptStatusFilter, setPromptStatusFilter] = useState('all');
-  const [promptCategoryFilter, setPromptCategoryFilter] = useState('all');
+  const [promptQuestionSetFilter, setPromptQuestionSetFilter] = useState('all');
   const [days, setDays] = useState(30);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyPrompt, setHistoryPrompt] = useState(null);
@@ -145,10 +153,6 @@ export default function GeoPromptsPage() {
     });
   };
 
-  const normalizeList = (value) => Array.isArray(value)
-    ? value.map((item) => String(item || '').trim()).filter(Boolean)
-    : [];
-
   const batchPreview = useMemo(
     () => parseBatchQuestions(batchText || ''),
     [batchText]
@@ -158,26 +162,26 @@ export default function GeoPromptsPage() {
     return filterPromptRows(prompts, {
       search: promptSearch,
       status: promptStatusFilter,
-      category: promptCategoryFilter
+      questionSet: promptQuestionSetFilter
     });
-  }, [prompts, promptSearch, promptStatusFilter, promptCategoryFilter]);
+  }, [prompts, promptSearch, promptStatusFilter, promptQuestionSetFilter]);
+
+  useEffect(() => {
+    setSelectedPromptIds((current) => retainVisiblePromptSelection(current, filteredPrompts));
+  }, [filteredPrompts]);
 
   const selectedFilteredCount = useMemo(() => {
     const selected = new Set(selectedPromptIds);
     return filteredPrompts.filter((item) => selected.has(item.id)).length;
   }, [filteredPrompts, selectedPromptIds]);
 
-  const promptCategoryOptions = useMemo(() => {
-    const categories = Array.from(new Set(
-      prompts
-        .map((item) => String(item?.category || item?.prompt_category || '').trim())
-        .filter(Boolean)
-    )).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  const promptQuestionSetOptions = useMemo(() => {
     return [
-      { label: '全部分类', value: 'all' },
-      ...categories.map((item) => ({ label: item, value: item }))
+      { label: '全部问题集', value: 'all' },
+      { label: '未分组', value: 'unassigned' },
+      ...questionSets.map((item) => ({ label: item.name, value: String(item.id) }))
     ];
-  }, [prompts]);
+  }, [questionSets]);
 
   const getPromptRunDisabledReason = (row) => {
     if (row?.enabled === false) return '问题已停用，启用后才能运行';
@@ -223,10 +227,10 @@ export default function GeoPromptsPage() {
         <Descriptions bordered column={2} size="small" styles={{ label: { whiteSpace: 'nowrap', width: 90 } }}>
           <Descriptions.Item label="检测时间">{formatOptionalDateTimeShort(row.created_at)}</Descriptions.Item>
           <Descriptions.Item label="状态">
-            <Tag color={statusColor}>{statusLabels[row.status] || row.status || '-'}</Tag>
+            <Tag color={statusColor}>{statusLabels[row.status] || row.status || '—'}</Tag>
           </Descriptions.Item>
           <Descriptions.Item label="问题" span={1}>
-            <div style={{ wordBreak: 'break-word' }}>{row.question || historyPrompt?.question || '-'}</div>
+            <div style={{ wordBreak: 'break-word' }}>{row.question || historyPrompt?.question || '—'}</div>
           </Descriptions.Item>
           <Descriptions.Item label="检测关键词" span={1}>
             {brandKeywords.length ? (
@@ -235,11 +239,11 @@ export default function GeoPromptsPage() {
               </Space>
             ) : <span>-</span>}
           </Descriptions.Item>
-          <Descriptions.Item label="品牌" span={1}>{row.brand || selectedProject?.name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="品牌" span={1}>{row.brand || selectedProject?.name || '—'}</Descriptions.Item>
           <Descriptions.Item label="检测平台" span={1}>
-            <Tag color="processing">{row.platform_name || platformLabels[row.platform] || String(row.platform || '-')}</Tag>
+            <Tag color="processing">{row.platform_name || platformLabels[row.platform] || String(row.platform || '—')}</Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="实际模型" span={1}>{row.model_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="实际模型" span={1}>{row.model_name || '—'}</Descriptions.Item>
           <Descriptions.Item label={analysisDisplay.sovLabel} span={1}>
             {analysisDisplay.sov}
           </Descriptions.Item>
@@ -339,7 +343,9 @@ export default function GeoPromptsPage() {
     setPromptsLoading(true);
     try {
       const res = await axios.get(`/api/geo-projects/${projectId}/prompts`, { params: { days: targetDays } });
-      if (promptsRequestRef.current === requestId) setPrompts(Array.isArray(res?.data?.data) ? res.data.data : []);
+      if (promptsRequestRef.current === requestId) {
+        setPrompts(sortPromptRowsStable(Array.isArray(res?.data?.data) ? res.data.data : []));
+      }
     } catch (error) {
       if (promptsRequestRef.current === requestId) {
         message.error(getApiErrorMessage(error, '获取问题列表失败'));
@@ -389,7 +395,7 @@ export default function GeoPromptsPage() {
     if (shouldResetPromptListFilters(previousProjectIdRef.current, selectedProjectId)) {
       setPromptSearch('');
       setPromptStatusFilter('all');
-      setPromptCategoryFilter('all');
+      setPromptQuestionSetFilter('all');
     }
     if (shouldClearGeneratedPromptSuggestions(previousProjectIdRef.current, selectedProjectId)) {
       setModalOpen(false);
@@ -397,6 +403,9 @@ export default function GeoPromptsPage() {
       setBatchModalOpen(false);
       setQuestionSetModalOpen(false);
       setEditingQuestionSet(null);
+      setAddToQuestionSetOpen(false);
+      setAddToQuestionSetId(null);
+      setAddingToQuestionSet(false);
       form.resetFields();
       batchForm.resetFields();
       questionSetForm.resetFields();
@@ -427,7 +436,6 @@ export default function GeoPromptsPage() {
     setEditingPrompt(null);
     form.setFieldsValue({
       question: '',
-      tags: [],
       question_set_id: null,
       enabled: true,
     });
@@ -438,7 +446,6 @@ export default function GeoPromptsPage() {
     setEditingPrompt(record);
     form.setFieldsValue({
       question: record.question || '',
-      tags: normalizeList(record.tags),
       question_set_id: record.question_set_id || null,
       enabled: record.enabled !== false,
     });
@@ -452,7 +459,6 @@ export default function GeoPromptsPage() {
     }
     batchForm.setFieldsValue({
       questions_text: '',
-      tags: [],
       question_set_id: null,
       enabled: true
     });
@@ -469,7 +475,6 @@ export default function GeoPromptsPage() {
       const values = await form.validateFields();
       const payload = {
         question: String(values.question || '').trim(),
-        tags: normalizeList(values.tags),
         question_set_id: values.question_set_id || null,
         enabled: values.enabled !== false,
       };
@@ -514,7 +519,6 @@ export default function GeoPromptsPage() {
       setSavingBatch(true);
       const response = await axios.post(`/api/geo-projects/${mutationProjectId}/prompts/batch`, {
         questions: parsed.questions,
-        tags: normalizeList(values.tags),
         question_set_id: values.question_set_id || null,
         enabled: values.enabled !== false
       });
@@ -561,6 +565,53 @@ export default function GeoPromptsPage() {
         : []
     });
     setQuestionSetModalOpen(true);
+  };
+
+  const openAddToQuestionSet = () => {
+    if (!selectedPromptIds.length) return;
+    if (!questionSets.length) {
+      message.warning('请先创建问题集');
+      return;
+    }
+    setAddToQuestionSetId(questionSets[0].id);
+    setAddToQuestionSetOpen(true);
+  };
+
+  const addSelectedToQuestionSet = async () => {
+    if (!selectedProjectId || !selectedPromptIds.length || !addToQuestionSetId) return;
+    const mutationProjectId = selectedProjectId;
+    const targetQuestionSet = questionSets.find(
+      (item) => String(item.id) === String(addToQuestionSetId)
+    );
+    if (!targetQuestionSet) {
+      message.error('目标问题集不存在，请刷新后重试');
+      return;
+    }
+    const memberIds = Array.isArray(targetQuestionSet.questions)
+      ? targetQuestionSet.questions.map((item) => item.id).filter(Boolean)
+      : [];
+    const mergedIds = Array.from(
+      new Map([...memberIds, ...selectedPromptIds].map((id) => [String(id), id])).values()
+    );
+    try {
+      setAddingToQuestionSet(true);
+      await axios.patch(
+        `/api/geo-projects/${mutationProjectId}/question-sets/${targetQuestionSet.id}`,
+        { question_ids: mergedIds }
+      );
+      if (!isCurrentPromptProject(mutationProjectId)) return;
+      message.success(`已加入问题集“${targetQuestionSet.name}”`);
+      setAddToQuestionSetOpen(false);
+      setAddToQuestionSetId(null);
+      setSelectedPromptIds([]);
+      refreshPromptDataForProject(mutationProjectId);
+    } catch (error) {
+      if (isCurrentPromptProject(mutationProjectId)) {
+        message.error(getApiErrorMessage(error, '加入问题集失败'));
+      }
+    } finally {
+      if (isCurrentPromptProject(mutationProjectId)) setAddingToQuestionSet(false);
+    }
   };
 
   const saveQuestionSet = async () => {
@@ -829,17 +880,6 @@ export default function GeoPromptsPage() {
         : <Text type="secondary">未分组</Text>
     },
     {
-      title: '标签',
-      dataIndex: 'tags',
-      key: 'tags',
-      width: 220,
-      render: (values) => (
-        <Space wrap size={[4, 4]}>
-          {normalizeList(values).map((item) => <Tag key={item}>{item}</Tag>)}
-        </Space>
-      ),
-    },
-    {
       title: `近 ${days} 天`,
       dataIndex: ['performance', 'valid_answers'],
       key: 'valid_answers',
@@ -874,7 +914,7 @@ export default function GeoPromptsPage() {
       key: 'avg_brand_rank',
       width: 90,
       render: (value, row) => value === null || value === undefined
-        ? `N/A（有效回答 ${Number(row.performance?.ranked_answers || 0)}）`
+        ? `—（有效回答 ${Number(row.performance?.ranked_answers || 0)}）`
         : `${formatRank(value)}（有效回答 ${Number(row.performance?.ranked_answers || 0)}）`,
       sorter: (a, b) => Number(a.performance?.avg_brand_rank || 0) - Number(b.performance?.avg_brand_rank || 0),
     },
@@ -897,7 +937,7 @@ export default function GeoPromptsPage() {
         const positive = Number(perf.positive_sentiment_count || 0);
         const neutral = Number(perf.neutral_sentiment_count || 0);
         const negative = Number(perf.negative_sentiment_count || 0);
-        if (!positive && !neutral && !negative) return '-';
+        if (!positive && !neutral && !negative) return '—';
         return (
           <Space size={[4, 4]} wrap>
             {positive ? <Tag color="success">正 {positive}</Tag> : null}
@@ -931,7 +971,7 @@ export default function GeoPromptsPage() {
         const disabledReason = getPromptRunDisabledReason(row);
         return (
           <Space>
-            <Tooltip title={disabledReason}>
+            <Tooltip title={disabledReason} trigger={['hover']}>
               <span>
                 <Button
                   size="small"
@@ -945,7 +985,7 @@ export default function GeoPromptsPage() {
             </Tooltip>
             <Button size="small" onClick={() => openPromptHistory(row)}>历史</Button>
             <Button size="small" onClick={() => togglePrompt(row)}>{row.enabled !== false ? '停用' : '启用'}</Button>
-            <Button size="small" type="primary" onClick={() => openEdit(row)}>编辑</Button>
+            <Button size="small" onClick={() => openEdit(row)}>编辑</Button>
             <Popconfirm title="确认删除该问题？" onConfirm={() => deletePrompt(row)}>
               <Button size="small" danger>删除</Button>
             </Popconfirm>
@@ -957,6 +997,32 @@ export default function GeoPromptsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      <WorkspacePageHeader
+        section="监测任务"
+        title="问题管理"
+        actions={(
+          <Space wrap>
+            <Select
+              aria-label="统计周期"
+              value={days}
+              style={{ width: 120 }}
+              options={periodOptions}
+              onChange={setDays}
+            />
+            <Button onClick={() => refreshPromptDataForProject(selectedProjectId)} disabled={!selectedProjectId}>刷新</Button>
+            <Tooltip trigger={['hover']} title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
+              <span>
+                <Button type="primary" onClick={openCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>新建问题</Button>
+              </span>
+            </Tooltip>
+            <Tooltip trigger={['hover']} title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
+              <span>
+                <Button onClick={openBatchCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>批量新增</Button>
+              </span>
+            </Tooltip>
+          </Space>
+        )}
+      />
       {platformCatalogError ? <Alert type="error" showIcon title={platformCatalogError} /> : null}
       {!platformCatalogLoading && !platformCatalogError && !selectableCodes.length ? (
         <Alert
@@ -968,36 +1034,9 @@ export default function GeoPromptsPage() {
         />
       ) : null}
       <WebPlatformRuntimeStatus platformCodes={selectableCodes} />
-      <Text type="secondary">运行平台由管理员在“AI 平台”中统一启用。</Text>
       {defaultContext.errorMessage ? (
         <Alert type="warning" showIcon title={defaultContext.errorMessage} />
       ) : null}
-      <Row gutter={[12, 12]} align="middle" justify="end">
-        <Col flex="140px">
-          <Select
-            value={days}
-            style={{ width: '100%' }}
-            options={periodOptions}
-            onChange={setDays}
-          />
-        </Col>
-        <Col>
-          <Space wrap>
-            <Button size="small" onClick={() => refreshPromptDataForProject(selectedProjectId)} disabled={!selectedProjectId}>刷新</Button>
-            <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
-              <span>
-                <Button size="small" type="primary" onClick={openCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>新建问题</Button>
-              </span>
-            </Tooltip>
-            <Tooltip title={!selectedProjectId ? '默认项目不可用' : !selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : ''}>
-              <span>
-                <Button size="small" onClick={openBatchCreate} disabled={!selectedProjectId || platformCatalogLoading || !selectableCodes.length}>批量新增</Button>
-              </span>
-            </Tooltip>
-          </Space>
-        </Col>
-      </Row>
-
       <Card
         title="问题集"
         extra={<Button type="primary" disabled={!selectedProjectId} onClick={openCreateQuestionSet}>新建问题集</Button>}
@@ -1052,7 +1091,7 @@ export default function GeoPromptsPage() {
                 width: 230,
                 render: (_, questionSet) => (
                   <Space>
-                    <Tooltip title={
+                    <Tooltip trigger={['hover']} title={
                       Number(questionSet.enabled_question_count || 0) <= 0
                         ? '问题集中没有启用的问题'
                         : (!selectableCodes.length ? '当前没有已启用且配置完整的监测平台' : '')
@@ -1071,7 +1110,7 @@ export default function GeoPromptsPage() {
                         </Button>
                       </span>
                     </Tooltip>
-                    <Button size="small" type="primary" onClick={() => openEditQuestionSet(questionSet)}>编辑</Button>
+                    <Button size="small" onClick={() => openEditQuestionSet(questionSet)}>编辑</Button>
                     <Popconfirm
                       title={`删除问题集“${questionSet.name}”？集合内问题会继续保留。`}
                       onConfirm={() => deleteQuestionSet(questionSet)}
@@ -1095,16 +1134,16 @@ export default function GeoPromptsPage() {
               <Space wrap>
                 <Input.Search
                   allowClear
-                  placeholder="搜索问题或标签"
+                  placeholder="搜索问题"
                   style={{ width: 260 }}
                   value={promptSearch}
                   onChange={(event) => setPromptSearch(event.target.value)}
                 />
                 <Select
-                  value={promptCategoryFilter}
+                  value={promptQuestionSetFilter}
                   style={{ width: 140 }}
-                  onChange={setPromptCategoryFilter}
-                  options={promptCategoryOptions}
+                  onChange={setPromptQuestionSetFilter}
+                  options={promptQuestionSetOptions}
                 />
                 <Select
                   value={promptStatusFilter}
@@ -1123,19 +1162,23 @@ export default function GeoPromptsPage() {
                 </Text>
               </Space>
               <Space wrap>
-                <Button type="primary" disabled={selectedPromptIds.length < 2} onClick={openCreateQuestionSet}>
-                  将所选组成问题集
-                </Button>
-                <Popconfirm
-                  title={`确认删除选中的 ${selectedPromptIds.length} 个问题？`}
-                  disabled={!selectedPromptIds.length}
-                  onConfirm={batchDeletePrompts}
-                >
-                  <Button danger disabled={!selectedPromptIds.length}>批量删除</Button>
-                </Popconfirm>
+                {selectedPromptIds.length ? (
+                  <>
+                    <Button type="primary" disabled={selectedPromptIds.length < 2} onClick={openCreateQuestionSet}>
+                      组成问题集
+                    </Button>
+                    <Button onClick={openAddToQuestionSet}>加入问题集</Button>
+                    <Popconfirm
+                      title={`确认删除选中的 ${selectedPromptIds.length} 个问题？`}
+                      onConfirm={batchDeletePrompts}
+                    >
+                      <Button danger>批量删除</Button>
+                    </Popconfirm>
+                    <Button onClick={() => setSelectedPromptIds([])}>清空选择</Button>
+                  </>
+                ) : null}
                 <Button disabled={!filteredPrompts.length || selectedFilteredCount === filteredPrompts.length} onClick={selectAllPrompts}>全选筛选结果</Button>
-                <Button disabled={!selectedPromptIds.length} onClick={() => setSelectedPromptIds([])}>清空选择</Button>
-                <Text type="secondary">已选择 {selectedPromptIds.length} 条</Text>
+                {selectedPromptIds.length ? <Text type="secondary">已选择 {selectedPromptIds.length} 条</Text> : null}
               </Space>
             </Space>
             <Table
@@ -1149,12 +1192,11 @@ export default function GeoPromptsPage() {
                 pageSizeOptions: [10, 20, 50, 100],
                 showSizeChanger: true,
                 showTotal: (total) => `共 ${total} 条`,
-                placement: ['topRight', 'bottomRight'],
+                placement: ['bottomRight'],
               }}
               scroll={{ x: 'max-content' }}
               rowSelection={{
                 selectedRowKeys: selectedPromptIds,
-                preserveSelectedRowKeys: true,
                 onChange: (keys) => setSelectedPromptIds(keys),
               }}
             />
@@ -1177,9 +1219,6 @@ export default function GeoPromptsPage() {
         <Form form={form} layout="vertical">
           <Form.Item name="question" label="问题" rules={[{ required: true, message: '请输入问题' }]}>
             <Input.TextArea rows={4} placeholder="输入需要持续追踪的用户问题" />
-          </Form.Item>
-          <Form.Item name="tags" label="标签">
-            <Select mode="tags" tokenSeparators={[',', '，', ';', '\n']} placeholder="输入标签并回车添加" />
           </Form.Item>
           <Form.Item name="question_set_id" label="所属问题集">
             <Select
@@ -1230,10 +1269,7 @@ export default function GeoPromptsPage() {
               ? `已识别 ${batchPreview.questions.length + batchPreview.overflow_count} 个问题，超出上限 ${batchPreview.overflow_count} 个`
               : `已识别 ${batchPreview.questions.length} 个问题`}
           />
-          <Form.Item name="tags" label="统一标签" style={{ marginTop: 16 }}>
-            <Select mode="tags" tokenSeparators={[',', '，', ';', '\n']} placeholder="可选，应用到本批次全部问题" />
-          </Form.Item>
-          <Form.Item name="question_set_id" label="统一加入问题集">
+          <Form.Item name="question_set_id" label="统一加入问题集" style={{ marginTop: 16 }}>
             <Select
               allowClear
               placeholder="可选；问题仍可单独运行"
@@ -1244,6 +1280,34 @@ export default function GeoPromptsPage() {
             <Switch checkedChildren="启用" unCheckedChildren="停用" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="加入问题集"
+        open={addToQuestionSetOpen}
+        onOk={addSelectedToQuestionSet}
+        onCancel={() => {
+          setAddToQuestionSetOpen(false);
+          setAddToQuestionSetId(null);
+          setAddingToQuestionSet(false);
+        }}
+        confirmLoading={addingToQuestionSet}
+        okText="加入"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          <Text type="secondary">
+            已选择 {selectedPromptIds.length} 个问题；已属于其他问题集的问题会移入新问题集。
+          </Text>
+          <Select
+            value={addToQuestionSetId}
+            style={{ width: '100%' }}
+            placeholder="选择问题集"
+            options={questionSets.map((item) => ({ label: item.name, value: item.id }))}
+            onChange={setAddToQuestionSetId}
+          />
+        </Space>
       </Modal>
 
       <Modal
@@ -1321,7 +1385,7 @@ export default function GeoPromptsPage() {
               title: '模型',
               dataIndex: 'model_name',
               width: 150,
-              render: (value) => value || '-'
+              render: (value) => value || '—'
             },
             {
               title: '状态',

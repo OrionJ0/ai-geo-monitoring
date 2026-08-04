@@ -9,6 +9,7 @@ const { fixedShanghaiWindow } = require('../domain/syncWindow');
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX_STALE_MS = 24 * 60 * 60 * 1000;
 const PAGE_REPORT_CACHE_MAX_ENTRIES = 8;
+const SNAPSHOT_SCHEMA_VERSION = 2;
 const DEVICES = new Set(['all', 'pc', 'mobile']);
 const METRICS = Object.freeze(['pageviews', 'visits', 'visitors']);
 const WEBSITE_METRICS = new Set([
@@ -21,34 +22,65 @@ const WEBSITE_METRICS = new Set([
 ]);
 const WEBSITE_SOURCE_KEYS = new Set([
   'ALL',
+  'BAIDU_PAID',
+  'BAIDU_SEARCH',
+  'DIRECT',
+  'BING_SEARCH',
+  'GOOGLE_SEARCH',
+  'OTHER_SEARCH',
+  'EXTERNAL_REFERRAL'
+]);
+const SOURCE_DEFINITIONS = Object.freeze([
+  {
+    sourceKey: 'BAIDU_PAID',
+    sourceLabel: '百度推广',
+    sourceHost: 'e.baidu.com',
+    sourceType: 'PAID'
+  },
+  {
+    sourceKey: 'DIRECT',
+    sourceLabel: '直接访问',
+    sourceHost: null,
+    sourceType: 'DIRECT'
+  },
+  {
+    sourceKey: 'BAIDU_SEARCH',
+    sourceLabel: '百度搜索',
+    sourceHost: 'baidu.com',
+    sourceType: 'ORGANIC_SEARCH'
+  },
+  {
+    sourceKey: 'BING_SEARCH',
+    sourceLabel: '必应搜索',
+    sourceHost: 'bing.com',
+    sourceType: 'ORGANIC_SEARCH'
+  },
+  {
+    sourceKey: 'GOOGLE_SEARCH',
+    sourceLabel: 'Google 搜索',
+    sourceHost: 'google.com',
+    sourceType: 'ORGANIC_SEARCH'
+  },
+  {
+    sourceKey: 'OTHER_SEARCH',
+    sourceLabel: '其他搜索',
+    sourceHost: '多个搜索引擎',
+    sourceType: 'ORGANIC_SEARCH'
+  },
+  {
+    sourceKey: 'EXTERNAL_REFERRAL',
+    sourceLabel: '外部引荐',
+    sourceHost: '多个网站',
+    sourceType: 'REFERRAL'
+  }
+]);
+const SOURCE_KEYS = new Set(SOURCE_DEFINITIONS.map((source) => source.sourceKey));
+const LEGACY_SOURCE_KEYS = Object.freeze([
   'BAIDU_SEARCH',
   'DIRECT',
   'BING_SEARCH',
   'OTHER'
 ]);
-const SOURCE_DEFINITIONS = Object.freeze([
-  {
-    sourceKey: 'BAIDU_SEARCH',
-    sourceLabel: '百度自然搜索',
-    sourceHost: 'baidu.com'
-  },
-  {
-    sourceKey: 'DIRECT',
-    sourceLabel: '直接访问',
-    sourceHost: null
-  },
-  {
-    sourceKey: 'BING_SEARCH',
-    sourceLabel: '必应自然搜索',
-    sourceHost: 'bing.com'
-  },
-  {
-    sourceKey: 'OTHER',
-    sourceLabel: '其他来源',
-    sourceHost: '多个网站'
-  }
-]);
-const SOURCE_KEYS = new Set(SOURCE_DEFINITIONS.map((source) => source.sourceKey));
 
 class BaiduTongjiError extends Error {
   constructor(message, code, status = 400) {
@@ -306,6 +338,10 @@ function isBingSource(row) {
   return /必应|bing/iu.test(row.name);
 }
 
+function isGoogleSource(row) {
+  return /谷歌|google/iu.test(row.name);
+}
+
 function normalizeSummary(summary, errorCode = 'TONGJI_SOURCE_RESPONSE_INVALID') {
   if (!summary || typeof summary !== 'object' || Array.isArray(summary)) {
     throw new BaiduTongjiError('百度统计来源汇总无效', errorCode, 502);
@@ -323,17 +359,18 @@ function summaryForRow(row) {
   ]));
 }
 
-function buildOtherSummary({ otherSearch, external, bing }) {
+function buildRemainderSummary({ total, excluded }) {
   const summary = { visitors: null };
   for (const metric of ['pageviews', 'visits']) {
-    const operands = [otherSearch?.[metric], external?.[metric], bing?.[metric]];
+    const operands = [total?.[metric], ...excluded.map((row) => row?.[metric])];
     if (operands.some((value) => value == null)) {
       summary[metric] = null;
       continue;
     }
-    const value = BigInt(exactMetric(operands[0]))
-      + BigInt(exactMetric(operands[1]))
-      - BigInt(exactMetric(operands[2]));
+    const value = operands.slice(1).reduce(
+      (remainder, operand) => remainder - BigInt(exactMetric(operand)),
+      BigInt(exactMetric(operands[0]))
+    );
     if (value < 0n) {
       throw new BaiduTongjiError(
         '百度统计来源拆分结果无效',
@@ -344,6 +381,68 @@ function buildOtherSummary({ otherSearch, external, bing }) {
     summary[metric] = value.toString();
   }
   return summary;
+}
+
+function assertSourcePartition(trend, sources) {
+  const total = summarizeRows(trend);
+  for (const metric of ['pageviews', 'visits']) {
+    const sourceValues = sources.map((source) => source.summary?.[metric]);
+    if (total[metric] == null || sourceValues.some((value) => value == null)) {
+      continue;
+    }
+    const sourceTotal = sourceValues.reduce(
+      (sum, value) => sum + BigInt(exactMetric(value)),
+      0n
+    );
+    if (sourceTotal !== BigInt(exactMetric(total[metric]))) {
+      throw new BaiduTongjiError(
+        '百度统计来源汇总与全站汇总不一致',
+        'TONGJI_SOURCE_RESPONSE_INVALID',
+        502
+      );
+    }
+  }
+}
+
+function nullSummary() {
+  return { pageviews: null, visits: null, visitors: null };
+}
+
+function legacyCompatibleSources(sources) {
+  const byKey = new Map(sources.map((source) => [source.sourceKey, source]));
+  const otherParts = [
+    byKey.get('GOOGLE_SEARCH'),
+    byKey.get('OTHER_SEARCH'),
+    byKey.get('EXTERNAL_REFERRAL')
+  ];
+  const otherSummary = {
+    ...addSummaries(otherParts.map((source) => source?.summary)),
+    visitors: null
+  };
+  const otherDetails = [...new Set(otherParts.flatMap(
+    (source) => source?.sourceDetails || []
+  ))].slice(0, 8);
+  return [
+    { ...byKey.get('BAIDU_SEARCH') },
+    { ...byKey.get('DIRECT') },
+    { ...byKey.get('BING_SEARCH') },
+    {
+      sourceKey: 'OTHER',
+      sourceLabel: '其他来源',
+      sourceHost: '多个网站',
+      sourceDetails: otherDetails,
+      summary: otherSummary
+    }
+  ];
+}
+
+function snapshotPayloadForStorage(payload) {
+  return {
+    ...payload,
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+    sourcesV2: payload.sources,
+    sources: legacyCompatibleSources(payload.sources)
+  };
 }
 
 function hasTraffic(row) {
@@ -427,24 +526,42 @@ function buildSnapshotPayload(result, coverage, device) {
   const sourceSummaries = normalizeSummaryRows(result?.sourceSummaries);
   const engineSummaries = normalizeSummaryRows(result?.engineSummaries);
   const sourceById = new Map(sourceSummaries.map((row) => [row.source, row]));
+  const paidRows = sourceSummaries.filter(isPaidSource);
   const bingRows = engineSummaries.filter((row) => (
     isBingSource(row) && !isPaidSource(row)
   ));
+  const googleRows = engineSummaries.filter((row) => (
+    isGoogleSource(row) && !isPaidSource(row)
+  ));
+  const otherEngineRows = engineSummaries.filter((row) => (
+    !isPaidSource(row)
+    && row.source !== 'searchBaiduNature'
+    && !isBingSource(row)
+    && !isGoogleSource(row)
+  ));
+  const paidSummary = addSummaries(paidRows);
   const bingSummary = addSummaries(bingRows);
-
-  const otherDetails = [
-    ...engineSummaries
-      .filter((row) => (
-        !isPaidSource(row)
-        && row.source !== 'searchBaiduNature'
-        && !isBingSource(row)
-        && hasTraffic(row)
-      ))
-      .map((row) => row.name),
-    ...(hasTraffic(sourceById.get('link')) ? ['外部链接'] : [])
-  ];
-  const uniqueOtherDetails = [...new Set(otherDetails)].slice(0, 8);
+  const googleSummary = addSummaries(googleRows);
+  const otherSearchSummary = buildRemainderSummary({
+    total: sourceById.get('searchOther'),
+    excluded: [bingSummary, googleSummary]
+  });
+  const otherSearchDetails = [...new Set(otherEngineRows
+    .filter(hasTraffic)
+    .map((row) => row.name))].slice(0, 8);
   const sources = [
+    {
+      sourceKey: 'BAIDU_PAID',
+      summary: paidSummary,
+      sourceDetails: paidRows.length
+        ? [...new Set(paidRows.map((row) => row.name))]
+        : []
+    },
+    {
+      sourceKey: 'DIRECT',
+      summary: summaryForRow(sourceById.get('through')),
+      sourceDetails: [site.domain]
+    },
     {
       sourceKey: 'BAIDU_SEARCH',
       summary: summaryForRow(sourceById.get('searchBaiduNature')),
@@ -456,21 +573,24 @@ function buildSnapshotPayload(result, coverage, device) {
       sourceDetails: bingRows.length ? [...new Set(bingRows.map((row) => row.name))] : []
     },
     {
-      sourceKey: 'DIRECT',
-      summary: summaryForRow(sourceById.get('through')),
-      sourceDetails: [site.domain]
+      sourceKey: 'GOOGLE_SEARCH',
+      summary: googleSummary,
+      sourceDetails: googleRows.length ? [...new Set(googleRows.map((row) => row.name))] : []
     },
     {
-      sourceKey: 'OTHER',
-      summary: buildOtherSummary({
-        otherSearch: sourceById.get('searchOther'),
-        external: sourceById.get('link'),
-        bing: bingSummary
-      }),
-      sourceDetails: uniqueOtherDetails
+      sourceKey: 'OTHER_SEARCH',
+      summary: otherSearchSummary,
+      sourceDetails: otherSearchDetails
+    },
+    {
+      sourceKey: 'EXTERNAL_REFERRAL',
+      summary: summaryForRow(sourceById.get('link')),
+      sourceDetails: hasTraffic(sourceById.get('link')) ? ['外部链接'] : []
     }
   ];
+  assertSourcePartition(trend, sources);
   return {
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     site: { ...site, status: 'ACTIVE' },
     coverage,
     device,
@@ -480,6 +600,9 @@ function buildSnapshotPayload(result, coverage, device) {
     sources,
     selectors: {
       bingEngineIds: bingRows
+        .map((row) => row.engineId)
+        .filter(Boolean),
+      googleEngineIds: googleRows
         .map((row) => row.engineId)
         .filter(Boolean)
     }
@@ -502,21 +625,28 @@ function normalizeStoredPayload(payload) {
     );
   }
   const trend = normalizeRows(payload?.trend);
-  if (!Array.isArray(payload?.sources)) {
+  const storedSources = payload?.schemaVersion === SNAPSHOT_SCHEMA_VERSION
+    ? payload.sourcesV2 || payload.sources
+    : payload?.sources;
+  if (!Array.isArray(storedSources)) {
     throw new BaiduTongjiError(
       '百度统计缓存来源无效',
       'TONGJI_CACHE_INVALID',
       500
     );
   }
-  const storedByKey = new Map(payload.sources.map((source) => [
+  const storedByKey = new Map(storedSources.map((source) => [
     source?.sourceKey,
     source
   ]));
-  if (
-    storedByKey.size !== SOURCE_DEFINITIONS.length
-    || SOURCE_DEFINITIONS.some((definition) => !storedByKey.has(definition.sourceKey))
-  ) {
+  const isCurrent = storedByKey.size === SOURCE_DEFINITIONS.length
+    && SOURCE_DEFINITIONS.every((definition) => (
+      storedByKey.has(definition.sourceKey)
+    ));
+  const isLegacy = payload?.schemaVersion == null
+    && storedByKey.size === LEGACY_SOURCE_KEYS.length
+    && LEGACY_SOURCE_KEYS.every((sourceKey) => storedByKey.has(sourceKey));
+  if (!isCurrent && !isLegacy) {
     throw new BaiduTongjiError(
       '百度统计缓存来源无效',
       'TONGJI_CACHE_INVALID',
@@ -525,6 +655,19 @@ function normalizeStoredPayload(payload) {
   }
   const sources = SOURCE_DEFINITIONS.map((definition) => {
     const stored = storedByKey.get(definition.sourceKey);
+    const unavailableLegacySource = isLegacy && !stored;
+    if (unavailableLegacySource) {
+      return {
+        ...definition,
+        sourceHost: definition.sourceKey === 'DIRECT'
+          ? site.domain
+          : definition.sourceHost,
+        sourceType: definition.sourceType,
+        sourceDetails: [],
+        dataState: 'NO_DATA',
+        summary: nullSummary()
+      };
+    }
     if (!stored?.summary) {
       throw new BaiduTongjiError(
         '百度统计缓存来源汇总无效',
@@ -551,7 +694,7 @@ function normalizeStoredPayload(payload) {
       sourceHost: definition.sourceKey === 'DIRECT'
         ? site.domain
         : definition.sourceHost,
-      sourceType: 'ORGANIC',
+      sourceType: definition.sourceType,
       sourceDetails,
       dataState: dataState(summary),
       summary
@@ -560,9 +703,14 @@ function normalizeStoredPayload(payload) {
   const bingEngineIds = Array.isArray(payload?.selectors?.bingEngineIds)
     ? payload.selectors.bingEngineIds.map(String)
     : [];
+  const googleEngineIds = Array.isArray(payload?.selectors?.googleEngineIds)
+    ? payload.selectors.googleEngineIds.map(String)
+    : [];
   if (
     bingEngineIds.some((value) => !/^\d+$/u.test(value))
     || new Set(bingEngineIds).size !== bingEngineIds.length
+    || googleEngineIds.some((value) => !/^\d+$/u.test(value))
+    || new Set(googleEngineIds).size !== googleEngineIds.length
   ) {
     throw new BaiduTongjiError(
       '百度统计缓存来源选择器无效',
@@ -585,7 +733,7 @@ function normalizeStoredPayload(payload) {
     ),
     sourceReportsIncluded: payload?.sourceReportsIncluded === true,
     sources,
-    selectors: { bingEngineIds }
+    selectors: { bingEngineIds, googleEngineIds }
   };
 }
 
@@ -1228,7 +1376,7 @@ class BaiduTongjiService {
       siteDomain: payload.site.domain,
       coverageStart: payload.coverage.from,
       coverageEnd: payload.coverage.to,
-      payloadJson: JSON.stringify(payload),
+      payloadJson: JSON.stringify(snapshotPayloadForStorage(payload)),
       qualityIncluded: payload.quality === null ? 0 : 1,
       sourcesIncluded: payload.sourceReportsIncluded === true ? 1 : 0,
       refreshedAt: now,

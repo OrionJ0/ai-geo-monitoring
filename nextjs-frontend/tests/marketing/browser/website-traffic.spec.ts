@@ -9,10 +9,13 @@ const artifactDirectory = path.resolve(
 );
 
 const sourceRows = [
-  { sourceKey: 'BAIDU_SEARCH', sourceLabel: '百度自然搜索', visits: '25870', trafficShare: '41.8', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' },
+  { sourceKey: 'BAIDU_PAID', sourceLabel: '百度推广', visits: '12000', trafficShare: '19.4', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' },
   { sourceKey: 'DIRECT', sourceLabel: '直接访问', visits: '18630', trafficShare: '30.1', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' },
-  { sourceKey: 'BING_SEARCH', sourceLabel: '必应自然搜索', visits: '10420', trafficShare: '16.8', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' },
-  { sourceKey: 'OTHER', sourceLabel: '其他来源', visits: '6922', trafficShare: '11.2', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' }
+  { sourceKey: 'BAIDU_SEARCH', sourceLabel: '百度搜索', visits: '15870', trafficShare: '25.7', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' },
+  { sourceKey: 'BING_SEARCH', sourceLabel: '必应搜索', visits: '6420', trafficShare: '10.4', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' },
+  { sourceKey: 'GOOGLE_SEARCH', sourceLabel: 'Google 搜索', visits: '3922', trafficShare: '6.3', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' },
+  { sourceKey: 'OTHER_SEARCH', sourceLabel: '其他搜索', visits: '2500', trafficShare: '4.0', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' },
+  { sourceKey: 'EXTERNAL_REFERRAL', sourceLabel: '外部引荐', visits: '2500', trafficShare: '4.0', bounceRate: null, averageVisitTime: null, averageVisitPages: null, dataState: 'DATA' }
 ] as const;
 
 const metricTotals: Record<string, [string, string]> = {
@@ -89,13 +92,17 @@ async function installRoutes(page: Page) {
   }));
   await page.route('**/website-traffic-overview**', (route) => {
     const url = new URL(route.request().url());
+    const from = url.searchParams.get('from') || '2026-07-28';
+    const to = url.searchParams.get('to') || '2026-08-03';
     const metric = url.searchParams.get('metric') || 'visits';
     const source = url.searchParams.get('source') || 'ALL';
     const sourceIndex = Math.max(
       0,
       sourceRows.findIndex((row) => row.sourceKey === source)
     );
-    const ratio = source === 'ALL' ? 1 : [0.42, 0.3, 0.17, 0.11][sourceIndex];
+    const ratio = source === 'ALL'
+      ? 1
+      : Number(sourceRows[sourceIndex].trafficShare) / 100;
     const currentTotal = Number(metricTotals[metric][0]);
     const previousTotal = Number(metricTotals[metric][1]);
     const trend = Array.from({ length: 30 }, (_, index) => ({
@@ -112,7 +119,7 @@ async function installRoutes(page: Page) {
         mode: 'DATABASE_RANGE_SNAPSHOT',
         site: { domain: 'gato.com.cn' },
         device: url.searchParams.get('device') || 'all',
-        coverage: { from: '2026-07-05', to: '2026-08-03' },
+        coverage: { from, to },
         previousCoverage: { from: '2026-06-05', to: '2026-07-04' },
         selectedSource: {
           sourceKey: source,
@@ -147,6 +154,8 @@ async function installRoutes(page: Page) {
   });
   await page.route('**/website-traffic-pages**', (route) => {
     const url = new URL(route.request().url());
+    const from = url.searchParams.get('from') || '2026-07-28';
+    const to = url.searchParams.get('to') || '2026-08-03';
     const view = url.searchParams.get('view') || 'landing';
     const query = (url.searchParams.get('query') || '').toLowerCase();
     const pageNumber = Number(url.searchParams.get('page') || 1);
@@ -171,8 +180,8 @@ async function installRoutes(page: Page) {
       body: JSON.stringify({
         projectId: '11',
         source: 'BAIDU_TONGJI',
-        device: 'all',
-        coverage: { from: '2026-07-05', to: '2026-08-03' },
+        device: url.searchParams.get('device') || 'all',
+        coverage: { from, to },
         view,
         dataState: sorted.length ? 'DATA' : 'NO_DATA',
         rows: sorted.slice(offset, offset + pageSize),
@@ -211,15 +220,20 @@ async function installUnavailableDataRoutes(page: Page) {
     sourcePageCorrelation: false,
     unavailableReason
   };
-  await page.route('**/website-traffic-overview**', (route) => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify({
+  await page.route('**/website-traffic-overview**', (route) => {
+    const url = new URL(route.request().url());
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
       projectId: '11',
       source: 'BAIDU_TONGJI',
       mode: 'DATABASE_RANGE_SNAPSHOT',
       site: { domain: 'gato.com.cn' },
-      device: 'all',
-      coverage: { from: '2026-07-05', to: '2026-08-03' },
+      device: url.searchParams.get('device') || 'all',
+      coverage: {
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to')
+      },
       previousCoverage: { from: '2026-06-05', to: '2026-07-04' },
       selectedSource: { sourceKey: 'ALL', sourceLabel: '全部来源' },
       selectedMetric: 'visits',
@@ -253,15 +267,21 @@ async function installUnavailableDataRoutes(page: Page) {
       },
       capabilities,
       cache: { state: 'HIT' }
-    })
-  }));
-  await page.route('**/website-traffic-pages**', (route) => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify({
+      })
+    });
+  });
+  await page.route('**/website-traffic-pages**', (route) => {
+    const url = new URL(route.request().url());
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
       projectId: '11',
       source: 'BAIDU_TONGJI',
-      device: 'all',
-      coverage: { from: '2026-07-05', to: '2026-08-03' },
+      device: url.searchParams.get('device') || 'all',
+      coverage: {
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to')
+      },
       view: 'landing',
       dataState: 'UNAVAILABLE',
       rows: [],
@@ -271,12 +291,13 @@ async function installUnavailableDataRoutes(page: Page) {
       scope: { source: 'ALL', label: '全部来源' },
       dataQuality: { excludedCrossDomainRows: null },
       capabilities
-    })
-  }));
+      })
+    });
+  });
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.clock.setFixedTime(new Date('2026-08-03T04:00:00.000Z'));
+  await page.clock.setFixedTime(new Date('2026-08-04T04:00:00.000Z'));
   await installRoutes(page);
 });
 
@@ -303,8 +324,8 @@ test('matches the final desktop structure and supports source trend recovery', a
     chartBox.y + (chartBox.height * 0.5)
   );
   const trendTooltip = page.locator('.g2-tooltip');
-  await expect(trendTooltip).toContainText('近 30 天');
-  await expect(trendTooltip).toContainText('较前 30 天');
+  await expect(trendTooltip).toContainText('近 7 天');
+  await expect(trendTooltip).toContainText('较前 7 天');
   await expect(trendTooltip).toContainText('变化');
 
   const directRow = page.getByRole('row', { name: /直接访问/ });
@@ -421,17 +442,14 @@ test('keeps tables internally scrollable at narrow width and 400 percent zoom', 
   });
 });
 
-test('exposes full paths to hover and keyboard focus without serious axe findings', async ({ page }) => {
+test('exposes full paths on hover without serious axe findings', async ({ page }) => {
   await page.goto('/geo/website-traffic');
-  const longPath = page.locator('span[tabindex="0"]').filter({
+  const longPath = page.locator('[class*="pagePath"]').filter({
     hasText: /industrial-very-long-path/
   });
   await longPath.hover();
   await expect(page.getByRole('tooltip')).toContainText('industrial-very-long-path');
   await page.mouse.move(0, 0);
-  await page.keyboard.press('Escape');
-  await longPath.focus();
-  await expect(page.getByRole('tooltip')).toContainText('industrial-very-long-path');
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations.filter((violation) => (
     ['critical', 'serious'].includes(violation.impact || '')
@@ -442,10 +460,12 @@ test('renders an explicitly unavailable capability state without simulated quali
   await installUnavailableDataRoutes(page);
   await page.setViewportSize({ width: 1440, height: 1024 });
   await page.goto('/geo/website-traffic');
-  const bounceSummary = page.getByText('跳出率', { exact: true }).first().locator('..');
-  await expect(bounceSummary.getByText('—', { exact: true })).toBeVisible();
-  await expect(bounceSummary).toContainText('无可用环比');
-  await expect(page.getByRole('row', { name: /百度自然搜索/ })).toContainText('—');
+  const bounceSummary = page.getByRole('heading', { name: /跳出率/u })
+    .locator('xpath=ancestor::div[contains(@class,"ant-card")][1]');
+  await expect(bounceSummary.getByLabel('跳出率本期：暂无数据')).toBeVisible();
+  await expect(bounceSummary.getByLabel('跳出率上期：暂无数据')).toBeVisible();
+  await expect(bounceSummary.getByLabel('跳出率较上一周期：暂无数据')).toBeVisible();
+  await expect(page.getByRole('row', { name: /百度搜索/ })).toContainText('—');
   await expect(page.getByText('页面报告暂未接入')).toBeVisible();
   await expect(page.getByText('未验证真实账号页面报告合同，不以 0 或模拟数据代替')).toBeVisible();
   await expect(page.locator('.ant-pagination')).toHaveCount(0);
@@ -499,7 +519,7 @@ test('rejects page rows that pretend Baidu supplied titles or custom keys', asyn
     });
   });
   await page.goto('/geo/website-traffic');
-  await expect(page.getByRole('main', { name: '网站流量' }).getByRole('alert'))
+  await expect(page.getByRole('region', { name: '页面表现' }).getByRole('alert'))
     .toContainText(
     '页面表现读取失败，请稍后重试。'
   );

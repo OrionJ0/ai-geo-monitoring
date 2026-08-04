@@ -67,9 +67,9 @@ const statusMeta = {
 } as const;
 
 function formatDate(value?: string) {
-  if (!value) return '-';
+  if (!value) return '—';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '-';
+  if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString('zh-CN', { hour12: false });
 }
 

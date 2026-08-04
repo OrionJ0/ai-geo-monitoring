@@ -9,8 +9,6 @@ import {
   Alert,
   Breadcrumb,
   Button,
-  Card,
-  DatePicker,
   Empty,
   Select,
   Skeleton,
@@ -27,11 +25,19 @@ import {
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import useMarketingCapabilities from '@/lib/useMarketingCapabilities';
 import useMarketOverview from '@/lib/marketing/useMarketOverview';
+import { useWebsiteTrafficOverview } from '@/lib/marketing/useWebsiteTraffic';
 import useWebsiteFormConsultations from '@/lib/websiteData/useWebsiteFormConsultations';
+import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
+import {
+  clampMarketingDateRange,
+  useMarketingFilters
+} from '@/components/marketing/MarketingFiltersContext';
+import MarketingMetricCard, {
+  MarketingMetricGrid
+} from '@/components/marketing/MarketingMetricCard';
 import { groupDigits } from '@/utils/marketingValues.cjs';
 import {
   buildPeriodRows,
-  calculateRate,
   divideScaledAmount,
   formatAverage,
   formatPeriodChange,
@@ -43,17 +49,28 @@ import {
 } from '@/utils/marketOverviewPresentation.cjs';
 import styles from './market-overview.module.css';
 
-const { RangePicker } = DatePicker;
 const { Title } = Typography;
 
 const PAID_SOURCE = 'BAIDU_PAID';
 const TONGJI_ALL_SOURCE = 'BAIDU_TONGJI_ALL';
 const TONGJI_SOURCE_KEYS = Object.freeze({
+  BAIDU_PAID: 'BAIDU_PAID',
   BAIDU_TONGJI_DIRECT: 'DIRECT',
   BAIDU_TONGJI_BAIDU_SEARCH: 'BAIDU_SEARCH',
   BAIDU_TONGJI_BING_SEARCH: 'BING_SEARCH',
-  BAIDU_TONGJI_OTHER: 'OTHER'
+  BAIDU_TONGJI_GOOGLE_SEARCH: 'GOOGLE_SEARCH',
+  BAIDU_TONGJI_OTHER_SEARCH: 'OTHER_SEARCH',
+  BAIDU_TONGJI_EXTERNAL_REFERRAL: 'EXTERNAL_REFERRAL'
 });
+const TONGJI_CHANNEL_DEFINITIONS = Object.freeze([
+  { sourceKey: 'BAIDU_PAID', sourceLabel: '百度推广', sourceHost: 'e.baidu.com', sourceType: 'PAID' },
+  { sourceKey: 'DIRECT', sourceLabel: '直接访问', sourceHost: null, sourceType: 'DIRECT' },
+  { sourceKey: 'BAIDU_SEARCH', sourceLabel: '百度搜索', sourceHost: 'baidu.com', sourceType: 'ORGANIC_SEARCH' },
+  { sourceKey: 'BING_SEARCH', sourceLabel: '必应搜索', sourceHost: 'bing.com', sourceType: 'ORGANIC_SEARCH' },
+  { sourceKey: 'GOOGLE_SEARCH', sourceLabel: 'Google 搜索', sourceHost: 'google.com', sourceType: 'ORGANIC_SEARCH' },
+  { sourceKey: 'OTHER_SEARCH', sourceLabel: '其他搜索', sourceHost: '多个搜索引擎', sourceType: 'ORGANIC_SEARCH' },
+  { sourceKey: 'EXTERNAL_REFERRAL', sourceLabel: '外部引荐', sourceHost: '多个网站', sourceType: 'REFERRAL' }
+]);
 const MISSING_ATTRIBUTION = '缺少可信的按来源关联，当前不能计算该指标。';
 const FORM_ONLY_SOURCE_LABELS = Object.freeze({
   BAIDU_PAID: '百度推广（仅官网表单）',
@@ -79,10 +96,10 @@ const TREND_METRICS = [
     header: '展现'
   },
   {
-    key: 'clicks',
-    label: '访问（点击）',
+    key: 'visits',
+    label: '访问',
     unit: '次',
-    header: '访问（点击）'
+    header: '访问'
   }
 ];
 
@@ -107,10 +124,12 @@ const TRAFFIC_TREND_METRICS = [
 const TREND_SOURCES = [
   { value: PAID_SOURCE, label: '百度推广' },
   { value: TONGJI_ALL_SOURCE, label: '官网全站（百度统计）' },
-  { value: 'BAIDU_TONGJI_BAIDU_SEARCH', label: '百度搜索（自然流量）' },
-  { value: 'BAIDU_TONGJI_BING_SEARCH', label: '必应搜索（自然流量）' },
-  { value: 'BAIDU_TONGJI_DIRECT', label: '直接访问（百度统计）' },
-  { value: 'BAIDU_TONGJI_OTHER', label: '其他来源（自然流量）' }
+  { value: 'BAIDU_TONGJI_DIRECT', label: '直接访问' },
+  { value: 'BAIDU_TONGJI_BAIDU_SEARCH', label: '百度搜索' },
+  { value: 'BAIDU_TONGJI_BING_SEARCH', label: '必应搜索' },
+  { value: 'BAIDU_TONGJI_GOOGLE_SEARCH', label: 'Google 搜索' },
+  { value: 'BAIDU_TONGJI_OTHER_SEARCH', label: '其他搜索' },
+  { value: 'BAIDU_TONGJI_EXTERNAL_REFERRAL', label: '外部引荐' }
 ];
 
 const KPI_DEFINITIONS = [
@@ -135,7 +154,7 @@ const KPI_DEFINITIONS = [
   {
     key: 'CPC',
     title: '平均点击成本',
-    formula: '广告投入 ÷ 访问（点击）数。越低越好。',
+    formula: '广告投入 ÷ 广告点击数；越低越好。',
     missing: '当前范围没有可用于计算的广告投入或点击。'
   }
 ];
@@ -154,22 +173,22 @@ function useReducedMotion() {
 
 function InfoTip({ label, children }) {
   return (
-    <Tooltip title={children} placement="top" trigger={['hover', 'focus']}>
-      <button
-        type="button"
+    <Tooltip title={children} placement="top" trigger={['hover']}>
+      <span
         className={styles.infoButton}
+        role="img"
         aria-label={`${label}口径说明`}
       >
         <InfoCircleOutlined aria-hidden="true" />
-      </button>
+      </span>
     </Tooltip>
   );
 }
 
 function MissingValue({ reason = MISSING_ATTRIBUTION, label = '数据缺失' }) {
   return (
-    <Tooltip title={reason}>
-      <span className={styles.missingValue} tabIndex={0} aria-label={`${label}：${reason}`}>
+    <Tooltip title={reason} trigger={['hover']}>
+      <span className={styles.missingValue} aria-label={`${label}：${reason}`}>
         —
       </span>
     </Tooltip>
@@ -229,53 +248,6 @@ function changeTone(change, lowerIsBetter = false) {
   return rising ? 'good' : 'bad';
 }
 
-function EfficiencyCard({ metric, current, previous, change, loading, period }) {
-  const tone = changeTone(change, metric.key !== 'ROAS');
-  const missingReason = metric.missing;
-  return (
-    <Card className={styles.kpiCard}>
-      <div className={styles.kpiTitleRow}>
-        <h3>{metric.title} <span>{metric.key}</span></h3>
-        <InfoTip label={metric.key}>
-          <span>{metric.formula}</span>
-          <br />
-          <span>本期：{period ? `${period.currentFrom} 至 ${period.currentTo}` : '日期范围暂缺'}</span>
-          <br />
-          <span>上期：{period ? `${period.previousFrom} 至 ${period.previousTo}` : '日期范围暂缺'}</span>
-          <br />
-          <span>{metric.key === 'CPC' && current ? '按广告投入与点击数计算。' : metric.missing}</span>
-        </InfoTip>
-      </div>
-      {loading ? (
-        <Skeleton active paragraph={{ rows: 2 }} title={false} />
-      ) : (
-        <>
-          <div className={styles.kpiPeriods}>
-            <div>
-              <span>本期</span>
-              <strong>{current || <MissingValue reason={missingReason} label={`${metric.key} 本期`} />}</strong>
-            </div>
-            <div>
-              <span>上期</span>
-              <strong className={styles.previousValue}>
-                {previous || <MissingValue reason="等长上一周期数据不完整，无法比较。" label={`${metric.key} 上期`} />}
-              </strong>
-            </div>
-          </div>
-          <div className={styles.kpiChange}>
-            <span>较上一周期</span>
-            {change ? (
-              <strong data-tone={tone}>{change}</strong>
-            ) : (
-              <MissingValue reason="等长上一周期数据不完整，无法计算周期变化。" label={`${metric.key} 周期变化`} />
-            )}
-          </div>
-        </>
-      )}
-    </Card>
-  );
-}
-
 function MetricHeader({ metric, targetMetric, selected, setTrendMetric }) {
   return (
     <th scope="col" className={selected ? styles.selectedHeader : undefined}>
@@ -299,7 +271,6 @@ function SourceIdentity({
   sourceKey,
   label,
   host,
-  natural = false,
   tag = null
 }) {
   let icon = <GlobalOutlined aria-hidden="true" />;
@@ -310,7 +281,10 @@ function SourceIdentity({
   } else if (sourceKey === 'BING_SEARCH') {
     icon = <span aria-hidden="true">b</span>;
     brand = 'bing';
-  } else if (sourceKey === 'OTHER') {
+  } else if (sourceKey === 'GOOGLE_SEARCH') {
+    icon = <span aria-hidden="true">G</span>;
+    brand = 'google';
+  } else if (sourceKey === 'OTHER_SEARCH' || sourceKey === 'EXTERNAL_REFERRAL') {
     icon = <LinkOutlined aria-hidden="true" />;
     brand = 'other';
   } else if (sourceKey === PAID_SOURCE) {
@@ -319,6 +293,17 @@ function SourceIdentity({
   } else if (sourceKey === 'SEARCH') {
     icon = <SearchOutlined aria-hidden="true" />;
   }
+  const sourceTag = tag || (
+    sourceKey === PAID_SOURCE
+      ? '广告'
+      : ['BAIDU_SEARCH', 'BING_SEARCH', 'GOOGLE_SEARCH', 'OTHER_SEARCH'].includes(sourceKey)
+        ? '自然搜索'
+        : sourceKey === 'DIRECT'
+          ? '直接访问'
+          : sourceKey === 'EXTERNAL_REFERRAL'
+            ? '外部引荐'
+            : '未分类'
+  );
   return (
     <span className={styles.sourceIdentity}>
       <span className={styles.sourceIcon} data-brand={brand}>{icon}</span>
@@ -326,8 +311,8 @@ function SourceIdentity({
         <strong>{label}</strong>
         <span className={styles.sourceMeta}>
           <span className={styles.sourceHost}>{host}</span>
-          <span className={natural ? styles.naturalTag : styles.allDeviceTag}>
-            {tag || (natural ? '自然流量' : '全部设备')}
+          <span className={sourceTag === '自然搜索' ? styles.naturalTag : styles.allDeviceTag}>
+            {sourceTag}
           </span>
         </span>
       </span>
@@ -357,16 +342,10 @@ function WebsiteFormConsultationCell({ source, websiteForms, label }) {
 
 function TrafficSourceRow({
   source,
-  dateRange,
   formConsultation,
   websiteForms
 }) {
-  const sourcePeriod = dateRange
-    ? buildPeriodRows(source.trend || [], dateRange[0], dateRange[1])
-    : null;
-  const sourceTotals = {
-    visits: sourcePeriod ? sumField(sourcePeriod.current, 'visits') : null
-  };
+  const visits = source.summary?.visits ?? null;
   const noAdReason = '百度统计来源报告不包含广告投入，这不是 0。';
   const noImpressionReason = '百度统计记录站内访问，不提供搜索结果展现。';
   return (
@@ -377,7 +356,6 @@ function TrafficSourceRow({
             sourceKey={source.sourceKey}
             label={source.sourceLabel}
             host={source.sourceHost}
-            natural
           />
         </Link>
       </th>
@@ -388,12 +366,10 @@ function TrafficSourceRow({
         <MissingValue reason={noImpressionReason} label={`${source.sourceLabel}展现`} />
       </td>
       <td className={styles.metricCell}>
-        <strong>{sourceTotals.visits == null
+        <strong>{visits == null
           ? <MissingValue label={`${source.sourceLabel}访问`} />
-          : groupDigits(sourceTotals.visits)}</strong>
-        <small>{source.sourceDetails?.length
-          ? source.sourceDetails.join('、')
-          : '当前范围未记录访问'}</small>
+          : groupDigits(visits)}</strong>
+        <small>所选区间的百度统计访问次数</small>
       </td>
       <td className={styles.metricCell}>
         <WebsiteFormConsultationCell
@@ -563,9 +539,14 @@ function StatusMessages({
 export default function MarketOverviewPage() {
   const defaultContext = useDefaultProjectContext();
   const marketing = useMarketingCapabilities();
+  const {
+    device: trafficDevice,
+    setDevice: setTrafficDevice,
+    dateRange,
+    setDateRange
+  } = useMarketingFilters();
   const projectId = defaultContext.project?.id || '';
   const enabled = marketing.capabilities.adsRead || marketing.capabilities.trafficRead;
-  const [trafficDevice, setTrafficDevice] = useState('pc');
   const [trendSource, setTrendSource] = useState(PAID_SOURCE);
   const selectedTrafficSourceKey = TONGJI_SOURCE_KEYS[trendSource] || null;
   const overview = useMarketOverview({
@@ -575,57 +556,57 @@ export default function MarketOverviewPage() {
     trafficTrendSource: selectedTrafficSourceKey
   });
   const reducedMotion = useReducedMotion();
-  const [dateRange, setDateRange] = useState(null);
   const websiteFallbackRange = useMemo(() => {
-    const to = dayjs();
+    const to = dayjs().subtract(1, 'day');
     return [
       to.subtract(29, 'day').format('YYYY-MM-DD'),
       to.format('YYYY-MM-DD')
     ];
   }, []);
   const [efficiencySource, setEfficiencySource] = useState(PAID_SOURCE);
-  const [trendMetric, setTrendMetric] = useState('clicks');
+  const [trendMetric, setTrendMetric] = useState('visits');
   const websiteForms = useWebsiteFormConsultations({
     projectId,
     enabled: Boolean(projectId && dateRange),
     from: dateRange?.[0] || null,
     to: dateRange?.[1] || null
   });
+  const trafficRangeQuery = useMemo(() => ({
+    projectId,
+    enabled: Boolean(projectId && dateRange && marketing.capabilities.trafficRead),
+    device: trafficDevice,
+    from: dateRange?.[0] || websiteFallbackRange[0],
+    to: dateRange?.[1] || websiteFallbackRange[1],
+    source: 'ALL',
+    metric: 'visits'
+  }), [
+    dateRange,
+    marketing.capabilities.trafficRead,
+    projectId,
+    trafficDevice,
+    websiteFallbackRange
+  ]);
+  const trafficRange = useWebsiteTrafficOverview(trafficRangeQuery);
 
   const ad = overview.ad;
   const trafficData = overview.traffic.data?.device === trafficDevice
     ? overview.traffic.data
     : null;
-  const trafficSourceData = overview.trafficSources.data?.device === trafficDevice
-    ? overview.trafficSources.data
+  const paidTrafficData = overview.paidTraffic.data?.device === trafficDevice
+    ? overview.paidTraffic.data
+    : null;
+  const trafficTrendData = overview.trafficTrend.data?.device === trafficDevice
+    ? overview.trafficTrend.data
     : null;
   const coverage = ad.data?.coverage || trafficData?.coverage || null;
-  const defaultRange = ad.data?.filter || coverage;
 
   useEffect(() => {
-    if (!projectId) {
-      setDateRange(null);
-      return;
+    if (!coverage || !dateRange) return;
+    const nextRange = clampMarketingDateRange(dateRange, coverage);
+    if (nextRange[0] !== dateRange[0] || nextRange[1] !== dateRange[1]) {
+      setDateRange(nextRange);
     }
-    setDateRange((current) => {
-      if (!coverage?.from || !coverage?.to || !defaultRange?.from || !defaultRange?.to) {
-        return current || websiteFallbackRange;
-      }
-      if (
-        current
-        && current[0] >= coverage.from
-        && current[1] <= coverage.to
-      ) return current;
-      return [defaultRange.from, defaultRange.to];
-    });
-  }, [
-    coverage?.from,
-    coverage?.to,
-    defaultRange?.from,
-    defaultRange?.to,
-    projectId,
-    websiteFallbackRange
-  ]);
+  }, [coverage, dateRange, setDateRange]);
 
   const period = useMemo(() => {
     if (!dateRange) return null;
@@ -633,9 +614,21 @@ export default function MarketOverviewPage() {
   }, [ad.data?.trend, dateRange]);
 
   const currentTotals = useMemo(() => ({
-    costAmountScaled: period ? sumField(period.current, 'costAmountScaled') : null,
-    impressions: period ? sumField(period.current, 'impressions') : null,
-    clicks: period ? sumField(period.current, 'clicks') : null
+    costAmountScaled: period && hasCompletePeriod(
+      period.current,
+      period.days,
+      'costAmountScaled'
+    ) ? sumField(period.current, 'costAmountScaled') : null,
+    impressions: period && hasCompletePeriod(
+      period.current,
+      period.days,
+      'impressions'
+    ) ? sumField(period.current, 'impressions') : null,
+    clicks: period && hasCompletePeriod(
+      period.current,
+      period.days,
+      'clicks'
+    ) ? sumField(period.current, 'clicks') : null
   }), [period]);
 
   const previousTotals = useMemo(() => {
@@ -690,10 +683,25 @@ export default function MarketOverviewPage() {
     CPC: { current: cpcCurrent, previous: cpcPrevious, change: cpcChange }
   };
 
-  const trafficSources = (
-    trafficSourceData?.attribution?.level === 'WEBSITE_TRAFFIC_SOURCE'
-    && trafficSourceData?.attribution?.isCrossSystemVerified === false
-  ) ? trafficSourceData?.sources || [] : [];
+  const rangeSourceRows = new Map(
+    (trafficRange.data?.sourceQuality?.rows || []).map((source) => [source.sourceKey, source])
+  );
+  const trafficSources = TONGJI_CHANNEL_DEFINITIONS.map((definition) => {
+    const rangeSource = rangeSourceRows.get(definition.sourceKey);
+    return {
+      ...definition,
+      sourceHost: definition.sourceKey === 'DIRECT'
+        ? trafficRange.data?.site?.domain || '官网'
+        : definition.sourceHost,
+      summary: { visits: rangeSource?.visits ?? null }
+    };
+  });
+  const paidTrafficSource = trafficSources.find(
+    (source) => source.sourceKey === PAID_SOURCE
+  ) || null;
+  const nonPaidTrafficSources = trafficSources.filter(
+    (source) => source.sourceKey !== PAID_SOURCE
+  );
   const websiteFormBySource = new Map(
     (websiteForms.data?.sourceBreakdown || []).map((source) => [
       source.sourceKey,
@@ -712,26 +720,35 @@ export default function MarketOverviewPage() {
       && BigInt(source.attributedFormSubmissionSessions) > BigInt(0)
     )
   );
+  const paidTrafficTrend = paidTrafficData?.selectedTrend?.sourceKey === PAID_SOURCE
+    ? paidTrafficData.selectedTrend
+    : null;
   const selectedTrafficTrend = (
-    trafficSourceData?.selectedTrend?.sourceKey === selectedTrafficSourceKey
-  ) ? trafficSourceData.selectedTrend : null;
+    trafficTrendData?.selectedTrend?.sourceKey === selectedTrafficSourceKey
+  ) ? trafficTrendData.selectedTrend : null;
   const selectedTrendRows = useMemo(() => (
     trendSource === PAID_SOURCE
-      ? ad.data?.trend || []
+      ? trendMetric === 'visits'
+        ? paidTrafficTrend?.trend || []
+        : ad.data?.trend || []
       : trendSource === TONGJI_ALL_SOURCE
         ? trafficData?.trend || []
         : selectedTrafficTrend?.trend || []
   ), [
     ad.data?.trend,
+    paidTrafficTrend?.trend,
     trafficData?.trend,
     selectedTrafficTrend?.trend,
+    trendMetric,
     trendSource
   ]);
   const selectedTrendCoverage = trendSource === PAID_SOURCE
-    ? ad.data?.coverage || coverage
+    ? trendMetric === 'visits'
+      ? paidTrafficData?.coverage || coverage
+      : ad.data?.coverage || coverage
     : trendSource === TONGJI_ALL_SOURCE
       ? trafficData?.coverage || coverage
-      : trafficSourceData?.coverage || coverage;
+      : trafficTrendData?.coverage || coverage;
   const availableTrendMetrics = trendSource === PAID_SOURCE
     ? TREND_METRICS
     : TRAFFIC_TREND_METRICS;
@@ -794,25 +811,23 @@ export default function MarketOverviewPage() {
     previousSummary.total,
     1
   );
-  const selectedTrendError = (
-    trendSource === 'BAIDU_TONGJI_OTHER'
-    && selectedMetric.key === 'visitors'
-  )
-    ? '其他来源合并多个互斥会话来源，同一访客可能跨来源重复，不能安全相加 UV。'
-    : trendSource === PAID_SOURCE
-      ? overview.ad.errorMessage
+  const selectedTrendError = trendSource === PAID_SOURCE
+      ? trendMetric === 'visits'
+        ? overview.paidTraffic.errorMessage
+        : overview.ad.errorMessage
       : trendSource === TONGJI_ALL_SOURCE
         ? overview.traffic.errorMessage
-        : overview.trafficSources.errorMessage;
+        : overview.trafficTrend.errorMessage;
   const loading = (
     defaultContext.loading
     || marketing.loading
     || (enabled && overview.status === 'LOADING' && !ad.data)
   );
+  const paidVisits = paidTrafficSource?.summary?.visits ?? null;
   const canShowAdRow = ['AVAILABLE', 'ZERO', 'STALE'].includes(ad.state);
   const canShowTrafficSourceRows = ['AVAILABLE', 'NO_DATA'].includes(
     overview.trafficSources.state
-  ) && trafficSources.length > 0;
+  ) && nonPaidTrafficSources.length > 0;
   const canShowFormOnlyRows = formOnlySources.length > 0;
 
   return (
@@ -820,49 +835,16 @@ export default function MarketOverviewPage() {
       <h1 className={styles.visuallyHidden}>市场总览</h1>
       <div className={styles.breadcrumbRow}>
         <Breadcrumb items={[{ title: '首页' }, { title: '市场总览' }]} />
-        <div className={styles.globalControls}>
-          <label className={styles.deviceControl}>
-            <span>网站流量设备</span>
-            <Select
-              aria-label="网站流量设备"
-              value={trafficDevice}
-              onChange={setTrafficDevice}
-              options={[
-                { value: 'pc', label: 'PC 端' },
-                { value: 'mobile', label: '移动端' }
-              ]}
-              popupMatchSelectWidth={false}
-            />
-          </label>
-          <RangePicker
-          aria-label="全局日期范围"
-          value={dateRange
-            ? [dayjs(dateRange[0]), dayjs(dateRange[1])]
-            : null}
-          format="YYYY-MM-DD"
-          separator="至"
-          allowClear={false}
-          allowEmpty={[true, true]}
-          disabled={!projectId}
-          disabledDate={(current) => (
-            coverage?.from && coverage?.to
-              ? current.isBefore(dayjs(coverage.from), 'day')
-                || current.isAfter(dayjs(coverage.to), 'day')
-              : current.isBefore(
-                dayjs(websiteFallbackRange[1]).subtract(179, 'day'),
-                'day'
-              )
-                || current.isAfter(dayjs(websiteFallbackRange[1]), 'day')
-          )}
-          onChange={(values) => {
-            if (!values?.[0] || !values?.[1]) return;
-            setDateRange([
-              values[0].format('YYYY-MM-DD'),
-              values[1].format('YYYY-MM-DD')
-            ]);
-          }}
-          />
-        </div>
+        <MarketingPageFilters
+          device={trafficDevice}
+          onDeviceChange={setTrafficDevice}
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
+          dateAriaLabel="市场总览日期范围"
+          minDate={coverage?.from || dayjs(websiteFallbackRange[1]).subtract(179, 'day').format('YYYY-MM-DD')}
+          maxDate={coverage?.to || websiteFallbackRange[1]}
+          presetAnchor={coverage?.to || websiteFallbackRange[1]}
+        />
       </div>
 
       <StatusMessages
@@ -871,6 +853,16 @@ export default function MarketOverviewPage() {
         overview={overview}
         websiteForms={websiteForms}
       />
+      {trafficRange.error ? (
+        <Alert
+          className={styles.rangeSourceAlert}
+          type="warning"
+          showIcon
+          title="当前日期范围的渠道访问读取失败"
+          description={trafficRange.error}
+          action={<Button size="small" onClick={trafficRange.reload}>重试</Button>}
+        />
+      ) : null}
 
       {!defaultContext.errorMessage ? (
         <>
@@ -887,50 +879,58 @@ export default function MarketOverviewPage() {
             />
           </div>
         </div>
-        <div className={styles.kpiGrid}>
+        <MarketingMetricGrid ariaLabel="投放效率指标">
           {KPI_DEFINITIONS.map((metric) => (
-            <EfficiencyCard
+            <MarketingMetricCard
               key={metric.key}
-              metric={metric}
+              title={metric.title}
+              metricKey={metric.key}
               current={kpiValues[metric.key].current}
               previous={kpiValues[metric.key].previous}
               change={kpiValues[metric.key].change}
+              info={metric.formula}
               loading={loading}
-              period={period}
+              tone={changeTone(
+                kpiValues[metric.key].change,
+                metric.key !== 'ROAS'
+              )}
+              currentMissingReason={metric.missing}
+              previousMissingReason={metric.missing}
+              changeMissingReason={metric.missing}
             />
           ))}
-        </div>
+        </MarketingMetricGrid>
       </section>
 
       <section className={styles.whiteModule} aria-labelledby="journey-title">
         <div className={styles.moduleHeader}>
           <div className={styles.titleWithInfo}>
-            <Title level={2} id="journey-title">来源全链路</Title>
+            <Title level={2} id="journey-title">全链路数据</Title>
             <InfoTip label="全链路">
-              点击率＝访问（点击）÷展现。官网表单咨询列只展示官网可归因成功提交会话，
-              不包含 53KF 客服咨询；只有来源键精确一致时才对齐到已有来源，
-              未细分来源会单独成行。百度统计来源只是站内访问证据，
-              不是跨系统归因；当前不据此计算咨询率。
+              渠道目录是内置且稳定的：百度推广的投入和展现来自百度推广报告，
+              访问来自百度统计；其余渠道的访问均来自百度统计。
+              官网表单咨询只展示可归因成功提交会话，不包含 53KF 客服咨询；
+              这些数据是独立事实，不会因同期出现而伪造跨系统归因。
             </InfoTip>
           </div>
         </div>
-        <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="来源全链路表格">
+        <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="全链路数据表格">
           <table className={styles.journeyTable}>
-            <caption>来源全链路</caption>
+            <caption>全链路数据</caption>
             <thead>
               <tr>
-                <th scope="col">来源</th>
+                <th scope="col">渠道</th>
                 {TREND_METRICS.map((metric) => (
                   <MetricHeader
                     key={metric.key}
                     metric={metric}
                     targetMetric={trendSource === PAID_SOURCE
                       ? metric.key
-                      : metric.key === 'clicks' ? 'visits' : null}
+                      : metric.key === 'visits' ? 'visits' : null}
                     selected={trendMetric === (
                       trendSource === PAID_SOURCE
                         ? metric.key
-                        : metric.key === 'clicks' ? 'visits' : null
+                        : metric.key === 'visits' ? 'visits' : null
                     )}
                     setTrendMetric={setTrendMetric}
                   />
@@ -973,14 +973,10 @@ export default function MarketOverviewPage() {
                       : groupDigits(currentTotals.impressions)}</strong>
                   </td>
                   <td className={styles.metricCell}>
-                    <strong>{currentTotals.clicks == null
-                      ? <MissingValue label="访问（点击）" />
-                      : groupDigits(currentTotals.clicks)}</strong>
-                    <small>点击率 {calculateRate(
-                      currentTotals.clicks,
-                      currentTotals.impressions,
-                      2
-                    ) || '—'}</small>
+                    <strong>{paidVisits == null
+                      ? <MissingValue reason="百度统计付费搜索访问暂时不可用，不能用广告点击代替。" label="百度推广访问" />
+                      : groupDigits(paidVisits)}</strong>
+                    <small>来自百度统计</small>
                   </td>
                   <td className={styles.metricCell}>
                     <WebsiteFormConsultationCell
@@ -1001,11 +997,10 @@ export default function MarketOverviewPage() {
                     <MissingValue label="百度推广整体转换率" />
                   </td>
                 </tr> : null}
-                {trafficSources.map((source) => (
+                {nonPaidTrafficSources.map((source) => (
                   <TrafficSourceRow
                     key={source.sourceKey}
                     source={source}
-                    dateRange={dateRange}
                     formConsultation={source.sourceKey === 'DIRECT'
                       ? websiteFormBySource.get('DIRECT')
                       : null}
@@ -1046,7 +1041,7 @@ export default function MarketOverviewPage() {
                 value={trendSource}
                 onChange={(value) => {
                   setTrendSource(value);
-                  setTrendMetric(value === PAID_SOURCE ? 'clicks' : 'visits');
+                  setTrendMetric('visits');
                 }}
                 options={TREND_SOURCES}
                 popupMatchSelectWidth={false}

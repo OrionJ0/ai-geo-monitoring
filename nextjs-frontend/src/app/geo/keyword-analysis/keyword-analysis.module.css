@@ -9,110 +9,37 @@
 .moduleStack {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  gap: 16px;
 }
 
-.coverageCard,
 .filterCard,
 .analysisCard,
 .tableCard {
   min-width: 0;
   border: 1px solid #dfe5ee !important;
-  border-radius: 8px !important;
   background: #fff !important;
   box-shadow: none !important;
 }
 
-.coverageCard :global(.ant-card-body),
+.filterCard,
+.analysisCard {
+  border-radius: 12px !important;
+}
+
+.tableCard {
+  border-radius: 10px !important;
+}
+
 .filterCard :global(.ant-card-body),
 .analysisCard :global(.ant-card-body),
 .tableCard :global(.ant-card-body) {
   padding: 0;
 }
 
-.dateRangeControl {
-  max-width: none !important;
-}
-
-.sourceMeta {
-  flex: none;
-  margin-left: 6px;
-  padding-left: 16px;
-  border-left: 1px solid #d9e0ea;
-  color: #667085;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.coverageRow {
-  display: flex;
-  min-height: 54px;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  color: #46546b;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.coverageRow button {
-  min-height: 32px;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: #46546b;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-}
-
-.coverageRow button:hover {
-  background: #f5f7fa;
-}
-
-.coverageRow button:focus-visible,
 .scatterRegion:focus-visible,
 .keywordTable :global(.ant-table-tbody > tr:focus-visible) {
   outline: 3px solid rgba(31, 94, 220, 0.36);
   outline-offset: 2px;
-}
-
-.coverageRow button.stageSelected {
-  border-color: #91caff;
-  color: #0f5bd3;
-  background: #eaf3ff;
-}
-
-.coverageRow b {
-  margin-left: 6px;
-  color: #0f5bd3;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.coverageArrow {
-  color: #8a96a8;
-  font-size: 12px;
-}
-
-.coverageMetric {
-  padding-left: 18px;
-  border-left: 1px solid #e3e8ef;
-}
-
-.riskMetric {
-  display: inline-flex;
-  margin-left: auto;
-  align-items: center;
-  gap: 8px;
-  border-color: #ff9c6e !important;
-  color: #b63708 !important;
-  background: #fff7f0 !important;
-}
-
-.riskMetric b {
-  color: #b63708;
 }
 
 .filterRow {
@@ -317,17 +244,6 @@
 .scatterEmpty {
   min-height: 350px;
   padding-top: 84px;
-}
-
-.keyboardTooltip {
-  display: grid;
-  max-width: 300px;
-  gap: 2px;
-  font-size: 12px;
-}
-
-.keyboardTooltip strong {
-  margin-bottom: 4px;
 }
 
 .detailPane {
@@ -623,18 +539,6 @@
 }
 
 @media (max-width: 1100px) {
-  .dateRangeControl {
-    overflow-x: auto;
-  }
-
-  .coverageRow {
-    overflow-x: auto;
-  }
-
-  .riskMetric {
-    margin-left: 18px;
-  }
-
   .analysisGrid {
     grid-template-columns: 1fr;
   }
@@ -653,10 +557,6 @@
 }
 
 @media (max-width: 767px) {
-  .sourceMeta {
-    display: none;
-  }
-
   .filterRow,
   .filterField,
   .chartHeader,

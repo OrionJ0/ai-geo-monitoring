@@ -1,9 +1,9 @@
 .page {
+  min-width: 0;
+  max-width: 100%;
   min-height: 100%;
-  padding: 24px;
-  background:
-    radial-gradient(circle at 92% 2%, rgba(47, 107, 255, 0.08), transparent 24rem),
-    #f6f8fb;
+  padding-bottom: 24px;
+  color: #172b4d;
 }
 
 .pageStack {
@@ -20,7 +20,6 @@
 .coreSection {
   border-color: #cddcfa;
   background: linear-gradient(135deg, #f7faff 0%, #ffffff 56%, #f3f7ff 100%);
-  box-shadow: 0 12px 32px rgba(28, 64, 125, 0.08);
 }
 
 .diagnosisSection {
@@ -32,6 +31,11 @@
 }
 
 .sectionHeader {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 16px;
 }
 
@@ -52,7 +56,7 @@
   overflow: hidden;
   border-color: #d8e4f8;
   background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 8px 20px rgba(34, 71, 133, 0.06);
+  box-shadow: none;
 }
 
 .coreMetricCard :global(.ant-statistic-content) {
@@ -96,9 +100,22 @@
   margin-top: 12px;
 }
 
+.diagnosticRows > :global(.ant-col) {
+  display: flex;
+}
+
+.diagnosticRows > :global(.ant-col) > :global(.ant-card) {
+  width: 100%;
+  height: 100%;
+}
+
+.diagnosticRows :global(.ant-card-body) {
+  min-width: 0;
+}
+
 @media (max-width: 640px) {
   .page {
-    padding: 16px 12px 24px;
+    padding-bottom: 24px;
   }
 
   .metricSection {

@@ -1,15 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import axios from '@/lib/axiosConfig';
 import {
   adaptMarketingDashboard,
   assertMarketingDashboardResponse,
   marketingSnapshotWarning,
-  type AdPerformanceModel,
-  type MarketingDashboardResponse
+  type AdPerformanceModel
 } from '@/lib/marketing/adPerformanceAdapter';
 import { buildAdPerformanceFixture } from '@/fixtures/adPerformance.fixture';
+import { readMarketingDashboard } from './readMarketingDashboard';
 
 export type AdPerformanceFixtureState = 'ready' | 'loading' | 'empty' | 'error';
 
@@ -22,6 +21,7 @@ type UseAdPerformanceOptions = {
   fixtureEnabled?: boolean;
   dateRange: DateRange;
   fixtureState?: AdPerformanceFixtureState;
+  onDateRangeAdjusted?: (range: [string, string]) => void;
 };
 
 type UseAdPerformanceState = {
@@ -44,13 +44,15 @@ export default function useAdPerformance({
   enabled,
   fixtureEnabled = AD_PERFORMANCE_FIXTURE_ENABLED,
   dateRange,
-  fixtureState = 'ready'
+  fixtureState = 'ready',
+  onDateRangeAdjusted
 }: UseAdPerformanceOptions): UseAdPerformanceState {
   const [data, setData] = useState<AdPerformanceModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
   const requestSequence = useRef(0);
+  const skipAutomaticRangeReload = useRef('');
 
   const reload = useCallback(async () => {
     const requestId = ++requestSequence.current;
@@ -87,14 +89,19 @@ export default function useAdPerformance({
     setError('');
     setWarning('');
     try {
-      const response = await axios.get<MarketingDashboardResponse>(
-        `/api/marketing/projects/${encodeURIComponent(projectId)}/dashboard`,
-        dateRange
-          ? { params: { from: dateRange[0], to: dateRange[1] } }
-          : undefined
-      );
+      const response = await readMarketingDashboard({ projectId, dateRange });
       if (requestId !== requestSequence.current) return;
       assertMarketingDashboardResponse(response.data, projectId);
+      if (response.effectiveDateRange) {
+        if (
+          !dateRange
+          || response.effectiveDateRange[0] !== dateRange[0]
+          || response.effectiveDateRange[1] !== dateRange[1]
+        ) {
+          skipAutomaticRangeReload.current = response.effectiveDateRange.join(':');
+        }
+        onDateRangeAdjusted?.(response.effectiveDateRange);
+      }
       setWarning(marketingSnapshotWarning(response.data));
       setData(adaptMarketingDashboard(response.data, projectName));
     } catch (requestError: unknown) {
@@ -117,11 +124,24 @@ export default function useAdPerformance({
     } finally {
       if (requestId === requestSequence.current) setLoading(false);
     }
-  }, [dateRange, enabled, fixtureEnabled, fixtureState, projectId, projectName]);
+  }, [
+    dateRange,
+    enabled,
+    fixtureEnabled,
+    fixtureState,
+    onDateRangeAdjusted,
+    projectId,
+    projectName
+  ]);
 
   useEffect(() => {
+    const rangeKey = dateRange?.join(':') || '';
+    if (rangeKey && skipAutomaticRangeReload.current === rangeKey) {
+      skipAutomaticRangeReload.current = '';
+      return;
+    }
     void reload();
-  }, [reload]);
+  }, [dateRange, reload]);
 
   return { data, loading, error, warning, reload };
 }

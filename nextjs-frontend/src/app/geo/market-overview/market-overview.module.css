@@ -36,28 +36,13 @@
   border-radius: 8px;
 }
 
-.globalControls,
-.deviceControl {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.deviceControl > span {
-  color: #667085;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 20px;
-  white-space: nowrap;
-}
-
-.deviceControl :global(.ant-select) {
-  min-width: 92px;
-}
-
 .statusStack {
   display: grid;
   gap: 8px;
+  margin-bottom: 16px;
+}
+
+.rangeSourceAlert {
   margin-bottom: 16px;
 }
 
@@ -130,7 +115,6 @@
   background: #e6f4ff;
 }
 
-.infoButton:focus-visible,
 .sourceLink:focus-visible,
 .headerButton:focus-visible,
 .tableScroller:focus-visible {
@@ -138,115 +122,18 @@
   outline-offset: 2px;
 }
 
-.kpiGrid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.kpiCard {
-  min-width: 0;
-  border: 1px solid #e5eaf1 !important;
-  border-radius: 10px !important;
-}
-
-.kpiCard :global(.ant-card-body) {
-  padding: 16px;
-}
-
-.kpiCard :global(.ant-skeleton) {
-  min-height: 100px;
-}
-
-.kpiTitleRow {
-  display: flex;
-  min-height: 28px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.kpiTitleRow h3 {
-  min-width: 0;
-  margin: 0;
-  color: #111827;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 24px;
-}
-
-.kpiTitleRow h3 span {
-  margin-left: 4px;
-  color: #172b4d;
-}
-
-.kpiPeriods {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.kpiPeriods > div {
-  min-width: 0;
-}
-
-.kpiPeriods span,
-.kpiChange > span {
-  display: block;
-  margin-bottom: 6px;
-  color: #667085;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 18px;
-}
-
-.kpiPeriods strong {
-  display: block;
-  min-height: 36px;
-  overflow: hidden;
-  color: #15803d;
-  font-size: 28px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  line-height: 36px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.kpiPeriods .previousValue {
-  color: #172b4d;
-  font-size: 22px;
-}
-
-.kpiChange {
-  display: flex;
-  min-height: 22px;
-  align-items: center;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.kpiChange > span {
-  margin: 0;
-}
-
-.kpiChange strong,
 .trendSummary dd[data-tone] {
   font-variant-numeric: tabular-nums;
 }
 
-.kpiChange strong[data-tone="good"],
 .trendSummary dd[data-tone="good"] {
   color: #15803d;
 }
 
-.kpiChange strong[data-tone="bad"],
 .trendSummary dd[data-tone="bad"] {
   color: #dc2626;
 }
 
-.kpiChange strong[data-tone="neutral"],
 .trendSummary dd[data-tone="neutral"] {
   color: #172b4d;
 }
@@ -616,10 +503,6 @@
 }
 
 @media (max-width: 1279px) {
-  .kpiGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .trendHeader {
     flex-direction: column;
   }
@@ -640,20 +523,6 @@
   .breadcrumbRow :global(.ant-picker) {
     width: 100%;
     min-width: 0;
-  }
-
-  .globalControls {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .deviceControl {
-    display: grid;
-    grid-template-columns: 84px minmax(0, 1fr);
-  }
-
-  .deviceControl :global(.ant-select) {
-    width: 100%;
   }
 
   .page section + section {
@@ -701,20 +570,6 @@
 
   .chartRegion {
     min-height: 210px;
-  }
-}
-
-@media (max-width: 479px) {
-  .kpiGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .kpiCard :global(.ant-card-body) {
-    padding: 16px;
-  }
-
-  .kpiPeriods strong {
-    font-size: 26px;
   }
 }
 

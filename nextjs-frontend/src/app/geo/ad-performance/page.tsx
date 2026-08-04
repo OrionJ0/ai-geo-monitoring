@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import dayjs, { type Dayjs } from 'dayjs';
 import { Line } from '@ant-design/plots';
 import {
   Alert,
@@ -9,7 +8,6 @@ import {
   Breadcrumb,
   Button,
   Card,
-  DatePicker,
   Descriptions,
   Empty,
   Input,
@@ -21,7 +19,6 @@ import {
 } from 'antd';
 import type { TableProps } from 'antd';
 import {
-  CalendarOutlined,
   DownOutlined,
   LeftOutlined,
   RightOutlined,
@@ -40,10 +37,13 @@ import type {
   AdHierarchyLevel,
   AdHierarchyNode
 } from '@/lib/marketing/adPerformanceAdapter';
-import { AD_PERFORMANCE_FIXTURE_DEFAULT_RANGE } from '@/fixtures/adPerformance.fixture';
+import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
+import { useMarketingFilters } from '@/components/marketing/MarketingFiltersContext';
+import MarketingMetricCard, {
+  MarketingMetricGrid,
+  MarketingMetricPlaceholderGrid
+} from '@/components/marketing/MarketingMetricCard';
 import styles from './ad-performance.module.css';
-
-const { RangePicker } = DatePicker;
 
 type DateRange = [string, string] | null;
 type DisplayLevel = 'all' | AdHierarchyLevel;
@@ -66,6 +66,13 @@ const TREND_OPTIONS: Array<{ value: TrendMetric; label: string }> = [
   { value: 'cpc', label: '平均 CPC' }
 ];
 
+const AD_SUMMARY_PLACEHOLDERS = Object.freeze([
+  { title: '总消费', metricKey: 'COST' },
+  { title: '总展现', metricKey: 'IMPRESSIONS' },
+  { title: '总点击', metricKey: 'CLICKS' },
+  { title: '平均点击成本', metricKey: 'CPC' }
+]);
+
 const DEFAULT_EXPANDED_KEYS = [
   'project:perimeter-alarm',
   'scheme:pc-multi-region'
@@ -86,10 +93,18 @@ function roundedDivision(numerator: bigint, denominator: bigint): bigint {
 
 function fixedDecimal(value: bigint, digits: number): string {
   const scale = powerOfTen(digits);
-  const whole = value / scale;
-  if (!digits) return groupDigits(whole.toString());
-  const fraction = (value % scale).toString().padStart(digits, '0');
-  return `${groupDigits(whole.toString())}.${fraction}`;
+  const negative = value < BigInt(0);
+  const absolute = negative ? -value : value;
+  const whole = absolute / scale;
+  if (!digits) return `${negative ? '-' : ''}${groupDigits(whole.toString())}`;
+  const fraction = (absolute % scale).toString().padStart(digits, '0');
+  return `${negative ? '-' : ''}${groupDigits(whole.toString())}.${fraction}`;
+}
+
+function signedRoundedDivision(numerator: bigint, denominator: bigint): bigint {
+  return numerator < BigInt(0)
+    ? -roundedDivision(-numerator, denominator)
+    : roundedDivision(numerator, denominator);
 }
 
 function formatMoney(
@@ -128,6 +143,54 @@ function calculateCpc(
   );
   const symbol = currency === 'CNY' ? '¥' : `${currency} `;
   return `${symbol}${fixedDecimal(cents, 2)}`;
+}
+
+function sumTrendMetrics(rows: AdDailyMetrics[]): AdExactMetrics {
+  return rows.reduce<AdExactMetrics>((totals, row) => ({
+    costAmountScaled: (BigInt(totals.costAmountScaled) + BigInt(row.costAmountScaled)).toString(),
+    impressions: (BigInt(totals.impressions) + BigInt(row.impressions)).toString(),
+    clicks: (BigInt(totals.clicks) + BigInt(row.clicks)).toString()
+  }), { costAmountScaled: '0', impressions: '0', clicks: '0' });
+}
+
+function formatExactChange(current: string, previous: string): string | null {
+  const currentValue = BigInt(current);
+  const previousValue = BigInt(previous);
+  if (previousValue === BigInt(0)) return null;
+  const tenths = signedRoundedDivision(
+    (currentValue - previousValue) * BigInt(1000),
+    previousValue
+  );
+  const sign = tenths > BigInt(0) ? '+' : '';
+  return `${sign}${fixedDecimal(tenths, 1)}%`;
+}
+
+function formatRatioChange(
+  currentNumerator: string,
+  currentDenominator: string,
+  previousNumerator: string,
+  previousDenominator: string
+): string | null {
+  const currentDen = BigInt(currentDenominator);
+  const previousDen = BigInt(previousDenominator);
+  const previousNum = BigInt(previousNumerator);
+  if (currentDen === BigInt(0) || previousDen === BigInt(0) || previousNum === BigInt(0)) {
+    return null;
+  }
+  const currentNum = BigInt(currentNumerator);
+  const tenths = signedRoundedDivision(
+    (currentNum * previousDen - previousNum * currentDen) * BigInt(1000),
+    previousNum * currentDen
+  );
+  const sign = tenths > BigInt(0) ? '+' : '';
+  return `${sign}${fixedDecimal(tenths, 1)}%`;
+}
+
+function comparisonTone(change: string | null, lowerIsBetter = false) {
+  if (!change || change.startsWith('0')) return 'neutral' as const;
+  const rising = change.startsWith('+');
+  if (lowerIsBetter) return rising ? 'bad' as const : 'good' as const;
+  return rising ? 'good' as const : 'bad' as const;
 }
 
 function useReducedMotion(): boolean {
@@ -348,7 +411,7 @@ function DetailPopover({
           }))}
         />
       )}
-      trigger={['hover', 'focus']}
+      trigger={['hover']}
       placement="left"
       open={open}
       onOpenChange={onOpenChange}
@@ -373,16 +436,11 @@ function DetailPopover({
 function LoadingPage({ dateRange }: { dateRange: DateRange }) {
   return (
     <div className={styles.moduleStack} aria-busy="true">
-      <Card className={styles.summaryCard}>
-        <div className={styles.summaryGrid}>
-          {[0, 1, 2].map((item) => (
-            <div key={item} className={styles.summaryItem}>
-              <Skeleton.Input active size="small" />
-              <Skeleton.Input active size="large" />
-            </div>
-          ))}
-        </div>
-      </Card>
+      <MarketingMetricPlaceholderGrid
+        items={AD_SUMMARY_PLACEHOLDERS}
+        ariaLabel="广告表现指标加载中"
+        loading
+      />
       <Card className={styles.trendCard}>
         <Skeleton active title paragraph={{ rows: 7 }} />
       </Card>
@@ -399,18 +457,11 @@ function LoadingPage({ dateRange }: { dateRange: DateRange }) {
 export default function AdPerformancePage() {
   const reducedMotion = useReducedMotion();
   const defaultContext = useDefaultProjectContext();
+  const { device, setDevice, dateRange, setDateRange } = useMarketingFilters();
   const [fixtureEnabled, setFixtureEnabled] = useState(
     AD_PERFORMANCE_FIXTURE_ENABLED
   );
   const marketing = useMarketingCapabilities(!fixtureEnabled);
-  const [dateRange, setDateRange] = useState<DateRange>(
-    AD_PERFORMANCE_FIXTURE_ENABLED
-      ? [
-          AD_PERFORMANCE_FIXTURE_DEFAULT_RANGE.from,
-          AD_PERFORMANCE_FIXTURE_DEFAULT_RANGE.to
-        ]
-      : null
-  );
   const [fixtureState, setFixtureState] = useState<AdPerformanceFixtureState>('ready');
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('cost');
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
@@ -433,12 +484,6 @@ export default function AdPerformancePage() {
       || devFixtureRequested;
     setFixtureEnabled(nextFixtureEnabled);
     setFixtureState(fixtureStateFromLocation(nextFixtureEnabled));
-    if (nextFixtureEnabled) {
-      setDateRange([
-        AD_PERFORMANCE_FIXTURE_DEFAULT_RANGE.from,
-        AD_PERFORMANCE_FIXTURE_DEFAULT_RANGE.to
-      ]);
-    }
   }, []);
 
   useEffect(() => {
@@ -461,16 +506,9 @@ export default function AdPerformancePage() {
     enabled,
     fixtureEnabled,
     dateRange,
-    fixtureState
+    fixtureState,
+    onDateRangeAdjusted: setDateRange
   });
-
-  useEffect(() => {
-    if (dateRange || !performance.data) return;
-    setDateRange([
-      performance.data.period.currentFrom,
-      performance.data.period.currentTo
-    ]);
-  }, [dateRange, performance.data]);
 
   const selectedNode = useMemo(() => findNode(
     performance.data?.structure || [],
@@ -482,6 +520,14 @@ export default function AdPerformancePage() {
   const previousTrend = useMemo(() => (
     selectedNode?.previousTrend || performance.data?.previousTrend || []
   ), [performance.data?.previousTrend, selectedNode]);
+  const currentOverviewMetrics = useMemo(
+    () => sumTrendMetrics(performance.data?.currentTrend || []),
+    [performance.data?.currentTrend]
+  );
+  const previousOverviewMetrics = useMemo(
+    () => sumTrendMetrics(performance.data?.previousTrend || []),
+    [performance.data?.previousTrend]
+  );
   const currentPeriodLabel = performance.data
     ? `近 ${performance.data.period.days} 天`
     : '当前周期';
@@ -569,6 +615,7 @@ export default function AdPerformancePage() {
             title={name}
             placement="topLeft"
             mouseEnterDelay={0.25}
+            trigger={['hover']}
           >
             <span className={styles.nameCell}>{name}</span>
           </Tooltip>
@@ -674,18 +721,6 @@ export default function AdPerformancePage() {
         ? '广告数据尚未开放。'
         : performance.error)
     : performance.error;
-  const rangeDays = dateRange
-    ? dayjs(dateRange[1]).diff(dayjs(dateRange[0]), 'day') + 1
-    : 30;
-  const rangeLabel = rangeDays === 30 ? '近 30 天' : `近 ${rangeDays} 天`;
-  const rangePresets = [7, 14, 30].map((days) => ({
-    label: `近 ${days} 天`,
-    value: ([
-      dayjs('2026-08-03').subtract(days - 1, 'day'),
-      dayjs('2026-08-03')
-    ]) as [Dayjs, Dayjs],
-  }));
-
   return (
     <main className={styles.page} aria-label="广告表现">
       <div className={styles.breadcrumbRow}>
@@ -696,38 +731,20 @@ export default function AdPerformancePage() {
             { title: '广告表现' }
           ]}
         />
-        <div className={styles.dateRangeControl}>
-          <CalendarOutlined aria-hidden="true" />
-          <span>{rangeLabel}</span>
-          <RangePicker
-            aria-label="广告表现日期范围"
-            value={dateRange
-              ? [dayjs(dateRange[0]), dayjs(dateRange[1])]
-              : null}
-            format="YYYY-MM-DD"
-            separator="至"
-            allowClear={false}
-            allowEmpty={[true, true]}
-            presets={rangePresets}
-            variant="borderless"
-            suffixIcon={<DownOutlined />}
-            disabled={!performance.data && !fixtureEnabled}
-            disabledDate={(current) => (
-              Boolean(performance.data) && (
-                current.isBefore(dayjs(performance.data?.availableFrom), 'day')
-                || current.isAfter(dayjs(performance.data?.availableTo), 'day')
-              )
-            )}
-            onChange={(values) => {
-              if (!values?.[0] || !values?.[1]) return;
-              setSelectedNodeKey(null);
-              setDateRange([
-                values[0].format('YYYY-MM-DD'),
-                values[1].format('YYYY-MM-DD')
-              ]);
-            }}
-          />
-        </div>
+        <MarketingPageFilters
+          device={device}
+          onDeviceChange={setDevice}
+          availableDevices={['all']}
+          dateRange={dateRange}
+          onDateRangeChange={(nextRange) => {
+            setSelectedNodeKey(null);
+            setDateRange(nextRange);
+          }}
+          dateAriaLabel="广告表现日期范围"
+          minDate={performance.data?.availableFrom || null}
+          maxDate={performance.data?.availableTo || null}
+          presetAnchor={performance.data?.availableTo || dateRange?.[1] || null}
+        />
       </div>
 
       {pageError ? (
@@ -759,30 +776,65 @@ export default function AdPerformancePage() {
       ) : null}
 
       {shellLoading || performance.loading || !performance.data ? (
-        pageError ? null : <LoadingPage dateRange={dateRange} />
+        pageError ? (
+          <MarketingMetricPlaceholderGrid
+            items={AD_SUMMARY_PLACEHOLDERS}
+            ariaLabel="广告表现周期汇总指标"
+            missingReason={pageError}
+          />
+        ) : <LoadingPage dateRange={dateRange} />
       ) : (
         <div className={styles.moduleStack}>
-          <Card className={styles.summaryCard}>
-            <div className={styles.summaryGrid} aria-label="周期汇总指标">
-              <div className={styles.summaryItem}>
-                <span>总消费</span>
-                <strong>{formatMoney(
-                  performance.data.summary.costAmountScaled,
-                  performance.data.costScale,
-                  0,
-                  performance.data.currency
-                )}</strong>
-              </div>
-              <div className={styles.summaryItem}>
-                <span>总展现</span>
-                <strong>{groupDigits(performance.data.summary.impressions)}</strong>
-              </div>
-              <div className={styles.summaryItem}>
-                <span>总点击</span>
-                <strong>{groupDigits(performance.data.summary.clicks)}</strong>
-              </div>
-            </div>
-          </Card>
+          <MarketingMetricGrid ariaLabel="广告表现周期汇总指标">
+            {[
+              {
+                title: '总消费', key: 'COST',
+                current: formatMoney(currentOverviewMetrics.costAmountScaled, performance.data.costScale, 0, performance.data.currency),
+                previous: formatMoney(previousOverviewMetrics.costAmountScaled, performance.data.costScale, 0, performance.data.currency),
+                change: formatExactChange(currentOverviewMetrics.costAmountScaled, previousOverviewMetrics.costAmountScaled),
+                lowerIsBetter: true,
+                info: '所选周期的百度推广消费。'
+              },
+              {
+                title: '总展现', key: 'IMPRESSIONS',
+                current: groupDigits(currentOverviewMetrics.impressions),
+                previous: groupDigits(previousOverviewMetrics.impressions),
+                change: formatExactChange(currentOverviewMetrics.impressions, previousOverviewMetrics.impressions),
+                info: '所选周期的百度推广展现数。'
+              },
+              {
+                title: '总点击', key: 'CLICKS',
+                current: groupDigits(currentOverviewMetrics.clicks),
+                previous: groupDigits(previousOverviewMetrics.clicks),
+                change: formatExactChange(currentOverviewMetrics.clicks, previousOverviewMetrics.clicks),
+                info: '百度推广点击数，不等于站内访问数。'
+              },
+              {
+                title: '平均点击成本', key: 'CPC',
+                current: calculateCpc(currentOverviewMetrics, performance.data.costScale, performance.data.currency),
+                previous: calculateCpc(previousOverviewMetrics, performance.data.costScale, performance.data.currency),
+                change: formatRatioChange(
+                  currentOverviewMetrics.costAmountScaled,
+                  currentOverviewMetrics.clicks,
+                  previousOverviewMetrics.costAmountScaled,
+                  previousOverviewMetrics.clicks
+                ),
+                lowerIsBetter: true,
+                info: '广告消费 ÷ 广告点击数，越低越好。'
+              }
+            ].map((item) => (
+              <MarketingMetricCard
+                key={item.key}
+                title={item.title}
+                metricKey={item.key}
+                current={item.current === '—' ? null : item.current}
+                previous={item.previous === '—' ? null : item.previous}
+                change={item.change}
+                tone={comparisonTone(item.change, item.lowerIsBetter)}
+                info={item.info}
+              />
+            ))}
+          </MarketingMetricGrid>
 
           <Card className={styles.trendCard}>
             <div className={styles.trendHeader}>

@@ -30,6 +30,8 @@ type MarketOverviewState = {
   ad: SourceSlot;
   traffic: SourceSlot;
   trafficSources: SourceSlot;
+  paidTraffic: SourceSlot;
+  trafficTrend: SourceSlot;
   reload: () => Promise<void>;
 };
 
@@ -107,11 +109,56 @@ function validTrafficRows(value: unknown): boolean {
   ));
 }
 
+const TONGJI_SOURCE_KEYS = [
+  'BAIDU_PAID',
+  'DIRECT',
+  'BAIDU_SEARCH',
+  'BING_SEARCH',
+  'GOOGLE_SEARCH',
+  'OTHER_SEARCH',
+  'EXTERNAL_REFERRAL'
+] as const;
+
+function validTrafficSources(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length !== TONGJI_SOURCE_KEYS.length) {
+    return false;
+  }
+  const keys = value.map((source) => (
+    objectRecord(source) ? String(source.sourceKey) : ''
+  ));
+  return new Set(keys).size === TONGJI_SOURCE_KEYS.length
+    && TONGJI_SOURCE_KEYS.every((key) => keys.includes(key))
+    && value.every((source: unknown) => objectRecord(source)
+      && objectRecord(source.summary)
+      && ['pageviews', 'visits', 'visitors']
+        .every((key) => exactMetric(source.summary[key])));
+}
+
+function validSelectedSourceTrend(
+  value: unknown,
+  expectedSourceKey: string | null,
+  device: 'all' | 'pc' | 'mobile'
+): boolean {
+  if (expectedSourceKey === null) return value === null;
+  return objectRecord(value)
+    && value.sourceKey === expectedSourceKey
+    && value.device === device
+    && ['DATA', 'NO_DATA'].includes(String(value.dataState))
+    && objectRecord(value.coverage)
+    && objectRecord(value.summary)
+    && ['pageviews', 'visits', 'visitors']
+      .every((key) => exactMetric(value.summary[key]))
+    && validTrafficRows(value.trend)
+    && objectRecord(value.cache)
+    && ['HIT', 'REFRESHED', 'FALLBACK'].includes(String(value.cache.state));
+}
+
 function assertTongjiOverviewResponse(
   value: unknown,
   projectId: string,
-  device: 'pc' | 'mobile',
-  kind: 'trend' | 'sources'
+  device: 'all' | 'pc' | 'mobile',
+  kind: 'trend' | 'sources',
+  selectedSourceKey: string | null = null
 ): asserts value is Record<string, any> {
   if (!objectRecord(value)) throw new TypeError('百度统计响应合同无效');
   const baseValid = String(value.projectId) === projectId
@@ -132,14 +179,12 @@ function assertTongjiOverviewResponse(
       && objectRecord(value.attribution)
       && value.attribution.level === 'WEBSITE_TRAFFIC_SOURCE'
       && value.attribution.isCrossSystemVerified === false
-      && Array.isArray(value.sources)
-      && value.sources.length === 4
-      && value.sources.every((source: unknown) => objectRecord(source)
-        && ['BAIDU_SEARCH', 'DIRECT', 'BING_SEARCH', 'OTHER']
-          .includes(String(source.sourceKey))
-        && objectRecord(source.summary)
-        && ['pageviews', 'visits', 'visitors']
-          .every((key) => exactMetric(source.summary[key])));
+      && validTrafficSources(value.sources)
+      && validSelectedSourceTrend(
+        value.selectedTrend,
+        selectedSourceKey,
+        device
+      );
   if (!valid) {
     const error = new TypeError('百度统计响应合同无效');
     (error as TypeError & { code: string }).code =
@@ -165,11 +210,18 @@ function fulfilledTrafficSlot(
   value: unknown,
   readAt: string,
   projectId: string,
-  device: 'pc' | 'mobile',
-  kind: 'trend' | 'sources'
+  device: 'all' | 'pc' | 'mobile',
+  kind: 'trend' | 'sources',
+  selectedSourceKey: string | null = null
 ): SourceSlot {
   try {
-    assertTongjiOverviewResponse(value, projectId, device, kind);
+    assertTongjiOverviewResponse(
+      value,
+      projectId,
+      device,
+      kind,
+      selectedSourceKey
+    );
     return trafficSlot(value, readAt);
   } catch (error) {
     return rejectedSlot(error, '百度统计响应合同无效');
@@ -200,12 +252,22 @@ export default function useMarketOverview({
 }: {
   projectId: string;
   enabled: boolean;
-  device: 'pc' | 'mobile';
-  trafficTrendSource: 'BAIDU_SEARCH' | 'BING_SEARCH' | 'DIRECT' | 'OTHER' | null;
+  device: 'all' | 'pc' | 'mobile';
+  trafficTrendSource:
+    | 'BAIDU_PAID'
+    | 'DIRECT'
+    | 'BAIDU_SEARCH'
+    | 'BING_SEARCH'
+    | 'GOOGLE_SEARCH'
+    | 'OTHER_SEARCH'
+    | 'EXTERNAL_REFERRAL'
+    | null;
 }): MarketOverviewState {
   const [ad, setAd] = useState<SourceSlot>(idleSlot);
   const [traffic, setTraffic] = useState<SourceSlot>(idleSlot);
   const [trafficSources, setTrafficSources] = useState<SourceSlot>(idleSlot);
+  const [paidTraffic, setPaidTraffic] = useState<SourceSlot>(idleSlot);
+  const [trafficTrend, setTrafficTrend] = useState<SourceSlot>(idleSlot);
   const [status, setStatus] = useState<MarketOverviewState['status']>('IDLE');
   const requestSequence = useRef(0);
   const lastReadAt = useRef(0);
@@ -217,6 +279,8 @@ export default function useMarketOverview({
       setAd(idleSlot());
       setTraffic(idleSlot());
       setTrafficSources(idleSlot());
+      setPaidTraffic(idleSlot());
+      setTrafficTrend(idleSlot());
       setStatus('IDLE');
       return;
     }
@@ -225,9 +289,29 @@ export default function useMarketOverview({
       setAd((current) => ({ ...current, state: 'LOADING' }));
       setTraffic((current) => ({ ...current, state: 'LOADING' }));
       setTrafficSources((current) => ({ ...current, state: 'LOADING' }));
+      setPaidTraffic((current) => ({ ...current, state: 'LOADING' }));
+      setTrafficTrend((current) => ({ ...current, state: 'LOADING' }));
     }
     const encodedProjectId = encodeURIComponent(projectId);
-    const [adResult, trafficResult, trafficSourcesResult] = await Promise.allSettled([
+    const paidTrafficRequest = axios.get(
+      `/api/marketing/projects/${encodedProjectId}/tongji-source-trends`,
+      { params: { device, source: 'BAIDU_PAID' } }
+    );
+    const selectedTrendRequest = trafficTrendSource === 'BAIDU_PAID'
+      ? paidTrafficRequest
+      : trafficTrendSource
+        ? axios.get(
+            `/api/marketing/projects/${encodedProjectId}/tongji-source-trends`,
+            { params: { device, source: trafficTrendSource } }
+          )
+        : null;
+    const [
+      adResult,
+      trafficResult,
+      trafficSourcesResult,
+      paidTrafficResult,
+      trafficTrendResult
+    ] = await Promise.allSettled([
       axios.get(`/api/marketing/projects/${encodedProjectId}/dashboard`),
       axios.get(
         `/api/marketing/projects/${encodedProjectId}/tongji-trend`,
@@ -235,13 +319,10 @@ export default function useMarketOverview({
       ),
       axios.get(
         `/api/marketing/projects/${encodedProjectId}/tongji-source-trends`,
-        {
-          params: {
-            device,
-            ...(trafficTrendSource ? { source: trafficTrendSource } : {})
-          }
-        }
-      )
+        { params: { device } }
+      ),
+      paidTrafficRequest,
+      selectedTrendRequest || Promise.resolve(null)
     ]);
     if (sequence !== requestSequence.current) return;
     const readAt = new Date().toISOString();
@@ -266,9 +347,33 @@ export default function useMarketOverview({
         'sources'
       )
       : rejectedSlot(trafficSourcesResult.reason, '网站来源读取失败');
+    const nextPaidTraffic = paidTrafficResult.status === 'fulfilled'
+      ? fulfilledTrafficSlot(
+        paidTrafficResult.value.data,
+        readAt,
+        projectId,
+        device,
+        'sources',
+        'BAIDU_PAID'
+      )
+      : rejectedSlot(paidTrafficResult.reason, '百度推广访问读取失败');
+    const nextTrafficTrend = !selectedTrendRequest
+      ? idleSlot()
+      : trafficTrendResult.status === 'fulfilled'
+        ? fulfilledTrafficSlot(
+          trafficTrendResult.value?.data,
+          readAt,
+          projectId,
+          device,
+          'sources',
+          trafficTrendSource
+        )
+        : rejectedSlot(trafficTrendResult.reason, '所选来源趋势读取失败');
     setAd(nextAd);
     setTraffic(nextTraffic);
     setTrafficSources(nextTrafficSources);
+    setPaidTraffic(nextPaidTraffic);
+    setTrafficTrend(nextTrafficTrend);
     setStatus(overallStatus(nextAd, nextTraffic, nextTrafficSources));
     lastReadAt.current = Date.now();
   }, [device, enabled, projectId, trafficTrendSource]);
@@ -289,5 +394,13 @@ export default function useMarketOverview({
     };
   }, [fetchOverview]);
 
-  return { status, ad, traffic, trafficSources, reload };
+  return {
+    status,
+    ad,
+    traffic,
+    trafficSources,
+    paidTraffic,
+    trafficTrend,
+    reload
+  };
 }

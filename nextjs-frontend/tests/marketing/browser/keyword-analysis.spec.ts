@@ -233,6 +233,11 @@ async function installRoutes(page: Page) {
   }));
 }
 
+function keywordMetric(page: Page, title: string) {
+  return page.getByRole('heading', { name: new RegExp(title, 'u') })
+    .locator('xpath=ancestor::div[contains(@class,"ant-card")][1]');
+}
+
 test.beforeEach(async ({ page }) => {
   await installRoutes(page);
   await page.setViewportSize({ width: 1488, height: 1058 });
@@ -241,10 +246,10 @@ test.beforeEach(async ({ page }) => {
 test('confirmed keyword analysis visual keeps selection, donut, task filters, and direct unit text', async ({ page }) => {
   await page.goto('/geo/keyword-analysis');
 
-  await expect(page.getByText('有展现关键词')).toContainText('302');
-  await expect(page.getByText('有点击关键词')).toContainText('51');
-  await expect(page.getByText('点击覆盖率')).toContainText('16.89%');
-  await expect(page.getByText('未获点击')).toContainText('251');
+  await expect(keywordMetric(page, '有展现关键词')).toContainText('302');
+  await expect(keywordMetric(page, '有点击关键词')).toContainText('51');
+  await expect(keywordMetric(page, '点击覆盖率')).toContainText('16.89%');
+  await expect(keywordMetric(page, '未获点击')).toContainText('251');
   await expect(page.getByText('百度推广 · 真实数据 · 数据截至 2026-08-03')).toBeVisible();
   await expect(page.getByText('当前选中关键词')).toBeVisible();
   await expect(page.getByText('行动建议分布')).toBeVisible();
@@ -335,8 +340,48 @@ test('stale snapshot warns and preserves keyword data with retry', async ({ page
   });
   await expect(warning).toContainText('截至 2026-08-03');
   await expect(warning.getByRole('button', { name: /重\s*试/u })).toBeVisible();
-  await expect(page.getByText('有展现关键词')).toContainText('302');
+  await expect(keywordMetric(page, '有展现关键词')).toContainText('302');
   await expect(page.getByText('振动光纤价格').first()).toBeVisible();
+});
+
+test('stale snapshot clamps a crossed-day default to the last completed coverage', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-08-05T04:00:00.000Z'));
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  const requestedRanges: Array<string | null> = [];
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    const url = new URL(route.request().url());
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
+    requestedRanges.push(from && to ? `${from}:${to}` : null);
+    if (to === '2026-08-04') {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'DASHBOARD_DATE_OUT_OF_RANGE',
+            message: '日期筛选超出当前快照覆盖范围'
+          }
+        })
+      });
+    }
+    const response = dashboardFixture(true);
+    if (from && to) response.filter = { from, to };
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(response)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+
+  await expect(keywordMetric(page, '有展现关键词')).toContainText('302');
+  await expect(page.getByText('日期筛选超出当前快照覆盖范围')).toHaveCount(0);
+  await expect.poll(() => requestedRanges).toEqual([
+    '2026-07-29:2026-08-04',
+    null,
+    '2026-07-28:2026-08-03'
+  ]);
 });
 
 test('stale snapshot warns and preserves advertising data with retry', async ({ page }) => {
@@ -370,7 +415,8 @@ test('keyword page rejects a dashboard belonging to another project', async ({ p
 
   await expect(page.getByText('关键词数据读取失败，请稍后重试。'))
     .toBeVisible();
-  await expect(page.getByText('有展现关键词')).toHaveCount(0);
+  await expect(page.getByText('百度推广 · 真实数据', { exact: false }))
+    .toHaveCount(0);
 });
 
 test('advertising page rejects an impossible data-with-NA state', async ({ page }) => {

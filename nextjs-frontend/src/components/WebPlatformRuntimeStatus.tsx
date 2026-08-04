@@ -9,8 +9,8 @@ import { useWebPlatformRuntimeStatus } from '@/lib/useWebPlatformRuntimeStatus';
 import styles from './WebPlatformRuntimeStatus.module.css';
 
 const PLATFORMS = [
-  { code: 'deepseek-web', name: 'DeepSeek Web', kicker: 'DEEPSEEK WEB' },
-  { code: 'doubao-web', name: '豆包 Web', kicker: '豆包 WEB' }
+  { code: 'deepseek-web', name: 'DeepSeek Web' },
+  { code: 'doubao-web', name: '豆包 Web' }
 ] as const;
 
 function RuntimeStrip({ platform }: { platform: typeof PLATFORMS[number] }) {
@@ -35,7 +35,6 @@ function RuntimeStrip({ platform }: { platform: typeof PLATFORMS[number] }) {
         <span />
       </span>
       <div className={styles.copy}>
-        <span className={styles.kicker}>{platform.kicker} · 单通道队列</span>
         <strong>{presentation.title}</strong>
         <span className={styles.description}>{presentation.description}</span>
         {presentation.actionHref ? (

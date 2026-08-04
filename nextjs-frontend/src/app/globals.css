@@ -64,28 +64,24 @@ img, svg, video {
 }
 
 a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+  color: #0f4fb8;
+  font-weight: inherit;
+  text-decoration: none;
 }
 
 a:hover {
-  color: #535bf2;
+  color: #0b3d91;
 }
 
 h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+  font-size: 28px;
+  line-height: 36px;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;
     background-color: #ffffff;
-  }
-
-  a:hover {
-    color: #747bff;
   }
 
 }
@@ -129,14 +125,6 @@ h1 {
 .ant-card-head-title {
   font-size: 18px;
   font-weight: 500;
-}
-
-.ant-statistic-title {
-  font-size: 16px !important;
-}
-
-.ant-statistic-content {
-  font-size: 28px !important;
 }
 
 .ant-card {

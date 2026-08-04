@@ -15,6 +15,10 @@
   color: #183153;
 }
 
+.runtimeStrip + .runtimeStrip {
+  margin-top: 8px;
+}
+
 .runtimeStrip[data-tone='warning'] {
   --lane-accent: #b36b00;
   --lane-surface: #fff9ed;
@@ -62,19 +66,11 @@
 }
 
 .copy {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
-  column-gap: 14px;
+  display: flex;
+  min-width: 0;
   align-items: baseline;
-}
-
-.kicker {
-  grid-column: 1 / -1;
-  margin-bottom: 2px;
-  color: color-mix(in srgb, var(--lane-accent) 78%, #4b5563);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.11em;
+  flex-wrap: wrap;
+  gap: 4px 14px;
 }
 
 .copy strong {
@@ -113,13 +109,7 @@
 }
 
 @media (max-width: 640px) {
-  .copy {
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-
   .action {
-    margin-top: 4px;
     width: fit-content;
   }
 }

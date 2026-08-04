@@ -33,36 +33,6 @@
   line-height: 20px;
 }
 
-.dateRangeControl {
-  display: flex;
-  min-height: 40px;
-  align-items: center;
-  gap: 8px;
-  padding-left: 12px;
-  border: 1px solid #e5eaf1;
-  border-radius: 8px;
-  color: #172b4d;
-  background: #fff;
-}
-
-.dateRangeControl > span {
-  flex: none;
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.dateRangeControl :global(.ant-picker) {
-  width: 244px;
-  min-width: 0;
-  padding-left: 0;
-}
-
-.dateRangeControl :global(.ant-picker-input > input) {
-  color: #172b4d;
-  font-variant-numeric: tabular-nums;
-}
-
 .pageAlert {
   margin-bottom: 16px;
 }
@@ -73,7 +43,6 @@
   gap: 16px;
 }
 
-.summaryCard,
 .trendCard,
 .tableCard {
   min-width: 0;
@@ -82,7 +51,6 @@
   box-shadow: none !important;
 }
 
-.summaryCard,
 .trendCard {
   border-radius: 12px !important;
 }
@@ -90,50 +58,6 @@
 .tableCard {
   overflow: hidden;
   border-radius: 10px !important;
-}
-
-.summaryCard :global(.ant-card-body) {
-  padding: 0;
-}
-
-.summaryGrid {
-  display: grid;
-  min-height: 120px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: center;
-}
-
-.summaryItem {
-  display: grid;
-  min-width: 0;
-  min-height: 64px;
-  align-content: center;
-  justify-items: center;
-  gap: 8px;
-  padding: 12px 24px;
-}
-
-.summaryItem + .summaryItem {
-  border-left: 1px solid #e8edf4;
-}
-
-.summaryItem > span {
-  color: #667085;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 22px;
-}
-
-.summaryItem > strong {
-  max-width: 100%;
-  overflow: hidden;
-  color: #172b4d;
-  font-size: 28px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  line-height: 36px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .trendCard :global(.ant-card-body) {
@@ -363,10 +287,6 @@
     align-items: flex-start;
   }
 
-  .dateRangeControl :global(.ant-picker) {
-    width: 224px;
-  }
-
   .tableToolbar {
     align-items: flex-start;
   }
@@ -385,27 +305,8 @@
     flex-direction: column;
   }
 
-  .dateRangeControl,
-  .dateRangeControl :global(.ant-picker),
   .searchInput {
     width: 100%;
-  }
-
-  .dateRangeControl > span {
-    display: none;
-  }
-
-  .summaryGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .summaryItem {
-    min-height: 92px;
-  }
-
-  .summaryItem + .summaryItem {
-    border-top: 1px solid #e8edf4;
-    border-left: 0;
   }
 
   .trendCard :global(.ant-card-body) {

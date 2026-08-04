@@ -4,6 +4,16 @@
 
 ### P1
 
+- [ ] 2026-08-04：修复问题筛选后保留不可见选中项
+  - 状态：待修
+  - 记录时间：2026-08-04 13:07
+  - 现象：问题列表启用 `preserveSelectedRowKeys`，搜索、问题集或状态筛选变化后，当前筛选结果之外的问题仍保持选中；批量删除、组成问题集和加入问题集会继续作用于这些不可见记录。
+  - 影响：用户可能在无法核对完整选择范围时执行破坏性批量操作。
+  - 来源：
+    - `nextjs-frontend/src/app/geo/prompts/page.tsx`
+  - 复现：选中多个问题，改变搜索词或问题集筛选使部分已选问题隐藏，再观察选择数量并执行批量操作。
+  - 下一步：筛选变化时将选中项收敛到当前筛选结果，并增加回归测试覆盖隐藏选择。
+
 - [x] 2026-07-29：修复新项目默认平台与 Web 登录前置校验
   - 当前规则（2026-07-31）：本条所述项目级默认平台和 Web 整批阻断均已退役。正式运行只使用设置中心全局启用平台；单个平台不可用时记录并跳过，其他平台继续，详见 `closed-2026-07-31-002-single-brand-platform-runtime/`。以下内容仅保留为历史修复记录。
   - 状态：已修
@@ -119,6 +129,78 @@
 
 ### P2
 
+- [ ] 2026-08-04：统一工作台页面壳与顶部控件位置
+  - 状态：待修
+  - 记录时间：2026-08-04 13:07
+  - 现象：全局内容区已有 24px 内边距，总体表现又重复增加 24px，网站流量则用负位移上移；部分一级页面没有统一的面包屑和顶部筛选行，营销筛选使用 40px 控件而其他页面多为 32px。
+  - 影响：切换页面时左边缘、首屏高度、筛选控件大小和页面身份持续跳动。
+  - 来源：
+    - `nextjs-frontend/src/app/geo/layout.tsx`
+    - `nextjs-frontend/src/app/geo/project-dashboard/project-dashboard.module.css`
+    - `nextjs-frontend/src/app/geo/website-traffic/website-traffic.module.css`
+    - `nextjs-frontend/src/components/marketing/marketing-shared.module.css`
+  - 复现：依次打开市场总览、网站流量、总体表现、引用来源和常用网站，对比首行位置与控件高度。
+  - 下一步：以全局内容区为唯一外边距来源，统一 32px 顶部控件和页面身份行。
+
+- [ ] 2026-08-04：修复引用变化大表被压缩进三列卡片
+  - 状态：待修
+  - 记录时间：2026-08-04 13:07
+  - 现象：新增、流失、保留域名和 URL 表格以三列并排显示，每张卡约占三分之一页面宽度，却分别设置 930 至 1160px 的横向滚动宽度。
+  - 影响：桌面端也只能看到少量列，需要在六张小卡中反复横向滚动，无法快速比较变化数据。
+  - 来源：
+    - `nextjs-frontend/src/app/geo/project-dashboard/page.tsx`
+    - `nextjs-frontend/src/app/geo/sources/page.tsx`
+  - 复现：在有引用变化数据的项目中打开总体表现和引用来源，查看新增、流失、保留区域。
+  - 下一步：把同类变化改为全宽可切换表格或纵向全宽分组，并保留表格内部滚动。
+
+- [ ] 2026-08-04：统一筛选刷新和不可用操作反馈
+  - 状态：待修
+  - 记录时间：2026-08-04 13:07
+  - 现象：总体表现与引用来源在周期或平台变化时先清空旧数据，产生整页闪空；咨询数据的不可查看详情仍渲染为可聚焦、可点击但没有动作的链接按钮。
+  - 影响：页面刷新时数据和高度跳动，不可用操作看起来仍能执行。
+  - 来源：
+    - `nextjs-frontend/src/app/geo/project-dashboard/page.tsx`
+    - `nextjs-frontend/src/app/geo/sources/page.tsx`
+    - `nextjs-frontend/src/app/geo/consultations/page.tsx`
+  - 复现：切换总体表现的周期或平台；在咨询数据中点击不可查看记录的“查看”。
+  - 下一步：刷新时保留旧数据并显示加载态；不可用详情使用真正禁用的按钮并保留原因说明。
+
+- [ ] 2026-08-04：收敛全局 Ant Design 样式和页面视觉规格
+  - 状态：待修
+  - 记录时间：2026-08-04 13:07
+  - 现象：全局 CSS 强制全部统计标题和数值字号，覆盖页面自己的核心、辅助、诊断层级；营销页面又存在多套间距、圆角、卡片内边距和表格密度。
+  - 影响：组件无法按页面语义表现层级，同类型卡片和表格在不同页面外观不一致。
+  - 来源：
+    - `nextjs-frontend/src/app/globals.css`
+    - `nextjs-frontend/src/components/marketing/marketing-shared.module.css`
+    - `nextjs-frontend/src/app/geo/project-dashboard/project-dashboard.module.css`
+    - `nextjs-frontend/src/app/geo/keyword-analysis/keyword-analysis.module.css`
+  - 复现：对比总体表现核心指标、诊断指标及营销各页面卡片的字号、圆角和模块间距。
+  - 下一步：删除会污染局部层级的全局强制字号，以现行视觉规范统一卡片 12px、表格 10px 和 16px 模块间距。
+
+- [ ] 2026-08-04：统一 Tooltip、空值、分页和行内操作规则
+  - 状态：待修
+  - 记录时间：2026-08-04 13:07
+  - 现象：Tooltip 同时存在仅悬停和聚焦触发，空值混用 `—`、`-`、`N/A`，问题列表上下重复显示分页，表格行内“编辑”和“运行”的主次样式不统一。
+  - 影响：相同组件的交互方式、数据语义和操作优先级难以形成稳定预期。
+  - 来源：
+    - `nextjs-frontend/src/components/marketing/MarketingMetricCard.tsx`
+    - `nextjs-frontend/src/app/geo/prompts/page.tsx`
+    - `nextjs-frontend/src/app/geo/project-dashboard/page.tsx`
+    - `nextjs-frontend/src/app/geo/question-set-reports/page.tsx`
+  - 复现：依次查看指标说明、无有效回答指标、问题表格分页及问题集行内操作。
+  - 下一步：按产品决定将 Tooltip 统一为仅鼠标悬停；空值统一为 `—`；列表只保留下方分页并统一行内操作层级。
+
+- [ ] 2026-08-04：修正常用网站的页面身份和基木鱼入口
+  - 状态：待修
+  - 记录时间：2026-08-04 13:07
+  - 现象：常用网站没有页面身份行，打开后首个可见标题是“广告投放”；基木鱼和百度推广当前指向同一个地址并使用同一个百度通用图标，外部 favicon 失败时图标样式还会突变为文字。
+  - 影响：分类标题容易被误认为页面标题，基木鱼入口无法确认是否进入正确后台，网站卡片图标稳定性不足。
+  - 来源：
+    - `nextjs-frontend/src/app/geo/quick-links/page.tsx`
+  - 复现：打开常用网站，对比百度推广与基木鱼的链接地址及图标。
+  - 下一步：补齐统一页面身份行；确认基木鱼正式入口后使用正确链接，并继续保留清晰的本地文字回退。
+
 - [x] 2026-08-03：修复营销首页无人访问时仍固定刷新百度推广并过度预取统计趋势
   - 状态：已修
   - 记录时间：2026-08-03 21:53
@@ -212,6 +294,17 @@
   - 验证：`UserLifecycleApi.test.js` 证明硬删除路由不存在、停用只更新用户状态且已有令牌立即失效；`adminUserLifecycle.test.cjs` 证明后台不再调用删除接口并统一发送 `active / inactive`。
 
 ### P3
+
+- [ ] 2026-08-04：精简总体表现并统一网站诊断页面外观
+  - 状态：待修
+  - 记录时间：2026-08-04 13:07
+  - 现象：总体表现把引用变化同时展示为指标卡和明细表，并与引用来源页面大量重复；网站诊断采用独立 Hero、方形容器、持续阴影和另一套页面宽度。
+  - 影响：总体表现阅读路径过长，网站诊断在工作台中像另一套独立产品。
+  - 来源：
+    - `nextjs-frontend/src/app/geo/project-dashboard/page.tsx`
+    - `nextjs-frontend/src/app/geo/seo-audit/seo-audit.module.css`
+  - 复现：连续浏览总体表现、引用来源和网站诊断，对比信息重复度与基础页面外观。
+  - 下一步：总体表现保留核心摘要和入口，详细引用变化集中到引用来源；网站诊断保留大输入任务但统一页面壳、圆角和阴影规则。
 
 - [ ] 2026-07-27：修复问题库首屏短暂显示空数据
   - 状态：待修

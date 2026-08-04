@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Form, Input, Segmented, Spin, Tooltip, Upload, message } from 'antd';
+import { Button, Form, Input, Segmented, Space, Spin, Tooltip, Upload, message } from 'antd';
 import {
   CheckCircleFilled,
   ClockCircleOutlined,
@@ -17,6 +17,7 @@ import {
 import axios from '@/lib/axiosConfig';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import SeoAuditHistoryDrawer from './SeoAuditHistoryDrawer';
+import WorkspacePageHeader from '@/components/WorkspacePageHeader';
 import SeoAuditJobProgress from './SeoAuditJobProgress';
 import SeoSiteAuditReport from './SeoSiteAuditReport';
 import SearchPlatformPanel from './SearchPlatformPanel';
@@ -79,7 +80,7 @@ function getCheckFinding(check) {
 }
 
 function formatDate(value) {
-  if (!value) return '-';
+  if (!value) return '—';
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
 }
 
@@ -296,31 +297,39 @@ export default function SeoAuditPage() {
 
   return (
     <main className={styles.page}>
+      <div className={styles.pageHeader}>
+        <WorkspacePageHeader
+          section="网站诊断"
+          title="SEO 健康检测"
+          actions={(
+            <Space wrap>
+              <Upload
+                accept=".csv,text/csv"
+                showUploadList={false}
+                beforeUpload={importReport}
+                disabled={importing || loading}
+              >
+                <Button
+                  className={styles.importButton}
+                  icon={<ImportOutlined />}
+                  loading={importing}
+                  disabled={loading}
+                >
+                  导入 CSV
+                </Button>
+              </Upload>
+              <Button
+                className={styles.historyButton}
+                icon={<HistoryOutlined />}
+                onClick={() => setHistoryOpen(true)}
+              >
+                历史报告
+              </Button>
+            </Space>
+          )}
+        />
+      </div>
       <section className={styles.hero} aria-label="技术 SEO 检测">
-        <div className={styles.heroActions}>
-          <Upload
-            accept=".csv,text/csv"
-            showUploadList={false}
-            beforeUpload={importReport}
-            disabled={importing || loading}
-          >
-            <Button
-              className={styles.importButton}
-              icon={<ImportOutlined />}
-              loading={importing}
-              disabled={loading}
-            >
-              导入 CSV
-            </Button>
-          </Upload>
-          <Button
-            className={styles.historyButton}
-            icon={<HistoryOutlined />}
-            onClick={() => setHistoryOpen(true)}
-          >
-            历史报告
-          </Button>
-        </div>
         <div className={styles.modeControl}>
           <span>检测范围</span>
           <Segmented
@@ -370,8 +379,8 @@ export default function SeoAuditPage() {
               ? '当前仅允许检测公网地址'
               : '正在检查网络范围'}
           </span>
-          <Tooltip title="检测由后端服务器发出；localhost 指后端所在机器，其他电脑请填写后端可访问的局域网 IP。全站模式只抓取同域页面，单页模式只检测输入页面及必要的站点级文件。">
-            <InfoCircleOutlined tabIndex={0} aria-label="检测范围说明" />
+          <Tooltip title="检测由服务器执行；内网地址需确保服务器能访问。" trigger={['hover']}>
+            <InfoCircleOutlined aria-label="检测范围说明" />
           </Tooltip>
         </div>
       </section>

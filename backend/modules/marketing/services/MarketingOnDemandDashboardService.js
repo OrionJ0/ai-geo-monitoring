@@ -1,9 +1,25 @@
+const FAILED_REFRESH_COOLDOWN_MS = 60 * 1000;
+
 class MarketingOnDemandDashboardService {
-  constructor({ dashboardService, refreshService, executeRefresh }) {
+  constructor({
+    dashboardService,
+    refreshService,
+    executeRefresh,
+    clock = () => Date.now(),
+    failedRefreshCooldownMs = FAILED_REFRESH_COOLDOWN_MS
+  }) {
     this.dashboardService = dashboardService;
     this.refreshService = refreshService;
     this.executeRefresh = executeRefresh;
+    this.clock = clock;
+    this.failedRefreshCooldownMs = failedRefreshCooldownMs;
     this.refreshes = new Map();
+    this.failedRefreshes = new Map();
+    if (
+      !Number.isSafeInteger(failedRefreshCooldownMs)
+      || failedRefreshCooldownMs < 1_000
+      || failedRefreshCooldownMs > 10 * 60 * 1000
+    ) throw new TypeError('营销按需刷新失败冷却时间无效');
   }
 
   assertAccess(input) {
@@ -55,10 +71,18 @@ class MarketingOnDemandDashboardService {
       if (input.from === undefined && input.to === undefined) return current;
       return this.dashboardService.read(input);
     }
-    try {
-      await this.refresh(input.projectId);
-    } catch (error) {
-      if (!current.revision) throw error;
+    const key = String(input.projectId);
+    const lastFailureAt = this.failedRefreshes.get(key);
+    const coolingDown = Number.isFinite(lastFailureAt)
+      && this.clock() - lastFailureAt < this.failedRefreshCooldownMs;
+    if (!coolingDown) {
+      try {
+        await this.refresh(input.projectId);
+        this.failedRefreshes.delete(key);
+      } catch (error) {
+        this.failedRefreshes.set(key, this.clock());
+        if (!current.revision) throw error;
+      }
     }
     return this.dashboardService.read(input);
   }

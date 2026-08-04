@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import dayjs, { type Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import { Heatmap, Pie, Scatter } from '@ant-design/plots';
 import {
   Alert,
   Breadcrumb,
   Button,
   Card,
-  DatePicker,
   Empty,
   Input,
   Radio,
@@ -20,9 +19,6 @@ import {
 } from 'antd';
 import type { TableProps } from 'antd';
 import {
-  ArrowRightOutlined,
-  CalendarOutlined,
-  DownOutlined,
   SearchOutlined
 } from '@ant-design/icons';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
@@ -52,19 +48,24 @@ import useKeywordAnalysis, {
   KEYWORD_ANALYSIS_FIXTURE_ENABLED,
   type KeywordFixtureState
 } from '@/lib/marketing/useKeywordAnalysis';
+import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
+import { useMarketingFilters } from '@/components/marketing/MarketingFiltersContext';
+import MarketingMetricCard, {
+  MarketingMetricGrid,
+  MarketingMetricPlaceholderGrid
+} from '@/components/marketing/MarketingMetricCard';
 import sharedStyles from '../ad-performance/ad-performance.module.css';
 import styles from './keyword-analysis.module.css';
 
-const { RangePicker } = DatePicker;
-
-type DateRange = [string, string] | null;
+const KEYWORD_SUMMARY_PLACEHOLDERS = Object.freeze([
+  { title: '有展现关键词', metricKey: 'IMPRESSION KEYWORDS' },
+  { title: '有点击关键词', metricKey: 'CLICKED KEYWORDS' },
+  { title: '点击覆盖率', metricKey: 'CLICK COVERAGE' },
+  { title: '未获点击', metricKey: 'NO CLICK' }
+]);
 type TagFilter = 'all' | KeywordTag;
 type BenchmarkMode = 'median' | 'account-average';
 type ChartMode = 'scatter' | 'density';
-
-const DEFAULT_RANGE: DateRange = KEYWORD_ANALYSIS_FIXTURE_ENABLED
-  ? [KEYWORD_FIXTURE_RANGE.from, KEYWORD_FIXTURE_RANGE.to]
-  : null;
 
 const TYPED_KEYWORD_TAGS = KEYWORD_TAGS as readonly KeywordTag[];
 
@@ -163,35 +164,15 @@ function KeywordTagValue({ tag }: { tag: KeywordTag | null }) {
 function LoadingPage() {
   return (
     <div className={styles.moduleStack} aria-busy="true">
-      <Card className={styles.coverageCard}><Skeleton.Input active block size="small" /></Card>
+      <MarketingMetricPlaceholderGrid
+        items={KEYWORD_SUMMARY_PLACEHOLDERS}
+        ariaLabel="关键词总览指标加载中"
+        loading
+      />
       <Card className={styles.filterCard}><Skeleton.Input active block size="small" /></Card>
       <Card className={styles.analysisCard}><Skeleton active title paragraph={{ rows: 12 }} /></Card>
       <Card className={styles.tableCard}><Skeleton active title paragraph={{ rows: 6 }} /></Card>
       <span className={sharedStyles.visuallyHidden}>正在加载关键词分析</span>
-    </div>
-  );
-}
-
-function ScatterKeyboardTooltip({
-  point,
-  scale,
-  currency,
-  unitName
-}: {
-  point: KeywordScatterPoint;
-  scale: number;
-  currency: string;
-  unitName: string;
-}) {
-  return (
-    <div className={styles.keyboardTooltip}>
-      <strong>{point.keyword}</strong>
-      <span>CTR {formatPercent(point.ctrPercent)}</span>
-      <span>平均 CPC {currency === 'CNY' ? '¥' : `${currency} `}{point.averageCpc.toFixed(2)}</span>
-      <span>点击 {groupDigits(String(point.clicks))}</span>
-      <span>消费 {formatMoney(point.costAmountScaled, scale, 0, currency)}</span>
-      <span>展现 {groupDigits(point.impressions)}</span>
-      <span>{unitName}</span>
     </div>
   );
 }
@@ -219,7 +200,7 @@ export default function KeywordAnalysisPage() {
   const fixtureEnabled = KEYWORD_ANALYSIS_FIXTURE_ENABLED;
   const defaultContext = useDefaultProjectContext();
   const marketing = useMarketingCapabilities(!fixtureEnabled);
-  const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_RANGE);
+  const { device, setDevice, dateRange, setDateRange } = useMarketingFilters();
   const [fixtureState, setFixtureState] = useState<KeywordFixtureState>('ready');
   const [stageFilter, setStageFilter] = useState<KeywordStageFilter>('all');
   const [unitFilter, setUnitFilter] = useState('all');
@@ -230,7 +211,6 @@ export default function KeywordAnalysisPage() {
   const [benchmarkMode, setBenchmarkMode] = useState<BenchmarkMode>('median');
   const [chartMode, setChartMode] = useState<ChartMode>('scatter');
   const [selectedKeywordKey, setSelectedKeywordKey] = useState<string | null>(null);
-  const [keyboardPointIndex, setKeyboardPointIndex] = useState(-1);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -248,15 +228,11 @@ export default function KeywordAnalysisPage() {
     enabled,
     dateRange,
     fixtureEnabled,
-    fixtureState
+    fixtureState,
+    onDateRangeAdjusted: setDateRange
   });
   const model = analysis.data;
   const rows = useMemo<KeywordAggregateRow[]>(() => model?.rows || [], [model?.rows]);
-
-  useEffect(() => {
-    if (dateRange || !model) return;
-    setDateRange([model.range.from, model.range.to]);
-  }, [dateRange, model]);
 
   const unitOptions = useMemo(() => {
     const units = new Map<string, string>();
@@ -321,9 +297,6 @@ export default function KeywordAnalysisPage() {
     () => new Map(filteredRows.map((row) => [row.key, row])),
     [filteredRows]
   );
-  const keyboardPoint = keyboardPointIndex >= 0
-    ? scatterPoints[keyboardPointIndex] || null
-    : null;
 
   useEffect(() => {
     setPage(1);
@@ -340,11 +313,6 @@ export default function KeywordAnalysisPage() {
     const preferred = scatterPoints.find((point) => point.keyword === '振动光纤价格');
     setSelectedKeywordKey((preferred || scatterPoints[0]).key);
   }, [scatterPoints, selectedKeywordKey]);
-
-  useEffect(() => {
-    if (keyboardPointIndex < scatterPoints.length) return;
-    setKeyboardPointIndex(scatterPoints.length ? 0 : -1);
-  }, [keyboardPointIndex, scatterPoints.length]);
 
   useEffect(() => {
     const pageElement = pageRef.current;
@@ -390,7 +358,7 @@ export default function KeywordAnalysisPage() {
         width: 252,
         fixed: 'left',
         render: (keyword: string, record) => (
-          <Tooltip title={`${record.accountName} / ${record.path}`} placement="topLeft">
+          <Tooltip title={`${record.accountName} / ${record.path}`} placement="topLeft" trigger={['hover']}>
             <span className={styles.keywordCell}>
               <span className={styles.keywordName}>{keyword}</span>
               <span className={styles.keywordUnit}>{record.unitName}</span>
@@ -554,17 +522,6 @@ export default function KeywordAnalysisPage() {
   ];
   const donutRows = distributionRows.filter((item) => item.count > 0);
 
-  const rangeDays = dateRange
-    ? dayjs(dateRange[1]).diff(dayjs(dateRange[0]), 'day') + 1
-    : 30;
-  const rangeLabel = rangeDays === 30 ? '近 30 天' : `近 ${rangeDays} 天`;
-  const rangePresets = [7, 14, 30].map((days) => ({
-    label: `近 ${days} 天`,
-    value: ([
-      dayjs(model?.availableTo || KEYWORD_FIXTURE_RANGE.to).subtract(days - 1, 'day'),
-      dayjs(model?.availableTo || KEYWORD_FIXTURE_RANGE.to)
-    ]) as [Dayjs, Dayjs]
-  }));
   const sourceMeta = model
     ? `百度推广 · ${model.source === 'development-fixture' ? '开发数据' : '真实数据'} · ${
         model.updatedAt
@@ -588,45 +545,22 @@ export default function KeywordAnalysisPage() {
           { title: '投放与流量' },
           { title: '关键词分析' }
         ]} />
-        <div className={`${sharedStyles.dateRangeControl} ${styles.dateRangeControl}`}>
-          <CalendarOutlined aria-hidden="true" />
-          <span>{rangeLabel}</span>
-          <RangePicker
-            aria-label="关键词分析日期范围"
-            value={dateRange ? [dayjs(dateRange[0]), dayjs(dateRange[1])] : null}
-            format="YYYY-MM-DD"
-            separator="至"
-            allowClear={false}
-            allowEmpty={[true, true]}
-            presets={rangePresets}
-            variant="borderless"
-            suffixIcon={<DownOutlined />}
-            disabled={!model}
-            disabledDate={(current) => Boolean(model) && (
-              current.isBefore(dayjs(model?.availableFrom), 'day')
-              || current.isAfter(dayjs(model?.availableTo), 'day')
-            )}
-            onChange={(values) => {
-              if (!values?.[0] || !values?.[1]) return;
-              clearFilters();
-              setDateRange([
-                values[0].format('YYYY-MM-DD'),
-                values[1].format('YYYY-MM-DD')
-              ]);
-            }}
-          />
-          {sourceMeta ? <span className={styles.sourceMeta}>{sourceMeta}</span> : null}
-        </div>
-      </div>
-
-      {pageError ? (
-        <Alert
-          type="error"
-          showIcon
-          title={pageError}
-          action={<Button size="small" onClick={() => void analysis.reload()}>重试</Button>}
+        <MarketingPageFilters
+          device={device}
+          onDeviceChange={setDevice}
+          availableDevices={['all']}
+          dateRange={dateRange}
+          onDateRangeChange={(nextRange) => {
+            clearFilters();
+            setDateRange(nextRange);
+          }}
+          dateAriaLabel="关键词分析日期范围"
+          minDate={model?.availableFrom || null}
+          maxDate={model?.availableTo || null}
+          presetAnchor={model?.availableTo || KEYWORD_FIXTURE_RANGE.to}
+          after={sourceMeta || null}
         />
-      ) : null}
+      </div>
 
       {!pageError && analysis.warning ? (
         <Alert
@@ -637,45 +571,76 @@ export default function KeywordAnalysisPage() {
         />
       ) : null}
 
-      {shellLoading || analysis.loading || !model ? (
-        pageError ? null : <LoadingPage />
+      {pageError ? (
+        <div className={styles.moduleStack}>
+          <Alert
+            type="error"
+            showIcon
+            title={pageError}
+            action={<Button size="small" onClick={() => void analysis.reload()}>重试</Button>}
+          />
+          <MarketingMetricPlaceholderGrid
+            items={KEYWORD_SUMMARY_PLACEHOLDERS}
+            ariaLabel="关键词覆盖摘要"
+            missingReason={pageError}
+          />
+        </div>
+      ) : shellLoading || analysis.loading || !model ? (
+        <LoadingPage />
       ) : (
         <div className={styles.moduleStack}>
-          <Card className={styles.coverageCard}>
-            <div className={styles.coverageRow} aria-label="关键词覆盖摘要">
-              <button
-                type="button"
-                className={stageFilter === 'impressions' ? styles.stageSelected : ''}
-                aria-pressed={stageFilter === 'impressions'}
-                onClick={() => setStageFilter((current) => current === 'impressions' ? 'all' : 'impressions')}
-              >
-                有展现关键词 <b>{model.coverage.impressionKeywordCount}</b>
-              </button>
-              <ArrowRightOutlined className={styles.coverageArrow} aria-hidden="true" />
-              <button
-                type="button"
-                className={stageFilter === 'clicked' ? styles.stageSelected : ''}
-                aria-pressed={stageFilter === 'clicked'}
-                onClick={() => setStageFilter((current) => current === 'clicked' ? 'all' : 'clicked')}
-              >
-                有点击关键词 <b>{model.coverage.clickedKeywordCount}</b>
-              </button>
-              <span className={styles.coverageMetric}>
-                点击覆盖率 <b>{model.coverage.clickCoverageRate == null
-                  ? '—'
-                  : formatPercent(model.coverage.clickCoverageRate * 100)}</b>
-              </span>
-              <button
-                type="button"
-                className={`${styles.riskMetric} ${stageFilter === 'unclicked' ? styles.stageSelected : ''}`}
-                aria-pressed={stageFilter === 'unclicked'}
-                onClick={() => setStageFilter((current) => current === 'unclicked' ? 'all' : 'unclicked')}
-              >
-                未获点击 <b>{model.coverage.unclickedKeywordCount}</b>
-                <ArrowRightOutlined aria-hidden="true" />
-              </button>
-            </div>
-          </Card>
+          <MarketingMetricGrid ariaLabel="关键词覆盖摘要">
+            <MarketingMetricCard
+              title="有展现关键词"
+              metricKey="IMPRESSION KEYWORDS"
+              current={String(model.coverage.impressionKeywordCount)}
+              previous={null}
+              change={null}
+              info="有展现的关键词数；点击卡片可筛选。"
+              previousMissingReason="当前关键词合同尚未提供上一周期覆盖摘要。"
+              changeMissingReason="缺少上一周期摘要，无法比较。"
+              selected={stageFilter === 'impressions'}
+              onActivate={() => setStageFilter((current) => current === 'impressions' ? 'all' : 'impressions')}
+            />
+            <MarketingMetricCard
+              title="有点击关键词"
+              metricKey="CLICKED KEYWORDS"
+              current={String(model.coverage.clickedKeywordCount)}
+              previous={null}
+              change={null}
+              info="有点击的关键词数；点击卡片可筛选。"
+              previousMissingReason="当前关键词合同尚未提供上一周期覆盖摘要。"
+              changeMissingReason="缺少上一周期摘要，无法比较。"
+              selected={stageFilter === 'clicked'}
+              onActivate={() => setStageFilter((current) => current === 'clicked' ? 'all' : 'clicked')}
+            />
+            <MarketingMetricCard
+              title="点击覆盖率"
+              metricKey="CLICK COVERAGE"
+              current={model.coverage.clickCoverageRate == null
+                ? null
+                : formatPercent(model.coverage.clickCoverageRate * 100)}
+              previous={null}
+              change={null}
+              info="有点击关键词数 ÷ 有展现关键词数。"
+              currentMissingReason="当前没有可用的关键词覆盖分母。"
+              previousMissingReason="当前关键词合同尚未提供上一周期覆盖摘要。"
+              changeMissingReason="缺少上一周期摘要，无法比较。"
+            />
+            <MarketingMetricCard
+              title="未获点击"
+              metricKey="NO CLICKS"
+              current={String(model.coverage.unclickedKeywordCount)}
+              previous={null}
+              change={null}
+              tone="bad"
+              info="有展现但没有点击的关键词数；点击卡片可筛选。"
+              previousMissingReason="当前关键词合同尚未提供上一周期覆盖摘要。"
+              changeMissingReason="缺少上一周期摘要，无法比较。"
+              selected={stageFilter === 'unclicked'}
+              onActivate={() => setStageFilter((current) => current === 'unclicked' ? 'all' : 'unclicked')}
+            />
+          </MarketingMetricGrid>
 
           <Card className={styles.filterCard}>
             <div className={styles.filterRow} aria-label="关键词任务筛选">
@@ -761,26 +726,11 @@ export default function KeywordAnalysisPage() {
                 </div>
 
                 {chartRows.length ? (
-                  <Tooltip
-                    open={Boolean(keyboardPoint)}
-                    title={keyboardPoint ? (
-                      <ScatterKeyboardTooltip
-                        point={keyboardPoint}
-                        scale={model.costScale}
-                        currency={model.currency}
-                        unitName={rowByKey.get(keyboardPoint.key)?.unitName || '—'}
-                      />
-                    ) : null}
-                    placement="top"
-                  >
-                    <div
+                  <div
                       className={styles.scatterRegion}
                       role="img"
-                      tabIndex={0}
-                      aria-label={`关键词效率分布，共 ${scatterPoints.length} 个有点击关键词。按方向键浏览，按回车选中。`}
+                      aria-label={`关键词效率分布，共 ${scatterPoints.length} 个有点击关键词。`}
                       aria-describedby="scatter-equivalent-note"
-                      onFocus={() => setKeyboardPointIndex((current) => current >= 0 ? current : 0)}
-                      onBlur={() => setKeyboardPointIndex(-1)}
                       onClick={(event) => {
                         const bounds = event.currentTarget.getBoundingClientRect();
                         const plotLeft = 56;
@@ -804,25 +754,6 @@ export default function KeywordAnalysisPage() {
                         }, null);
                         if (nearest && nearest.distance <= 24) {
                           setSelectedKeywordKey(nearest.point.key);
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        if (!scatterPoints.length) return;
-                        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-                          event.preventDefault();
-                          setKeyboardPointIndex((current) => (
-                            (Math.max(current, 0) + 1) % scatterPoints.length
-                          ));
-                        } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-                          event.preventDefault();
-                          setKeyboardPointIndex((current) => (
-                            (Math.max(current, 0) - 1 + scatterPoints.length) % scatterPoints.length
-                          ));
-                        } else if ((event.key === 'Enter' || event.key === ' ') && keyboardPoint) {
-                          event.preventDefault();
-                          setSelectedKeywordKey(keyboardPoint.key);
-                        } else if (event.key === 'Escape') {
-                          setKeyboardPointIndex(-1);
                         }
                       }}
                     >
@@ -948,8 +879,7 @@ export default function KeywordAnalysisPage() {
                           />
                         </div>
                       ) : null}
-                    </div>
-                  </Tooltip>
+                  </div>
                 ) : (
                   <Empty
                     className={styles.scatterEmpty}

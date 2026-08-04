@@ -45,6 +45,7 @@ import QuestionSetRunHistoryDrawer, {
 } from './QuestionSetRunHistoryDrawer';
 import WebCaptureEvidence from '@/components/WebCaptureEvidence';
 import WebPlatformRuntimeStatus from '@/components/WebPlatformRuntimeStatus';
+import WorkspacePageHeader from '@/components/WorkspacePageHeader';
 import styles from './question-set-reports.module.css';
 
 const { Paragraph, Text, Title } = Typography;
@@ -330,9 +331,9 @@ function extractList(response: unknown) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return '-';
+  if (!value) return '—';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '-';
+  if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString('zh-CN', { hour12: false });
 }
 
@@ -356,21 +357,21 @@ function percent(value?: number | null) {
 
 function formatRank(value?: number | null) {
   const number = Number(value || 0);
-  return Number.isFinite(number) && number > 0 ? Number(number.toFixed(2)) : '-';
+  return Number.isFinite(number) && number > 0 ? Number(number.toFixed(2)) : '—';
 }
 
 function formatAnswerSov(row: ReportRow) {
   if (row.sov?.kind === 'contextual_competitor_mentions') {
-    if (row.sov.status === 'not_applicable') return 'N/A';
+    if (row.sov.status === 'not_applicable') return '—';
     return `${percent(row.sov.value ?? undefined)}%（${row.sov.numerator ?? 0}/${row.sov.denominator ?? 0}）`;
   }
-  return row.sov?.value == null ? '-' : `${percent(row.sov.value)}%`;
+  return row.sov?.value == null ? '—' : `${percent(row.sov.value)}%`;
 }
 
 function formatSovSummary(summary: ReportSummary) {
   const sovSummary = summary.sov_summary;
   const sampleText = `有效回答 ${sovSummary?.calculable_answers || 0}`;
-  if (!sovSummary || sovSummary.average == null) return `N/A（${sampleText}）`;
+  if (!sovSummary || sovSummary.average == null) return `—（${sampleText}）`;
   return `${percent(sovSummary.average)}%（${sampleText}）`;
 }
 
@@ -378,7 +379,7 @@ function formatAnalysisCoverage(summary: ReportSummary) {
   const validAnswers = Number(summary.valid_answers || 0);
   const acquiredAnswers = Number(summary.acquired_answers || 0);
   if (summary.analysis_coverage_rate == null || acquiredAnswers === 0) {
-    return `N/A（${validAnswers} / ${acquiredAnswers}）`;
+    return `—（${validAnswers} / ${acquiredAnswers}）`;
   }
   return `${percent(summary.analysis_coverage_rate)}%（${validAnswers} / ${acquiredAnswers}）`;
 }
@@ -391,7 +392,7 @@ function formatCurrentRate(
   const safeNumerator = Number(numerator || 0);
   const safeDenominator = Number(denominator || 0);
   if (value == null || safeDenominator === 0) {
-    return `N/A（${safeNumerator} / ${safeDenominator}）`;
+    return `—（${safeNumerator} / ${safeDenominator}）`;
   }
   return `${percent(value)}%（${safeNumerator} / ${safeDenominator}）`;
 }
@@ -421,11 +422,10 @@ function MetricLabel({ label, help }: { label: string; help: string }) {
   return (
     <span className={styles.metricLabel}>
       <Text>{label}</Text>
-      <Tooltip title={help} trigger={['hover', 'focus']}>
+      <Tooltip title={help} trigger={['hover']}>
         <QuestionCircleOutlined
           className={styles.metricHelp}
           aria-label={`${label}指标说明`}
-          tabIndex={0}
         />
       </Tooltip>
     </span>
@@ -862,7 +862,7 @@ export default function QuestionSetReportsPage() {
       width: pdfLayout ? PDF_COLUMN_WIDTHS.question : 300,
       render: (value: string, row: ReportRow) => (
         <Space orientation="vertical" size={2}>
-          <Text strong>{value || '-'}</Text>
+          <Text strong>{value || '—'}</Text>
           <Text type="secondary">{row.question_category || '未分类'}</Text>
         </Space>
       ),
@@ -873,8 +873,8 @@ export default function QuestionSetReportsPage() {
       width: pdfLayout ? PDF_COLUMN_WIDTHS.platform : 180,
       render: (_: unknown, row: ReportRow) => (
         <Space orientation="vertical" size={2}>
-          <Text>{row.platform_name || row.platform || '-'}</Text>
-          <Text type="secondary">{row.model_name || '-'}</Text>
+          <Text>{row.platform_name || row.platform || '—'}</Text>
+          <Text type="secondary">{row.model_name || '—'}</Text>
         </Space>
       ),
     },
@@ -910,7 +910,7 @@ export default function QuestionSetReportsPage() {
             <Text type="secondary">SOV {formatAnswerSov(row)}</Text>
           ) : null}
         </Space>
-      ) : '-',
+      ) : '—',
     },
     {
       title: '排名',
@@ -928,39 +928,45 @@ export default function QuestionSetReportsPage() {
       title: '情绪（AI 语义分析）',
       dataIndex: 'sentiment',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.sentiment : 80,
-      render: (value: string) => sentimentLabel[value] || '-',
+      render: (value: string) => sentimentLabel[value] || '—',
     },
   ];
 
   return (
     <div className={styles.page}>
-      <div className={styles.toolbar}>
-        <Space wrap>
-          <Upload accept=".csv,text/csv" showUploadList={false} beforeUpload={importReport}>
-            <Button icon={<ImportOutlined />} loading={importing} disabled={!projectId}>导入 CSV</Button>
-          </Upload>
-          <Button
-            icon={<HistoryOutlined />}
-            disabled={!projectId}
-            onClick={() => {
-              setHistoryOpen(true);
-              loadHistory(projectId, historyPage, historyQuestionSetId);
-            }}
-          >
-            历史报告
-          </Button>
-          <Button
-            icon={<ReloadOutlined />}
-            loading={historyLoading || reportLoading}
-            disabled={!projectId}
-            onClick={() => {
-              loadHistory(projectId, historyPage, historyQuestionSetId);
-              loadReport(projectId, runId);
-            }}
-          >
-            刷新
-          </Button>
-        </Space>
+      <div className={styles.pageHeader}>
+        <WorkspacePageHeader
+          section="监测任务"
+          title="运行报告"
+          actions={(
+            <Space wrap>
+              <Upload accept=".csv,text/csv" showUploadList={false} beforeUpload={importReport}>
+                <Button icon={<ImportOutlined />} loading={importing} disabled={!projectId}>导入 CSV</Button>
+              </Upload>
+              <Button
+                icon={<HistoryOutlined />}
+                disabled={!projectId}
+                onClick={() => {
+                  setHistoryOpen(true);
+                  loadHistory(projectId, historyPage, historyQuestionSetId);
+                }}
+              >
+                历史报告
+              </Button>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={historyLoading || reportLoading}
+                disabled={!projectId}
+                onClick={() => {
+                  loadHistory(projectId, historyPage, historyQuestionSetId);
+                  loadReport(projectId, runId);
+                }}
+              >
+                刷新
+              </Button>
+            </Space>
+          )}
+        />
       </div>
 
       {defaultContext.errorMessage ? (
@@ -1109,8 +1115,8 @@ export default function QuestionSetReportsPage() {
                         ? formatAnalysisCoverage(summary)
                         : `${summary.valid_analyses || 0} / ${summary.total || 0}`}
                       help={report.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
-                        ? '成功分析数 ÷ 已采集有效回答数。已保存完整原回答但结构化分析失败的样本只降低覆盖率，不会按品牌未提及、未推荐或 SOV 为 0 计入品牌指标。搜索状态、资料摘要和计划文本会标记为采集无效，不进入分析覆盖率分母。'
-                        : '生成当时可用的有效指标样本数 ÷ 本次计划任务数。历史报告保持原有统计口径。'}
+                        ? '成功分析数 ÷ 已采集有效回答数；采集无效不进分母，分析失败不进品牌指标。'
+                        : '有效指标样本数 ÷ 计划任务数。'}
                     />
                     <MetricItem
                       label="品牌提及率"
@@ -1121,7 +1127,7 @@ export default function QuestionSetReportsPage() {
                           summary.valid_answers,
                         )
                         : `${percent(summary.brand_mention_rate)}%`}
-                      help="至少存在 1 条目标品牌结构化提及记录的有效分析数 ÷ 有效分析数。分析模型先把目标品牌显式映射到回答实体；每条提及只保留品牌名或别名等短实体词，并须能按顺序在原回答中定位。是否提及和百分比由程序计数，分析模型不直接返回。"
+                      help="提及目标品牌的有效分析数 ÷ 有效分析数。"
                     />
                     <MetricItem
                       label="推荐率（AI 语义分析）"
@@ -1132,7 +1138,7 @@ export default function QuestionSetReportsPage() {
                           summary.valid_answers,
                         )
                         : `${percent(summary.recommendation_rate)}%`}
-                      help="至少存在 1 条目标品牌明确推荐关系的有效分析数 ÷ 有效分析数。仅客观列举不算推荐，程序根据明确推荐关系计算是否推荐和推荐率，分析模型不直接返回布尔值或比例。"
+                      help="明确推荐目标品牌的有效分析数 ÷ 有效分析数；仅列举不算推荐。"
                     />
                   </div>
 
@@ -1156,7 +1162,7 @@ export default function QuestionSetReportsPage() {
                             value={hasCurrentSov
                               ? `${formatRank(summary.avg_brand_rank)}（有效排名回答 ${summary.ranked_answers || 0}）`
                               : formatRank(summary.avg_brand_rank)}
-                            help="程序只读取至少包含 2 个不同实体、且回答明确给出顺序或名次的首个榜单；普通项目符号、正文首次出现位置和单项列表都不是排名。"
+                            help="只统计明确给出顺序或名次的多品牌榜单。"
                           />
                           {summary.sov_summary ? (
                             <MetricItem
@@ -1165,8 +1171,8 @@ export default function QuestionSetReportsPage() {
                                 : '平均 SOV（历史竞品配置口径）'}
                               value={formatSovSummary(summary)}
                               help={hasCurrentSov
-                                ? '先对每条可计算回答计算：目标品牌实际提及次数 ÷ 目标品牌与本回答 AI 判定竞品的实际提及次数之和；再对这些单条结果等权平均。N/A 回答和分析失败回答不进入平均。'
-                                : '历史报告沿用生成当时的已配置竞品统计值，不反推分子分母，也不与新版回答级口径混合。'}
+                                ? '目标品牌提及数 ÷ 品牌与竞品提及总数，再按回答取平均。'
+                                : '沿用生成报告时的竞品配置，不与新版指标混算。'}
                             />
                           ) : null}
                           <MetricItem
@@ -1174,7 +1180,7 @@ export default function QuestionSetReportsPage() {
                             value={Number(summary.citation_valid_analyses || 0) > 0
                               ? `${percent(summary.citation_rate)}%`
                               : '暂无可验证样本'}
-                            help="回答中至少包含 1 条平台引用标记的可验证分析数 ÷ 引用口径可验证分析数。正文链接、检索候选、分析模型补充来源和历史混合来源均不计入。"
+                            help="带平台引用标记的分析数 ÷ 可验证分析数。"
                           />
                           <MetricItem
                             label="官网引用率"
@@ -1183,22 +1189,22 @@ export default function QuestionSetReportsPage() {
                                   ? `${percent(summary.owned_citation_rate)}%`
                                   : '暂无可验证样本')
                               : '未配置官网'}
-                            help="至少引用 1 次品牌官网的可验证分析数 ÷ 引用口径可验证分析数。引用域名等于品牌项目中配置的官网域名或其子域名时，计为官网引用；未配置官网时无法识别。"
+                            help="引用品牌官网的分析数 ÷ 可验证分析数。"
                           />
                           <MetricItem
                             label="官网引用次数"
                             value={selectedProject?.website ? (summary.total_owned_citations || 0) : '未配置官网'}
-                            help="本次所有有效分析中，引用域名属于品牌官网或其子域名的引用条数合计。"
+                            help="品牌官网及其子域名的引用总数。"
                           />
                           <MetricItem
                             label="引用总次数"
                             value={summary.total_citations || 0}
-                            help="本次所有有效分析中，平台明确标注为引用的来源条数合计；历史混合来源不进入此指标。"
+                            help="平台明确标记的引用总数。"
                           />
                           <MetricItem
                             label="执行状态"
                             value={`${summary.completed || 0} / ${summary.failed || 0} / ${summary.pending || 0}`}
-                            help="依次为已完成、失败和进行中的任务数。三项合计应等于本次计划任务数。"
+                            help="依次为已完成、失败、进行中的任务数。"
                           />
                         </div>
                       ),
@@ -1241,25 +1247,25 @@ export default function QuestionSetReportsPage() {
                           {row.analysis_diagnostics ? (
                             <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} bordered>
                               <Descriptions.Item label="错误代码">
-                                {row.analysis_diagnostics.error_code || '-'}
+                                {row.analysis_diagnostics.error_code || '—'}
                               </Descriptions.Item>
                               <Descriptions.Item label="失败阶段">
-                                {row.analysis_diagnostics.stage || '-'}
+                                {row.analysis_diagnostics.stage || '—'}
                               </Descriptions.Item>
                               <Descriptions.Item label="尝试次数">
-                                {row.analysis_diagnostics.attempt_count ?? '-'}
+                                {row.analysis_diagnostics.attempt_count ?? '—'}
                               </Descriptions.Item>
                               <Descriptions.Item label="分析模型">
                                 {[row.analysis_diagnostics.platform, row.analysis_diagnostics.model]
                                   .filter(Boolean)
-                                  .join(' · ') || '-'}
+                                  .join(' · ') || '—'}
                               </Descriptions.Item>
                               <Descriptions.Item label="结束原因">
-                                {row.analysis_diagnostics.finish_reason || '-'}
+                                {row.analysis_diagnostics.finish_reason || '—'}
                               </Descriptions.Item>
                               <Descriptions.Item label="输出长度">
                                 {row.analysis_diagnostics.output_length == null
-                                  ? '-'
+                                  ? '—'
                                   : `${row.analysis_diagnostics.output_length} 字符`}
                               </Descriptions.Item>
                               {row.analysis_diagnostics.error_detail ? (
@@ -1269,8 +1275,8 @@ export default function QuestionSetReportsPage() {
                               ) : null}
                               {row.analysis_diagnostics.usage?.total_tokens != null ? (
                                 <Descriptions.Item label="Token 用量" span={3}>
-                                  输入 {row.analysis_diagnostics.usage.prompt_tokens ?? '-'} ·
-                                  输出 {row.analysis_diagnostics.usage.completion_tokens ?? '-'} ·
+                                  输入 {row.analysis_diagnostics.usage.prompt_tokens ?? '—'} ·
+                                  输出 {row.analysis_diagnostics.usage.completion_tokens ?? '—'} ·
                                   总计 {row.analysis_diagnostics.usage.total_tokens}
                                 </Descriptions.Item>
                               ) : null}
@@ -1281,10 +1287,10 @@ export default function QuestionSetReportsPage() {
                               {row.failure ? (
                                 <>
                                   <Descriptions.Item label="失败链路">
-                                    {row.failure.stage || '-'}
+                                    {row.failure.stage || '—'}
                                   </Descriptions.Item>
                                   <Descriptions.Item label="链路错误代码">
-                                    {row.failure.error_code || '-'}
+                                    {row.failure.error_code || '—'}
                                   </Descriptions.Item>
                                 </>
                               ) : null}
@@ -1294,10 +1300,10 @@ export default function QuestionSetReportsPage() {
                                     {row.retry.kind === 'analysis_only' ? '仅重做结构化分析' : '重新调用监测平台'}
                                   </Descriptions.Item>
                                   <Descriptions.Item label="重试次数">
-                                    {row.retry.attempt ?? '-'}
+                                    {row.retry.attempt ?? '—'}
                                   </Descriptions.Item>
                                   <Descriptions.Item label="上一条记录">
-                                    {row.retry.previous_record_id ?? '-'}
+                                    {row.retry.previous_record_id ?? '—'}
                                   </Descriptions.Item>
                                 </>
                               ) : null}
@@ -1340,7 +1346,7 @@ export default function QuestionSetReportsPage() {
                                     key={`${entity.name || 'entity'}-${index}`}
                                     color={entity.name === row.analysis_structure?.target_entity_name ? 'blue' : undefined}
                                   >
-                                    {entity.name || '-'} · {
+                                    {entity.name || '—'} · {
                                       entity.type === 'company'
                                         ? '公司'
                                         : entity.type === 'other_organization'
@@ -1374,9 +1380,9 @@ export default function QuestionSetReportsPage() {
                                     <Tag color={entity.relation === 'competitor' ? 'orange' : 'default'}>
                                       {entity.relation === 'competitor' ? '竞品' : '非竞品'}
                                     </Tag>
-                                    <Text strong>{entity.name || '-'}</Text>
+                                    <Text strong>{entity.name || '—'}</Text>
                                     <Text>提及 {entity.mentions ?? 0} 次</Text>
-                                    <Text type="secondary">{entity.reason || '-'}</Text>
+                                    <Text type="secondary">{entity.reason || '—'}</Text>
                                     {Array.isArray(entity.evidence)
                                       ? entity.evidence.map((quote) => (
                                         <Text type="secondary" key={quote}>“{quote}”</Text>
@@ -1396,7 +1402,7 @@ export default function QuestionSetReportsPage() {
                                   <div key={`candidate-list-${index}`}>
                                     <Text>
                                       {list.ordered ? '明确排序' : '普通列表'}：
-                                      {(list.entries || []).join(' → ') || '-'}
+                                      {(list.entries || []).join(' → ') || '—'}
                                     </Text>
                                     {list.reason ? <Text type="secondary"> · {list.reason}</Text> : null}
                                     {Array.isArray(list.evidence)
@@ -1427,8 +1433,8 @@ export default function QuestionSetReportsPage() {
                               <Space orientation="vertical" size={4}>
                                 {row.analysis_structure.claims.map((claim, index) => (
                                   <Text key={`claim-${index}`}>
-                                    {claim.subject_name || '-'} · {claim.predicate || '-'}：
-                                    {claim.value || '-'}
+                                    {claim.subject_name || '—'} · {claim.predicate || '—'}：
+                                    {claim.value || '—'}
                                     {claim.qualifier ? `（${claim.qualifier}）` : ''}
                                   </Text>
                                 ))}

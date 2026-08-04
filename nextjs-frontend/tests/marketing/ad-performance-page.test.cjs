@@ -14,14 +14,18 @@ const styleSource = read(
   'src/app/geo/ad-performance/ad-performance.module.css'
 );
 const hookSource = read('src/lib/marketing/useAdPerformance.ts');
+const dashboardReaderSource = read('src/lib/marketing/readMarketingDashboard.ts');
 const adapterSource = read('src/lib/marketing/adPerformanceAdapter.ts');
 const fixtureSource = read('src/fixtures/adPerformance.fixture.ts');
 
 test('advertising page uses the default project and the real read-only dashboard endpoint', () => {
   assert.match(pageSource, /useDefaultProjectContext/);
   assert.match(pageSource, /defaultContext\.project\?\.id/);
-  assert.match(hookSource, /\/dashboard/);
-  assert.match(hookSource, /axios\.get<MarketingDashboardResponse>/);
+  assert.match(dashboardReaderSource, /\/dashboard/);
+  assert.match(dashboardReaderSource, /axios\.get<MarketingDashboardResponse>/);
+  assert.match(dashboardReaderSource, /DASHBOARD_DATE_OUT_OF_RANGE/);
+  assert.match(dashboardReaderSource, /clampMarketingDateRange/);
+  assert.match(hookSource, /onDateRangeAdjusted\?\.\(response\.effectiveDateRange\)/);
   assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data, projectId\)/);
   assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);
   assert.match(pageSource, /performance\.warning/);
@@ -29,7 +33,7 @@ test('advertising page uses the default project and the real read-only dashboard
   assert.match(adapterSource, /value\.projectId !== expectedProjectId/);
   assert.match(adapterSource, /value\.revision !== null/);
   assert.doesNotMatch(adapterSource, /return '0';/);
-  assert.doesNotMatch(hookSource, /axios\.(?:post|put|patch|delete)\(/);
+  assert.doesNotMatch(hookSource + dashboardReaderSource, /axios\.(?:post|put|patch|delete)\(/);
   assert.doesNotMatch(pageSource, /立即刷新|最后成功|更新时间|前往百度/);
 });
 
@@ -42,8 +46,8 @@ test('page follows the approved breadcrumb, date, summary, trend, and drilldown 
   assert.ok(breadcrumb >= 0 && breadcrumb < summary);
   assert.ok(summary < trend && trend < drilldown);
   assert.match(pageSource, /广告表现日期范围/);
-  assert.match(pageSource, /allowEmpty=\{\[true, true\]\}/);
-  assert.match(pageSource, /近 30 天/);
+  assert.match(pageSource, /<MarketingPageFilters/);
+  assert.match(pageSource, /availableDevices=\{\['all'\]\}/);
   assert.match(pageSource, /总消费/);
   assert.match(pageSource, /总展现/);
   assert.match(pageSource, /总点击/);
@@ -84,9 +88,10 @@ test('drilldown table keeps the required columns, hierarchy filters, and parent 
   assert.match(styleSource, /\.selectedRow[\s\S]*#e6f4ff/);
 });
 
-test('detail popover is viewport-aware, hoverable, keyboard-triggered, and escape-closeable', () => {
+test('detail popover is viewport-aware, hover-only, and escape-closeable', () => {
   assert.match(pageSource, /<Popover/);
-  assert.match(pageSource, /trigger=\{\['hover', 'focus'\]\}/);
+  assert.match(pageSource, /trigger=\{\['hover'\]\}/);
+  assert.doesNotMatch(pageSource, /trigger=\{\['hover', 'focus'\]\}/);
   assert.match(pageSource, /autoAdjustOverflow/);
   assert.match(pageSource, /aria-describedby=\{descriptionId\}/);
   assert.match(pageSource, /event\.key === 'Escape'/);

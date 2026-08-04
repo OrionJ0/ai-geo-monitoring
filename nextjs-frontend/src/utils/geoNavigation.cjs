@@ -25,7 +25,7 @@ const DELIVERY_ITEMS = Object.freeze([
 ]);
 
 const AI_MONITORING_ITEMS = Object.freeze([
-  page('/project-dashboard', 'AI 搜索表现', '/geo/project-dashboard'),
+  page('/project-dashboard', '总体表现', '/geo/project-dashboard'),
   page('/sources', '引用来源分析', '/geo/sources')
 ]);
 
@@ -43,26 +43,25 @@ function buildGeoNavigation() {
     MARKET_OVERVIEW,
     group('delivery', '投放与流量', DELIVERY_ITEMS),
     group('conversion', '转化结果', [
-      page('/consultations', '原始咨询', '/geo/consultations'),
+      page('/consultations', '咨询数据', '/geo/consultations'),
       page('/order-results', '订单结果', '/geo/order-results')
     ])
   ];
 
-  navigation.push(group('ai-monitoring', 'AI 品牌监测', AI_MONITORING_ITEMS));
-  navigation.push(group(
-    'website-diagnosis',
-    '网站诊断',
-    WEBSITE_DIAGNOSIS_ITEMS
-  ));
   navigation.push(group(
     'monitoring-tasks',
     '监测任务',
     MONITORING_TASK_ITEMS
   ));
+  navigation.push(group('ai-monitoring', 'GEO 监测', AI_MONITORING_ITEMS));
+  navigation.push(group(
+    'website-diagnosis',
+    '网站诊断',
+    WEBSITE_DIAGNOSIS_ITEMS
+  ));
   navigation.push(QUICK_LINKS);
 
   const settingItems = [
-    page('/notice', '系统通知', '/geo/notice'),
     page('/profile', '个人中心', '/geo/profile')
   ];
   navigation.push(group('settings', '设置', settingItems));

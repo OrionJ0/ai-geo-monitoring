@@ -37,7 +37,7 @@ function trafficSnapshot() {
       domain: 'active.example.test',
       status: 'ACTIVE'
     },
-    allTrend: rows(100, 14, 10),
+    allTrend: rows(100, 15, 10),
     sourceSummaries: [
       { name: '直接访问', source: 'through', pageviews: '20', visits: '3', visitors: '3' },
       { name: '百度自然搜索', source: 'searchBaiduNature', pageviews: '30', visits: '4', visitors: '4' },
@@ -87,6 +87,7 @@ test('Tongji source aggregation preserves missing values and real zeroes', () =>
   )));
 
   const zero = trafficSnapshot();
+  zero.allTrend = rows(0, 0, 0);
   zero.sourceSummaries = zero.sourceSummaries.map((row) => ({
     ...row,
     pageviews: '0',
@@ -114,6 +115,19 @@ test('Tongji ratios use exact half-up rounding and reject impossible shares', ()
   assert.equal(comparisonValue('5', '6'), '-16.7');
   assert.throws(
     () => trafficShare('7', '6'),
+    { code: 'TONGJI_SOURCE_RESPONSE_INVALID', status: 502 }
+  );
+});
+
+test('Tongji snapshot rejects a source partition that does not reconcile', () => {
+  const invalid = trafficSnapshot();
+  invalid.allTrend = rows(100, 14, 10);
+  assert.throws(
+    () => buildSnapshotPayload(
+      invalid,
+      { from: '2026-07-29', to: '2026-07-30' },
+      'all'
+    ),
     { code: 'TONGJI_SOURCE_RESPONSE_INVALID', status: 502 }
   );
 });
@@ -178,20 +192,33 @@ test('Tongji service persists one ten-minute snapshot shared by trend and source
       visits: source.summary.visits
     })),
     [
-      { key: 'BAIDU_SEARCH', label: '百度自然搜索', host: 'baidu.com', visits: '4' },
+      { key: 'BAIDU_PAID', label: '百度推广', host: 'e.baidu.com', visits: '1' },
       { key: 'DIRECT', label: '直接访问', host: 'active.example.test', visits: '3' },
-      { key: 'BING_SEARCH', label: '必应自然搜索', host: 'bing.com', visits: '2' },
-      { key: 'OTHER', label: '其他来源', host: '多个网站', visits: '5' }
+      { key: 'BAIDU_SEARCH', label: '百度搜索', host: 'baidu.com', visits: '4' },
+      { key: 'BING_SEARCH', label: '必应搜索', host: 'bing.com', visits: '2' },
+      { key: 'GOOGLE_SEARCH', label: 'Google 搜索', host: 'google.com', visits: '1' },
+      { key: 'OTHER_SEARCH', label: '其他搜索', host: '多个搜索引擎', visits: '0' },
+      { key: 'EXTERNAL_REFERRAL', label: '外部引荐', host: '多个网站', visits: '4' }
     ]
   );
-  assert.deepEqual(sources.sources.at(-1).sourceDetails, ['Google', '外部链接']);
-  assert.equal(sources.sources.at(-1).summary.visitors, null);
+  assert.deepEqual(sources.sources.at(-3).sourceDetails, ['Google']);
+  assert.deepEqual(sources.sources.at(-1).sourceDetails, ['外部链接']);
+  assert.equal(sources.sources.at(-2).summary.visitors, null);
 
   const cacheRows = await database.sequelize.query(
-    'SELECT project_id, device, site_id FROM baidu_tongji_snapshots',
+    'SELECT project_id, device, site_id, payload_json FROM baidu_tongji_snapshots',
     { type: QueryTypes.SELECT }
   );
-  assert.deepEqual(cacheRows, [{ project_id: 11, device: 'pc', site_id: '301' }]);
+  assert.equal(cacheRows[0].project_id, 11);
+  assert.equal(cacheRows[0].device, 'pc');
+  assert.equal(cacheRows[0].site_id, '301');
+  const storedPayload = JSON.parse(cacheRows[0].payload_json);
+  assert.equal(storedPayload.schemaVersion, 2);
+  assert.deepEqual(
+    storedPayload.sources.map((source) => source.sourceKey),
+    ['BAIDU_SEARCH', 'DIRECT', 'BING_SEARCH', 'OTHER']
+  );
+  assert.equal(storedPayload.sourcesV2.length, 7);
 
   now += 5 * 60 * 1000;
   await service.readProjectTrend('11', 'pc');
@@ -432,7 +459,58 @@ test('Tongji cache coalesces concurrent refreshes and falls back to the last dat
   const fallback = await service.readProjectTrend('11', 'pc');
   assert.equal(calls, 2);
   assert.equal(fallback.cache.state, 'FALLBACK');
-  assert.equal(fallback.summary.visits, '14');
+  assert.equal(fallback.summary.visits, '15');
+});
+
+test('Tongji deployment reads a stale four-source cache when the upstream is unavailable', async (t) => {
+  let now = Date.parse('2026-07-30T04:00:00.000Z');
+  let fail = false;
+  const { database, service } = await createService(t, {
+    clock: () => now,
+    capabilities: { sourceTraffic: true },
+    provider: {
+      async readTrafficSnapshot() {
+        if (fail) throw new Error('synthetic upstream failure');
+        return { ...trafficSnapshot(), sourceReportsIncluded: true };
+      }
+    }
+  });
+
+  await service.readProjectSourceTrends('11', 'pc');
+  const rowsFromDatabase = await database.sequelize.query(
+    `SELECT payload_json FROM baidu_tongji_snapshots
+     WHERE project_id = 11 AND device = 'pc'`,
+    { type: QueryTypes.SELECT }
+  );
+  const legacyPayload = JSON.parse(rowsFromDatabase[0].payload_json);
+  delete legacyPayload.schemaVersion;
+  delete legacyPayload.sourcesV2;
+  await database.sequelize.query(
+    `UPDATE baidu_tongji_snapshots
+     SET payload_json = :payloadJson,
+         expires_at = :expiresAt
+     WHERE project_id = 11 AND device = 'pc'`,
+    {
+      replacements: {
+        payloadJson: JSON.stringify(legacyPayload),
+        expiresAt: new Date(now - 1).toISOString()
+      }
+    }
+  );
+
+  now += 11 * 60 * 1000;
+  fail = true;
+  const fallback = await service.readProjectSourceTrends('11', 'pc');
+  assert.equal(fallback.cache.state, 'FALLBACK');
+  assert.equal(fallback.sources.length, 7);
+  assert.equal(
+    fallback.sources.find((source) => source.sourceKey === 'DIRECT').summary.visits,
+    '3'
+  );
+  assert.equal(
+    fallback.sources.find((source) => source.sourceKey === 'BAIDU_PAID').summary.visits,
+    null
+  );
 });
 
 test('Tongji rich requests never fall back to a stale basic-capability snapshot', async (t) => {
@@ -763,10 +841,13 @@ test('website traffic contract compares equal periods, preserves all-device and 
       row.trafficShare
     ]),
     [
-      ['百度自然搜索', '40', '40.0'],
+      ['百度搜索', '40', '40.0'],
       ['直接访问', '30', '30.0'],
-      ['必应自然搜索', '20', '20.0'],
-      ['其他来源', '10', '10.0']
+      ['必应搜索', '20', '20.0'],
+      ['外部引荐', '10', '10.0'],
+      ['百度推广', null, null],
+      ['Google 搜索', null, null],
+      ['其他搜索', null, null]
     ]
   );
   assert.equal(result.sourceQuality.rows.at(-1).averageVisitTime, null);

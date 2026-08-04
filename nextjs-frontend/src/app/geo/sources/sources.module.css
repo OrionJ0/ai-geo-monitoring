@@ -1,0 +1,16 @@
+.pageStack {
+  width: 100%;
+}
+
+.equalCardRow > :global(.ant-col) {
+  display: flex;
+}
+
+.equalCardRow > :global(.ant-col) > :global(.ant-card) {
+  width: 100%;
+  height: 100%;
+}
+
+.equalCardRow :global(.ant-card-body) {
+  min-width: 0;
+}

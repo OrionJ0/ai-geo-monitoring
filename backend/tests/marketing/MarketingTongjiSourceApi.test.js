@@ -104,6 +104,7 @@ test('Tongji source API authorizes the project and returns source trends', async
           const error = new Error('upstream failed');
           error.code = 'TONGJI_UPSTREAM_FAILED';
           error.status = 502;
+          error.retryAfterSeconds = 2;
           throw error;
         }
         return { projectId, selectedMetric: options.metric };
@@ -189,4 +190,5 @@ test('Tongji source API authorizes the project and returns source trends', async
   );
   assert.equal(failedResponse.status, 502);
   assert.equal(failedResponse.headers.get('cache-control'), 'private, no-store');
+  assert.equal(failedResponse.headers.get('retry-after'), '2');
 });

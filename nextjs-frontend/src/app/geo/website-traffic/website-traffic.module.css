@@ -5,9 +5,6 @@
   padding-bottom: 28px;
   color: #172b4d;
   background: #f6f8fb;
-  position: relative;
-  top: -20px;
-  margin-bottom: -20px;
 }
 
 .visuallyHidden {
@@ -24,7 +21,7 @@
 
 .breadcrumbRow {
   display: flex;
-  min-height: 40px;
+  min-height: 32px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -36,9 +33,6 @@
   font-size: 13px;
 }
 
-.filters,
-.filters label,
-.dateRangeControl,
 .trendControls,
 .trendControls label,
 .cardHeader,
@@ -50,42 +44,11 @@
   align-items: center;
 }
 
-.filters {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 12px;
-}
-
-.filters label,
 .trendControls label {
   gap: 8px;
   color: #526071;
   font-size: 14px;
   white-space: nowrap;
-}
-
-.filters label :global(.ant-select) {
-  width: 112px;
-}
-
-.dateRangeControl {
-  min-height: 40px;
-  gap: 8px;
-  padding-left: 12px;
-  border: 1px solid #e5eaf1;
-  border-radius: 8px;
-  background: #fff;
-}
-
-.dateRangeControl > span {
-  flex: none;
-  color: #526071;
-  font-size: 14px;
-}
-
-.dateRangeControl :global(.ant-picker) {
-  width: 244px;
-  padding-left: 0;
 }
 
 .pageAlert {
@@ -96,7 +59,7 @@
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
+  gap: 16px;
 }
 
 .moduleStack > section {
@@ -114,7 +77,6 @@
   line-height: 28px;
 }
 
-.summaryCard,
 .trendCard,
 .tableCard {
   min-width: 0;
@@ -123,7 +85,6 @@
   box-shadow: none !important;
 }
 
-.summaryCard,
 .trendCard {
   border-radius: 12px !important;
 }
@@ -132,85 +93,6 @@
   overflow: hidden;
   max-width: 100%;
   border-radius: 10px !important;
-}
-
-.summaryCard :global(.ant-card-body) {
-  padding: 0;
-}
-
-.summaryGrid {
-  display: grid;
-  min-height: 126px;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  align-items: center;
-}
-
-.summaryItem {
-  display: grid;
-  position: relative;
-  min-width: 0;
-  min-height: 76px;
-  align-content: center;
-  justify-items: center;
-  gap: 5px;
-  padding: 12px 18px;
-  text-align: center;
-}
-
-.summaryItem + .summaryItem::before {
-  position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: 0;
-  width: 1px;
-  background: #eef1f5;
-  content: '';
-}
-
-.qualityMetric::before {
-  width: 2px !important;
-  top: 4px !important;
-  bottom: 4px !important;
-  background: #d7dde7 !important;
-}
-
-.qualityMetric + .qualityMetric::before {
-  width: 1px !important;
-  top: 12px !important;
-  bottom: 12px !important;
-  background: #eef1f5 !important;
-}
-
-.summaryItem > span {
-  overflow: hidden;
-  max-width: 100%;
-  color: #667085;
-  font-size: 13px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.summaryItem > strong {
-  overflow: hidden;
-  max-width: 100%;
-  color: #172b4d;
-  font-size: 27px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  line-height: 34px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.summaryItem > small {
-  overflow: hidden;
-  max-width: 100%;
-  color: #667085;
-  font-size: 12px;
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .trendCard :global(.ant-card-body) {
@@ -509,36 +391,8 @@
   font-size: 12px;
 }
 
-.pagePath:focus-visible {
-  border-radius: 2px;
-  outline: 2px solid #1d4ed8;
-  outline-offset: 2px;
-}
-
 .pageTable :global(.ant-pagination) {
   margin: 14px 20px 16px;
-}
-
-@media (max-width: 1100px) {
-  .summaryGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .qualityMetric::before {
-    top: 12px !important;
-    bottom: 12px !important;
-    width: 1px !important;
-    background: #eef1f5 !important;
-  }
-
-  .qualityMetric:nth-child(4) {
-    border-top: 2px solid #d7dde7;
-  }
-
-  .qualityMetric:nth-child(5),
-  .qualityMetric:nth-child(6) {
-    border-top: 2px solid #d7dde7;
-  }
 }
 
 @media (max-width: 900px) {
@@ -549,7 +403,6 @@
     flex-direction: column;
   }
 
-  .filters,
   .trendControls {
     justify-content: flex-start;
   }
@@ -559,47 +412,19 @@
     flex-direction: column;
   }
 
-  .summaryGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .qualityMetric:nth-child(4),
-  .qualityMetric:nth-child(5),
-  .qualityMetric:nth-child(6) {
-    border-top: 0;
-  }
-
-  .summaryItem:nth-child(n + 3) {
-    border-top: 1px solid #eef1f5;
-  }
-
   .searchInput {
     width: 100%;
   }
 }
 
 @media (max-width: 600px) {
-  .filters,
   .trendControls,
-  .filters label,
-  .trendControls label,
-  .dateRangeControl {
+  .trendControls label {
     width: 100%;
   }
 
-  .filters label :global(.ant-select),
-  .trendControls :global(.ant-select),
-  .dateRangeControl :global(.ant-picker) {
+  .trendControls :global(.ant-select) {
     width: 100%;
-  }
-
-  .dateRangeControl > span,
-  .dateRangeControl > :global(.anticon) {
-    display: none;
-  }
-
-  .summaryGrid {
-    grid-template-columns: 1fr;
   }
 
   .pageHeadingGroup {
@@ -611,19 +436,6 @@
 
   .pageHeadingGroup h2 {
     white-space: nowrap;
-  }
-
-  .summaryItem + .summaryItem::before {
-    top: 0 !important;
-    right: 20px;
-    bottom: auto !important;
-    left: 20px;
-    width: auto !important;
-    height: 1px;
-  }
-
-  .summaryItem:nth-child(n + 3) {
-    border-top: 0;
   }
 
   .cardHeader,

@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import axios from '@/lib/axiosConfig';
 import {
   buildKeywordFixture,
   KEYWORD_FIXTURE_RANGE
@@ -14,9 +13,9 @@ import {
 } from '@/lib/marketing/keywordAnalysisAdapter';
 import {
   assertMarketingDashboardResponse,
-  marketingSnapshotWarning,
-  type MarketingDashboardResponse
+  marketingSnapshotWarning
 } from '@/lib/marketing/adPerformanceAdapter';
+import { readMarketingDashboard } from './readMarketingDashboard';
 
 export type KeywordFixtureState = 'ready' | 'loading' | 'empty' | 'error';
 
@@ -27,6 +26,7 @@ type UseKeywordAnalysisOptions = {
   dateRange: [string, string] | null;
   fixtureEnabled?: boolean;
   fixtureState?: KeywordFixtureState;
+  onDateRangeAdjusted?: (range: [string, string]) => void;
 };
 
 type UseKeywordAnalysisState = {
@@ -50,13 +50,15 @@ export default function useKeywordAnalysis({
   enabled,
   dateRange,
   fixtureEnabled = KEYWORD_ANALYSIS_FIXTURE_ENABLED,
-  fixtureState = 'ready'
+  fixtureState = 'ready',
+  onDateRangeAdjusted
 }: UseKeywordAnalysisOptions): UseKeywordAnalysisState {
   const [data, setData] = useState<KeywordAnalysisModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
   const requestSequence = useRef(0);
+  const skipAutomaticRangeReload = useRef('');
 
   const reload = useCallback(async () => {
     const requestId = ++requestSequence.current;
@@ -96,20 +98,28 @@ export default function useKeywordAnalysis({
         ));
         return;
       }
-      const response = await axios.get<MarketingDashboardResponse>(
-        `/api/marketing/projects/${encodeURIComponent(projectId)}/dashboard`,
-        dateRange
-          ? { params: { from: dateRange[0], to: dateRange[1] } }
-          : undefined
-      );
+      const response = await readMarketingDashboard({ projectId, dateRange });
       if (requestId !== requestSequence.current) return;
       assertMarketingDashboardResponse(response.data, projectId);
+      if (response.effectiveDateRange) {
+        if (
+          !dateRange
+          || response.effectiveDateRange[0] !== dateRange[0]
+          || response.effectiveDateRange[1] !== dateRange[1]
+        ) {
+          skipAutomaticRangeReload.current = response.effectiveDateRange.join(':');
+        }
+        onDateRangeAdjusted?.(response.effectiveDateRange);
+      }
       setWarning(marketingSnapshotWarning(response.data));
       setData(adaptMarketingDashboardKeywords(
         response.data,
         projectName,
-        dateRange
-          ? { from: dateRange[0], to: dateRange[1] }
+        response.effectiveDateRange
+          ? {
+              from: response.effectiveDateRange[0],
+              to: response.effectiveDateRange[1]
+            }
           : undefined
       ));
     } catch (requestError: unknown) {
@@ -137,13 +147,19 @@ export default function useKeywordAnalysis({
     enabled,
     fixtureEnabled,
     fixtureState,
+    onDateRangeAdjusted,
     projectId,
     projectName
   ]);
 
   useEffect(() => {
+    const rangeKey = dateRange?.join(':') || '';
+    if (rangeKey && skipAutomaticRangeReload.current === rangeKey) {
+      skipAutomaticRangeReload.current = '';
+      return;
+    }
     void reload();
-  }, [reload]);
+  }, [dateRange, reload]);
 
   return {
     data,

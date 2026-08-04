@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Tooltip, message } from 'antd';
+import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tabs, Tag, Tooltip, message } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import axios from '@/lib/axiosConfig';
 import { Column } from '@ant-design/plots';
@@ -10,6 +10,8 @@ import { normalizeSourceContextValues } from '@/utils/sourceDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
+import WorkspacePageHeader from '@/components/WorkspacePageHeader';
+import styles from './sources.module.css';
 
 
 const typeColor = {
@@ -32,15 +34,15 @@ const periodOptions = [
 ];
 
 function formatDate(value) {
-  if (!value) return '-';
+  if (!value) return '—';
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '-';
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString('zh-CN', { hour12: false });
 }
 
 function renderTags(values, fallbackMap = {}) {
   const list = normalizeSourceContextValues(values);
-  if (!list.length) return '-';
+  if (!list.length) return '—';
   return (
     <Space size={[4, 4]} wrap>
       {list.map((item) => <Tag key={item}>{fallbackMap[item] || item}</Tag>)}
@@ -64,8 +66,7 @@ export default function GeoSourcesPage() {
   const handleDaysChange = (value) => {
     invalidateSourceRequest();
     setDays(value);
-    setSources(null);
-    setSourceLoading(false);
+    setSourceLoading(true);
   };
 
   const fetchSources = useCallback(async (id, targetDays) => {
@@ -76,7 +77,6 @@ export default function GeoSourcesPage() {
       setSourceLoading(false);
       return;
     }
-    setSources(null);
     setSourceLoading(true);
     try {
       const res = await axios.get(`/api/geo-projects/${id}/sources`, { params: { days: targetDays } });
@@ -142,7 +142,7 @@ export default function GeoSourcesPage() {
       dataIndex: 'url',
       width: 360,
       ellipsis: true,
-      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '-'
+      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '—'
     },
     { title: '域名', dataIndex: 'domain', width: 180, ellipsis: true },
     {
@@ -176,7 +176,7 @@ export default function GeoSourcesPage() {
       dataIndex: 'url',
       width: 360,
       ellipsis: true,
-      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '-'
+      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '—'
     },
     { title: '域名', dataIndex: 'domain', width: 180, ellipsis: true },
     {
@@ -191,8 +191,32 @@ export default function GeoSourcesPage() {
     { title: '最近出现', dataIndex: 'last_seen_at', width: 180, render: formatDate },
   ];
 
+  const renderDomainChanges = (rows, emptyText) => (
+    <Table
+      rowKey="domain"
+      dataSource={rows}
+      columns={sourceChangeColumns}
+      size="small"
+      scroll={{ x: 940 }}
+      pagination={{ pageSize: 10, showSizeChanger: false }}
+      locale={{ emptyText }}
+    />
+  );
+
+  const renderUrlChanges = (rows, emptyText) => (
+    <Table
+      rowKey="url"
+      dataSource={rows}
+      columns={sourceUrlChangeColumns}
+      size="small"
+      scroll={{ x: 1160 }}
+      pagination={{ pageSize: 10, showSizeChanger: false }}
+      locale={{ emptyText }}
+    />
+  );
+
   const opportunityColumns = [
-    { title: '平台', dataIndex: 'platform', width: 110, render: (value) => platformLabel[value] || value || '-' },
+    { title: '平台', dataIndex: 'platform', width: 110, render: (value) => platformLabel[value] || value || '—' },
     { title: '问题分类', dataIndex: 'prompt_category', width: 140, render: (value) => value || '未分类' },
     { title: '域名', dataIndex: 'domain', width: 180, ellipsis: true },
     {
@@ -200,13 +224,13 @@ export default function GeoSourcesPage() {
       dataIndex: 'url',
       width: 360,
       ellipsis: true,
-      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '-'
+      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '—'
     },
     { title: '时间', dataIndex: 'created_at', width: 180, render: formatDate },
   ];
 
   const recordColumns = [
-    { title: '平台', dataIndex: 'platform', width: 110, render: (value) => platformLabel[value] || value || '-' },
+    { title: '平台', dataIndex: 'platform', width: 110, render: (value) => platformLabel[value] || value || '—' },
     {
       title: '品牌提及',
       dataIndex: 'brand_mentioned',
@@ -225,23 +249,26 @@ export default function GeoSourcesPage() {
       dataIndex: 'url',
       width: 360,
       ellipsis: true,
-      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '-'
+      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '—'
     },
     { title: '时间', dataIndex: 'created_at', width: 180, render: formatDate },
   ];
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-      <Row gutter={[12, 12]} align="middle" justify="end">
-        <Col>
+    <Space orientation="vertical" size={16} className={styles.pageStack}>
+      <WorkspacePageHeader
+        section="GEO 监测"
+        title="引用来源"
+        actions={(
           <Select
+            aria-label="统计周期"
             value={days}
             style={{ width: 120 }}
             options={periodOptions}
             onChange={handleDaysChange}
           />
-        </Col>
-      </Row>
+        )}
+      />
 
       {defaultContext.errorMessage ? (
         <Alert
@@ -252,7 +279,7 @@ export default function GeoSourcesPage() {
         />
       ) : null}
 
-      <Row gutter={[12, 12]}>
+      <Row gutter={[12, 12]} className={styles.equalCardRow}>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="引用总数" value={summary.total_citations || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="有引用回答" value={summary.cited_responses || 0} loading={sourceLoading} /></Card></Col>
         <Col xs={24} sm={12} lg={4}><Card size="small"><Statistic title="来源域名" value={summary.source_domain_count || 0} loading={sourceLoading} /></Card></Col>
@@ -264,8 +291,8 @@ export default function GeoSourcesPage() {
               title={(
                 <Space size={5}>
                   <span>全部第三方来源</span>
-                  <Tooltip title="媒体内容表示域名命中系统维护的媒体域名规则；其他第三方来源表示非自有、非竞品且未命中社区、电商、百科、视频或媒体规则的外部来源；第三方来源总数包含媒体及其他外部类型。">
-                    <InfoCircleOutlined tabIndex={0} aria-label="来源类型口径" />
+                  <Tooltip title="包括媒体等外部来源，不含自有和竞品来源。" trigger={['hover']}>
+                    <InfoCircleOutlined aria-label="来源类型口径" />
                   </Tooltip>
                 </Space>
               )}
@@ -276,114 +303,25 @@ export default function GeoSourcesPage() {
         </Col>
       </Row>
 
-      <Row gutter={[12, 12]}>
-        <Col xs={24} lg={10}>
+      <Row gutter={[12, 12]} className={styles.equalCardRow}>
+        <Col xs={24} lg={8}>
           <Card size="small" title="来源类型分布" loading={sourceLoading}>
             {sourceTypeChartData.length ? <Column {...sourceTypeConfig} /> : <Empty description="暂无引用来源" />}
           </Card>
         </Col>
-        <Col xs={24} lg={14}>
-          <Card size="small" title="竞品来源缺口" loading={sourceLoading}>
+        <Col xs={24} lg={16}>
+          <Card size="small" title={`Top 来源域名${selectedProject?.name ? `：${selectedProject.name}` : ''}`} loading={sourceLoading}>
             <Table
-              rowKey={(row) => `${row.url}-${row.created_at}`}
-              dataSource={opportunities}
-              columns={opportunityColumns}
+              rowKey="domain"
+              dataSource={domains}
+              columns={domainColumns}
               size="small"
-              scroll={{ x: 920 }}
-              pagination={{ pageSize: 5, showSizeChanger: false }}
+              scroll={{ x: 960 }}
+              pagination={{ pageSize: 6, showSizeChanger: false }}
             />
           </Card>
         </Col>
       </Row>
-
-      <Row gutter={[12, 12]}>
-        <Col xs={24} lg={8}>
-          <Card size="small" title="新增引用域名" loading={sourceLoading}>
-            <Table
-              rowKey="domain"
-              dataSource={newDomains}
-              columns={sourceChangeColumns}
-              size="small"
-              scroll={{ x: 940 }}
-              pagination={{ pageSize: 5, showSizeChanger: false }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={8}>
-          <Card size="small" title="流失引用域名" loading={sourceLoading}>
-            <Table
-              rowKey="domain"
-              dataSource={droppedDomains}
-              columns={sourceChangeColumns}
-              size="small"
-              scroll={{ x: 940 }}
-              pagination={{ pageSize: 5, showSizeChanger: false }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={8}>
-          <Card size="small" title="保留引用域名" loading={sourceLoading}>
-            <Table
-              rowKey="domain"
-              dataSource={retainedDomains}
-              columns={sourceChangeColumns}
-              size="small"
-              scroll={{ x: 940 }}
-              pagination={{ pageSize: 5, showSizeChanger: false }}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      <Row gutter={[12, 12]}>
-        <Col xs={24} lg={8}>
-          <Card size="small" title="新增引用 URL" loading={sourceLoading}>
-            <Table
-              rowKey="url"
-              dataSource={newUrls}
-              columns={sourceUrlChangeColumns}
-              size="small"
-              scroll={{ x: 1160 }}
-              pagination={{ pageSize: 5, showSizeChanger: false }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={8}>
-          <Card size="small" title="流失引用 URL" loading={sourceLoading}>
-            <Table
-              rowKey="url"
-              dataSource={droppedUrls}
-              columns={sourceUrlChangeColumns}
-              size="small"
-              scroll={{ x: 1160 }}
-              pagination={{ pageSize: 5, showSizeChanger: false }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={8}>
-          <Card size="small" title="保留引用 URL" loading={sourceLoading}>
-            <Table
-              rowKey="url"
-              dataSource={retainedUrls}
-              columns={sourceUrlChangeColumns}
-              size="small"
-              scroll={{ x: 1160 }}
-              pagination={{ pageSize: 5, showSizeChanger: false }}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      <Card size="small" title={`Top 来源域名${selectedProject?.name ? `：${selectedProject.name}` : ''}`} loading={sourceLoading}>
-        <Table
-          rowKey="domain"
-          dataSource={domains}
-          columns={domainColumns}
-          size="small"
-          scroll={{ x: 960 }}
-          pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: [10, 20, 50] }}
-        />
-      </Card>
 
       <Card size="small" title="Top 引用 URL" loading={sourceLoading}>
         <Table
@@ -393,6 +331,39 @@ export default function GeoSourcesPage() {
           size="small"
           scroll={{ x: 980 }}
           pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: [10, 20, 50] }}
+        />
+      </Card>
+
+      <Card size="small" title="竞品来源缺口" loading={sourceLoading}>
+        <Table
+          rowKey={(row) => `${row.url}-${row.created_at}`}
+          dataSource={opportunities}
+          columns={opportunityColumns}
+          size="small"
+          scroll={{ x: 920 }}
+          pagination={{ pageSize: 5, showSizeChanger: false }}
+        />
+      </Card>
+
+      <Card size="small" title="引用域名变化" loading={sourceLoading}>
+        <Tabs
+          defaultActiveKey="new"
+          items={[
+            { key: 'new', label: `新增（${newDomains.length}）`, children: renderDomainChanges(newDomains, '暂无新增引用域名') },
+            { key: 'dropped', label: `流失（${droppedDomains.length}）`, children: renderDomainChanges(droppedDomains, '暂无流失引用域名') },
+            { key: 'retained', label: `保留（${retainedDomains.length}）`, children: renderDomainChanges(retainedDomains, '暂无保留引用域名') },
+          ]}
+        />
+      </Card>
+
+      <Card size="small" title="引用 URL 变化" loading={sourceLoading}>
+        <Tabs
+          defaultActiveKey="new"
+          items={[
+            { key: 'new', label: `新增（${newUrls.length}）`, children: renderUrlChanges(newUrls, '暂无新增引用 URL') },
+            { key: 'dropped', label: `流失（${droppedUrls.length}）`, children: renderUrlChanges(droppedUrls, '暂无流失引用 URL') },
+            { key: 'retained', label: `保留（${retainedUrls.length}）`, children: renderUrlChanges(retainedUrls, '暂无保留引用 URL') },
+          ]}
         />
       </Card>
 

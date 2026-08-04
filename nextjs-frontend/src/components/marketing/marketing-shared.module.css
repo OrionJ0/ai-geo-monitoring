@@ -1,0 +1,258 @@
+.pageFilters,
+.dateFilter {
+  display: flex;
+  align-items: center;
+}
+
+.pageFilters {
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.deviceSelect {
+  min-width: 112px;
+  min-height: 32px;
+}
+
+.deviceSelectUnsupported {
+  min-width: 168px;
+}
+
+.dateFilter > span {
+  flex: none;
+  color: #526071;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.deviceSelect :global(.ant-select-selector) {
+  min-height: 32px !important;
+  padding-inline: 12px !important;
+  border-color: #e5eaf1 !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.dateFilter {
+  min-height: 32px;
+  gap: 8px;
+  padding-left: 12px;
+  border: 1px solid #e5eaf1;
+  border-radius: 8px;
+  color: #172b4d;
+  background: #fff;
+}
+
+.dateFilter :global(.ant-picker) {
+  width: 244px;
+  min-width: 0;
+  padding-left: 0;
+}
+
+.dateFilter :global(.ant-picker-input > input) {
+  color: #172b4d;
+  font-variant-numeric: tabular-nums;
+}
+
+.filterMeta {
+  max-width: 260px;
+  overflow: hidden;
+  color: #667085;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metricGrid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.metricCard {
+  min-width: 0;
+  border: 1px solid #e5eaf1 !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.metricCard[role="button"] {
+  cursor: pointer;
+}
+
+.metricCard[role="button"]:hover,
+.metricCard[data-selected="true"] {
+  border-color: #2f6bff !important;
+  box-shadow: 0 0 0 2px rgb(47 107 255 / 10%) !important;
+}
+
+.metricCard[role="button"]:focus-visible {
+  outline: 2px solid #2f6bff;
+  outline-offset: 2px;
+}
+
+.metricCard :global(.ant-card-body) {
+  padding: 16px;
+}
+
+.metricCard :global(.ant-skeleton) {
+  min-height: 100px;
+}
+
+.metricTitleRow {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.metricTitleRow h3 {
+  min-width: 0;
+  margin: 0;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.metricTitleRow h3 span {
+  margin-left: 4px;
+  color: #172b4d;
+}
+
+.infoButton {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  align-items: center;
+  justify-content: center;
+  color: #17366d;
+  background: transparent;
+  border-radius: 6px;
+  cursor: help;
+  font-size: 15px;
+}
+
+.infoButton:hover {
+  color: #0f4fb8;
+  background: #e6f4ff;
+}
+
+.metricPeriods {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.metricPeriods > div {
+  min-width: 0;
+}
+
+.metricPeriods span,
+.metricChange > span {
+  display: block;
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.metricPeriods strong {
+  display: block;
+  min-height: 36px;
+  overflow: hidden;
+  color: #15803d;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 36px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metricPeriods .previousValue {
+  color: #172b4d;
+  font-size: 22px;
+}
+
+.metricChange {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.metricChange > span {
+  margin: 0;
+}
+
+.metricChange strong {
+  color: #172b4d;
+  font-variant-numeric: tabular-nums;
+}
+
+.metricChange strong[data-tone="good"] {
+  color: #15803d;
+}
+
+.metricChange strong[data-tone="bad"] {
+  color: #dc2626;
+}
+
+.missingValue {
+  display: inline-flex;
+  min-width: 20px;
+  min-height: 22px;
+  align-items: center;
+  color: #8a94a3;
+  font-size: inherit;
+}
+
+@media (max-width: 1180px) {
+  .metricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .pageFilters {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .deviceSelect,
+  .dateFilter :global(.ant-picker) {
+    width: 100%;
+  }
+
+  .dateFilter > span {
+    display: none;
+  }
+
+  .dateFilter :global(.ant-picker) {
+    flex: 1;
+  }
+
+  .filterMeta {
+    max-width: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .metricGrid {
+    grid-template-columns: 1fr;
+  }
+}

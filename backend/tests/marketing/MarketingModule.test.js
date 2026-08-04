@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  createConcurrencyGate,
   createMarketingModule
 } = require('../../modules/marketing');
 const {
@@ -26,6 +27,85 @@ function expectedStatus(moduleState, errorCode = null) {
     capabilities: buildMarketingCapabilities(moduleState)
   };
 }
+
+test('Tongji concurrency gate limits bursts and releases capacity after rejection', async () => {
+  const run = createConcurrencyGate(2);
+  let active = 0;
+  let maximum = 0;
+  const task = (shouldFail = false) => run(async () => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active -= 1;
+    if (shouldFail) throw new Error('synthetic failure');
+    return 'ok';
+  });
+
+  const outcomes = await Promise.allSettled([
+    task(), task(true), task(), task(), task()
+  ]);
+
+  assert.equal(maximum, 2);
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.status),
+    ['fulfilled', 'rejected', 'fulfilled', 'fulfilled', 'fulfilled']
+  );
+});
+
+test('Tongji concurrency gate rejects excess queued work with retry metadata', async () => {
+  const run = createConcurrencyGate(1, {
+    maxQueue: 1,
+    waitTimeoutMs: 1_000
+  });
+  let releaseFirst;
+  let signalStarted;
+  const started = new Promise((resolve) => {
+    signalStarted = resolve;
+  });
+  const first = run(() => new Promise((resolve) => {
+    releaseFirst = resolve;
+    signalStarted();
+  }));
+  await started;
+
+  const second = run(async () => 'queued');
+  await assert.rejects(
+    run(async () => 'rejected'),
+    (error) => error.code === 'BAIDU_TONGJI_QUEUE_FULL'
+      && error.status === 503
+      && error.retryAfterSeconds === 2
+  );
+
+  releaseFirst('first');
+  assert.deepEqual(await Promise.all([first, second]), ['first', 'queued']);
+});
+
+test('Tongji concurrency gate expires work that waits too long', async () => {
+  const run = createConcurrencyGate(1, {
+    maxQueue: 1,
+    waitTimeoutMs: 10
+  });
+  let releaseFirst;
+  let signalStarted;
+  const started = new Promise((resolve) => {
+    signalStarted = resolve;
+  });
+  const first = run(() => new Promise((resolve) => {
+    releaseFirst = resolve;
+    signalStarted();
+  }));
+  await started;
+
+  await assert.rejects(
+    run(async () => 'expired'),
+    (error) => error.code === 'BAIDU_TONGJI_QUEUE_TIMEOUT'
+      && error.status === 503
+      && error.retryAfterSeconds === 2
+  );
+
+  releaseFirst('first');
+  assert.equal(await first, 'first');
+});
 
 function enabledConfig(overrides = {}) {
   return {

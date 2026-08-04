@@ -49,7 +49,7 @@ function formatRate(value, numerator, denominator) {
   const rate = nullablePercent(value);
   const valid = Number(denominator || 0);
   return rate === null
-    ? `N/A（有效回答 ${valid}）`
+    ? `—（有效回答 ${valid}）`
     : `${rate}%（${Number(numerator || 0)} / ${valid}）`;
 }
 
@@ -57,7 +57,7 @@ function formatSov(summary) {
   const value = nullablePercent(summary?.average);
   const count = Number(summary?.calculable_answers || 0);
   return value === null
-    ? `N/A（有效回答 ${count}）`
+    ? `—（有效回答 ${count}）`
     : `${value}%（有效回答 ${count}）`;
 }
 
@@ -66,9 +66,9 @@ function formatCitationRate(value, row) {
 }
 
 function formatDate(value) {
-  if (!value) return '-';
+  if (!value) return '—';
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '-';
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString('zh-CN', { hour12: false });
 }
 
@@ -80,12 +80,12 @@ function safeFilePart(value, fallback = 'report') {
 
 function formatRank(value) {
   const n = Number(value || 0);
-  return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '-';
+  return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '—';
 }
 
 function renderTags(values, fallbackMap = {}) {
   const list = Array.isArray(values) ? values.filter(Boolean) : [];
-  if (!list.length) return '-';
+  if (!list.length) return '—';
   return (
     <Space size={[4, 4]} wrap>
       {list.map((item) => <Tag key={item}>{fallbackMap[item] || item}</Tag>)}
@@ -388,7 +388,7 @@ export default function GeoReportsPage() {
       dataIndex: 'url',
       width: 360,
       ellipsis: true,
-      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '-',
+      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '—',
     },
     { title: '域名', dataIndex: 'domain', width: 200, ellipsis: true },
     {
@@ -423,7 +423,7 @@ export default function GeoReportsPage() {
       dataIndex: 'url',
       width: 360,
       ellipsis: true,
-      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '-',
+      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '—',
     },
     { title: '域名', dataIndex: 'domain', width: 200, ellipsis: true },
     {
@@ -450,10 +450,10 @@ export default function GeoReportsPage() {
       },
     },
     { title: '机会类型', dataIndex: 'type', width: 130, render: (value) => <Tag color="blue">{value || '机会'}</Tag> },
-    { title: '平台/来源', key: 'scope', width: 130, render: (_, row) => formatOpportunityScope(row, platformLabel) || '-' },
-    { title: '对象', key: 'target', width: 240, render: (_, row) => row.prompt || row.domain || row.competitor || row.prompt_category || '-' },
-    { title: '证据', dataIndex: 'evidence', width: 280, render: (value) => value || '-' },
-    { title: '建议动作', dataIndex: 'recommendation', render: (value) => value || '-' },
+    { title: '平台/来源', key: 'scope', width: 130, render: (_, row) => formatOpportunityScope(row, platformLabel) || '—' },
+    { title: '对象', key: 'target', width: 240, render: (_, row) => row.prompt || row.domain || row.competitor || row.prompt_category || '—' },
+    { title: '证据', dataIndex: 'evidence', width: 280, render: (value) => value || '—' },
+    { title: '建议动作', dataIndex: 'recommendation', render: (value) => value || '—' },
   ];
 
   return (
@@ -553,7 +553,7 @@ export default function GeoReportsPage() {
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用率" value={Number(metricSummary.citation_eligible_checks || 0) > 0 ? percent(metricSummary.citation_rate) : '暂无可验证样本'} suffix={Number(metricSummary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '官网引用率' : '自有来源覆盖率'} value={isCurrentReport && !(selectedProject?.website || report?.project?.website) ? '未配置官网' : (Number(metricSummary.citation_eligible_checks || 0) > 0 ? percent(metricSummary.owned_citation_rate) : '暂无可验证样本')} suffix={(!isCurrentReport || Boolean(selectedProject?.website || report?.project?.website)) && Number(metricSummary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '推荐率（AI 语义分析）' : '推荐率'} value={isCurrentReport ? formatRate(metricSummary.recommendation_rate, metricSummary.recommended_answers, metricSummary.valid_answers) : `${percent(metricSummary.recommendation_rate)}%`} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '明确有序榜单平均排名' : '平均品牌排名'} value={isCurrentReport ? (metricSummary.avg_brand_rank === null || metricSummary.avg_brand_rank === undefined ? `N/A（有效回答 ${Number(metricSummary.ranked_answers || 0)}）` : `${formatRank(metricSummary.avg_brand_rank)}（有效回答 ${Number(metricSummary.ranked_answers || 0)}）`) : formatRank(metricSummary.avg_brand_rank)} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '明确有序榜单平均排名' : '平均品牌排名'} value={isCurrentReport ? (metricSummary.avg_brand_rank === null || metricSummary.avg_brand_rank === undefined ? `—（有效回答 ${Number(metricSummary.ranked_answers || 0)}）` : `${formatRank(metricSummary.avg_brand_rank)}（有效回答 ${Number(metricSummary.ranked_answers || 0)}）`) : formatRank(metricSummary.avg_brand_rank)} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用源总数" value={sourceSummary.total_citations || 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="来源域名数" value={sourceSummary.source_domain_count || 0} /></Card></Col>
               </Row>

@@ -361,8 +361,26 @@ function collectConsoleErrors(page: Page) {
   return errors;
 }
 
+async function selectAllDevices(page: Page) {
+  const device = page.getByRole('combobox', { name: '设备' });
+  const control = device.locator(
+    'xpath=ancestor::div[contains(@class,"ant-select")][1]'
+  );
+  await control.click();
+  await page.getByRole('option', { name: '全部设备' }).click();
+  await expect(control).toContainText('全部设备');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox')).toBeHidden();
+}
+
+function consultationMetric(page: Page, title: string) {
+  return page.getByRole('heading', { name: new RegExp(title, 'u') })
+    .locator('xpath=ancestor::div[contains(@class,"ant-card")][1]');
+}
+
 test.beforeEach(async ({ page }) => {
   fs.mkdirSync(artifactDirectory, { recursive: true });
+  await page.clock.setFixedTime(new Date('2026-08-04T04:00:00.000Z'));
   await installRoutes(page);
 });
 
@@ -370,9 +388,9 @@ test('1440x1024 keeps the table full width and opens an overlay audit drawer', a
   const consoleErrors = collectConsoleErrors(page);
   await page.setViewportSize({ width: 1440, height: 1024 });
   await page.goto('/geo/consultations');
+  await selectAllDevices(page);
 
-  await expect(page.getByText('128', { exact: true })).toBeVisible();
-  await expect(page.getByText('未验证', { exact: true })).toBeVisible();
+  await expect(consultationMetric(page, '表单咨询')).toContainText('本期33');
   await expect(page.getByText('53KF 尚未完成真实账户接口、有效对话规则和历史覆盖验证。')).toBeVisible();
   await expect(page.getByRole('heading', { name: '最近咨询' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '咨询内容摘要' })).toBeVisible();
@@ -446,6 +464,7 @@ test('1440x1024 keeps the table full width and opens an overlay audit drawer', a
 test('filters, search, sorting, pagination and analysis tabs drive independent state', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1024 });
   await page.goto('/geo/consultations');
+  await selectAllDevices(page);
   await expect(page.getByRole('heading', { name: '最近咨询' })).toBeVisible({ timeout: 10_000 });
 
   const typeRequest = page.waitForRequest((request) => (
@@ -513,7 +532,7 @@ test('filters, search, sorting, pagination and analysis tabs drive independent s
   await expect(page.locator('[aria-label="咨询来源分布图"]')).toBeVisible();
   await expect(page.locator('[aria-label="咨询趋势图"]')).toBeHidden();
 
-  await page.getByRole('combobox', { name: '咨询分析设备' })
+  await page.getByRole('combobox', { name: '设备' })
     .locator('xpath=ancestor::div[contains(@class,"ant-select")][1]')
     .click();
   await page.getByRole('option', { name: '移动端' }).click();
@@ -525,6 +544,7 @@ test('exposes honest partial coverage, accessible chart data and disabled-detail
   await installUnavailableRoutes(page, { includeUnavailableRow: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/geo/consultations');
+  await selectAllDevices(page);
 
   await expect(page.getByText(/官网逐条记录仅部分覆盖/u)).toBeVisible();
   await expect(page.getByText(/53KF 尚未完成真实账户接口/u)).toBeVisible();
@@ -550,6 +570,7 @@ test('exposes honest partial coverage, accessible chart data and disabled-detail
 test('keeps the modal drawer full-width and keyboard-contained on a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/geo/consultations');
+  await selectAllDevices(page);
   const trigger = page.getByRole('button', { name: /查看 2026-08-03 09:32/u });
   await trigger.focus();
   await page.keyboard.press('Enter');

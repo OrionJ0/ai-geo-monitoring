@@ -11,7 +11,6 @@ import { Button, Layout, Menu, message } from 'antd';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
-  BellOutlined,
   BookOutlined,
   FileSearchOutlined,
   FundProjectionScreenOutlined,
@@ -27,6 +26,7 @@ import {
 } from '@ant-design/icons';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import Login from '@/components/Login';
+import { MarketingFiltersProvider } from '@/components/marketing/MarketingFiltersContext';
 import { clearAuth, setAuthToken } from '@/lib/axiosConfig';
 import {
   buildGeoNavigation,
@@ -67,7 +67,6 @@ const navigationIcons: Record<string, React.ReactNode> = {
   '/prompts': <BookOutlined />,
   '/question-set-reports': <ReadOutlined />,
   '/quick-links': <ProfileOutlined />,
-  '/notice': <BellOutlined />,
   '/profile': <UserOutlined />
 };
 
@@ -174,70 +173,72 @@ export default function GeoLayout({
   }
 
   return (
-    <Layout className="layout">
-      <Header
-        className="app-header"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}
-      >
-        <div className="logo" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Button
-            ref={siderToggleRef}
-            type="text"
-            aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
-            aria-expanded={!collapsed}
-            icon={collapsed
-              ? <MenuUnfoldOutlined style={{ color: '#fff' }} />
-              : <MenuFoldOutlined style={{ color: '#fff' }} />}
-            onClick={handleSiderToggle}
-          />
-          <span>广拓数据工作台</span>
-        </div>
-        <Button onClick={handleLogout}>退出登录</Button>
-      </Header>
-      <Layout className="workspace-shell">
-        {!collapsed ? (
-          <button
-            type="button"
-            className="geo-sider-backdrop"
-            aria-label="关闭侧栏"
-            onClick={closeMobileSider}
-          />
-        ) : null}
-        <Sider
-          className="geo-sider"
-          width={224}
-          collapsedWidth={0}
-          breakpoint="md"
-          theme="light"
-          collapsible
-          collapsed={collapsed}
-          onBreakpoint={setCollapsed}
-          onCollapse={setCollapsed}
-          trigger={null}
+    <MarketingFiltersProvider>
+      <Layout className="layout">
+        <Header
+          className="app-header"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}
         >
-          <nav aria-label="工作台主导航">
-            <Menu
-              className="workspace-navigation"
-              mode="inline"
-              selectedKeys={location.selectedKey ? [location.selectedKey] : []}
-              style={{ minHeight: '100%', borderRight: 0 }}
-              items={menuItems}
-              onClick={() => {
-                if (window.innerWidth < 768) {
-                  window.setTimeout(closeMobileSider, 0);
-                }
-              }}
+          <div className="logo" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Button
+              ref={siderToggleRef}
+              type="text"
+              aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
+              aria-expanded={!collapsed}
+              icon={collapsed
+                ? <MenuUnfoldOutlined style={{ color: '#fff' }} />
+                : <MenuFoldOutlined style={{ color: '#fff' }} />}
+              onClick={handleSiderToggle}
             />
-          </nav>
-        </Sider>
-        <Content className="geo-content" style={{ padding: 24 }}>
-          {children}
-        </Content>
+            <span>广拓数据工作台</span>
+          </div>
+          <Button onClick={handleLogout}>退出登录</Button>
+        </Header>
+        <Layout className="workspace-shell">
+          {!collapsed ? (
+            <button
+              type="button"
+              className="geo-sider-backdrop"
+              aria-label="关闭侧栏"
+              onClick={closeMobileSider}
+            />
+          ) : null}
+          <Sider
+            className="geo-sider"
+            width={224}
+            collapsedWidth={0}
+            breakpoint="md"
+            theme="light"
+            collapsible
+            collapsed={collapsed}
+            onBreakpoint={setCollapsed}
+            onCollapse={setCollapsed}
+            trigger={null}
+          >
+            <nav aria-label="工作台主导航">
+              <Menu
+                className="workspace-navigation"
+                mode="inline"
+                selectedKeys={location.selectedKey ? [location.selectedKey] : []}
+                style={{ minHeight: '100%', borderRight: 0 }}
+                items={menuItems}
+                onClick={() => {
+                  if (window.innerWidth < 768) {
+                    window.setTimeout(closeMobileSider, 0);
+                  }
+                }}
+              />
+            </nav>
+          </Sider>
+          <Content className="geo-content" style={{ padding: 24 }}>
+            {children}
+          </Content>
+        </Layout>
       </Layout>
-    </Layout>
+    </MarketingFiltersProvider>
   );
 }

@@ -217,6 +217,10 @@ test('keyword analysis page implements the confirmed task-focused visual and int
     path.join(frontendRoot, 'src/lib/marketing/useKeywordAnalysis.ts'),
     'utf8'
   );
+  const dashboardReaderSource = fs.readFileSync(
+    path.join(frontendRoot, 'src/lib/marketing/readMarketingDashboard.ts'),
+    'utf8'
+  );
   assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data, projectId\)/);
   assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);
   assert.match(pageSource, /analysis\.warning/);
@@ -225,10 +229,12 @@ test('keyword analysis page implements the confirmed task-focused visual and int
 
   assert.match(hookSource, /NEXT_PUBLIC_KEYWORD_ANALYSIS_FIXTURE/);
   assert.match(hookSource, /process\.env\.NODE_ENV !== 'production'/);
-  assert.match(hookSource, /axios\.get<MarketingDashboardResponse>/);
-  assert.match(hookSource, /\/dashboard/);
+  assert.match(dashboardReaderSource, /axios\.get<MarketingDashboardResponse>/);
+  assert.match(dashboardReaderSource, /\/dashboard/);
+  assert.match(dashboardReaderSource, /DASHBOARD_DATE_OUT_OF_RANGE/);
+  assert.match(hookSource, /onDateRangeAdjusted\?\.\(response\.effectiveDateRange\)/);
   assert.match(hookSource, /adaptMarketingDashboardKeywords/);
-  assert.doesNotMatch(hookSource, /axios\.(?:post|put|patch|delete)\(/);
+  assert.doesNotMatch(hookSource + dashboardReaderSource, /axios\.(?:post|put|patch|delete)\(/);
   assert.match(pageSource, /useDefaultProjectContext/);
   assert.match(pageSource, /useMarketingCapabilities/);
   assert.match(pageSource, /首页/);
@@ -260,7 +266,8 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(pageSource, /type:\s*'sqrt'/);
   assert.match(pageSource, /range:\s*\[3,\s*11\]/);
   assert.match(pageSource, /fillOpacity:\s*0\.56/);
-  assert.match(pageSource, /allowEmpty=\{\[true,\s*true\]\}/);
+  assert.match(pageSource, /<MarketingPageFilters/);
+  assert.match(pageSource, /availableDevices=\{\['all'\]\}/);
   assert.doesNotMatch(pageSource, /MORE_FILTER_OPTIONS|更多筛选/);
   assert.doesNotMatch(pageSource, /title:\s*'投放路径'/);
   assert.doesNotMatch(pageSource, /推广单元：\{record\.unitName\}/);

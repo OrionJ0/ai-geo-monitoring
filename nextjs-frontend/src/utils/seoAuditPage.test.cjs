@@ -68,11 +68,11 @@ test('SEO audit page defaults to full-site mode and polls persisted asynchronous
   assert.match(source, /localStorage/);
 });
 
-test('SEO audit page explains that localhost belongs to the backend server', () => {
+test('SEO audit page briefly explains that checks run from the server', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 
-  assert.match(source, /localhost 指后端所在机器/);
-  assert.match(source, /其他电脑请填写后端可访问的局域网 IP/);
+  assert.match(source, /检测由服务器执行/);
+  assert.match(source, /内网地址需确保服务器能访问/);
 });
 
 test('SEO audit page exposes private-target availability and report limitations', () => {

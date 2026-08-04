@@ -138,6 +138,7 @@ test('maps login, verification, unavailable and shutdown to operator-safe guidan
 test('shared component polls only on visible pages and is mounted at both decision points', () => {
   const hookPath = path.resolve(__dirname, '../lib/useWebPlatformRuntimeStatus.ts');
   const componentPath = path.resolve(__dirname, '../components/WebPlatformRuntimeStatus.tsx');
+  const componentStylesPath = path.resolve(__dirname, '../components/WebPlatformRuntimeStatus.module.css');
   const promptsPath = path.resolve(__dirname, '../app/geo/prompts/page.tsx');
   const reportsPath = path.resolve(__dirname, '../app/geo/question-set-reports/page.tsx');
 
@@ -146,6 +147,7 @@ test('shared component polls only on visible pages and is mounted at both decisi
 
   const hook = fs.readFileSync(hookPath, 'utf8');
   const component = fs.readFileSync(componentPath, 'utf8');
+  const componentStyles = fs.readFileSync(componentStylesPath, 'utf8');
   const prompts = fs.readFileSync(promptsPath, 'utf8');
   const reports = fs.readFileSync(reportsPath, 'utf8');
 
@@ -159,6 +161,9 @@ test('shared component polls only on visible pages and is mounted at both decisi
   assert.match(component, /aria-live="polite"/);
   assert.match(component, /presentation\.actionHref/);
   assert.match(component, /前往设置中心|presentation\.actionLabel/);
+  assert.doesNotMatch(component, /单通道队列|platform\.kicker/);
+  assert.match(componentStyles, /\.runtimeStrip \+ \.runtimeStrip\s*\{[^}]*margin-top:\s*8px/);
+  assert.match(componentStyles, /\.copy\s*\{[^}]*display:\s*flex[^}]*align-items:\s*baseline/);
   assert.match(prompts, /<WebPlatformRuntimeStatus\s+platformCodes=\{selectableCodes\}\s*\/>/);
   assert.match(reports, /<WebPlatformRuntimeStatus\s+platformCodes=\{relevantWebPlatformCodes\}\s*\/>/);
 });

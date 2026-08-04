@@ -2,6 +2,9 @@ const express = require('express');
 
 function sendError(res, error) {
   res.set('Cache-Control', 'private, no-store');
+  if (Number.isSafeInteger(error?.retryAfterSeconds)) {
+    res.set('Retry-After', String(error.retryAfterSeconds));
+  }
   return res.status(error?.status || 500).json({
     error: {
       code: error?.code || 'MARKETING_DASHBOARD_FAILED',

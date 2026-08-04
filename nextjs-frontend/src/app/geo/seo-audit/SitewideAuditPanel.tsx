@@ -158,9 +158,9 @@ export default function SitewideAuditPanel({ sitewide, comparison }) {
     unverified: []
   };
   const comparisonLabel = change.status === 'compared'
-    ? `对比报告 #${change.previous_audit_id || '-'}`
+    ? `对比报告 #${change.previous_audit_id || '—'}`
     : change.status === 'partial'
-      ? `部分对比报告 #${change.previous_audit_id || '-'}，证据不足项不判定为已解决`
+      ? `部分对比报告 #${change.previous_audit_id || '—'}，证据不足项不判定为已解决`
       : change.status === 'not_comparable'
         ? '审计版本或覆盖范围不同，本次不做问题增减判断'
         : '首次审计，暂无可比基线';

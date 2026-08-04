@@ -21,6 +21,7 @@ const SEARCH_REPORT_BUDGET_LIMITS = Object.freeze({
 const REAUTHORIZATION_CODES = new Set(['894062', '894063', '894064']);
 const TONGJI_SOURCE_FILTERS = Object.freeze({
   ALL: null,
+  BAIDU_PAID: 'searchBaiduProFc',
   DIRECT: 'through',
   SEARCH: 'search,0',
   EXTERNAL: 'link',

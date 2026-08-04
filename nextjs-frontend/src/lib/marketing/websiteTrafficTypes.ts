@@ -1,10 +1,13 @@
 export type WebsiteDevice = 'all' | 'pc' | 'mobile';
 export type WebsiteSourceKey =
   | 'ALL'
+  | 'BAIDU_PAID'
   | 'BAIDU_SEARCH'
   | 'DIRECT'
   | 'BING_SEARCH'
-  | 'OTHER';
+  | 'GOOGLE_SEARCH'
+  | 'OTHER_SEARCH'
+  | 'EXTERNAL_REFERRAL';
 export type WebsiteMetric =
   | 'visits'
   | 'visitors'
@@ -171,6 +174,36 @@ function comparison(value: unknown, changeKey: string): boolean {
     && metric(value[changeKey]);
 }
 
+const WEBSITE_TRAFFIC_SOURCE_KEYS = [
+  'BAIDU_PAID',
+  'DIRECT',
+  'BAIDU_SEARCH',
+  'BING_SEARCH',
+  'GOOGLE_SEARCH',
+  'OTHER_SEARCH',
+  'EXTERNAL_REFERRAL'
+] as const;
+
+function sourceQualityRows(value: unknown): boolean {
+  if (
+    !Array.isArray(value)
+    || value.length !== WEBSITE_TRAFFIC_SOURCE_KEYS.length
+  ) return false;
+  const keys = value.map((row) => (
+    record(row) ? String(row.sourceKey) : ''
+  ));
+  return new Set(keys).size === WEBSITE_TRAFFIC_SOURCE_KEYS.length
+    && WEBSITE_TRAFFIC_SOURCE_KEYS.every((key) => keys.includes(key))
+    && value.every((row) => record(row)
+      && text(row.sourceLabel)
+      && metric(row.visits)
+      && metric(row.trafficShare)
+      && metric(row.bounceRate)
+      && metric(row.averageVisitTime)
+      && metric(row.averageVisitPages)
+      && ['DATA', 'NO_DATA'].includes(String(row.dataState)));
+}
+
 export function assertWebsiteTrafficOverview(
   value: unknown,
   query: {
@@ -210,17 +243,7 @@ export function assertWebsiteTrafficOverview(
       && metric(row.current) && metric(row.previous))
     || !record(sourceQuality)
     || !metric(sourceQuality.allSiteBounceRate)
-    || !Array.isArray(sourceQuality.rows)
-    || !sourceQuality.rows.every((row) => record(row)
-      && ['BAIDU_SEARCH', 'DIRECT', 'BING_SEARCH', 'OTHER']
-        .includes(String(row.sourceKey))
-      && text(row.sourceLabel)
-      && metric(row.visits)
-      && metric(row.trafficShare)
-      && metric(row.bounceRate)
-      && metric(row.averageVisitTime)
-      && metric(row.averageVisitPages)
-      && ['DATA', 'NO_DATA'].includes(String(row.dataState)))
+    || !sourceQualityRows(sourceQuality.rows)
     || !capabilities(responseCapabilities)
     || !record(value.cache)
     || !['HIT', 'REFRESHED', 'FALLBACK'].includes(String(value.cache.state))

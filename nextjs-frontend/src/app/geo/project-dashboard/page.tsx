@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import axios from '@/lib/axiosConfig';
 import { Column, Line } from '@ant-design/plots';
@@ -11,6 +11,7 @@ import { getBrandSentimentDisplay } from '@/utils/historyAnalysisDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
+import WorkspacePageHeader from '@/components/WorkspacePageHeader';
 import styles from './project-dashboard.module.css';
 
 const { Text, Title } = Typography;
@@ -47,38 +48,38 @@ function nullablePercent(value) {
 function formatRate(value, numerator, denominator) {
   const rate = nullablePercent(value);
   const valid = Number(denominator || 0);
-  if (rate === null) return `N/A（有效回答 ${valid}）`;
+  if (rate === null) return `—（有效回答 ${valid}）`;
   return `${rate}%（${Number(numerator || 0)} / ${valid}）`;
 }
 
 function formatSov(summary) {
   const value = nullablePercent(summary?.average);
   const count = Number(summary?.calculable_answers || 0);
-  return value === null ? `N/A（有效回答 ${count}）` : `${value}%（有效回答 ${count}）`;
+  return value === null ? `—（有效回答 ${count}）` : `${value}%（有效回答 ${count}）`;
 }
 
 function formatDate(value) {
-  if (!value) return '-';
+  if (!value) return '—';
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '-';
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString('zh-CN', { hour12: false });
 }
 
 function formatRank(value) {
   const n = Number(value || 0);
-  return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '-';
+  return Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : '—';
 }
 
 function formatOpportunityScope(row, platformLabel = {}) {
   const platform = row?.platform ? (platformLabel[row.platform] || row.platform) : '';
   const domain = row?.domain || '';
   if (platform && domain) return `${platform} / ${domain}`;
-  return platform || domain || row?.competitor || '-';
+  return platform || domain || row?.competitor || '—';
 }
 
 function renderTags(values, fallbackMap = {}) {
   const list = Array.isArray(values) ? values.filter(Boolean) : [];
-  if (!list.length) return '-';
+  if (!list.length) return '—';
   return (
     <Space size={[4, 4]} wrap>
       {list.map((item) => <Tag key={item}>{fallbackMap[item] || item}</Tag>)}
@@ -90,8 +91,8 @@ function metricTitle(label, explanation) {
   return (
     <Space size={6}>
       <span>{label}</span>
-      <Tooltip title={explanation}>
-        <InfoCircleOutlined tabIndex={0} aria-label={`${label}计算口径`} style={{ color: '#7b8ba5' }} />
+      <Tooltip title={explanation} trigger={['hover']}>
+        <InfoCircleOutlined aria-label={`${label}计算口径`} style={{ color: '#7b8ba5' }} />
       </Tooltip>
     </Space>
   );
@@ -114,15 +115,13 @@ export default function GeoProjectDashboardPage() {
   const handleDaysChange = (value) => {
     invalidateDashboardRequest();
     setDays(value);
-    setDashboard(null);
-    setDashboardLoading(false);
+    setDashboardLoading(true);
   };
 
   const handlePlatformChange = (value) => {
     invalidateDashboardRequest();
     setPlatform(value);
-    setDashboard(null);
-    setDashboardLoading(false);
+    setDashboardLoading(true);
   };
 
   const fetchDashboard = useCallback(async (id, targetDays, targetPlatform) => {
@@ -133,7 +132,6 @@ export default function GeoProjectDashboardPage() {
       setDashboardLoading(false);
       return;
     }
-    setDashboard(null);
     setDashboardLoading(true);
     try {
       const res = await axios.get(`/api/geo-projects/${id}/dashboard`, {
@@ -142,7 +140,7 @@ export default function GeoProjectDashboardPage() {
       if (dashboardRequestRef.current === requestId) setDashboard(res?.data?.data || null);
     } catch (error) {
       if (dashboardRequestRef.current === requestId) {
-        message.error(getApiErrorMessage(error, '获取 AI 搜索表现失败'));
+        message.error(getApiErrorMessage(error, '获取总体表现失败'));
       }
     } finally {
       if (dashboardRequestRef.current === requestId) setDashboardLoading(false);
@@ -254,7 +252,7 @@ export default function GeoProjectDashboardPage() {
       width: 300,
       render: (_, row) => (
         <div style={{ wordBreak: 'break-word', lineHeight: 1.5 }}>
-          {row?.prompt?.question || row?.questionRecord?.question || '-'}
+          {row?.prompt?.question || row?.questionRecord?.question || '—'}
         </div>
       ),
     },
@@ -282,7 +280,7 @@ export default function GeoProjectDashboardPage() {
       width: 180,
       render: (value) => value?.status === 'calculated'
         ? `${nullablePercent(value.value)}%（${value.numerator} / ${value.denominator}）`
-        : 'N/A',
+        : '—',
     },
     {
       title: '排名/推荐',
@@ -303,7 +301,7 @@ export default function GeoProjectDashboardPage() {
         ? <Tag>历史混合来源（不计入）</Tag>
         : (Number(row.citation_count || 0)
             ? `${Number(row.citation_count || 0)} 条 / 自有 ${Number(row.owned_citation_count || 0)}`
-            : '-'),
+            : '—'),
     },
     {
       title: '分类',
@@ -417,27 +415,13 @@ export default function GeoProjectDashboardPage() {
     { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
   ];
 
-  const sourceChangeColumns = [
-    { title: '域名', dataIndex: 'domain', width: 220, ellipsis: true },
-    {
-      title: '类型',
-      dataIndex: 'source_type',
-      width: 110,
-      render: (value) => <Tag color={sourceTypeColor[value] || 'default'}>{value || '未知来源'}</Tag>
-    },
-    { title: '引用次数', dataIndex: 'citation_count', width: 120, render: (value) => Number(value || 0) },
-    { title: '平台', dataIndex: 'platforms', width: 150, render: (value) => renderTags(value, platformLabel) },
-    { title: '问题分类', dataIndex: 'categories', width: 180, render: (value) => renderTags(value) },
-    { title: '最近出现', dataIndex: 'last_seen_at', width: 170, render: formatDate },
-  ];
-
   const sourceUrlColumns = [
     {
       title: 'URL',
       dataIndex: 'url',
       width: 360,
       ellipsis: true,
-      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '-'
+      render: (value) => value ? <a href={value} target="_blank" rel="noreferrer">{value}</a> : '—'
     },
     { title: '域名', dataIndex: 'domain', width: 180, ellipsis: true },
     {
@@ -474,20 +458,22 @@ export default function GeoProjectDashboardPage() {
       title: '对象',
       key: 'target',
       width: 260,
-      render: (_, row) => row.prompt || row.domain || row.competitor || row.prompt_category || '-'
+      render: (_, row) => row.prompt || row.domain || row.competitor || row.prompt_category || '—'
     },
-    { title: '证据', dataIndex: 'evidence', width: 300, render: (value) => value || '-' },
-    { title: '建议动作', dataIndex: 'recommendation', render: (value) => value || '-' },
+    { title: '证据', dataIndex: 'evidence', width: 300, render: (value) => value || '—' },
+    { title: '建议动作', dataIndex: 'recommendation', render: (value) => value || '—' },
   ];
 
   return (
     <div className={styles.page}>
       <Space orientation="vertical" size={16} className={styles.pageStack}>
-        <Row align="middle" justify="space-between" gutter={[16, 12]}>
-          <Col flex="auto" />
-          <Col>
+        <WorkspacePageHeader
+          section="GEO 监测"
+          title="总体表现"
+          actions={(
             <Space wrap>
               <Select
+                aria-label="统计周期"
                 style={{ width: 120 }}
                 value={days}
                 options={periodOptions}
@@ -507,8 +493,8 @@ export default function GeoProjectDashboardPage() {
                 ]}
               />
             </Space>
-          </Col>
-        </Row>
+          )}
+        />
 
         {defaultContext.errorMessage ? (
           <Alert
@@ -528,10 +514,61 @@ export default function GeoProjectDashboardPage() {
               <Card className={styles.coreMetricCard}><Statistic title={metricTitle('品牌提及率', '提及目标品牌的有效回答数 ÷ 有效回答数')} value={formatRate(summary.brand_mention_rate, summary.brand_mentioned_answers, summary.valid_answers)} loading={dashboardLoading} /></Card>
             </Col>
             <Col xs={24} sm={12} lg={8}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('回答内竞品提及占比（SOV）', '每条回答内：目标品牌独立提及次数 ÷ 目标品牌与 AI 判定竞品的独立提及总次数；项目值为可计算回答的等权平均')} value={formatSov(summary.sov_summary)} loading={dashboardLoading} /></Card>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('回答内竞品提及占比（SOV）', '目标品牌提及数 ÷ 品牌与竞品提及总数，再按回答取平均。')} value={formatSov(summary.sov_summary)} loading={dashboardLoading} /></Card>
             </Col>
             <Col xs={24} sm={12} lg={8}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('推荐率（AI 语义分析）', 'AI 语义分析判定推荐目标品牌的有效回答数 ÷ 有效回答数')} value={formatRate(summary.recommendation_rate, summary.recommended_answers, summary.valid_answers)} loading={dashboardLoading} /></Card>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('推荐率（AI 语义分析）', '明确推荐目标品牌的有效回答数 ÷ 有效回答数。')} value={formatRate(summary.recommendation_rate, summary.recommended_answers, summary.valid_answers)} loading={dashboardLoading} /></Card>
+            </Col>
+          </Row>
+        </section>
+
+        <section aria-labelledby="performance-trend-title" className={styles.metricSection}>
+          <div className={styles.sectionHeader}>
+            <Title level={4} id="performance-trend-title" className={styles.sectionTitle}>表现趋势</Title>
+          </div>
+          <Row gutter={[12, 12]} className={styles.diagnosticRows}>
+            <Col xs={24} xl={14}>
+              <Card size="small" title="趋势" loading={dashboardLoading}>
+                {shouldShowTrendChart ? (
+                  <Line
+                    data={trendData}
+                    xField="date"
+                    yField="value"
+                    seriesField="type"
+                    height={280}
+                    point
+                    legend={{ position: 'top' }}
+                  />
+                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无趋势数据" />}
+              </Card>
+            </Col>
+            <Col xs={24} xl={10}>
+              <Card size="small" title="平台百分比指标" loading={dashboardLoading}>
+                {shouldShowPlatformRateChart ? (
+                  <Column
+                    data={platformRateChartData}
+                    xField="platform"
+                    yField="value"
+                    seriesField="type"
+                    isGroup
+                    height={280}
+                    legend={{ position: 'top' }}
+                  />
+                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无平台指标" />}
+              </Card>
+            </Col>
+            <Col xs={24}>
+              <Card size="small" title="平台有效分析数" loading={dashboardLoading}>
+                {shouldShowPlatformCheckChart ? (
+                  <Column
+                    data={platformCheckChartData}
+                    xField="platform"
+                    yField="checks"
+                    height={220}
+                    legend={false}
+                  />
+                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无平台数据" />}
+              </Card>
             </Col>
           </Row>
         </section>
@@ -576,82 +613,86 @@ export default function GeoProjectDashboardPage() {
           </Row>
         </section>
 
+        <section aria-labelledby="source-structure-title" className={styles.metricSection}>
+          <div className={styles.sectionHeader}>
+            <Title level={4} id="source-structure-title" className={styles.sectionTitle}>来源结构</Title>
+          </div>
+          <Row gutter={[12, 12]} className={styles.diagnosticRows}>
+            <Col xs={24} xl={8}>
+              <Card size="small" title="来源类型分布" loading={dashboardLoading}>
+                <Table
+                  size="small"
+                  rowKey={(row) => row.type || 'unknown'}
+                  columns={sourceTypeColumns}
+                  dataSource={sourceTypes}
+                  pagination={false}
+                  locale={{ emptyText: '暂无来源类型' }}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} xl={16}>
+              <Card size="small" title="Top 引用域名" loading={dashboardLoading}>
+                <Table
+                  size="small"
+                  rowKey={(row) => row.domain}
+                  columns={sourceDomainColumns}
+                  dataSource={sourceDomains}
+                  pagination={{ pageSize: 6, showSizeChanger: false }}
+                  scroll={{ x: 960 }}
+                  locale={{ emptyText: '暂无引用域名' }}
+                />
+              </Card>
+            </Col>
+            <Col xs={24}>
+              <Card size="small" title="Top 引用 URL" loading={dashboardLoading}>
+                <Table
+                  size="small"
+                  rowKey={(row) => row.url || row.domain}
+                  columns={sourceUrlColumns}
+                  dataSource={sourceUrls}
+                  pagination={{ pageSize: 6, showSizeChanger: false }}
+                  scroll={{ x: 1180 }}
+                  locale={{ emptyText: '暂无引用 URL' }}
+                />
+              </Card>
+            </Col>
+          </Row>
+        </section>
+
         <section aria-labelledby="diagnosis-title" className={`${styles.metricSection} ${styles.diagnosisSection}`}>
           <div className={styles.sectionHeader}>
             <Title level={4} id="diagnosis-title" className={styles.sectionTitle}>变化与诊断</Title>
+            <Button type="link" href="/geo/sources">查看引用来源明细</Button>
           </div>
           <Row gutter={[12, 12]} className={styles.diagnosticRows}>
-            <Col xs={12} sm={8} lg={4}>
-              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title={metricTitle('明确有序榜单平均排名', '只统计至少包含 2 个不同实体、且回答明确给出顺序或名次的榜单')} value={summary.avg_brand_rank === null || summary.avg_brand_rank === undefined ? `N/A（有效回答 ${Number(summary.ranked_answers || 0)}）` : `${formatRank(summary.avg_brand_rank)}（有效回答 ${Number(summary.ranked_answers || 0)}）`} loading={dashboardLoading} /></Card>
+            <Col xs={12} sm={8} lg={6}>
+              <Card size="small" className={styles.diagnosticMetricCard}><Statistic title={metricTitle('明确有序榜单平均排名', '只统计明确给出顺序或名次的多品牌榜单。')} value={summary.avg_brand_rank === null || summary.avg_brand_rank === undefined ? `—（有效回答 ${Number(summary.ranked_answers || 0)}）` : `${formatRank(summary.avg_brand_rank)}（有效回答 ${Number(summary.ranked_answers || 0)}）`} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={12} sm={8} lg={4}>
+            <Col xs={12} sm={8} lg={6}>
               <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="竞品提及次数" value={competitors.reduce((sum, item) => sum + Number(item.mentions || 0), 0)} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={12} sm={8} lg={4}>
+            <Col xs={12} sm={8} lg={6}>
               <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="新增引用域名" value={newSourceDomains.length} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={12} sm={8} lg={4}>
+            <Col xs={12} sm={8} lg={6}>
               <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="流失引用域名" value={droppedSourceDomains.length} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={12} sm={8} lg={4}>
+            <Col xs={12} sm={8} lg={6}>
               <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="保留引用域名" value={retainedSourceDomains.length} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={12} sm={8} lg={4}>
+            <Col xs={12} sm={8} lg={6}>
               <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="新增引用 URL" value={newSourceUrls.length} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={12} sm={8} lg={4}>
+            <Col xs={12} sm={8} lg={6}>
               <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="流失引用 URL" value={droppedSourceUrls.length} loading={dashboardLoading} /></Card>
             </Col>
-            <Col xs={12} sm={8} lg={4}>
+            <Col xs={12} sm={8} lg={6}>
               <Card size="small" className={styles.diagnosticMetricCard}><Statistic title="保留引用 URL" value={retainedSourceUrls.length} loading={dashboardLoading} /></Card>
             </Col>
           </Row>
 
           <Row gutter={[12, 12]} className={styles.diagnosticRows}>
-          <Col xs={24} xl={14}>
-            <Card size="small" title="趋势" loading={dashboardLoading}>
-              {shouldShowTrendChart ? (
-                <Line
-                  data={trendData}
-                  xField="date"
-                  yField="value"
-                  seriesField="type"
-                  height={280}
-                  point
-                  legend={{ position: 'top' }}
-                />
-              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无趋势数据" />}
-            </Card>
-          </Col>
-          <Col xs={24} xl={10}>
-            <Card size="small" title="平台百分比指标" loading={dashboardLoading}>
-              {shouldShowPlatformRateChart ? (
-                <Column
-                  data={platformRateChartData}
-                  xField="platform"
-                  yField="value"
-                  seriesField="type"
-                  isGroup
-                  height={280}
-                  legend={{ position: 'top' }}
-                />
-              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无平台指标" />}
-            </Card>
-          </Col>
-          <Col xs={24}>
-            <Card size="small" title="平台有效分析数" loading={dashboardLoading}>
-              {shouldShowPlatformCheckChart ? (
-                <Column
-                  data={platformCheckChartData}
-                  xField="platform"
-                  yField="checks"
-                  height={220}
-                  legend={false}
-                />
-              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无平台数据" />}
-            </Card>
-          </Col>
-          <Col xs={24}>
+          <Col xs={24} xl={12}>
             <Card size="small" title="问题库分类覆盖" loading={dashboardLoading}>
               <Table
                 size="small"
@@ -663,87 +704,7 @@ export default function GeoProjectDashboardPage() {
               />
             </Card>
           </Col>
-          <Col xs={24} xl={8}>
-            <Card size="small" title="来源类型分布" loading={dashboardLoading}>
-              <Table
-                size="small"
-                rowKey={(row) => row.type || 'unknown'}
-                columns={sourceTypeColumns}
-                dataSource={sourceTypes}
-                pagination={false}
-                locale={{ emptyText: '暂无来源类型' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} xl={16}>
-            <Card size="small" title="Top 引用域名" loading={dashboardLoading}>
-              <Table
-                size="small"
-                rowKey={(row) => row.domain}
-                columns={sourceDomainColumns}
-                dataSource={sourceDomains}
-                pagination={{ pageSize: 6, showSizeChanger: false }}
-                scroll={{ x: 960 }}
-                locale={{ emptyText: '暂无引用域名' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Card size="small" title="新增引用域名" loading={dashboardLoading}>
-              <Table
-                size="small"
-                rowKey={(row) => row.domain}
-                columns={sourceChangeColumns}
-                dataSource={newSourceDomains}
-                pagination={{ pageSize: 6, showSizeChanger: false }}
-                scroll={{ x: 930 }}
-                locale={{ emptyText: '暂无新增引用域名' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Card size="small" title="流失引用域名" loading={dashboardLoading}>
-              <Table
-                size="small"
-                rowKey={(row) => row.domain}
-                columns={sourceChangeColumns}
-                dataSource={droppedSourceDomains}
-                pagination={{ pageSize: 6, showSizeChanger: false }}
-                scroll={{ x: 930 }}
-                locale={{ emptyText: '暂无流失引用域名' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Card size="small" title="保留引用域名" loading={dashboardLoading}>
-              <Table
-                size="small"
-                rowKey={(row) => row.domain}
-                columns={sourceChangeColumns}
-                dataSource={retainedSourceDomains}
-                pagination={{ pageSize: 6, showSizeChanger: false }}
-                scroll={{ x: 930 }}
-                locale={{ emptyText: '暂无保留引用域名' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24}>
-            <Card size="small" title="Top 引用 URL" loading={dashboardLoading}>
-              <Table
-                size="small"
-                rowKey={(row) => row.url || row.domain}
-                columns={sourceUrlColumns}
-                dataSource={sourceUrls}
-                pagination={{ pageSize: 6, showSizeChanger: false }}
-                scroll={{ x: 1180 }}
-                locale={{ emptyText: '暂无引用 URL' }}
-              />
-            </Card>
-          </Col>
-          </Row>
-
-          <Row gutter={[12, 12]} className={styles.diagnosticRows}>
-          <Col xs={24} xl={10}>
+          <Col xs={24} xl={12}>
             <Card size="small" title="竞品提及" loading={dashboardLoading}>
               <Table
                 size="small"
@@ -755,7 +716,10 @@ export default function GeoProjectDashboardPage() {
               />
             </Card>
           </Col>
-          <Col xs={24} xl={14}>
+          </Row>
+
+          <Row gutter={[12, 12]} className={styles.diagnosticRows}>
+          <Col xs={24}>
             <Card size="small" title="最近指标" loading={dashboardLoading}>
               <Table
                 size="small"

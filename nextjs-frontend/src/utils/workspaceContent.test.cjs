@@ -8,6 +8,14 @@ function read(relativePath) {
   return fs.readFileSync(path.resolve(__dirname, '..', relativePath), 'utf8');
 }
 
+function listTsxFiles(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) return listTsxFiles(entryPath);
+    return entry.name.endsWith('.tsx') ? [entryPath] : [];
+  });
+}
+
 test('市场页面不重复侧边栏标题或展示解释性段落', () => {
   const overview = read('app/geo/market-overview/page.tsx');
   const consultations = read('app/geo/consultations/page.tsx');
@@ -20,16 +28,17 @@ test('市场页面不重复侧边栏标题或展示解释性段落', () => {
     '当前只提示数据健康；趋势阈值尚未批准'
   ].forEach((copy) => assert.equal(overview.includes(copy), false));
   assert.match(overview, /<h1 className=\{styles\.visuallyHidden\}>市场总览<\/h1>/);
-  assert.doesNotMatch(orders, />订单结果</);
-  assert.match(consultations, /<h1 className=\{styles\.visuallyHidden\}>原始咨询<\/h1>/);
+  assert.match(orders, /<h1 className=\{styles\.visuallyHidden\}>订单结果<\/h1>/);
+  assert.doesNotMatch(orders, /<Title level=\{1\}/);
+  assert.match(consultations, /<h1 className=\{styles\.visuallyHidden\}>咨询数据<\/h1>/);
   assert.doesNotMatch(overview, /<Title level=\{1\}/);
   assert.doesNotMatch(consultations, /<Title level=\{1\}|<Paragraph/);
-  assert.doesNotMatch(orders, /<Card|<Paragraph|<Title/);
+  assert.doesNotMatch(orders, /<Paragraph|<Title/);
 });
 
 test('正式工作台页面以控件和数据开场，不重复导航页名', () => {
   const pages = [
-    ['app/geo/project-dashboard/page.tsx', />AI 搜索表现</],
+    ['app/geo/project-dashboard/page.tsx', />总体表现</],
     ['app/geo/sources/page.tsx', />引用来源分析</],
     ['app/geo/prompts/page.tsx', /<Card title="问题库"/],
     ['app/geo/question-set-reports/page.tsx', />运行报告</],
@@ -73,4 +82,37 @@ test('管理员页面不重复侧边栏页名或常驻说明', () => {
   assert.doesNotMatch(files.notice, /在此编辑系统通知/);
   assert.doesNotMatch(files.health, /<Card title="系统健康"/);
   assert.doesNotMatch(files.settings, /<Card title="设置中心"/);
+});
+
+test('个人中心不再请求或展示配额', () => {
+  const profile = read('app/geo/profile/page.tsx');
+
+  assert.doesNotMatch(profile, /\/api\/users\/quota\//);
+  assert.doesNotMatch(profile, /配额与使用情况/);
+  assert.doesNotMatch(profile, /<Statistic/);
+});
+
+test('工作台静态 tooltip 文案保持简短', () => {
+  const roots = [
+    path.resolve(__dirname, '../app/geo'),
+    path.resolve(__dirname, '../components')
+  ];
+  const patterns = [
+    /<Tooltip[^>]*\btitle="([^"]+)"/gs,
+    /\b(?:info|help)="([^"]+)"/g,
+    /\binfo:\s*'([^']+)'/g,
+    /\bformula:\s*'([^']+)'/g
+  ];
+
+  roots.flatMap(listTsxFiles).forEach((file) => {
+    const source = fs.readFileSync(file, 'utf8');
+    patterns.forEach((pattern) => {
+      for (const match of source.matchAll(pattern)) {
+        assert.ok(
+          Array.from(match[1]).length <= 40,
+          `${path.relative(path.resolve(__dirname, '..'), file)} tooltip 过长：${match[1]}`
+        );
+      }
+    });
+  });
 });

@@ -2,9 +2,10 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, Descriptions, Space, Button, Tag, Statistic, message } from 'antd';
+import { Card, Descriptions, Space, Button, Tag, message } from 'antd';
 import axios from 'axios';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import WorkspacePageHeader from '@/components/WorkspacePageHeader';
 
 const levelColors = {
   free: 'default',
@@ -18,8 +19,6 @@ export default function GeoProfilePage() {
 
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState(null);
-  const [quota, setQuota] = useState(null);
-  const [profileLoadedAt, setProfileLoadedAt] = useState(null);
 
   const formatDateTimeShort = (v) => {
     try {
@@ -31,20 +30,15 @@ export default function GeoProfilePage() {
       const mm = String(d.getMinutes()).padStart(2, '0');
       return `${y}-${m}-${dd} ${hh}:${mm}`;
     } catch {
-      return String(v || '-');
+      return String(v || '—');
     }
   };
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [pRes, qRes] = await Promise.all([
-        axios.get(`/api/users/profile/${userId}`),
-        axios.get(`/api/users/quota/${userId}`)
-      ]);
+      const pRes = await axios.get(`/api/users/profile/${userId}`);
       setProfile(pRes?.data?.data || null);
-      setQuota(qRes?.data?.data || null);
-      setProfileLoadedAt(Date.now());
     } catch (error) {
       message.error(getApiErrorMessage(error, '获取个人信息失败'));
     } finally {
@@ -54,56 +48,36 @@ export default function GeoProfilePage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const level = quota?.membership_level || profile?.membership_level || 'free';
-  const qs = quota?.quota_summary || {};
-  const expiresAt = quota?.membership_expires_at || profile?.membership_expires_at || null;
-  const remainingDays = (() => {
-    const lv = String(level).toLowerCase();
-    if (lv === 'free') return '长期有效';
-    if (!expiresAt || !profileLoadedAt) return '-';
-    try {
-      const end = new Date(expiresAt).getTime();
-      const diffMs = end - profileLoadedAt;
-      if (diffMs <= 0) return 0;
-      return Math.ceil(diffMs / (24 * 60 * 60 * 1000));
-    } catch {
-      return '-';
-    }
-  })();
+  const level = profile?.membership_level || 'free';
+  const expiresAt = profile?.membership_expires_at || null;
 
   const levelLabelMap = { free: '免费', basic: '基础', pro: '专业', enterprise: '企业' };
   const levelLabel = levelLabelMap[String(level).toLowerCase()] || level;
 
   return (
-    <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      <WorkspacePageHeader
+        title="个人中心"
+        actions={<Button onClick={fetchAll} loading={loading}>刷新</Button>}
+      />
       <Card
         title="个人信息"
         loading={loading}
-        extra={<Button onClick={fetchAll}>刷新</Button>}
       >
         <Descriptions column={1} size="small" styles={{ label: { width: 120 } }}>
           <Descriptions.Item label="用户ID">{profile?.user_id ?? userId}</Descriptions.Item>
-          <Descriptions.Item label="昵称">{profile?.nickname || profile?.username || '-'}</Descriptions.Item>
-          <Descriptions.Item label="邮箱">{profile?.email || '-'}</Descriptions.Item>
-          <Descriptions.Item label="角色">{profile?.role || '-'}</Descriptions.Item>
+          <Descriptions.Item label="昵称">{profile?.nickname || profile?.username || '—'}</Descriptions.Item>
+          <Descriptions.Item label="邮箱">{profile?.email || '—'}</Descriptions.Item>
+          <Descriptions.Item label="角色">{profile?.role || '—'}</Descriptions.Item>
           <Descriptions.Item label="会员等级">
             <Tag color={levelColors[String(level).toLowerCase()] || 'default'}>{levelLabel}</Tag>
           </Descriptions.Item>
           <Descriptions.Item label="会员时长">
             {String(level).toLowerCase() === 'free'
               ? (<Tag>长期有效</Tag>)
-              : (expiresAt ? `${formatDateTimeShort(expiresAt)}` : '-')}
+              : (expiresAt ? `${formatDateTimeShort(expiresAt)}` : '—')}
           </Descriptions.Item>
         </Descriptions>
-      </Card>
-
-      <Card title="配额与使用情况" loading={loading}>
-        <Space size="large" wrap>
-          <Statistic title="本日已用" value={(qs?.detection?.used ?? 0)} suffix="次检测" />
-          <Statistic title="本日上限" value={(qs?.detection?.limit ?? 0)} suffix="次检测" />
-          <Statistic title="本日剩余" value={(qs?.detection?.remaining ?? 0)} suffix="次检测" />
-          <Statistic title="剩余天数" value={remainingDays} suffix={typeof remainingDays === 'number' ? '天' : undefined} />
-        </Space>
       </Card>
     </Space>
   );

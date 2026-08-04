@@ -11,6 +11,10 @@ const hookPath = path.resolve(
   __dirname,
   '../../src/lib/marketing/useWebsiteTraffic.ts'
 );
+const typesPath = path.resolve(
+  __dirname,
+  '../../src/lib/marketing/websiteTrafficTypes.ts'
+);
 const manifestPath = path.resolve(
   __dirname,
   '../../../backend/modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/manifest.json'
@@ -39,6 +43,13 @@ test('website traffic page uses only server-side website traffic contracts', () 
   assert.match(hook, /assertWebsitePageReport\(response\.data, query\)/);
   assert.doesNotMatch(source + hook, /api\.baidu\.com|accessToken|tongji_site_id/);
   assert.doesNotMatch(source + hook, /\/dashboard|\/refresh-runs/);
+});
+
+test('website traffic contract requires every source exactly once', () => {
+  const contract = fs.readFileSync(typesPath, 'utf8');
+  assert.match(contract, /sourceQualityRows/);
+  assert.match(contract, /new Set\(keys\)\.size === WEBSITE_TRAFFIC_SOURCE_KEYS\.length/);
+  assert.match(contract, /WEBSITE_TRAFFIC_SOURCE_KEYS\.every\(\(key\) => keys\.includes\(key\)\)/);
 });
 
 test('page keeps fixed information architecture and honest missing states', () => {
@@ -85,8 +96,8 @@ test('page views replace columns and support search, sorting and server paginati
   assert.match(source, /onSearch/);
   assert.match(source, /sortBy/);
   assert.match(source, /total: pages\.data\.pagination\.totalItems/);
-  assert.match(source, /Tooltip title=\{row\.path\} trigger=\{\['hover', 'focus'\]\}/);
-  assert.match(source, /className=\{styles\.pagePath\} tabIndex=\{0\}/);
+  assert.match(source, /Tooltip title=\{row\.path\} trigger=\{\['hover'\]\}/);
+  assert.doesNotMatch(source, /className=\{styles\.pagePath\} tabIndex=\{0\}/);
 });
 
 test('hooks isolate late requests and expose loading, error and cache fallback states', () => {

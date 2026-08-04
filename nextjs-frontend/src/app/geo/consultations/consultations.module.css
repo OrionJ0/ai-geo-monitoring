@@ -33,16 +33,20 @@
   line-height: 20px;
 }
 
-.dateRangeGroup :global(.ant-picker) {
-  min-width: 324px;
-  border-radius: 8px;
-}
-
 .pageAlert {
   margin-bottom: 16px;
 }
 
-.summaryCard,
+.metricSummary {
+  margin-bottom: 16px;
+}
+
+.sourceStatusStack {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
 .analysisCard,
 .tableCard {
   min-width: 0;
@@ -51,78 +55,9 @@
   box-shadow: none !important;
 }
 
-.summaryCard,
 .analysisCard {
   margin-bottom: 16px;
   border-radius: 12px !important;
-}
-
-.summaryCard :global(.ant-card-body) {
-  padding: 0;
-}
-
-.summaryGrid {
-  display: grid;
-  min-height: 128px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.summaryMetric {
-  min-width: 0;
-  padding: 20px 28px;
-}
-
-.summaryMetric + .summaryMetric {
-  border-left: 1px solid #e5eaf1;
-}
-
-.metricTitleRow {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  color: #17366d;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 22px;
-}
-
-.metricTitleRow > :global(.anticon) {
-  color: #2f6bff;
-  font-size: 16px;
-}
-
-.metricTitleRow :global(.ant-tag) {
-  margin-inline-end: 0;
-  margin-left: auto;
-  color: #64748b;
-  background: #f8fafc;
-  border-color: #e5eaf1;
-}
-
-.metricTitleRow :global(.ant-tag.ant-tag-success) {
-  color: #166534 !important;
-  background: #f0fdf4 !important;
-  border-color: #bbf7d0 !important;
-}
-
-.summaryMetric > strong {
-  display: block;
-  margin-top: 8px;
-  color: #172b4d;
-  font-size: 28px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  line-height: 36px;
-}
-
-.summaryMetric > p {
-  min-height: 18px;
-  margin: 4px 0 0;
-  color: #667085;
-  font-size: 12px;
-  line-height: 18px;
-  overflow-wrap: anywhere;
 }
 
 .analysisCard :global(.ant-card-body) {
@@ -242,7 +177,7 @@
 
 .tableCard {
   overflow: hidden;
-  border-radius: 12px !important;
+  border-radius: 10px !important;
 }
 
 .tableCard :global(.ant-card-body) {
@@ -543,25 +478,6 @@
     align-items: stretch;
     flex-direction: column;
     gap: 8px;
-  }
-
-  .dateRangeGroup,
-  .dateRangeGroup :global(.ant-picker) {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .summaryGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .summaryMetric {
-    padding: 16px;
-  }
-
-  .summaryMetric + .summaryMetric {
-    border-top: 1px solid #e5eaf1;
-    border-left: 0;
   }
 
   .analysisCard :global(.ant-card-body) {

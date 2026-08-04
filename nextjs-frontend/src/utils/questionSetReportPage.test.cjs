@@ -28,6 +28,7 @@ test('运行报告只使用默认项目，并保留 run_id 深链', () => {
 test('运行报告页面以运行历史和单次逐条结果为中心', () => {
   assert.equal(fs.existsSync(pagePath), true, '运行报告页面应存在');
   const source = fs.readFileSync(pagePath, 'utf8');
+  const styles = fs.readFileSync(reportCssPath, 'utf8');
 
   assert.match(source, /运行报告/);
   assert.match(source, /运行历史/);
@@ -35,9 +36,10 @@ test('运行报告页面以运行历史和单次逐条结果为中心', () => {
   assert.match(source, /question-set-runs/);
   assert.match(source, /summary\.total/);
   assert.match(source, /dataSource=\{report\.rows/);
+  assert.doesNotMatch(styles, /\.toolbar\s*\{[^}]*border-bottom/);
 });
 
-test('问题集报告分级展示指标并给出可聚焦的口径说明', () => {
+test('问题集报告分级展示指标并给出简短的悬停口径说明', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
   const primaryStart = source.indexOf(`className={styles.primaryMetrics}`);
   const primaryEnd = source.indexOf(`className={styles.metricsCollapse}`, primaryStart);
@@ -61,13 +63,13 @@ test('问题集报告分级展示指标并给出可聚焦的口径说明', () =>
   assert.match(source, /hasCompetitorBaseline/);
   assert.match(source, /更多指标/);
   assert.match(source, /QuestionCircleOutlined/);
-  assert.match(source, /tabIndex=\{0\}/);
-  assert.match(source, /trigger=\{\['hover', 'focus'\]\}/);
-  assert.match(source, /分析模型先把目标品牌显式映射.*程序计数.*分析模型不直接返回/);
-  assert.match(source, /程序根据明确推荐关系计算/);
-  assert.match(source, /目标品牌实际提及次数.*AI 判定竞品.*等权平均/);
-  assert.match(source, /至少包含 2 个不同实体、且回答明确给出顺序或名次/);
-  assert.match(source, /短实体词.*原回答/);
+  assert.doesNotMatch(source, /QuestionCircleOutlined[\s\S]{0,180}tabIndex=\{0\}/);
+  assert.match(source, /trigger=\{\['hover'\]\}/);
+  assert.doesNotMatch(source, /trigger=\{\['hover', 'focus'\]\}/);
+  assert.match(source, /提及目标品牌的有效分析数 ÷ 有效分析数/);
+  assert.match(source, /仅列举不算推荐/);
+  assert.match(source, /目标品牌提及数 ÷ 品牌与竞品提及总数.*按回答取平均/);
+  assert.match(source, /明确给出顺序或名次的多品牌榜单/);
   assert.match(source, /AI 结构化/);
   assert.match(source, /历史规则/);
   assert.match(source, /这份历史报告包含旧规则指标/);
@@ -153,17 +155,19 @@ test('新口径运行用已采集回答计算并展示分析覆盖率', () => {
   assert.match(source, /invalid_captures/);
   assert.match(source, /capture_quality/);
   assert.match(source, /采集无效/);
-  assert.match(source, /不进入分析覆盖率分母/);
+  assert.match(source, /采集无效不进分母/);
   assert.doesNotMatch(source, /label="有效样本"/);
 });
 
-test('新版品牌率在没有有效分析时显示 N/A 而不是 0%', () => {
+test('新版品牌率在没有有效分析时显示统一缺失值而不是 0%', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 
   assert.match(source, /function formatCurrentRate/);
   assert.match(source, /value == null \|\| safeDenominator === 0/);
   assert.match(source, /formatCurrentRate\(\s*summary\.brand_mention_rate/);
   assert.match(source, /formatCurrentRate\(\s*summary\.recommendation_rate/);
+  assert.match(source, /`—（\$\{safeNumerator\} \/ \$\{safeDenominator\}）`/);
+  assert.doesNotMatch(source, /N\/A/);
 });
 
 test('正式页面只通过版本化 SOV 契约展示新旧聚合', () => {
@@ -324,15 +328,20 @@ test('运行报告成为问题库后的主入口，旧汇总入口下沉且运�
   const seoIndex = navigation.indexOf("page('/seo-audit'");
   const promptIndex = navigation.indexOf("page('/prompts'");
   const reportIndex = navigation.indexOf("page('/question-set-reports'");
+  const monitoringGroupIndex = navigation.indexOf("'monitoring-tasks'");
+  const geoGroupIndex = navigation.indexOf("'ai-monitoring'");
+  const diagnosisGroupIndex = navigation.indexOf("'website-diagnosis'");
   const noticeIndex = navigation.indexOf("page('/notice'");
   const profileIndex = navigation.indexOf("page('/profile'");
 
   assert.ok(promptIndex >= 0, '问题库入口应存在');
   assert.ok(questionSetRunStart >= 0 && questionSetRunEnd > questionSetRunStart, '应找到问题集运行处理函数');
-  assert.ok(sourceIndex > dashboardIndex, '引用来源分析应位于 AI 搜索表现之后');
-  assert.ok(seoIndex > sourceIndex && promptIndex > seoIndex, '网站诊断应位于 AI 品牌监测和监测任务之间');
   assert.ok(reportIndex > promptIndex, '运行报告应位于问题库之后');
-  assert.ok(noticeIndex > reportIndex && profileIndex > noticeIndex, '系统分组应位于监测任务之后');
+  assert.ok(geoGroupIndex > monitoringGroupIndex, 'GEO 监测应位于监测任务之后');
+  assert.ok(sourceIndex > dashboardIndex, '引用来源分析应位于总体表现之后');
+  assert.ok(diagnosisGroupIndex > geoGroupIndex, '网站诊断应位于 GEO 监测之后');
+  assert.equal(noticeIndex, -1, '系统通知入口应隐藏');
+  assert.ok(profileIndex > seoIndex, '设置分组应位于业务导航之后');
   assert.doesNotMatch(navigation, /\/geo\/reports/);
   assert.match(questionSetRunBlock, /data\.report_url/);
   assert.match(prompts, /const questionSetRunIdempotencyRef = useRef\(new Map\(\)\)/);

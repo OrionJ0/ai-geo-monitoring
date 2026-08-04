@@ -29,7 +29,7 @@ test('prompt page guards async list, batch creation and history responses from s
   assert.match(source, /promptsRequestRef\.current = requestId/);
   assert.match(source, /if \(!projectId\) \{[\s\S]*setPrompts\(\[\]\);[\s\S]*setPromptsLoading\(false\);[\s\S]*return;/);
   assert.match(source, /setPrompts\(\[\]\)[\s\S]*setPromptsLoading\(true\)/);
-  assert.match(source, /if \(promptsRequestRef\.current === requestId\) setPrompts\(Array\.isArray\(res\?\.data\?\.data\) \? res\.data\.data : \[\]\)/);
+  assert.match(source, /setPrompts\(sortPromptRowsStable\(Array\.isArray\(res\?\.data\?\.data\) \? res\.data\.data : \[\]\)\)/);
   assert.match(source, /const requestId = batchRequestRef\.current \+ 1/);
   assert.match(source, /batchRequestRef\.current = requestId/);
   assert.match(source, /batchRequestRef\.current === requestId && isCurrentPromptProject\(mutationProjectId\)/);
@@ -55,7 +55,7 @@ test('prompt page clears stale editors and filters when default context changes'
   assert.match(source, /shouldResetPromptListFilters/);
   assert.match(source, /setPromptSearch\(''\)/);
   assert.match(source, /setPromptStatusFilter\('all'\)/);
-  assert.match(source, /setPromptCategoryFilter\('all'\)/);
+  assert.match(source, /setPromptQuestionSetFilter\('all'\)/);
   assert.match(source, /setModalOpen\(false\)/);
   assert.match(source, /setEditingPrompt\(null\)/);
   assert.match(source, /form\.resetFields\(\)/);
@@ -118,4 +118,58 @@ test('prompt page refreshes prompt data only for the current project after mutat
 test('问题列表加载期间不显示有业务含义的 0 / 0 假空态', () => {
   assert.match(source, /promptsLoading\s*\?\s*'正在加载问题…'/);
   assert.match(source, /:\s*`显示 \$\{filteredPrompts\.length\} \/ \$\{prompts\.length\} 条`/);
+});
+
+test('问题列表只在选中后显示批量操作，并将操作放在全选按钮左侧', () => {
+  const listStart = source.indexOf('<Card title="问题列表">');
+  const listEnd = source.indexOf('<Modal', listStart);
+  const list = source.slice(listStart, listEnd);
+
+  assert.match(list, /selectedPromptIds\.length \? \(/);
+  assert.match(list, />\s*组成问题集\s*</);
+  assert.match(list, />加入问题集</);
+  assert.doesNotMatch(list, /将所选/);
+  ['组成问题集', '加入问题集', '批量删除', '清空选择'].forEach((label) => {
+    assert.ok(list.indexOf(label) < list.indexOf('全选筛选结果'));
+  });
+});
+
+test('问题筛选变化后只保留当前筛选结果内的选中项', () => {
+  assert.match(source, /retainVisiblePromptSelection/);
+  assert.match(
+    source,
+    /setSelectedPromptIds\(\(current\) => retainVisiblePromptSelection\(current, filteredPrompts\)\)/
+  );
+  assert.doesNotMatch(source, /preserveSelectedRowKeys:\s*true/);
+});
+
+test('问题库移除标签并改为问题集筛选，包含未分组', () => {
+  assert.doesNotMatch(source, /name="tags"|title:\s*'标签'|搜索问题或标签/);
+  assert.match(source, /placeholder="搜索问题"/);
+  assert.match(source, /全部问题集/);
+  assert.match(source, /未分组/);
+  assert.match(source, /questionSet:\s*promptQuestionSetFilter/);
+});
+
+test('选中问题可以原子加入已有问题集', () => {
+  assert.match(source, /const addSelectedToQuestionSet = async/);
+  assert.match(source, /question_ids:\s*mergedIds/);
+  assert.match(source, /question-sets\/\$\{targetQuestionSet\.id\}/);
+  assert.match(source, /已属于其他问题集的问题会移入新问题集/);
+});
+
+test('问题列表按创建时间稳定排序，不因启用状态更新时间而跳到首行', () => {
+  const fetchStart = source.indexOf('const fetchPrompts');
+  const fetchEnd = source.indexOf('const fetchQuestionSets', fetchStart);
+  const fetchBlock = source.slice(fetchStart, fetchEnd);
+
+  assert.match(fetchBlock, /sortPromptRowsStable/);
+  assert.doesNotMatch(fetchBlock, /updated_at/);
+});
+
+test('问题列表只在底部显示分页，行内编辑不占用主按钮样式', () => {
+  assert.match(source, /placement:\s*\['bottomRight'\]/);
+  assert.doesNotMatch(source, /placement:\s*\['topRight', 'bottomRight'\]/);
+  assert.doesNotMatch(source, /type="primary" onClick=\{\(\) => openEdit\(row\)\}/);
+  assert.doesNotMatch(source, /type="primary" onClick=\{\(\) => openEditQuestionSet/);
 });

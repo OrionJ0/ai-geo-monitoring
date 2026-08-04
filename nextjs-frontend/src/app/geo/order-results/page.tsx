@@ -15,7 +15,6 @@ import {
   Breadcrumb,
   Button,
   Card,
-  DatePicker,
   Descriptions,
   Drawer,
   Empty,
@@ -31,7 +30,6 @@ import type { TableColumnsType, TableProps } from 'antd';
 import {
   ArrowRightOutlined,
   ExportOutlined,
-  InfoCircleOutlined,
   SearchOutlined
 } from '@ant-design/icons';
 import type {
@@ -47,9 +45,12 @@ import {
   buildDailySeries,
   deriveOrderResultsView
 } from '@/utils/orderResults.cjs';
+import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
+import { useMarketingFilters } from '@/components/marketing/MarketingFiltersContext';
+import MarketingMetricCard, {
+  MarketingMetricGrid
+} from '@/components/marketing/MarketingMetricCard';
 import styles from './order-results.module.css';
-
-const { RangePicker } = DatePicker;
 
 const SOURCE_COLORS: Record<OrderSourceCategory, string> = {
   BAIDU_PAID: '#1462f3',
@@ -106,41 +107,6 @@ function consultationText(order: OrderResult) {
   const consultation = order.primaryConsultation;
   if (!consultation) return '—';
   return `${CONSULTATION_TYPE_LABELS[consultation.type]} ${dayjs(consultation.occurredAt).format('MM-DD')}「${consultation.summary}」`;
-}
-
-function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <Tooltip title={children} trigger={['hover', 'focus']}>
-      <button type="button" className={styles.infoButton} aria-label={`${label}口径说明`}>
-        <InfoCircleOutlined aria-hidden="true" />
-      </button>
-    </Tooltip>
-  );
-}
-
-function Metric({
-  title,
-  value,
-  note,
-  testId,
-  info
-}: {
-  title: string;
-  value: React.ReactNode;
-  note: React.ReactNode;
-  testId: string;
-  info?: React.ReactNode;
-}) {
-  return (
-    <section className={styles.summaryMetric} aria-label={title}>
-      <div className={styles.metricTitle}>
-        <span>{title}</span>
-        {info ? <InfoTip label={title}>{info}</InfoTip> : null}
-      </div>
-      <strong data-testid={testId}>{value}</strong>
-      <p className={styles.metricNote}>{note}</p>
-    </section>
-  );
 }
 
 function OrderDetailDrawer({
@@ -277,14 +243,14 @@ function OrderDetailDrawer({
               href={consultation ? '/geo/consultations' : undefined}
               disabled={!consultation}
             >
-              查看原始咨询
+              查看咨询数据
             </Button>
             {order.salesSystemRecordUrl ? (
               <Button href={order.salesSystemRecordUrl} target="_blank" icon={<ExportOutlined />}>
                 在销售系统查看
               </Button>
             ) : (
-              <Tooltip title="销售系统尚未提供真实订单记录 URL">
+              <Tooltip title="销售系统尚未提供真实订单记录 URL" trigger={['hover']}>
                 <Button disabled icon={<ExportOutlined />}>在销售系统查看</Button>
               </Tooltip>
             )}
@@ -312,11 +278,8 @@ function OrderResultsContent() {
     () => resolveOrderResultsDataSource(demoRequested),
     [demoRequested]
   );
-  const initialRange = dataSource.coverage
-    ? [dataSource.coverage.defaultFrom, dataSource.coverage.defaultTo]
-    : [dayjs().subtract(29, 'day').format('YYYY-MM-DD'), dayjs().format('YYYY-MM-DD')];
+  const { device, setDevice, dateRange, setDateRange } = useMarketingFilters();
   const [orders, setOrders] = useState<OrderResult[]>(() => [...dataSource.orders]);
-  const [dateRange, setDateRange] = useState<[string, string]>(initialRange as [string, string]);
   const [metric, setMetric] = useState<'count' | 'amount'>('count');
   const [sourceFilter, setSourceFilter] = useState<'ALL' | OrderSourceCategory>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | OrderAttributionStatus>('ALL');
@@ -333,9 +296,6 @@ function OrderResultsContent() {
 
   useEffect(() => {
     setOrders([...dataSource.orders]);
-    if (dataSource.coverage) {
-      setDateRange([dataSource.coverage.defaultFrom, dataSource.coverage.defaultTo]);
-    }
   }, [dataSource]);
 
   useEffect(() => {
@@ -461,7 +421,7 @@ function OrderResultsContent() {
     {
       title: '主要归因咨询', key: 'primaryConsultation', width: 200,
       render: (_, order) => (
-        <Tooltip title={order.primaryConsultation?.summary}>
+        <Tooltip title={order.primaryConsultation?.summary} trigger={['hover']}>
           <span className={styles.consultationCell} data-pending={!order.primaryConsultation}>
             {consultationText(order)}
           </span>
@@ -513,30 +473,81 @@ function OrderResultsContent() {
             { title: '订单结果' }
           ]} />
           {dataSource.state === 'DEMO' ? (
-            <Tooltip title={dataSource.message}>
+            <Tooltip title={dataSource.message} trigger={['hover']}>
               <Tag>开发示例</Tag>
             </Tooltip>
           ) : null}
         </div>
-        <RangePicker
-          aria-label="订单日期范围"
-          value={[dayjs(dateRange[0]), dayjs(dateRange[1])]}
-          format="YYYY-MM-DD"
-          separator="至"
-          allowClear={false}
-          disabledDate={(current) => dataSource.coverage ? (
-            current.isBefore(dayjs(dataSource.coverage.from), 'day')
-            || current.isAfter(dayjs(dataSource.coverage.to), 'day')
-          ) : false}
-          onChange={(values) => {
-            if (!values?.[0] || !values?.[1]) return;
-            setDateRange([
-              values[0].format('YYYY-MM-DD'),
-              values[1].format('YYYY-MM-DD')
-            ]);
+        <MarketingPageFilters
+          device={device}
+          onDeviceChange={setDevice}
+          availableDevices={['all']}
+          dateRange={dateRange}
+          onDateRangeChange={(nextRange) => {
+            setDateRange(nextRange);
             setPage(1);
           }}
+          dateAriaLabel="订单日期范围"
+          minDate={dataSource.coverage?.from || null}
+          maxDate={dataSource.coverage?.to || dayjs().format('YYYY-MM-DD')}
+          presetAnchor={dataSource.coverage?.to || dayjs().format('YYYY-MM-DD')}
         />
+      </div>
+
+      <div className={styles.metricSummary}>
+      <MarketingMetricGrid ariaLabel="订单结果周期汇总指标">
+        <MarketingMetricCard
+          title="成交订单"
+          metricKey="ORDERS"
+          current={dataSource.state === 'UNAVAILABLE' ? null : String(view.summary.totalCount)}
+          previous={dataSource.state === 'UNAVAILABLE' ? null : previousCount}
+          change={dataSource.state === 'UNAVAILABLE' ? null : countChange}
+          info="筛选范围内的去重订单数。"
+          currentMissingReason={dataSource.message}
+          previousMissingReason={dataSource.message}
+          changeMissingReason="当前没有完整的等长上一周期订单数。"
+          testId="summary-order-count"
+        />
+        <MarketingMetricCard
+          title="签订金额"
+          metricKey="AMOUNT"
+          current={dataSource.state === 'UNAVAILABLE' ? null : formatAmount(view.summary.signedAmountYuan)}
+          previous={dataSource.state === 'UNAVAILABLE' ? null : formatAmount(previousAmount)}
+          change={dataSource.state === 'UNAVAILABLE' ? null : amountChange}
+          info="合同签订金额，不等于回款或利润。"
+          currentMissingReason={dataSource.message}
+          previousMissingReason={dataSource.message}
+          changeMissingReason="当前没有完整的等长上一周期签订金额。"
+          testId="summary-signed-amount"
+        />
+        <MarketingMetricCard
+          title="已关联订单"
+          metricKey="ATTRIBUTED"
+          current={dataSource.state === 'UNAVAILABLE'
+            ? null
+            : `${view.summary.trustedCount} / ${view.summary.totalCount}`}
+          previous={null}
+          change={null}
+          info="来源已确认且可信的订单。"
+          currentMissingReason={dataSource.message}
+          previousMissingReason="当前订单合同未提供上一周期的关联状态汇总。"
+          changeMissingReason="缺少上一周期关联状态，无法比较。"
+          testId="summary-linked-orders"
+        />
+        <MarketingMetricCard
+          title="待关联订单"
+          metricKey="PENDING"
+          current={dataSource.state === 'UNAVAILABLE' ? null : String(view.summary.unresolvedCount)}
+          previous={null}
+          change={null}
+          tone="bad"
+          info="未选主要咨询，或来源无法证实的订单。"
+          currentMissingReason={dataSource.message}
+          previousMissingReason="当前订单合同未提供上一周期的关联状态汇总。"
+          changeMissingReason="缺少上一周期关联状态，无法比较。"
+          testId="summary-pending-orders"
+        />
+      </MarketingMetricGrid>
       </div>
 
       {dataSource.state === 'UNAVAILABLE' ? (
@@ -552,39 +563,7 @@ function OrderResultsContent() {
       ) : (
         <>
           <Card className={styles.summaryCard}>
-            <div className={styles.summaryLayout}>
-              <div className={styles.summaryMetrics}>
-                <Metric
-                  title="成交订单"
-                  value={view.summary.totalCount}
-                  note={countChange ? <>较上一周期 <strong>{countChange}</strong></> : '上一周期无可比数据'}
-                  testId="summary-order-count"
-                  info="订单数按筛选范围内的去重订单记录计数，不由金额推导。"
-                />
-                <Metric
-                  title="签订金额"
-                  value={formatAmount(view.summary.signedAmountYuan)}
-                  note={amountChange ? <>较上一周期 <strong>{amountChange}</strong></> : '上一周期无可比数据'}
-                  testId="summary-signed-amount"
-                  info="仅表示合同签订金额，不等于回款、收入或利润。"
-                />
-                <Metric
-                  title="已关联订单"
-                  value={`${view.summary.trustedCount} / ${view.summary.totalCount}`}
-                  note={<>关联率 <strong>{view.summary.associationRate}</strong></>}
-                  testId="summary-linked-orders"
-                  info="只计来源关系已经确认且来源可信的订单。"
-                />
-                <Metric
-                  title="待关联订单"
-                  value={view.summary.unresolvedCount}
-                  note="含来源无法证实的已关联记录"
-                  testId="summary-pending-orders"
-                  info="待处理关联包括未选择主要咨询，以及已关联但来源无法证实的订单。"
-                />
-              </div>
-
-              <section className={styles.sourceOverview} aria-labelledby="source-overview-title">
+            <section className={styles.sourceOverview} aria-labelledby="source-overview-title">
                 <div className={styles.sourceHeader}>
                   <h2 id="source-overview-title">来源概览</h2>
                   <span>按成交订单数 · 共 {view.summary.totalCount} 单</span>
@@ -643,8 +622,7 @@ function OrderResultsContent() {
                     ))}
                   </div>
                 </div>
-              </section>
-            </div>
+            </section>
           </Card>
 
           <Card className={styles.trendCard}>

@@ -7,7 +7,7 @@
 | 页面 | 本地设计实现 | 数据 / 证据边界 |
 | --- | --- | --- |
 | 市场总览 | 浏览器视觉、交互、响应式、axe 已通过 | 无 fixture 的本地 production build 已请求真实官网聚合 API 并显示 3 个可归因会话；百度营销与百度统计随后已从正式域名真实验收，官网生产因凭据缺失保持 `DISABLED` |
-| 原始咨询 | 浏览器视觉、抽屉、响应式、axe 已通过 | 官网记录级 adapter 已完成真实只读与脱敏验证；53KF 仍为独立 `NOT_CONNECTED` |
+| 咨询数据 | 浏览器视觉、抽屉、响应式、axe 已通过 | 官网原始咨询记录级 adapter 已完成真实只读与脱敏验证；53KF 仍为独立 `NOT_CONNECTED` |
 | 网站流量 | 浏览器视觉、交互、响应式、axe 已通过 | 真实合同已验证，隔离响应只用于可重复视觉验收 |
 | 关键词分析 | 浏览器视觉、图表、交互、axe 已通过 | 完整 302/51 数据与行动标签来自开发 fixture；生产读取 Dashboard 关键词且不补造标签 |
 | 广告表现 | 浏览器视觉、层级树、交互与本地登录态入口已通过 | 完整层级 fixture 只用于设计验收；生产读取 Dashboard 严格层级 |
@@ -56,7 +56,7 @@
 
 ### Pass 1
 
-- P1：表头联动后的截图停留在“广告投入”，与默认“访问（点击）”不一致；修复为联动验证后恢复默认指标。
+- P1（历史验收，旧“访问（点击）”口径已退役）：表头联动后的截图停留在“广告投入”，与当时默认指标不一致；修复为联动验证后恢复当时默认指标。当前页面已将“访问”固定为百度统计访问次数，不再用广告点击代替。
 - P1：上一周期折线误为实线；修复 series datum 读取后改为灰蓝虚线。
 - P2：全链路行高曾为 84px；收敛到规范允许范围。
 - P1：移动侧栏结束态、reduced-motion、主地标和隐藏 H1 存在验收问题；已分别修复并通过 axe。
@@ -71,7 +71,7 @@
 ### Pass 6
 
 - P1：Playwright 最终截图复用了 3001 端口的 Next.js 开发服务器，左下出现调试浮标；改为独立 3011 端口运行 production build。
-- P1：完整交互验收后截图停留在“搜索引擎”来源，缺少默认态上一周期虚线；测试现已恢复“百度推广 / 访问（点击）”后再截图。
+- P1（历史验收，旧“访问（点击）”口径已退役）：完整交互验收后截图停留在“搜索引擎”来源，缺少默认态上一周期虚线；当时测试恢复默认态后再截图。当前默认态改为“百度推广 / 访问”，访问来自百度统计。
 - 修复后：Chrome production build 下 9/9 Playwright/axe 用例通过，新的全页与聚焦并排证据中未发现可执行的 P0/P1/P2 差异。
 
 ## 浏览器验证
@@ -85,7 +85,7 @@
 
 - 本地 production build 通过 `/geo/market-overview` 登录进入，截图为 `output/playwright/market-overview-real-1440x1024.png`、`output/playwright/market-overview-real-390x844.png` 和 `output/playwright/market-overview-real-mobile-sidebar-390x844.png`。
 - 2026-08-04 使用本地 production build、默认项目 `6` 和独立官网只读凭据复验；页面请求正式内部 `/api/website-data/projects/6/form-consultations`，所选 30 日区间展示两条官网来源行、合计 3 个可归因成功提交会话。
-- 同一会话进入原始咨询页，请求 `/api/consultations/projects/6/records`；官网记录可用，53KF 明确未接入。页面没有注入 fixture，浏览器控制台无错误。
+- 同一会话进入咨询数据页，请求 `/api/consultations/projects/6/records`；官网原始咨询记录可用，53KF 明确未接入。页面没有注入 fixture，浏览器控制台无错误。
 - 本机没有百度真实凭据，因此这部分本地证据只验证能力门与诚实缺失态；百度真实账号证据随后已在服务器现有 Token 不出库的前提下通过正式域名补充完成。
 - 控制台唯一错误是 `GET /api/geo-projects/default-context` 返回预期的 `409 Conflict`；其余是 Next.js 对预加载 CSS 的未使用警告，不是页面脚本异常。
 
@@ -145,7 +145,7 @@ final result: passed
 
 ---
 
-# 原始咨询页 Design QA
+# 咨询数据页 Design QA
 
 ## 验收对象
 

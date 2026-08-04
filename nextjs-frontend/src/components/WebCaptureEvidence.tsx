@@ -12,7 +12,7 @@ type WebCaptureEvidenceProps = {
 };
 
 function formatCapturedAt(value: string) {
-  if (!value) return '-';
+  if (!value) return '—';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
 }
@@ -106,10 +106,10 @@ export default function WebCaptureEvidence({ record }: WebCaptureEvidenceProps) 
             {formatCapturedAt(evidence.capturedAt)}
           </Descriptions.Item>
           <Descriptions.Item label="选择器版本">
-            {evidence.selectorVersion || '-'}
+            {evidence.selectorVersion || '—'}
           </Descriptions.Item>
           <Descriptions.Item label="实际模型" span={2}>
-            {evidence.modelName || '-'}
+            {evidence.modelName || '—'}
           </Descriptions.Item>
           <Descriptions.Item label="引用" span={2}>
             {renderSources(evidence.explicitCitations, '页面未显示引用')}

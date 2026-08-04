@@ -16,7 +16,7 @@ test('prompt management has no per-question platform selector or legacy project 
   assert.doesNotMatch(source, /selectedProject\?\.platforms/);
   assert.doesNotMatch(source, /getProjectPromptRunBlockReason/);
   assert.match(source, /selectableCodes/);
-  assert.match(source, /运行平台由管理员在“AI 平台”中统一启用/);
+  assert.doesNotMatch(source, /运行平台由管理员在“AI 平台”中统一启用/);
 });
 
 test('question mutations no longer send platform scope', () => {

@@ -15,7 +15,7 @@ import styles from './seo-audit.module.css';
 const SEVERITY_LABELS = { critical: '严重', high: '高优先级', medium: '中优先级', low: '建议优化' };
 
 function formatDate(value) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
+  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—';
 }
 
 function formatDuration(value) {

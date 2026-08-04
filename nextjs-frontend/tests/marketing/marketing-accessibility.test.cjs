@@ -31,7 +31,7 @@ test('market overview provides one live region and equivalent trend table', () =
   assert.match(marketingPage, /aria-pressed/);
   assert.match(marketingPage, /scope="col"/);
   assert.match(marketingPage, /scope="row"/);
-  assert.match(marketingPage, /tabIndex=\{0\} aria-label/);
+  assert.match(marketingPage, /tabIndex=\{0\} role="region" aria-label/);
 });
 
 test('market overview includes narrow viewport and reduced-motion rules', () => {

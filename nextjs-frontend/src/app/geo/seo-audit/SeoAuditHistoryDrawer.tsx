@@ -9,7 +9,7 @@ import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
 import styles from './seo-audit.module.css';
 
 function formatHistoryDate(value) {
-  if (!value) return '-';
+  if (!value) return '—';
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
 }
 

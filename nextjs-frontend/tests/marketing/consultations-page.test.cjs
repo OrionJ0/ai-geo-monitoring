@@ -22,8 +22,8 @@ const dailyHookPath = path.resolve(
 
 test('keeps form and online-chat consultations independent without a total', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
-  assert.match(source, />表单咨询</);
-  assert.match(source, />在线客服有效对话</);
+  assert.match(source, /title="表单咨询"/);
+  assert.match(source, /title="在线客服有效对话"/);
   assert.doesNotMatch(source, /咨询总数|总咨询/);
   for (const forbidden of ['线索', '订单', '成交金额', 'ROAS', 'CPA', 'CPL']) {
     assert.doesNotMatch(source, new RegExp(`>${forbidden}<`));
@@ -37,7 +37,8 @@ test('implements exclusive trend/distribution views and independent filters', ()
   assert.match(source, /children: trendPanel/);
   assert.match(source, /children: distributionPanel/);
   assert.match(source, /aria-label="咨询分析来源"/);
-  assert.match(source, /aria-label="咨询分析设备"/);
+  assert.match(source, /<MarketingPageFilters/);
+  assert.match(source, /queryDevice/);
   assert.match(source, /表单咨询与在线客服有效对话始终保持独立口径/);
   assert.match(source, /aria-describedby="consultation-trend-data"/);
   assert.match(source, /aria-describedby="consultation-distribution-data"/);
@@ -78,6 +79,10 @@ test('uses a true overlay drawer with ESC and focus restoration', () => {
   assert.doesNotMatch(source, /SplitPane|fixedDetailPane|detailColumn/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /aria-disabled="true"/);
+  assert.match(source, /aria-describedby=\{reasonId\}/);
+  assert.match(source, /来源明细接口尚未验证，当前不能查看详情/);
+  assert.match(source, /trigger=\{\['hover'\]\}/);
+  assert.doesNotMatch(source, /type="link"\s+size="small"\s+disabled/);
 });
 
 test('reads real contracts and validates all responses at the browser boundary', () => {

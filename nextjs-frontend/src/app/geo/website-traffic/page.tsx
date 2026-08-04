@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import dayjs, { type Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import { Line } from '@ant-design/plots';
 import {
   Alert,
   Breadcrumb,
   Button,
   Card,
-  DatePicker,
   Empty,
   Input,
   Select,
@@ -19,7 +18,6 @@ import {
 } from 'antd';
 import type { TableProps } from 'antd';
 import {
-  CalendarOutlined,
   ReloadOutlined,
   SearchOutlined
 } from '@ant-design/icons';
@@ -30,7 +28,6 @@ import {
   useWebsiteTrafficOverview
 } from '@/lib/marketing/useWebsiteTraffic';
 import type {
-  WebsiteDevice,
   WebsiteMetric,
   WebsitePageRow,
   WebsitePageView,
@@ -47,9 +44,12 @@ import {
   formatTrendChange,
   groupDigits
 } from '@/utils/websiteTraffic.cjs';
+import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
+import { useMarketingFilters } from '@/components/marketing/MarketingFiltersContext';
+import MarketingMetricCard, {
+  MarketingMetricGrid
+} from '@/components/marketing/MarketingMetricCard';
 import styles from './website-traffic.module.css';
-
-const { RangePicker } = DatePicker;
 
 const METRIC_OPTIONS: Array<{ value: WebsiteMetric; label: string }> = [
   { value: 'visits', label: '访问次数' },
@@ -60,16 +60,11 @@ const METRIC_OPTIONS: Array<{ value: WebsiteMetric; label: string }> = [
   { value: 'averageVisitPages', label: '平均访问页数' }
 ];
 
-const DEVICE_OPTIONS: Array<{ value: WebsiteDevice; label: string }> = [
-  { value: 'all', label: '全部设备' },
-  { value: 'pc', label: 'PC' },
-  { value: 'mobile', label: '移动端' }
-];
-
-const DEFAULT_RANGE: [Dayjs, Dayjs] = [
-  dayjs().subtract(29, 'day'),
-  dayjs()
-];
+const DEVICE_LABELS = {
+  all: '全部设备',
+  pc: 'PC',
+  mobile: '移动端'
+} as const;
 
 type SortOrder = 'ascend' | 'descend';
 
@@ -80,32 +75,19 @@ function metricDisplay(metric: WebsiteMetric, value: string | null): string {
   return groupDigits(value);
 }
 
-function SummaryMetric({
-  label,
-  value,
-  comparison,
-  quality = false
-}: {
-  label: string;
-  value: string;
-  comparison: string;
-  quality?: boolean;
-}) {
-  return (
-    <div className={`${styles.summaryItem} ${quality ? styles.qualityMetric : ''}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{comparison === '—' ? '无可用环比' : `较上期 ${comparison}`}</small>
-    </div>
-  );
+function changeTone(value: string, lowerIsBetter = false) {
+  if (!value || value === '—' || value.startsWith('0')) return 'neutral' as const;
+  const rising = value.startsWith('+');
+  if (lowerIsBetter) return rising ? 'bad' as const : 'good' as const;
+  return rising ? 'good' as const : 'bad' as const;
 }
 
 function PageName({ row }: { row: WebsitePageRow }) {
   return (
     <div className={styles.pageNameCell}>
       <span className={styles.pageTitle}>{row.title || '—'}</span>
-      <Tooltip title={row.path} trigger={['hover', 'focus']}>
-        <span className={styles.pagePath} tabIndex={0}>{row.path}</span>
+      <Tooltip title={row.path} trigger={['hover']}>
+        <span className={styles.pagePath}>{row.path}</span>
       </Tooltip>
     </div>
   );
@@ -142,8 +124,7 @@ function AccessibleTableRegion({
 export default function WebsiteTrafficPage() {
   const defaultContext = useDefaultProjectContext();
   const marketing = useMarketingCapabilities();
-  const [device, setDevice] = useState<WebsiteDevice>('all');
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(DEFAULT_RANGE);
+  const { device, setDevice, dateRange, setDateRange } = useMarketingFilters();
   const [source, setSource] = useState<WebsiteSourceKey>('ALL');
   const [metric, setMetric] = useState<WebsiteMetric>('visits');
   const [view, setView] = useState<WebsitePageView>('landing');
@@ -156,8 +137,7 @@ export default function WebsiteTrafficPage() {
 
   const projectId = defaultContext.project?.id || '';
   const enabled = Boolean(projectId) && marketing.capabilities.trafficRead;
-  const from = range[0].format('YYYY-MM-DD');
-  const to = range[1].format('YYYY-MM-DD');
+  const [from, to] = dateRange;
   const overviewQuery = useMemo(() => ({
     projectId,
     enabled,
@@ -198,7 +178,7 @@ export default function WebsiteTrafficPage() {
   const selectedMetricLabel = METRIC_OPTIONS.find(
     (option) => option.value === metric
   )?.label || '';
-  const periodDays = range[1].diff(range[0], 'day') + 1;
+  const periodDays = dayjs(to).diff(dayjs(from), 'day') + 1;
   const currentPeriodLabel = `近 ${periodDays} 天`;
   const previousPeriodLabel = `较前 ${periodDays} 天`;
   const chartData = useMemo(() => (
@@ -339,9 +319,6 @@ export default function WebsiteTrafficPage() {
   if (defaultContext.errorMessage) {
     return <Alert type="error" showIcon message={defaultContext.errorMessage} />;
   }
-  if (!marketing.capabilities.trafficRead) {
-    return <Alert type="info" showIcon message="网站流量尚未开放" />;
-  }
 
   return (
     <main className={styles.page} aria-label="网站流量">
@@ -352,38 +329,32 @@ export default function WebsiteTrafficPage() {
           { title: '投放与流量' },
           { title: '网站流量' }
         ]} />
-        <div className={styles.filters} aria-label="网站流量筛选">
-          <label>
-            <span>设备：</span>
-            <Select<WebsiteDevice>
-              aria-label="设备"
-              value={device}
-              options={DEVICE_OPTIONS}
-              onChange={(value) => {
-                setDevice(value);
-                setPage(1);
-              }}
-              popupMatchSelectWidth={false}
-            />
-          </label>
-          <div className={styles.dateRangeControl}>
-            <CalendarOutlined aria-hidden="true" />
-            <span>近 {range[1].diff(range[0], 'day') + 1} 天</span>
-            <RangePicker
-              aria-label="统计周期"
-              value={range}
-              allowClear={false}
-              format="YYYY-MM-DD"
-              disabledDate={(date) => date.isAfter(dayjs(), 'day')}
-              onChange={(dates) => {
-                if (!dates?.[0] || !dates?.[1]) return;
-                setRange([dates[0], dates[1]]);
-                setPage(1);
-              }}
-            />
-          </div>
-        </div>
+        <MarketingPageFilters
+          device={device}
+          onDeviceChange={(value) => {
+            setDevice(value);
+            setPage(1);
+          }}
+          dateRange={[from, to]}
+          onDateRangeChange={([nextFrom, nextTo]) => {
+            setDateRange([nextFrom, nextTo]);
+            setPage(1);
+          }}
+          dateAriaLabel="网站流量统计周期"
+          maxDate={dayjs().format('YYYY-MM-DD')}
+          presetAnchor={dayjs().format('YYYY-MM-DD')}
+        />
       </div>
+
+      {!marketing.capabilities.trafficRead ? (
+        <Alert
+          className={styles.pageAlert}
+          type="info"
+          showIcon
+          message="网站流量尚未开放"
+          description="页面结构与筛选器保持可用；当前数据源未开放，因此指标显示为缺失状态。"
+        />
+      ) : null}
 
       {overview.error ? (
         <Alert
@@ -406,20 +377,58 @@ export default function WebsiteTrafficPage() {
       <div className={styles.moduleStack} aria-busy={overview.loading}>
         <section aria-labelledby="period-summary-heading">
           <h2 className={styles.visuallyHidden} id="period-summary-heading">周期汇总</h2>
-          <Card className={styles.summaryCard}>
-            {overview.loading && !overview.data ? (
-              <Skeleton active paragraph={{ rows: 2 }} />
-            ) : (
-              <div className={styles.summaryGrid}>
-                <SummaryMetric label="访问次数" value={groupDigits(summary?.visits.current || null)} comparison={formatPercentChange(summary?.visits.changePercent || null)} />
-                <SummaryMetric label="访客数（UV）" value={groupDigits(summary?.visitors.current || null)} comparison={formatPercentChange(summary?.visitors.changePercent || null)} />
-                <SummaryMetric label="浏览量（PV）" value={groupDigits(summary?.pageviews.current || null)} comparison={formatPercentChange(summary?.pageviews.changePercent || null)} />
-                <SummaryMetric quality label="跳出率" value={formatRate(summary?.bounceRate.current || null)} comparison={formatPointChange(summary?.bounceRate.changePoints || null)} />
-                <SummaryMetric quality label="平均访问时长" value={formatDuration(summary?.averageVisitTime.current || null)} comparison={formatDurationChange(summary?.averageVisitTime.changeSeconds || null)} />
-                <SummaryMetric quality label="平均访问页数" value={formatPages(summary?.averageVisitPages.current || null)} comparison={formatPagesChange(summary?.averageVisitPages.changePages || null)} />
-              </div>
-            )}
-          </Card>
+          <MarketingMetricGrid ariaLabel="网站流量周期汇总指标">
+            {[
+              {
+                title: '访问次数', key: 'VISITS',
+                current: groupDigits(summary?.visits.current || null),
+                previous: groupDigits(summary?.visits.previous || null),
+                change: formatPercentChange(summary?.visits.changePercent || null)
+              },
+              {
+                title: '访客数', key: 'UV',
+                current: groupDigits(summary?.visitors.current || null),
+                previous: groupDigits(summary?.visitors.previous || null),
+                change: formatPercentChange(summary?.visitors.changePercent || null)
+              },
+              {
+                title: '浏览量', key: 'PV',
+                current: groupDigits(summary?.pageviews.current || null),
+                previous: groupDigits(summary?.pageviews.previous || null),
+                change: formatPercentChange(summary?.pageviews.changePercent || null)
+              },
+              {
+                title: '跳出率', key: 'BOUNCE', lowerIsBetter: true,
+                current: formatRate(summary?.bounceRate.current || null),
+                previous: formatRate(summary?.bounceRate.previous || null),
+                change: formatPointChange(summary?.bounceRate.changePoints || null)
+              },
+              {
+                title: '平均访问时长', key: 'DURATION',
+                current: formatDuration(summary?.averageVisitTime.current || null),
+                previous: formatDuration(summary?.averageVisitTime.previous || null),
+                change: formatDurationChange(summary?.averageVisitTime.changeSeconds || null)
+              },
+              {
+                title: '平均访问页数', key: 'PAGES',
+                current: formatPages(summary?.averageVisitPages.current || null),
+                previous: formatPages(summary?.averageVisitPages.previous || null),
+                change: formatPagesChange(summary?.averageVisitPages.changePages || null)
+              }
+            ].map((item) => (
+              <MarketingMetricCard
+                key={item.key}
+                title={item.title}
+                metricKey={item.key}
+                current={item.current === '—' ? null : item.current}
+                previous={item.previous === '—' ? null : item.previous}
+                change={item.change === '—' ? null : item.change}
+                tone={changeTone(item.change, item.lowerIsBetter)}
+                loading={overview.loading && !overview.data}
+                info={`${item.title}的百度统计数据。`}
+              />
+            ))}
+          </MarketingMetricGrid>
         </section>
 
         <section aria-labelledby="traffic-trend-heading">
@@ -429,7 +438,7 @@ export default function WebsiteTrafficPage() {
                 <h2 id="traffic-trend-heading">网站访问趋势</h2>
                 {source === 'ALL' ? (
                   <span className={styles.trendScope}>
-                    {selectedMetricLabel} · 全部来源 · {DEVICE_OPTIONS.find((option) => option.value === device)?.label}
+              {selectedMetricLabel} · 全部来源 · {DEVICE_LABELS[device]}
                   </span>
                 ) : null}
                 {source !== 'ALL' ? (
