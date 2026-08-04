@@ -355,7 +355,10 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     }
 
     console.log('4/12 安装后端依赖');
-    await run('npm', ['ci'], { cwd: backendDirectory, label: '后端 npm ci' });
+    await run('npm', ['ci', '--include=dev'], {
+      cwd: backendDirectory,
+      label: '后端 npm ci',
+    });
     console.log('5/12 运行后端测试');
     await run('npm', ['test'], { cwd: backendDirectory, label: '后端测试' });
     await run('npm', ['run', 'test:marketing'], {
@@ -371,7 +374,10 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '后端原始咨询测试',
     });
     console.log('6/12 安装并静态检查前端依赖');
-    await run('npm', ['ci'], { cwd: frontendDirectory, label: '前端 npm ci' });
+    await run('npm', ['ci', '--include=dev'], {
+      cwd: frontendDirectory,
+      label: '前端 npm ci',
+    });
     await run('npm', ['test'], {
       cwd: frontendDirectory,
       label: '前端营销单元测试',

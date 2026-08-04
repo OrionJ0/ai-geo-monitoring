@@ -243,6 +243,10 @@ test('deployment builds the current frontend before browser acceptance and migra
   );
 
   const trace = fs.readFileSync(tracePath, 'utf8').trim().split('\n');
+  assert.equal(
+    trace.filter((line) => line === 'npm:ci --include=dev').length,
+    2
+  );
   const releaseBackupIndex = trace.findIndex((line) => (
     line.includes('/releases/database.pre-') && line.endsWith(':--if-absent')
   ));
