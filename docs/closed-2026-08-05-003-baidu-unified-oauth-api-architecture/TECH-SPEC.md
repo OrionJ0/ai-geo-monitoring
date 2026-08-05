@@ -1,8 +1,8 @@
 ---
 title: 百度统一 OAuth 凭据与营销 API 边界整理技术方案
 date: 2026-08-05
-status: active
-source: docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md
+status: closed
+source: docs/closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md
 scope: deep
 ---
 
@@ -889,9 +889,9 @@ A2 至少保存：
 
 ## 19. Handoff
 
-- PRD: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
-- Tech Spec: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Status: `active`；U1–U5 已在生产通过。独立 A2 revision `9be1d7672ee639ceca82ce1428c284e86740054d` 已应用迁移 015、删除三个旧列并完成双产品只读探针与正式 Chrome 验收；发布桥接 revision `5d11cbc69f56743f3b0a57d6436d4ec895fb0486` 也已正式上线并通过全量与 Chrome 40/40。瞬时刷新错误状态、PostgreSQL 015 并发门禁和管理页请求竞态的运行时加固仍待独立发布与复验，Issue 006 和父需求不提前关闭。
-- First issue: 发布并复验 Issue 006 审查加固 revision；确认 systemd 停机在 Git 快进之前、迁移 audit 无 pending、双产品当前版本与正式入口均通过后关闭。
+- PRD: `docs/closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
+- Tech Spec: `docs/closed-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
+- Status: `closed`；A1、A2 和发布桥接均保持独立 revision/Bundle。审查加固 revision `58469e29214ccc28e989f07d54af873d9c0ba801` 已由桥接后的 launcher 正式发布，生产双产品只读探针、迁移 `001`–`015`、旧列清零、systemd 单实例、公开精确 revision 与正式 Chrome 八入口全部通过。
+- First issue: 006 Issue 001；在独立资源路由上建立 additive 合同，003 正式入口与统一 Access Context 保持不变。
 - Completion condition: U1–U5 通过、A2 正式入口验收完成、旧实现与旧文档删除。
 - Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件；默认顺序为 003 → 006 → 007 → 005。

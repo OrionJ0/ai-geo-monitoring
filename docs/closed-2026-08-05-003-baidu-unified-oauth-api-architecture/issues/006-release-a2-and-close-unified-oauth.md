@@ -1,6 +1,6 @@
 ---
 title: "发布 A2、删除旧字段并关闭统一 OAuth 需求"
-status: active
+status: closed
 type: HITL
 blocked_by:
   - "005-retire-legacy-tongji-columns.md"
@@ -40,14 +40,23 @@ blocked_by:
 - [x] 全仓与生产证据证明旧字段、旧路由、旧 service、旧 UI、fallback、feature flag 和现役双 Token 说明为零。
 - [x] 凭据扫描和日志复核证明 Token、Secret、Code、Cookie 和原始授权响应未泄露。
 - [x] 015 或启动验收失败时，服务保持停止，数据库备份与 A2 后代 revert revision 按顺序恢复并通过 audit 后才重新接流量。
-- [ ] 全部验收通过后，003 目录和文档索引更新为 `closed`，并明确下一顺序为 006 → 007 → 005。
+- [x] 全部验收通过后，003 目录和文档索引更新为 `closed`，并明确下一顺序为 006 → 007 → 005。
 
 ## 2026-08-05 对抗式审查加固门禁
 
 - [x] 发布桥接 revision `5d11cbc69f56743f3b0a57d6436d4ec895fb0486` 已由独立 Bundle 正式发布；后端、营销、官网、咨询、前端、构建和真实 Chrome 40/40 全部通过，公开 revision、ready、systemd 与 migration audit 复核正常。
 - [x] 本地加固候选通过刷新 claim/迁移聚焦测试 33/33、含绑定上下文与 SQLite 并发栅栏的专项 52/52、营销 200/200、后端 994/994、前端 104/104、部署专项 13/13、lint、40 路由构建和设置页真实 Chrome 3/3。
 - [x] PostgreSQL 015 在可丢弃 PG16 实例真实执行两次；先取最终 `ACCESS EXCLUSIVE` 再锁其余门禁表，015 checksum 不变，成功与失败原子性均保留。
-- [ ] 运行时加固 revision 使用桥接后的 launcher 正式发布，并复核双产品只读探针、正式 Chrome、公开 revision、systemd、迁移 audit 与旧路径搜索。
+- [x] 运行时加固 revision `58469e29214ccc28e989f07d54af873d9c0ba801` 使用桥接后的 launcher 正式发布；后端 994、营销 200、官网 31、咨询 35、前端 104、Chrome 41 项均通过，双产品只读探针、正式域名八入口、公开 revision、systemd、迁移 audit 与旧路径搜索全部复核通过。
+
+## 2026-08-05 关闭证据
+
+- 正式路径：搜索推广与百度统计均通过同一版本化 Access Context 使用服务器数据库密文和服务端内存中的唯一 Token；当前默认即为该路径，没有双 Token fallback。
+- 生产运行：服务器 `HEAD`、前后端公开 revision 均为 `58469e29214ccc28e989f07d54af873d9c0ba801`，工作区干净，两个 systemd 单元单实例 active，`/api/ready` 为 `ready`。
+- 数据库：迁移 `001`–`015` 全部 applied、无 pending；`baidu_marketing_connections` 中三个旧统计凭据列不存在。
+- 上游证据：只读探针在 Token 版本 6 上同时得到搜索推广 32/74/183/14 与百度统计 1 个站点、1 行趋势，两个产品为 `VERIFIED/HAS_DATA`，`sideEffects=UNCHANGED`。
+- 浏览器证据：正式 Chrome 从 `https://insight.guangtuo.com` 验收八个正式入口；管理页两个产品均为 `VERIFIED`，更新弹窗仅有一个用户名文本框、零密码输入和统一 OAuth 说明。截图保留在服务器忽略目录 `output/playwright/a2-hardening-production-58469e2/`。
+- 退役证据：旧字段、旧统计 Token 路由/service/UI、兼容 adapter、feature flag、fallback 和现役双 Token 说明均已删除；安全、API、数据库、SRE、代码、现实性与最小变更审查没有剩余 P0/P1/P2。
 
 ## Blocked by
 

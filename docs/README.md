@@ -20,7 +20,7 @@
 本节只保留帮助读者判断文档状态所需的最小快照；完整运行证据以[部署与运维](DEPLOYMENT.md#当前正式单机实例)为准。
 
 - 唯一支持的正式入口是 `https://insight.guangtuo.com`；历史域名和直接 IP 不是支持入口。
-- 2026-08-05 A2 已以独立 Git Bundle 正式应用迁移 015，生产数据库三个旧统计凭据列已删除；统一 OAuth 是搜索推广与百度统计唯一正式凭据路径。精确 revision、只读双产品复验、数据库和浏览器证据见[部署与运维](DEPLOYMENT.md#当前正式单机实例)。A2 审查加固版本完成正式复验前，003 仍保持 `active`。
+- 2026-08-05 A2 与审查加固均已通过独立 Git Bundle 正式发布，迁移 015 删除了生产数据库三个旧统计凭据列；统一 OAuth 是搜索推广与百度统计唯一正式凭据路径，003 已关闭。精确 revision、只读双产品复验、数据库和浏览器证据见[部署与运维](DEPLOYMENT.md#当前正式单机实例)。
 - 百度营销、百度统计和既有 AI/GEO 数据已有生产真实数据证据。官网九键统计与脱敏咨询代码已部署，但生产仍缺专用官网项目和只读账号凭据，因此模块保持 `DISABLED`；代码已部署不等于官网数据已生产接通。53KF、线索池和销售订单仍未接入。
 
 ## 当前前端页面实施状态
@@ -61,7 +61,6 @@
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
 | [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 已定义目标事实/目标语义/开放竞品三轨合同、scoped SOV，以及“阶段 1 开放发现 → 模型外竞品注册表归一 → 阶段 2 无身份先验判断”的安全边界；S05 真实 Flash 定向复测 3/3 通过，但注册表 resolver/快照、不变性测试、自我修复清理、状态消费者和 41×3 新合同重跑尚未完成，暂不硬切，当前生产仍使用 v4 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
-| [百度统一 OAuth 凭据与营销 API 架构](active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) | Issue 001–005 已完成，A1 与 A2 已作为两个独立 Git Bundle 正式发布，迁移 015 已删除生产旧字段且统一 Access Context 完成双产品复验；Issue 006 正在发布对抗式审查发现的停服顺序、瞬时刷新和 PostgreSQL 并发门禁加固，完成复验后关闭 |
 
 ## 草案需求
 
@@ -101,6 +100,7 @@
 | 单品牌与平台运行范围 | [PRD](closed-2026-07-31-002-single-brand-platform-runtime/prd.md) |
 | 问题集报告可信度 | [Tech Spec](closed-2026-07-31-003-question-set-report-trustworthiness/TECH-SPEC.md) |
 | 市场总览渠道对比与真实数据修复 | [PRD](closed-2026-08-05-001-market-overview-channel-comparison/prd.md) |
+| 百度统一 OAuth 凭据与营销 API 架构 | [PRD](closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) |
 
 ## 决策与已验证解法
 
