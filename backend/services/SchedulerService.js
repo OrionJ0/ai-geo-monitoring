@@ -1,5 +1,6 @@
 const {
   BrandProject,
+  BrandCompetitor,
   DetectionSchedule,
   QuestionRecord,
   QuestionSetRetryBatch,
@@ -19,11 +20,42 @@ const QuestionSetRunService = require('./QuestionSetRunService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
 const {
   CURRENT_ANALYSIS_CONTRACT,
-  CURRENT_METRIC_SEMANTICS
+  CURRENT_METRIC_SEMANTICS,
+  V5_ANALYSIS_CONTRACT,
+  SCOPED_METRIC_SEMANTICS
 } = require('./GeoMetricSemanticsService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
+
+function isV5Provider(analysisProvider) {
+  return analysisProvider === 'v5';
+}
+
+function scheduleAnalysisContract(analysisProvider) {
+  return isV5Provider(analysisProvider) ? V5_ANALYSIS_CONTRACT : CURRENT_ANALYSIS_CONTRACT;
+}
+
+function scheduleMetricSemantics(analysisProvider) {
+  return isV5Provider(analysisProvider) ? SCOPED_METRIC_SEMANTICS : CURRENT_METRIC_SEMANTICS;
+}
+
+async function frozenCompetitorSnapshot(projectId, transaction = null) {
+  const competitors = await BrandCompetitor.findAll({
+    where: { project_id: projectId },
+    order: [['id', 'ASC']],
+    ...(transaction ? { transaction } : {})
+  });
+  return competitors.map((item) => {
+    const row = item?.toJSON ? item.toJSON() : item;
+    return {
+      id: Number(row.id) || null,
+      name: String(row.name || ''),
+      aliases: Array.isArray(row.aliases) ? row.aliases : [],
+      website: row.website || null
+    };
+  });
+}
 
 function platformUnavailableMessage(item) {
   const name = item?.platform_name || item?.code || '监测平台';
@@ -149,6 +181,10 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   }
 
   const runtimeSettings = await settingsService.getSettings();
+  const analysisProvider = options.analysisProvider || 'v4';
+  const competitorSnapshot = isV5Provider(analysisProvider)
+    ? await frozenCompetitorSnapshot(schedule.project_id)
+    : null;
 
   // 配额检查：严格按会员控制，每次按平台数量扣减
   try {
@@ -175,8 +211,9 @@ async function submitDetectionForSchedule(schedule, options = {}) {
             question,
             brand: schedule.brand,
             brand_keywords: keywordsArr.join(','),
-            analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
-            metric_semantics_version: CURRENT_METRIC_SEMANTICS,
+            analysis_contract_version: scheduleAnalysisContract(analysisProvider),
+            metric_semantics_version: scheduleMetricSemantics(analysisProvider),
+            competitor_snapshot: competitorSnapshot,
             status: 'failed',
             error_message: errMsg
           });
@@ -216,13 +253,15 @@ async function submitDetectionForSchedule(schedule, options = {}) {
         question,
         brand: schedule.brand,
         brand_keywords: keywordsArr.join(','),
-        analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
-        metric_semantics_version: CURRENT_METRIC_SEMANTICS
+        analysis_contract_version: scheduleAnalysisContract(analysisProvider),
+        metric_semantics_version: scheduleMetricSemantics(analysisProvider),
+        competitor_snapshot: competitorSnapshot
       });
 
       const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
         target: { platformConfig: platformStatus.config },
-        runtimeSettings
+        runtimeSettings,
+        analysisProvider
       });
       const lease = await ProjectRunService.claimRecordExecution(rec.id, {
         leaseMs,

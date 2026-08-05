@@ -1004,7 +1004,7 @@ class ProjectRunService {
     return 2;
   }
 
-  getRecordExecutionLeaseMs({ target = {}, runtimeSettings = {}, retryMode } = {}) {
+  getRecordExecutionLeaseMs({ target = {}, runtimeSettings = {}, retryMode, analysisProvider } = {}) {
     const rawMonitoringTimeoutSeconds = Number(
       target?.platformConfig?.request_timeout_seconds
       || runtimeSettings.ai_default_timeout_seconds
@@ -1028,9 +1028,18 @@ class ProjectRunService {
         (_, index) => Math.min(5, 2 ** index)
       ).reduce((sum, seconds) => sum + seconds, 0)
       : 0;
-    const analysisProfile = AIResponseAnalysisService.ANALYSIS_REQUEST_PROFILE || {};
-    const analysisSeconds = Math.max(10, Number(analysisProfile.timeout_seconds) || 120)
-      * Math.max(1, Number(analysisProfile.max_attempts) || 2);
+    // v5 分阶段分析：两阶段 × 每阶段最多 2 次 = 最多 4 次 Flash 调用，
+    // 每次 120 秒；正常 2 次也处于预算内。
+    let analysisSeconds;
+    if (isV5Provider(analysisProvider)) {
+      const { ANALYSIS_TIMEOUT_SECONDS } = require('./AIResponseEntityExtractionService');
+      const v5StageSeconds = Math.max(10, Number(ANALYSIS_TIMEOUT_SECONDS) || 120);
+      analysisSeconds = v5StageSeconds * 4;
+    } else {
+      const analysisProfile = AIResponseAnalysisService.ANALYSIS_REQUEST_PROFILE || {};
+      analysisSeconds = Math.max(10, Number(analysisProfile.timeout_seconds) || 120)
+        * Math.max(1, Number(analysisProfile.max_attempts) || 2);
+    }
     return Math.max(
       MIN_RECORD_LEASE_MS,
       (monitoringSeconds + retryDelaySeconds + analysisSeconds + RECORD_LEASE_BUFFER_SECONDS) * 1000
