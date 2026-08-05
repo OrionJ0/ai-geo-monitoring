@@ -35,6 +35,14 @@ export type AdKeywordScope = {
   keywordName: string;
 };
 
+export type AdSearchTermScopeEvidence = {
+  accountId: string;
+  campaignId: string;
+  adGroupId: string;
+  adGroupName: string;
+  keywordName: string;
+};
+
 export type AdSearchTermFilter = {
   keywordEvidence: string;
   adGroupId: string;
@@ -85,8 +93,7 @@ export type AdSearchTermResourceQuery = {
   keywordEvidence: string;
   queryStatus: 'all' | AdSearchTermStatus;
   matchType: string;
-  scopeAccountId: string | null;
-  scopeKeywordId: string | null;
+  scopeEvidence: AdSearchTermScopeEvidence | null;
   scopeRequired: boolean;
 };
 

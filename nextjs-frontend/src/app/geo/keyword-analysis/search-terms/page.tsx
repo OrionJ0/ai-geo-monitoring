@@ -47,8 +47,7 @@ import {
   buildAdSearchTermSummary,
   filterAdSearchTermRows,
   formatExactPercentChange,
-  keywordEvidenceKey,
-  resolveAdKeywordScope
+  keywordEvidenceKey
 } from '@/utils/adSearchTerms.cjs';
 import sharedStyles from '../../ad-performance/ad-performance.module.css';
 import styles from './search-terms.module.css';
@@ -171,8 +170,28 @@ function AdSearchTermsContent() {
     Boolean(projectId) && marketing.capabilities.adsRead
   );
   const accountId = searchParams.get('accountId');
-  const keywordId = searchParams.get('keywordId');
+  const campaignId = searchParams.get('campaignId');
+  const scopedAdGroupId = searchParams.get('adGroupId');
+  const scopedAdGroupName = searchParams.get('adGroupName');
+  const scopedKeywordName = searchParams.get('keywordName');
   const allRequested = searchParams.get('view') === 'all';
+  const requestedScope = useMemo(() => (
+    accountId && campaignId && scopedAdGroupId && scopedKeywordName
+      ? {
+          accountId,
+          campaignId,
+          adGroupId: scopedAdGroupId,
+          adGroupName: scopedAdGroupName || scopedAdGroupId,
+          keywordName: scopedKeywordName
+        }
+      : null
+  ), [
+    accountId,
+    campaignId,
+    scopedAdGroupId,
+    scopedAdGroupName,
+    scopedKeywordName
+  ]);
   const resourceQuery = useMemo(() => ({
     page,
     pageSize,
@@ -183,20 +202,18 @@ function AdSearchTermsContent() {
     keywordEvidence,
     queryStatus,
     matchType,
-    scopeAccountId: accountId,
-    scopeKeywordId: keywordId,
+    scopeEvidence: requestedScope,
     scopeRequired: !allRequested
   }), [
-    accountId,
     adGroupId,
     allRequested,
     keywordEvidence,
-    keywordId,
     matchType,
     page,
     pageSize,
     query,
     queryStatus,
+    requestedScope,
     sortBy,
     sortOrder
   ]);
@@ -212,13 +229,8 @@ function AdSearchTermsContent() {
   });
   const model = analysis.data;
   const current = model?.current || null;
-  const resolvedScope = useMemo(() => resolveAdKeywordScope(
-    current?.keywords || [],
-    accountId,
-    keywordId
-  ), [accountId, current?.keywords, keywordId]);
-  const scopeEvidence = resolvedScope ? keywordEvidenceKey(resolvedScope) : null;
-  const invalidScope = !allRequested && !resolvedScope;
+  const scopeEvidence = requestedScope ? keywordEvidenceKey(requestedScope) : null;
+  const invalidScope = !allRequested && !requestedScope;
   const filters = useMemo<AdSearchTermFilter>(() => ({
     keywordEvidence: scopeEvidence || keywordEvidence,
     adGroupId,
@@ -556,13 +568,13 @@ function AdSearchTermsContent() {
               action={<Button size="small" onClick={() => void analysis.reload()}>重试</Button>}
             />
           ) : null}
-          {resolvedScope ? (
+          {requestedScope ? (
             <Card className={styles.scopeCard}>
               <div className={styles.scopeContent}>
                 <div>
                   <span>当前广告关键词</span>
-                  <strong>{resolvedScope.keywordName}</strong>
-                  <small>{resolvedScope.adGroupName}</small>
+                  <strong>{requestedScope.keywordName}</strong>
+                  <small>{requestedScope.adGroupName}</small>
                 </div>
                 <Link href="/geo/keyword-analysis/search-terms?view=all">
                   查看全部广告搜索词
@@ -619,12 +631,12 @@ function AdSearchTermsContent() {
                 <Select
                   aria-label="命中广告关键词"
                   value={scopeEvidence || keywordEvidence}
-                  options={resolvedScope ? [{
+                  options={requestedScope ? [{
                     value: scopeEvidence,
-                    label: `${resolvedScope.keywordName} · ${resolvedScope.adGroupName}`
+                    label: `${requestedScope.keywordName} · ${requestedScope.adGroupName}`
                   }] : keywordOptions}
                   onChange={setKeywordEvidence}
-                  disabled={Boolean(resolvedScope)}
+                  disabled={Boolean(requestedScope)}
                   popupMatchSelectWidth={false}
                   showSearch
                   optionFilterProp="label"
@@ -666,7 +678,7 @@ function AdSearchTermsContent() {
           <Card className={styles.tableCard}>
             <div className={styles.tableToolbar}>
               <div>
-                <h2>{resolvedScope ? '命中该广告关键词的搜索词' : '全部广告搜索词'}</h2>
+                <h2>{requestedScope ? '命中该广告关键词的搜索词' : '全部广告搜索词'}</h2>
                 <span>共 {groupDigits(String(
                   current.source === 'development-fixture'
                     ? visibleRows.length
@@ -685,7 +697,7 @@ function AdSearchTermsContent() {
                 emptyText: (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={resolvedScope
+                    description={requestedScope
                       ? '当前广告关键词在所选时间内没有命中的广告搜索词'
                       : '所选条件下没有广告搜索词'}
                   />
