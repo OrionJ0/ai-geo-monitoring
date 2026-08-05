@@ -28,6 +28,41 @@ function plusMilliseconds(clock, milliseconds) {
   return new Date(clock() + milliseconds).toISOString();
 }
 
+const PRODUCT_ACCESS_STATES = Object.freeze(new Set([
+  'UNKNOWN',
+  'VERIFIED',
+  'REAUTH_REQUIRED',
+  'ACCOUNT_MISMATCH',
+  'UPSTREAM_ERROR'
+]));
+
+function publicProductState(row, product) {
+  const observedAuthGeneration = row[`${product}ObservedAuthGeneration`];
+  const observedTokenVersion = row[`${product}ObservedTokenVersion`];
+  const current = (
+    row.status === 'CONNECTED'
+    && observedAuthGeneration !== null
+    && observedAuthGeneration !== undefined
+    && observedTokenVersion !== null
+    && observedTokenVersion !== undefined
+    && Number(observedAuthGeneration) === Number(row.authGeneration)
+    && Number(observedTokenVersion) === Number(row.tokenVersion)
+    && PRODUCT_ACCESS_STATES.has(row[`${product}AccessState`])
+  );
+  if (!current) {
+    return {
+      state: 'UNKNOWN',
+      checkedAt: null,
+      lastErrorCode: null
+    };
+  }
+  return {
+    state: row[`${product}AccessState`],
+    checkedAt: row[`${product}CheckedAt`] || null,
+    lastErrorCode: row[`${product}LastErrorCode`] || null
+  };
+}
+
 class BaiduAuthorizationService {
   constructor({
     sequelize,
@@ -116,6 +151,17 @@ class BaiduAuthorizationService {
                auth_generation = :expectedGeneration,
                refresh_claim_token = NULL,
                refresh_claim_until = NULL,
+               tongji_user_name_verified_at = NULL,
+               marketing_access_state = 'UNKNOWN',
+               marketing_observed_auth_generation = NULL,
+               marketing_observed_token_version = NULL,
+               marketing_checked_at = NULL,
+               marketing_last_error_code = NULL,
+               tongji_access_state = 'UNKNOWN',
+               tongji_observed_auth_generation = NULL,
+               tongji_observed_token_version = NULL,
+               tongji_checked_at = NULL,
+               tongji_last_error_code = NULL,
                last_error_code = 'REAUTHORIZATION_PENDING',
                updated_at = :updatedAt
            WHERE id = :connectionId
@@ -499,6 +545,17 @@ class BaiduAuthorizationService {
                token_version = token_version + 1,
                refresh_claim_token = NULL,
                refresh_claim_until = NULL,
+               tongji_user_name_verified_at = NULL,
+               marketing_access_state = 'UNKNOWN',
+               marketing_observed_auth_generation = NULL,
+               marketing_observed_token_version = NULL,
+               marketing_checked_at = NULL,
+               marketing_last_error_code = NULL,
+               tongji_access_state = 'UNKNOWN',
+               tongji_observed_auth_generation = NULL,
+               tongji_observed_token_version = NULL,
+               tongji_checked_at = NULL,
+               tongji_last_error_code = NULL,
                last_error_code = NULL,
                updated_at = :completedAt
            WHERE id = :id
@@ -640,12 +697,19 @@ class BaiduAuthorizationService {
       `SELECT id, status, authorized_principal_id AS principalId,
               authorized_principal_name AS principalName,
               access_token_expires_at AS accessTokenExpiresAt,
-              tongji_account_name AS "tongjiAccountName",
-              CASE WHEN tongji_access_token_ciphertext IS NULL
-                THEN 0 ELSE 1 END AS "tongjiCredentialConfigured",
-              tongji_credential_updated_at AS "tongjiCredentialUpdatedAt",
+              tongji_user_name AS "tongjiUserName",
               auth_generation AS authGeneration,
               token_version AS tokenVersion,
+              marketing_access_state AS "marketingAccessState",
+              marketing_observed_auth_generation AS "marketingObservedAuthGeneration",
+              marketing_observed_token_version AS "marketingObservedTokenVersion",
+              marketing_checked_at AS "marketingCheckedAt",
+              marketing_last_error_code AS "marketingLastErrorCode",
+              tongji_access_state AS "tongjiAccessState",
+              tongji_observed_auth_generation AS "tongjiObservedAuthGeneration",
+              tongji_observed_token_version AS "tongjiObservedTokenVersion",
+              tongji_checked_at AS "tongjiCheckedAt",
+              tongji_last_error_code AS "tongjiLastErrorCode",
               last_error_code AS lastErrorCode,
               created_at AS createdAt,
               updated_at AS updatedAt
@@ -654,8 +718,19 @@ class BaiduAuthorizationService {
       { type: QueryTypes.SELECT }
     );
     return rows.map((row) => ({
-      ...row,
-      tongjiCredentialConfigured: Boolean(row.tongjiCredentialConfigured)
+      id: row.id,
+      status: row.status,
+      principalId: row.principalId,
+      principalName: row.principalName,
+      accessTokenExpiresAt: row.accessTokenExpiresAt,
+      tongjiUserName: row.tongjiUserName || null,
+      products: {
+        marketing: publicProductState(row, 'marketing'),
+        tongji: publicProductState(row, 'tongji')
+      },
+      lastErrorCode: row.lastErrorCode,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
     }));
   }
 
@@ -687,13 +762,22 @@ class BaiduAuthorizationService {
                access_token_ciphertext = NULL,
                refresh_token_ciphertext = NULL,
                access_token_expires_at = NULL,
-               tongji_account_name = NULL,
-               tongji_access_token_ciphertext = NULL,
-               tongji_credential_updated_at = NULL,
+               tongji_user_name = NULL,
+               tongji_user_name_verified_at = NULL,
                refresh_claim_token = NULL,
                refresh_claim_until = NULL,
                auth_generation = auth_generation + 1,
                token_version = token_version + 1,
+               marketing_access_state = 'UNKNOWN',
+               marketing_observed_auth_generation = NULL,
+               marketing_observed_token_version = NULL,
+               marketing_checked_at = NULL,
+               marketing_last_error_code = NULL,
+               tongji_access_state = 'UNKNOWN',
+               tongji_observed_auth_generation = NULL,
+               tongji_observed_token_version = NULL,
+               tongji_checked_at = NULL,
+               tongji_last_error_code = NULL,
                last_error_code = 'PROVIDER_REVOCATION_UNVERIFIED',
                updated_at = :disconnectedAt
            WHERE id = :connectionId`,

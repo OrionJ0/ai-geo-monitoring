@@ -8,6 +8,30 @@ const {
   MarketingAuthorizationError
 } = require('./BaiduAuthorizationService');
 
+const PRODUCT_COLUMNS = Object.freeze({
+  marketing: Object.freeze({
+    state: 'marketing_access_state',
+    authGeneration: 'marketing_observed_auth_generation',
+    tokenVersion: 'marketing_observed_token_version',
+    checkedAt: 'marketing_checked_at',
+    lastErrorCode: 'marketing_last_error_code'
+  }),
+  tongji: Object.freeze({
+    state: 'tongji_access_state',
+    authGeneration: 'tongji_observed_auth_generation',
+    tokenVersion: 'tongji_observed_token_version',
+    checkedAt: 'tongji_checked_at',
+    lastErrorCode: 'tongji_last_error_code'
+  })
+});
+const PRODUCT_ACCESS_STATES = Object.freeze(new Set([
+  'UNKNOWN',
+  'VERIFIED',
+  'REAUTH_REQUIRED',
+  'ACCOUNT_MISMATCH',
+  'UPSTREAM_ERROR'
+]));
+
 class BaiduConnectionService {
   constructor({
     sequelize,
@@ -138,6 +162,17 @@ class BaiduConnectionService {
              refresh_claim_token = NULL,
              refresh_claim_until = NULL,
              auth_generation = auth_generation + 1,
+             tongji_user_name_verified_at = NULL,
+             marketing_access_state = 'UNKNOWN',
+             marketing_observed_auth_generation = NULL,
+             marketing_observed_token_version = NULL,
+             marketing_checked_at = NULL,
+             marketing_last_error_code = NULL,
+             tongji_access_state = 'UNKNOWN',
+             tongji_observed_auth_generation = NULL,
+             tongji_observed_token_version = NULL,
+             tongji_checked_at = NULL,
+             tongji_last_error_code = NULL,
              last_error_code = :code,
              updated_at = :now
          WHERE id = :connectionId
@@ -273,6 +308,17 @@ class BaiduConnectionService {
            token_version = token_version + 1,
            refresh_claim_token = NULL,
            refresh_claim_until = NULL,
+           tongji_user_name_verified_at = NULL,
+           marketing_access_state = 'UNKNOWN',
+           marketing_observed_auth_generation = NULL,
+           marketing_observed_token_version = NULL,
+           marketing_checked_at = NULL,
+           marketing_last_error_code = NULL,
+           tongji_access_state = 'UNKNOWN',
+           tongji_observed_auth_generation = NULL,
+           tongji_observed_token_version = NULL,
+           tongji_checked_at = NULL,
+           tongji_last_error_code = NULL,
            last_error_code = NULL,
            updated_at = :now
        WHERE id = :connectionId
@@ -305,17 +351,25 @@ class BaiduConnectionService {
         409
       );
     }
-    return response.accessToken;
+    return {
+      accessToken: response.accessToken,
+      authGeneration: Number(connection.auth_generation),
+      tokenVersion: Number(connection.token_version) + 1
+    };
   }
 
-  async getAccessToken(connectionId) {
+  async getAccessContext(connectionId) {
     for (let attempt = 0; attempt <= this.maxClaimWaits; attempt += 1) {
       const connection = await this.readConnection(connectionId);
       if (this.accessTokenStillValid(connection)) {
-        return decryptSecret(
-          connection.access_token_ciphertext,
-          this.encryptionKey
-        );
+        return {
+          accessToken: decryptSecret(
+            connection.access_token_ciphertext,
+            this.encryptionKey
+          ),
+          authGeneration: Number(connection.auth_generation),
+          tokenVersion: Number(connection.token_version)
+        };
       }
       const claimToken = await this.claim(connection);
       if (claimToken) {
@@ -329,6 +383,75 @@ class BaiduConnectionService {
       'REFRESH_CLAIM_TIMEOUT',
       503
     );
+  }
+
+  async getAccessToken(connectionId) {
+    return (await this.getAccessContext(connectionId)).accessToken;
+  }
+
+  async recordProductAccess({
+    connectionId,
+    product,
+    state,
+    authGeneration,
+    tokenVersion,
+    checkedAt = new Date(this.clock()).toISOString(),
+    lastErrorCode = null
+  }) {
+    const columns = PRODUCT_COLUMNS[product];
+    if (!columns || !PRODUCT_ACCESS_STATES.has(state)) {
+      throw new MarketingAuthorizationError(
+        '百度产品能力状态无效',
+        'PRODUCT_ACCESS_STATE_INVALID'
+      );
+    }
+    const checkedAtTime = new Date(checkedAt).getTime();
+    if (
+      !Number.isInteger(authGeneration)
+      || authGeneration < 0
+      || !Number.isInteger(tokenVersion)
+      || tokenVersion < 1
+      || !Number.isFinite(checkedAtTime)
+      || (
+        lastErrorCode !== null
+        && (
+          typeof lastErrorCode !== 'string'
+          || !/^[A-Z][A-Z0-9_]{0,79}$/u.test(lastErrorCode)
+        )
+      )
+    ) {
+      throw new MarketingAuthorizationError(
+        '百度产品能力证据无效',
+        'PRODUCT_ACCESS_EVIDENCE_INVALID'
+      );
+    }
+    const stableErrorCode = state === 'VERIFIED' ? null : lastErrorCode;
+    const normalizedCheckedAt = new Date(checkedAtTime).toISOString();
+    const [, affected] = await this.sequelize.query(
+      `UPDATE baidu_marketing_connections
+       SET ${columns.state} = :state,
+           ${columns.authGeneration} = :authGeneration,
+           ${columns.tokenVersion} = :tokenVersion,
+           ${columns.checkedAt} = :checkedAt,
+           ${columns.lastErrorCode} = :lastErrorCode,
+           updated_at = :checkedAt
+       WHERE id = :connectionId
+         AND status = 'CONNECTED'
+         AND auth_generation = :authGeneration
+         AND token_version = :tokenVersion`,
+      {
+        replacements: {
+          connectionId,
+          state,
+          authGeneration,
+          tokenVersion,
+          checkedAt: normalizedCheckedAt,
+          lastErrorCode: stableErrorCode
+        },
+        type: QueryTypes.UPDATE
+      }
+    );
+    return affected === 1;
   }
 }
 

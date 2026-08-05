@@ -14,15 +14,44 @@ function commandError(message, code) {
   return error;
 }
 
+function parseArguments(argv) {
+  let apply = false;
+  let expectedLatest;
+  for (const argument of argv) {
+    if (argument === '--apply' && !apply) {
+      apply = true;
+      continue;
+    }
+    const expected = /^--expected-latest=(\d{3}-[a-z0-9-]+)$/u.exec(argument);
+    if (expected && expectedLatest === undefined) {
+      expectedLatest = expected[1];
+      continue;
+    }
+    throw commandError(
+      '营销迁移命令参数无效',
+      'MARKETING_MIGRATION_ARGUMENT_INVALID'
+    );
+  }
+  if (expectedLatest !== undefined && !apply) {
+    throw commandError(
+      '最高迁移版本门禁只能用于 apply',
+      'MARKETING_MIGRATION_ARGUMENT_INVALID'
+    );
+  }
+  return { apply, expectedLatest };
+}
+
 async function main() {
-  const apply = process.argv.includes('--apply');
+  const { apply, expectedLatest } = parseArguments(process.argv.slice(2));
   const config = auditMarketingConfig(process.env);
   if (config.moduleState === 'MISCONFIGURED') {
     throw commandError('营销模块配置审计失败', config.errorCode);
   }
 
   const runner = createMarketingMigrationRunner({ sequelize });
-  const migration = apply ? await runner.apply() : await runner.audit();
+  const migration = apply
+    ? await runner.apply({ expectedLatest })
+    : await runner.audit();
   if (!apply && !migration.ready) {
     throw commandError(
       '营销迁移结构未就绪，请先执行 migrate:marketing',

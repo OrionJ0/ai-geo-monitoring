@@ -82,7 +82,7 @@ function createMarketingMigrationRunner({
     const expected = new Map(
       orderedMigrations.map((migration) => [migration.version, migration])
     );
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
       const migration = expected.get(row.version);
       if (!migration) {
         throw migrationError(
@@ -96,6 +96,24 @@ function createMarketingMigrationRunner({
           'MARKETING_MIGRATION_CHECKSUM_MISMATCH'
         );
       }
+      if (orderedMigrations[index]?.version !== row.version) {
+        throw migrationError(
+          `营销迁移历史不是当前仓库的连续前缀: ${row.version}`,
+          'MARKETING_MIGRATION_HISTORY_GAP'
+        );
+      }
+    }
+  }
+
+  function assertExpectedLatest(expectedLatest) {
+    if (expectedLatest === undefined || expectedLatest === null) return;
+    const expected = String(expectedLatest).trim();
+    const actual = orderedMigrations.at(-1)?.version || null;
+    if (!expected || expected !== actual) {
+      throw migrationError(
+        '营销迁移仓库边界与预期最高版本不一致',
+        'MARKETING_MIGRATION_EXPECTED_LATEST_MISMATCH'
+      );
     }
   }
 
@@ -172,7 +190,8 @@ function createMarketingMigrationRunner({
     }
   }
 
-  async function apply() {
+  async function apply({ expectedLatest } = {}) {
+    assertExpectedLatest(expectedLatest);
     await sequelize.authenticate();
     const dialect = sequelize.getDialect();
     if (!['sqlite', 'postgres'].includes(dialect)) {
@@ -180,6 +199,10 @@ function createMarketingMigrationRunner({
         '营销迁移不支持当前数据库方言',
         'MARKETING_DATABASE_DIALECT_UNSUPPORTED'
       );
+    }
+
+    if (expectedLatest !== undefined && expectedLatest !== null) {
+      await audit();
     }
 
     if (dialect === 'sqlite') {
