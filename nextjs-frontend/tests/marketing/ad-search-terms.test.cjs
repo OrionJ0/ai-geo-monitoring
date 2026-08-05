@@ -149,6 +149,10 @@ test('keyword scope resolves by account and configured keyword ID before using n
 });
 
 test('advertising search-term page is a read-only nested dashboard consumer', () => {
+  const keywordPageSource = fs.readFileSync(
+    path.join(frontendRoot, 'src/app/geo/keyword-analysis/page.tsx'),
+    'utf8'
+  );
   const pageSource = fs.readFileSync(
     path.join(frontendRoot, 'src/app/geo/keyword-analysis/search-terms/page.tsx'),
     'utf8'
@@ -165,7 +169,7 @@ test('advertising search-term page is a read-only nested dashboard consumer', ()
   assert.match(pageSource, /查看全部广告搜索词/);
   assert.match(pageSource, /下钻范围无效/);
   assert.match(pageSource, /searchParams\.get\('view'\) === 'all'/);
-  assert.match(pageSource, /!allRequested && !resolvedScope/);
+  assert.match(pageSource, /!allRequested && !requestedScope/);
   assert.match(pageSource, /命中广告关键词/);
   assert.match(pageSource, /推广单元/);
   assert.match(pageSource, /匹配方式/);
@@ -173,13 +177,13 @@ test('advertising search-term page is a read-only nested dashboard consumer', ()
   assert.match(pageSource, /广告搜索词数/);
   assert.match(pageSource, /<MarketingPageFilters/);
   assert.match(pageSource, /availableDevices=\{\['all'\]\}/);
-  assert.match(hookSource, /assertMarketingDashboardResponse/);
+  assert.match(hookSource, /assertMarketingDashboardRootResponse/);
   assert.match(hookSource, /readMarketingDashboard/);
   assert.match(hookSource, /\/search-terms/);
   assert.match(hookSource, /revision:\s*currentResult\.data\.revision/);
   assert.match(hookSource, /assertMarketingSearchTermResourceResponse/);
   assert.match(hookSource, /marketingSnapshotWarning/);
-  assert.match(hookSource, /assertMarketingDashboardResponse\([^,]+, projectId\)/);
+  assert.match(hookSource, /assertMarketingDashboardRootResponse\([^,]+, projectId\)/);
   assert.match(hookSource, /dashboardFilterMatchesRange/);
   assert.match(hookSource, /timeout: 10_000/);
   assert.ok(
@@ -192,5 +196,13 @@ test('advertising search-term page is a read-only nested dashboard consumer', ()
     /axios\.get<MarketingDashboardResponse>\(endpoint/
   );
   assert.doesNotMatch(hookSource, /axios\.(?:post|put|patch|delete)\(/);
+  assert.doesNotMatch(
+    hookSource,
+    /currentResult\.data\.(?:campaigns|adGroups|keywords|searchTerms)/
+  );
+  assert.match(keywordPageSource, /campaignId:\s*record\.schemeId/);
+  assert.match(keywordPageSource, /adGroupId:\s*record\.unitId/);
+  assert.match(keywordPageSource, /adGroupName:\s*record\.unitName/);
+  assert.match(keywordPageSource, /keywordName:\s*record\.keyword/);
   assert.doesNotMatch(pageSource, /自然搜索词|网站流量/);
 });

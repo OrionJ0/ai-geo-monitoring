@@ -207,11 +207,8 @@ export function adaptMarketingSearchTermResource(
     availableTo: resource.coverage.to,
     range: resource.filter,
     rows,
-    filterRows: buildAdSearchTermRows(
-      dashboard.searchTerms || [],
-      resource.coverage.costScale
-    ),
-    keywords: (dashboard.keywords || []).map(keywordScope),
+    filterRows: rows,
+    keywords: [],
     summary,
     pagination: resource.pagination
   };

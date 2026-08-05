@@ -577,7 +577,9 @@ test('keyword evidence opens scoped real search terms and invalid scope never ex
     name: '查看“电子围栏厂家”命中的广告搜索词'
   }).click();
 
-  await expect(page).toHaveURL(/\/geo\/keyword-analysis\/search-terms\?accountId=.*&keywordId=/u);
+  await expect(page).toHaveURL(
+    /\/geo\/keyword-analysis\/search-terms\?accountId=.*&campaignId=.*&adGroupId=.*&keywordName=/u
+  );
   await expect(page.getByText('当前广告关键词')).toBeVisible();
   await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
   await expect(page.getByText('电子围栏生产厂家', { exact: true })).toBeVisible();
@@ -588,9 +590,13 @@ test('keyword evidence opens scoped real search terms and invalid scope never ex
     .toContainText('下钻范围无效');
   await expect(page.getByText('电子围栏厂家报价', { exact: true })).toHaveCount(0);
 
-  await page.goto('/geo/keyword-analysis/search-terms?accountId=invalid&keywordId=invalid');
-  await expect(page.getByRole('alert').filter({ hasText: '下钻范围无效' }))
-    .toContainText('下钻范围无效');
+  await page.goto(
+    '/geo/keyword-analysis/search-terms?accountId=invalid&campaignId=invalid&adGroupId=invalid&keywordName=invalid'
+  );
+  await expect(page.getByText(
+    '当前广告关键词在所选时间内没有命中的广告搜索词',
+    { exact: true }
+  )).toBeVisible();
   await expect(page.getByText('电子围栏厂家报价', { exact: true })).toHaveCount(0);
   await expect(page.getByText('周界报警系统方案', { exact: true })).toHaveCount(0);
 
@@ -865,9 +871,14 @@ test('advertising hierarchy pins the dashboard revision without reading legacy d
 test('migrated detail pages ignore malformed legacy dashboard arrays', async ({ page }) => {
   await page.unroute('**/api/marketing/projects/11/dashboard**');
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
-    const invalid = dashboardFixture();
-    invalid.adGroups = [];
-    invalid.hierarchyCounts.adGroups = 0;
+    const invalid = alignDashboardFilterToRequest(
+      dashboardFixture(),
+      route.request().url()
+    );
+    delete invalid.campaigns;
+    delete invalid.adGroups;
+    delete invalid.keywords;
+    delete invalid.searchTerms;
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(invalid)
@@ -878,6 +889,9 @@ test('migrated detail pages ignore malformed legacy dashboard arrays', async ({ 
 
   await page.goto('/geo/ad-performance');
   await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
+
+  await page.goto('/geo/keyword-analysis/search-terms?view=all');
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
 });
 
 test('advertising page rejects an orphan keyword from the hierarchy resource', async ({ page }) => {

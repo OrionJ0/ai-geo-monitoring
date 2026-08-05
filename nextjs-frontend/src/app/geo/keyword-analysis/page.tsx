@@ -164,7 +164,10 @@ function MatchedSearchTermsValue({ record }: { record: KeywordAnalysisRow }) {
         pathname: '/geo/keyword-analysis/search-terms',
         query: {
           accountId: record.accountId,
-          keywordId: record.keywordId
+          campaignId: record.schemeId,
+          adGroupId: record.unitId,
+          adGroupName: record.unitName,
+          keywordName: record.keyword
         }
       }}
       className={styles.searchTermLink}

@@ -1,6 +1,6 @@
 ---
 title: "发布 R1 并证明详细页面零旧数组消费者"
-status: open
+status: active
 type: HITL
 blocked_by:
   - "002-deliver-search-term-resource.md"

@@ -18,7 +18,7 @@ import type {
   AdSearchTermResourceQuery
 } from '@/lib/marketing/adSearchTermTypes';
 import {
-  assertMarketingDashboardResponse,
+  assertMarketingDashboardRootResponse,
   buildAdPeriod,
   marketingSnapshotWarning,
   type DashboardSearchTerm
@@ -28,7 +28,6 @@ import { KEYWORD_ANALYSIS_FIXTURE_ENABLED } from '@/lib/marketing/useKeywordAnal
 import { readMarketingDashboard } from '@/lib/marketing/readMarketingDashboard';
 import {
   dashboardFilterMatchesRange,
-  resolveAdKeywordScope
 } from '@/utils/adSearchTerms.cjs';
 
 export type AdSearchTermFixtureState = 'ready' | 'loading' | 'empty' | 'error';
@@ -191,7 +190,7 @@ export default function useAdSearchTerms({
         };
       }
       if (requestId !== requestSequence.current) return;
-      assertMarketingDashboardResponse(currentResult.data, projectId);
+      assertMarketingDashboardRootResponse(currentResult.data, projectId);
       if (currentResult.effectiveDateRange) {
         const effectiveDateRange = currentResult.effectiveDateRange;
         [from, to] = effectiveDateRange;
@@ -224,11 +223,7 @@ export default function useAdSearchTerms({
       if (!revision) {
         throw new TypeError('当前没有可用的广告搜索词快照。');
       }
-      const scope = resolveAdKeywordScope(
-        currentResult.data.keywords || [],
-        resourceQuery.scopeAccountId,
-        resourceQuery.scopeKeywordId
-      );
+      const scope = resourceQuery.scopeEvidence;
       if (resourceQuery.scopeRequired && !scope) {
         const emptyResource: MarketingSearchTermResourceResponse = {
           schemaVersion: 'marketing_search_terms_v1',
@@ -382,8 +377,7 @@ export default function useAdSearchTerms({
     resourceQuery.pageSize,
     resourceQuery.query,
     resourceQuery.queryStatus,
-    resourceQuery.scopeAccountId,
-    resourceQuery.scopeKeywordId,
+    resourceQuery.scopeEvidence,
     resourceQuery.scopeRequired,
     resourceQuery.sortBy,
     resourceQuery.sortOrder
