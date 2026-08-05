@@ -1,7 +1,7 @@
 ---
 title: 百度 Provider 模块化重构 PRD
 date: 2026-08-05
-status: draft
+status: active
 source: 003 统一 OAuth 后续架构工作与 2026-08-05 用户确认
 scope: product
 ---
@@ -169,6 +169,6 @@ scope: product
 
 ## Handoff
 
-- PRD path: `docs/draft-2026-08-05-005-baidu-provider-modularization/prd.md`
-- Current state: 独立后续草案，不阻塞 003、006 或 007；尚未实现、测试或发布。
-- Recommended next step: 待 003、006、007 完成并稳定后复核现役客户端，再开始现有 issues。
+- PRD path: `docs/active-2026-08-05-005-baidu-provider-modularization/prd.md`
+- Current state: active；Issue 001 已关闭，现役单体 Provider 的公开 surface、脱敏 trace、预算、稳定错误和 007 正确性行为已有可执行黑盒基线。
+- Recommended next step: 按 issues/001–005 严格顺序实施；当前进入 Issue 002，只抽取唯一安全 HTTP 内核与 OAuth 客户端，不发布中间状态。

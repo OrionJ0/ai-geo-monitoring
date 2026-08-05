@@ -1,8 +1,8 @@
 ---
 title: 百度 Provider 模块化重构技术方案
 date: 2026-08-05
-status: draft
-source: docs/draft-2026-08-05-005-baidu-provider-modularization/prd.md
+status: active
+source: docs/active-2026-08-05-005-baidu-provider-modularization/prd.md
 scope: deep
 ---
 
@@ -380,5 +380,5 @@ service → facade → product client → HTTP kernel → shared errors
 - 可拆 issue：U1 特征合同、U2 内核/OAuth、U3 搜索推广、U4 百度统计/清理、U5 发布。
 - 建议第一个 issue：在旧实现仍为正式真值时冻结脱敏黑盒合同。
 - 是否适合 TDD：适合，先让旧实现通过特征测试，再逐产品移动。
-- Tech Spec path: `docs/draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md`
-- Recommended next step: 待 003、006、007 全部关闭后复核方案，再开始 Issue 001。
+- Tech Spec path: `docs/active-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md`
+- Recommended next step: Issue 001 黑盒等价合同已在旧单体上通过；进入 Issue 002，先抽取唯一安全 HTTP 内核与 OAuth 客户端，中间状态不发布。
