@@ -12,7 +12,7 @@ const {
 
 const ANALYSIS_METHOD = 'ai_structured_v5';
 const STRUCTURE_VERSION = 'geo_metric_input_v5';
-const CONTRACT_REVISION = 'three_track_partial_v1';
+const CONTRACT_REVISION = 'three_track_partial_v2';
 
 class AIResponseAnalysisV5Error extends Error {
   constructor(message, code = 'invalid_analysis_output', details = {}) {
@@ -50,6 +50,16 @@ function combinedUsage(stages) {
 const RECOMMENDATION_CUE = /(?:首选|推荐|建议|选择|考虑|考察|联系|值得|优先|可选|备选|关注|专业厂家|最突出|黄金方案|采购参考)/u;
 const ENTITY_GROUP_CUE = /(?:品牌|厂家|厂商|企业)/u;
 
+// semantic_evidence_v2：语义断言的最终证据包由程序投影的 occurrence 证据与
+// 模型返回的 semantic context 组成。读取时优先取 v2 字段，兼容 v1 单数组。
+function semanticContextOf(item) {
+  return item?.semantic_context_source_ids || item?.evidence_source_ids || [];
+}
+
+function occurrenceSourceIds(entity) {
+  return [...new Set((entity?.mentions || []).map((mention) => mention.source_id))];
+}
+
 function mentionCount(entity) {
   return new Set(entity?.mentions?.map((mention) => mention.source_id) || []).size;
 }
@@ -73,7 +83,14 @@ function hasTargetSurface(text, targetEntity) {
 
 function isGroundedTargetRecommendation(recommendation, targetEntity) {
   if (!recommendation || !targetEntity) return false;
-  const evidence = recommendation.evidence_source_ids.map((sourceId, index) => ({
+  // semantic_evidence_v2：推荐以封闭 entity_id 引用目标，semantic context 由模型
+  // 提供并通过阶段 2 校验，程序不再要求推荐片段重复目标表面词。
+  if (Array.isArray(recommendation.semantic_context_source_ids)
+    && recommendation.semantic_context_source_ids.length > 0) {
+    return true;
+  }
+  // 历史 v1 风格输入兼容：保留文本启发式
+  const evidence = semanticContextOf(recommendation).map((sourceId, index) => ({
     source_id: sourceId,
     line: sourceLineNumber(sourceId),
     text: String(recommendation.evidence?.[index] || '')
@@ -96,7 +113,7 @@ function targetRank({ sourceMap, targetEntity, semantic, targetEntityId }) {
   const targetSourceIds = new Set(targetEntity?.mentions?.map((mention) => mention.source_id) || []);
   for (const group of semantic.candidate_groups) {
     if (!group.entries.includes(targetEntityId) || group.entries.length < 2) continue;
-    const explicitOrdinal = group.evidence_source_ids
+    const explicitOrdinal = semanticContextOf(group)
       .filter((sourceId) => targetSourceIds.has(sourceId))
       .map((sourceId) => sourceOrdinal(sourceById.get(sourceId)))
       .find((ordinal) => ordinal !== null);
@@ -132,12 +149,15 @@ function calculate({
     ))
     .map((entity) => {
       const relation = relationById.get(entity.entity_id);
+      const semanticSourceIds = semanticContextOf(relation);
       return {
         entity_id: entity.entity_id,
         name: entity.name,
         relation: relation.relation,
         reason: relation.reason,
-        evidence_source_ids: relation.evidence_source_ids,
+        semantic_context_source_ids: semanticSourceIds,
+        entity_occurrence_source_ids: occurrenceSourceIds(entity),
+        evidence_source_ids: semanticSourceIds,
         evidence: relation.evidence,
         mentions: mentionCount(entity),
         surface_forms: entity.surface_forms
@@ -224,7 +244,7 @@ function calculate({
     : (unresolvedEntityIds.length || quarantinedItems.length ? 'partial' : 'complete');
   const relationEvidenceSourceIds = (Array.isArray(semantic.competitor_relations)
     ? semantic.competitor_relations
-    : []).flatMap((relation) => relation.evidence_source_ids || []);
+    : []).flatMap((relation) => semanticContextOf(relation));
   const relationEntities = (Array.isArray(semantic.competitor_relations)
     ? semantic.competitor_relations
     : []).map((relation) => relation.entity_id);
@@ -240,26 +260,37 @@ function calculate({
     recommendation: {
       status: recommendationField.status,
       value: recommendationField.value,
-      evidence_source_ids: targetRecommended && targetRecommendation
-        ? targetRecommendation.evidence_source_ids
-        : []
+      evidence: targetRecommended && targetRecommendation
+        ? {
+            entity_occurrence_source_ids: occurrenceSourceIds(targetEntity),
+            semantic_context_source_ids: semanticContextOf(targetRecommendation)
+          }
+        : { entity_occurrence_source_ids: [], semantic_context_source_ids: [] }
     },
     rank: {
       status: rankField.status,
       value: rankField.value,
-      evidence_source_ids: calculatedTargetRank !== null
+      evidence: calculatedTargetRank !== null
         ? (() => {
           const group = (semantic.candidate_groups || []).find((item) => (
             item.entries?.includes(catalog.target_entity_id)
           ));
-          return group ? group.evidence_source_ids : [];
+          return {
+            entity_occurrence_source_ids: occurrenceSourceIds(targetEntity),
+            semantic_context_source_ids: group ? semanticContextOf(group) : []
+          };
         })()
-        : []
+        : { entity_occurrence_source_ids: [], semantic_context_source_ids: [] }
     },
     sentiment: {
       status: sentimentField.status,
       value: sentimentField.value,
-      evidence_source_ids: semantic.sentiment?.evidence_source_ids || []
+      evidence: sentimentField.status === 'assessed'
+        ? {
+            entity_occurrence_source_ids: occurrenceSourceIds(targetEntity),
+            semantic_context_source_ids: semanticContextOf(semantic.sentiment)
+          }
+        : { entity_occurrence_source_ids: [], semantic_context_source_ids: [] }
     }
   };
   const competitionAnalysis = {

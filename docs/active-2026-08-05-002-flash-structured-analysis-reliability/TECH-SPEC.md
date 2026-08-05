@@ -943,7 +943,7 @@ assessed 幸存样本中的推荐 21/21、情绪 21/21 和排名 4/4 不能证�
 
 ## 8. 实现切片
 
-当前进度：对应 issue 001–008 的 U1–U6 和候选正式入口接线已经完成；U7/issue 009 已完成第二轮真实 A/B/C，但门槛失败。U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。U10/issue 012 `semantic_evidence_v2`、U11/issue 013 真值审计、U12/issue 014–015 探针与全量门禁待执行。
+当前进度：对应 issue 001–008 的 U1–U6 和候选正式入口接线已经完成；U7/issue 009 已完成第二轮真实 A/B/C，但门槛失败。U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。U10/issue 012 `semantic_evidence_v2` 双角色证据合同已完成并关闭：`CONTRACT_REVISION=three_track_partial_v2`，S43 真实 Flash 3/3 目标语义 complete、推荐/情绪 assessed 且与真值一致。U11/issue 013 真值审计、U12/issue 014–015 探针与全量门禁待执行。
 
 ### U1. 冻结真实语料与评测合同
 

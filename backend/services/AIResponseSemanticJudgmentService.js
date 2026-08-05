@@ -6,7 +6,7 @@ const {
   effectiveRequestOptions
 } = require('./AIResponseEntityExtractionService');
 
-const SEMANTIC_PROMPT_REVISION = 'closed_entity_semantics_v3';
+const SEMANTIC_PROMPT_REVISION = 'closed_entity_semantics_v4_evidence_roles';
 const SEMANTIC_MAX_ATTEMPTS = 2;
 const VALID_RELATIONS = new Set(['competitor', 'non_competitor']);
 const VALID_SENTIMENTS = new Set(['positive', 'neutral', 'negative']);
@@ -69,7 +69,10 @@ function buildSemanticPrompt({ question, sourceMap, catalog }) {
       surface_forms: entity.surface_forms,
       source_ids: [...new Set(entity.mentions.map((mention) => mention.source_id))]
     })),
-    segments: sourceMap.segments.map(({ source_id, text }) => ({ source_id, text }))
+    // 空行无语义内容：不发模型，避免模型把空行当作语义上下文引用
+    segments: (sourceMap.segments || [])
+      .filter(({ text }) => String(text || '').trim().length > 0)
+      .map(({ source_id, text }) => ({ source_id, text }))
   };
   return [
     '<semantic_input>',
@@ -80,36 +83,54 @@ function buildSemanticPrompt({ question, sourceMap, catalog }) {
     'competitor_relations 尽量覆盖能由原文证明的非目标实体；无法确定关系或证据不足的实体可以不返回，禁止猜测补齐。',
     'competitor_relations 严禁返回 target_entity_id 本身；目标品牌不是它自己的竞品。',
     'candidate_groups 按回答真实类别分组；普通并列、表格行序和正文提及顺序不是排名。',
-    'recommendations 只记录回答明确建议的实体。所有证据只能引用 segments 中的 source_id。',
-    'candidate_groups 的证据应同时引用分组标题和每个成员出现的片段；单成员类别也可以记录。',
+    'recommendations 只记录回答明确建议的实体。',
+    'semantic_context_source_ids 必须引用真正支持该语义结论的原文片段；它可以与实体出现的片段不同，因为回答常先列举实体、后在其他片段用简称、集合或顺序表达推荐、关系或情绪。',
+    '不要只为满足存在性而引用实体列举行；如果某片段确实包含判断词或推荐、分组、比较的语义，才可引用。',
     'target_entity_id 为 null 时 sentiment 必须是 not_applicable；存在时才判断 positive、neutral 或 negative。',
     '</task>',
     '<output_contract>',
     '只输出一个 JSON 对象，不要输出 Markdown 或解释。',
-    '{"competitor_relations":[{"entity_id":"E001","relation":"competitor|non_competitor","reason":"简短理由","evidence_source_ids":["L001"]}],"candidate_groups":[{"ordered":false,"entries":["E001","E002"],"reason":"简短理由","evidence_source_ids":["L001"]}],"recommendations":[{"entity_id":"E001","kind":"explicit","evidence_source_ids":["L001"]}],"sentiment":{"status":"assessed|not_applicable","label":"positive|neutral|negative|null","reason":"简短理由","evidence_source_ids":["L001"],"risk_terms":[]}}',
+    '{"competitor_relations":[{"entity_id":"E001","relation":"competitor|non_competitor","reason":"简短理由","semantic_context_source_ids":["L001"]}],"candidate_groups":[{"ordered":false,"entries":["E001","E002"],"reason":"简短理由","semantic_context_source_ids":["L001"]}],"recommendations":[{"entity_id":"E001","kind":"explicit","semantic_context_source_ids":["L001"]}],"sentiment":{"status":"assessed|not_applicable","label":"positive|neutral|negative|null","reason":"简短理由","semantic_context_source_ids":["L001"],"risk_terms":[]}}',
     '不得输出 claims、实体名称、提及次数、排名数字、比例、SOV 或其他字段。',
     '</output_contract>'
   ].join('\n');
 }
 
-function buildSemanticRepairPrompt(basePrompt, error) {
+function buildSemanticRepairPrompt(basePrompt, error, { sourceMap, catalog }) {
+  const occurrenceByEntity = new Map((Array.isArray(catalog?.entities) ? catalog.entities : []).map((entity) => [
+    entity.entity_id,
+    [...new Set((entity.mentions || []).map((mention) => mention.source_id))]
+  ]));
+  const sourceMapSummary = (Array.isArray(sourceMap?.segments) ? sourceMap.segments : [])
+    .filter(({ text }) => String(text || '').trim().length > 0)
+    .map(({ source_id, text }) => `${source_id}: ${text}`)
+    .join('\n');
+  const occurrenceSummary = [...occurrenceByEntity.entries()]
+    .map(([entityId, sourceIds]) => `${entityId}: ${sourceIds.join(', ')}`)
+    .join('\n');
   return [
     basePrompt,
     '<validation_feedback>',
     `error_code=${String(error?.code || 'analysis_semantic_output_invalid')}`,
     `field=${String(error?.details?.field || 'semantic_output')}`,
+    `message=${String(error?.message || '语义判断未通过程序校验').slice(0, 300)}`,
     '上一份语义判断未通过程序校验。保持 semantic_input 中的实体目录完全不变，只纠正失败字段后重新输出完整语义 JSON。',
-    '不得引用目录之外的实体 ID 或 source ID，不得复述、沿用或猜测上一份无效值。',
+    '只能引用下面 source map 中存在的 source_id。semantic_context_source_ids 必须引用真正支持该断言结论的原文片段，不要只为满足存在性而引用实体列举行。',
+    '<source_map>',
+    sourceMapSummary,
+    '</source_map>',
+    '<entity_occurrence_ids>',
+    occurrenceSummary,
+    '</entity_occurrence_ids>',
+    'entity_occurrence_ids 只是实体在原文出现的确定性证据，不等于语义上下文。不得创建或改名实体，不得复述、沿用或猜测上一份无效值。',
     '</validation_feedback>'
   ].join('\n');
 }
 
-function validateEvidenceSourceIds({
+function validateSemanticContextSourceIds({
   value,
   field,
-  sourceById,
-  requiredEntityIds,
-  entityById
+  sourceById
 }) {
   const sourceIds = stringArray(value, field);
   sourceIds.forEach((sourceId) => {
@@ -121,19 +142,18 @@ function validateEvidenceSourceIds({
       );
     }
   });
-  requiredEntityIds.forEach((entityId) => {
-    const entity = entityById.get(entityId);
-    const entitySourceIds = new Set(entity?.mentions?.map((mention) => mention.source_id) || []);
-    if (!sourceIds.some((sourceId) => entitySourceIds.has(sourceId))) {
-      // 程序不得为模型自动补一条"看起来相关"的原文片段作为证据；
-      // 证据缺失时该字段判为无效，由上层标记 unresolved/invalid。
-      throw new AISemanticJudgmentError(
-        `${field} 没有引用包含实体 ${entityId} 的原文片段`,
-        'analysis_evidence_reference_invalid',
-        { field }
-      );
-    }
-  });
+  // semantic_evidence_v2：不要求语义片段重复实体 occurrence，也不做固定指示词
+  // 表判断——真实回答的语义表达（短名、场景词、集合表达）无法由机械词表覆盖，
+  // 机械词表正是 009 阶段 2 高降级的根因之一。语义是否真正支持结论由人工真值
+  // 评测约束；程序只拒绝引用无任何内容的空片段，且不得自动补写语义上下文。
+  const texts = sourceIds.map((sourceId) => sourceById.get(sourceId).text);
+  if (texts.every((text) => !String(text || '').trim())) {
+    throw new AISemanticJudgmentError(
+      `${field} 引用了无内容的原文片段`,
+      'analysis_evidence_reference_invalid',
+      { field }
+    );
+  }
   return sourceIds;
 }
 
@@ -167,7 +187,7 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
   const competitorRelations = relationItems.map((item, index) => {
     const field = `competitor_relations[${index}]`;
     if (!item || Array.isArray(item) || !exactKeys(item, [
-      'entity_id', 'relation', 'reason', 'evidence_source_ids'
+      'entity_id', 'relation', 'reason', 'semantic_context_source_ids'
     ])) {
       throw new AISemanticJudgmentError(`${field} 结构无效`, 'analysis_relation_incomplete', { field });
     }
@@ -183,9 +203,9 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
         field: `${field}.relation`
       });
     }
-    const evidenceSourceIds = validateEvidenceSourceIds({
-      value: item.evidence_source_ids,
-      field: `${field}.evidence_source_ids`,
+    const semanticContextSourceIds = validateSemanticContextSourceIds({
+      value: item.semantic_context_source_ids,
+      field: `${field}.semantic_context_source_ids`,
       sourceById,
       requiredEntityIds: [entityId],
       entityById,
@@ -194,8 +214,8 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       entity_id: entityId,
       relation,
       reason: nonEmptyReason(item.reason, `${field}.reason`),
-      evidence_source_ids: evidenceSourceIds,
-      evidence: evidenceSourceIds.map((sourceId) => sourceById.get(sourceId).text)
+      semantic_context_source_ids: semanticContextSourceIds,
+      evidence: semanticContextSourceIds.map((sourceId) => sourceById.get(sourceId).text)
     };
   });
   const actualRelationIds = competitorRelations.map((item) => item.entity_id).sort();
@@ -219,7 +239,7 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
   const candidateGroups = parsed.candidate_groups.map((item, index) => {
     const field = `candidate_groups[${index}]`;
     if (!item || Array.isArray(item) || !exactKeys(item, [
-      'ordered', 'entries', 'reason', 'evidence_source_ids'
+      'ordered', 'entries', 'reason', 'semantic_context_source_ids'
     ]) || typeof item.ordered !== 'boolean') {
       throw new AISemanticJudgmentError(`${field} 结构无效`, undefined, { field });
     }
@@ -229,9 +249,9 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
         field: `${field}.entries`
       });
     }
-    const evidenceSourceIds = validateEvidenceSourceIds({
-      value: item.evidence_source_ids,
-      field: `${field}.evidence_source_ids`,
+    const semanticContextSourceIds = validateSemanticContextSourceIds({
+      value: item.semantic_context_source_ids,
+      field: `${field}.semantic_context_source_ids`,
       sourceById,
       requiredEntityIds: entries,
       entityById,
@@ -240,8 +260,8 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       ordered: item.ordered && entries.length > 1,
       entries,
       reason: nonEmptyReason(item.reason, `${field}.reason`),
-      evidence_source_ids: evidenceSourceIds,
-      evidence: evidenceSourceIds.map((sourceId) => sourceById.get(sourceId).text)
+      semantic_context_source_ids: semanticContextSourceIds,
+      evidence: semanticContextSourceIds.map((sourceId) => sourceById.get(sourceId).text)
     };
   });
 
@@ -250,37 +270,51 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       field: 'recommendations'
     });
   }
+  // 同一实体可能在多个上下文片段中被明确推荐（如第一梯队与综合推荐各一次）。
+  // 真实 Flash 会为此输出多条同实体推荐；程序确定性合并上下文并去重，
+  // 不重复输出、不补写模型未给出的上下文。
+  const recommendations = [];
   const recommendationIds = new Set();
-  const recommendations = parsed.recommendations.map((item, index) => {
+  parsed.recommendations.forEach((item, index) => {
     const field = `recommendations[${index}]`;
     if (!item || Array.isArray(item) || !exactKeys(item, [
-      'entity_id', 'kind', 'evidence_source_ids'
+      'entity_id', 'kind', 'semantic_context_source_ids'
     ])) {
       throw new AISemanticJudgmentError(`${field} 结构无效`, undefined, { field });
     }
     const entityId = String(item.entity_id || '').trim();
-    if (!entityById.has(entityId) || recommendationIds.has(entityId) || item.kind !== 'explicit') {
+    if (!entityById.has(entityId) || item.kind !== 'explicit') {
       throw new AISemanticJudgmentError(`${field} 无效`, undefined, { field });
     }
-    recommendationIds.add(entityId);
-    const evidenceSourceIds = validateEvidenceSourceIds({
-      value: item.evidence_source_ids,
-      field: `${field}.evidence_source_ids`,
+    const semanticContextSourceIds = validateSemanticContextSourceIds({
+      value: item.semantic_context_source_ids,
+      field: `${field}.semantic_context_source_ids`,
       sourceById,
       requiredEntityIds: [entityId],
       entityById,
     });
-    return {
+    if (recommendationIds.has(entityId)) {
+      const existing = recommendations.find((recommendation) => recommendation.entity_id === entityId);
+      existing.semantic_context_source_ids = [...new Set([
+        ...existing.semantic_context_source_ids,
+        ...semanticContextSourceIds
+      ])];
+      existing.evidence = existing.semantic_context_source_ids
+        .map((sourceId) => sourceById.get(sourceId).text);
+      return;
+    }
+    recommendationIds.add(entityId);
+    recommendations.push({
       entity_id: entityId,
       kind: 'explicit',
-      evidence_source_ids: evidenceSourceIds,
-      evidence: evidenceSourceIds.map((sourceId) => sourceById.get(sourceId).text)
-    };
+      semantic_context_source_ids: semanticContextSourceIds,
+      evidence: semanticContextSourceIds.map((sourceId) => sourceById.get(sourceId).text)
+    });
   });
 
   const sentiment = parsed.sentiment;
   if (!sentiment || Array.isArray(sentiment) || !exactKeys(sentiment, [
-    'status', 'label', 'reason', 'evidence_source_ids', 'risk_terms'
+    'status', 'label', 'reason', 'semantic_context_source_ids', 'risk_terms'
   ])) {
     throw new AISemanticJudgmentError('sentiment 结构无效', undefined, { field: 'sentiment' });
   }
@@ -292,7 +326,7 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       status: 'not_applicable',
       label: null,
       reason: '目标实体未在回答中出现，情绪不适用。',
-      evidence_source_ids: [],
+      semantic_context_source_ids: [],
       evidence: [],
       risk_terms: riskTerms
     };
@@ -303,9 +337,9 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
         field: 'sentiment'
       });
     }
-    const evidenceSourceIds = validateEvidenceSourceIds({
-      value: sentiment.evidence_source_ids,
-      field: 'sentiment.evidence_source_ids',
+    const semanticContextSourceIds = validateSemanticContextSourceIds({
+      value: sentiment.semantic_context_source_ids,
+      field: 'sentiment.semantic_context_source_ids',
       sourceById,
       requiredEntityIds: [catalog.target_entity_id],
       entityById,
@@ -314,8 +348,8 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       status: 'assessed',
       label,
       reason: nonEmptyReason(sentiment.reason, 'sentiment.reason'),
-      evidence_source_ids: evidenceSourceIds,
-      evidence: evidenceSourceIds.map((sourceId) => sourceById.get(sourceId).text),
+      semantic_context_source_ids: semanticContextSourceIds,
+      evidence: semanticContextSourceIds.map((sourceId) => sourceById.get(sourceId).text),
       risk_terms: riskTerms
     };
   }
@@ -374,7 +408,7 @@ class AIResponseSemanticJudgmentService {
     for (let attempt = 1; attempt <= SEMANTIC_MAX_ATTEMPTS; attempt += 1) {
       const prompt = attempt === 1
         ? basePrompt
-        : buildSemanticRepairPrompt(basePrompt, lastError);
+        : buildSemanticRepairPrompt(basePrompt, lastError, { sourceMap, catalog });
       const connection = await this.requestService.queryConfig(platform, prompt, {
         retryCount: 0,
         requestOptions: effectiveRequestOptions(platform),

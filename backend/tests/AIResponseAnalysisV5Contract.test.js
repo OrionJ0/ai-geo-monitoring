@@ -144,7 +144,7 @@ test('阶段 1 漏掉目标实体时确定性目标事实仍完成，不被清�
   assert.equal(targetMentions[0].surface_form, '上海广拓');
 });
 
-test('语义判断不自动补语义证据：证据缺少实体出现片段时该字段无效', () => {
+test('语义判断不自动补语义证据：引用无内容片段时该字段无效', () => {
   const answer = '海康威视是主流品牌。\n大华股份也是。';
   const sourceMap = createSourceMap(answer);
   const catalog = buildEntityCatalog({
@@ -162,7 +162,7 @@ test('语义判断不自动补语义证据：证据缺少实体出现片段时�
       entity_id: e001.entity_id,
       relation: 'competitor',
       reason: '同类品牌',
-      evidence_source_ids: ['L002']
+      semantic_context_source_ids: ['L002']
     }],
     candidate_groups: [],
     recommendations: [],
@@ -170,21 +170,30 @@ test('语义判断不自动补语义证据：证据缺少实体出现片段时�
       status: 'not_applicable',
       label: null,
       reason: '目标未出现',
-      evidence_source_ids: [],
+      semantic_context_source_ids: [],
       risk_terms: []
     }
   };
-  // 如果 e001 只出现在 L001，而关系证据引用 L002（不含 e001），
-  // 程序不得自动补 L001 作为"看起来相关"的证据，应判该字段无效。
-  const e001SourceIds = new Set(e001.mentions.map((mention) => mention.source_id));
-  if (e001SourceIds.has('L002')) {
-    assert.ok(true, 'fixture 已满足证据关联，跳过自动补证据检查');
-    return;
-  }
+  // semantic_evidence_v2：关系上下文引用无内容的片段属于明显不支持；
+  // 程序不得自动补 L001，应判该字段无效。
+  const semanticOutputWithEmpty = JSON.parse(JSON.stringify(semanticOutput));
+  semanticOutputWithEmpty.competitor_relations[0].semantic_context_source_ids = ['L999'];
+  const emptyTextSourceMap = {
+    version: 'answer_source_lines_v1',
+    answer_sha256: 'fixture',
+    segments: [{ source_id: 'L999', start: 0, end: 0, text: '' }]
+  };
   assert.throws(
-    () => parseSemanticOutput(JSON.stringify(semanticOutput), { sourceMap, catalog }),
+    () => parseSemanticOutput(JSON.stringify(semanticOutputWithEmpty), {
+      sourceMap: emptyTextSourceMap,
+      catalog
+    }),
     (error) => error?.code === 'analysis_evidence_reference_invalid'
   );
+  // v2 允许关系语义上下文与实体 occurrence 分处不同片段（L002 有内容，不拒绝）；
+  // "程序不补证据"由上面的空内容拒绝与跨片段合法性共同保证。
+  const parsed = parseSemanticOutput(JSON.stringify(semanticOutput), { sourceMap, catalog });
+  assert.deepEqual(parsed.competitor_relations[0].semantic_context_source_ids, ['L002']);
 });
 
 test('calculate 不把模型中性情绪程序性覆盖为正面', () => {

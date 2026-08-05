@@ -259,3 +259,30 @@ issue 011 已按 TDD 完成并关闭，S55 类多实体命中目标别名的整�
 | r3 | complete（mentioned=true, count=2） | ambiguous | unavailable | partial | 7,038 ms |
 
 3/3 完成目标事实，无 `analysis_target_mapping_ambiguous`。presence/count/mentions（2）与确定性扫描及人工真值一致。010 仍由 015 全部门槛和人工批准解锁，本 issue 不改变正式入口或默认模型。
+
+---
+
+## 2026-08-05 issue 012：`semantic_evidence_v2` 双角色证据合同完成
+
+issue 012 已按 TDD 完成并关闭，阶段 2 证据拆成程序 occurrence 与模型 semantic context 两个角色。
+
+### 实现
+
+- `CONTRACT_REVISION=three_track_partial_v2`，`SEMANTIC_PROMPT_REVISION=closed_entity_semantics_v4_evidence_roles`；阶段 2 输出合同只用 `semantic_context_source_ids`。
+- 程序从冻结实体目录确定性投影 `entity_occurrence_source_ids`；Flash 只输出 `semantic_context_source_ids`。两类证据通过 `entity_id` 绑定，允许分处不同片段。
+- 校验：未知 ID、空的必需上下文、引用无内容片段的上下文仍拒绝；不采用固定指示词表机械判断（009 的 59.3% 降级根因之一），语义支持度由人工真值评测约束。
+- 修复提示携带失败断言、完整 source map 与各实体 occurrence IDs；提示词过滤空行片段。
+- 真实 Flash 会为同一实体输出多条推荐（不同上下文各一次）：程序确定性合并上下文去重，不重复输出、不补写。
+- 最终证据包 `evidence.entity_occurrence_source_ids + semantic_context_source_ids` 写入 `target_semantics` 三字段与竞品关系。
+
+### S43 真实 Flash 冒烟
+
+S43（目标唯一命中，v1 下属 59.3% 降级样本）真实 `deepseek-v4-flash` 3 次：
+
+| 重复 | 目标映射 | 目标语义 | 推荐 | 情绪 | 开放竞品 | 耗时 |
+| --- | --- | --- | --- | --- | --- | ---: |
+| r1 | resolved | complete | assessed(true) | assessed(positive) | partial | 8,425 ms |
+| r2 | resolved | complete | assessed(true) | assessed(positive) | complete | 7,926 ms |
+| r3 | resolved | complete | assessed(true) | assessed(positive) | partial | 8,193 ms |
+
+推荐与情绪与人工真值一致（S43 推荐 true、情绪 positive）。S55 映射歧义路径 3/3 无回归。本 issue 不改变正式入口或默认模型；010 仍由 015 全部门槛和人工批准解锁。

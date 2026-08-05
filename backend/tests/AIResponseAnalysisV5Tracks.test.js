@@ -292,13 +292,13 @@ const GOOD_SEMANTIC = JSON.stringify({
   competitor_relations: [],
   candidate_groups: [],
   recommendations: [],
-  sentiment: { status: 'not_applicable', label: null, reason: '目标未出现', evidence_source_ids: [], risk_terms: [] }
+  sentiment: { status: 'not_applicable', label: null, reason: '目标未出现', semantic_context_source_ids: [], risk_terms: [] }
 });
 const BAD_SEMANTIC = JSON.stringify({
-  competitor_relations: [{ entity_id: 'E999', relation: 'competitor', reason: '未知实体', evidence_source_ids: ['L001'] }],
+  competitor_relations: [{ entity_id: 'E999', relation: 'competitor', reason: '未知实体', semantic_context_source_ids: ['L001'] }],
   candidate_groups: [],
   recommendations: [],
-  sentiment: { status: 'not_applicable', label: null, reason: '目标未出现', evidence_source_ids: [], risk_terms: [] }
+  sentiment: { status: 'not_applicable', label: null, reason: '目标未出现', semantic_context_source_ids: [], risk_terms: [] }
 });
 
 const ANSWER = '海康威视是主流品牌。';
@@ -357,6 +357,89 @@ test('阶段 2 第二次仍无效时按字段降级，不回退 v4 或 Pro', asy
   // 目标未出现，语义字段仍为 not_applicable，竞品轨 unavailable
   assert.equal(result.analysis_structure.target_semantics.sentiment.status, 'not_applicable');
   assert.equal(result.analysis_structure.competition_analysis.status, 'unavailable');
+});
+
+test('semantic_evidence_v2：跨片段推荐时证据包同时含程序 occurrence 与模型 semantic context', async () => {
+  const answer = [
+    '候选品牌：上海广拓、海康威视、大华股份。',
+    '综合可靠性比较后，优先考虑上述候选。'
+  ].join('\n');
+  const extract = async ({ sourceMap, validateMentions }) => {
+    const mentions = [
+      { source_id: 'L001', surface_form: '上海广拓', canonical_name: '上海广拓', entity_type: 'brand' },
+      { source_id: 'L001', surface_form: '海康威视', canonical_name: '海康威视', entity_type: 'brand' },
+      { source_id: 'L001', surface_form: '大华股份', canonical_name: '大华股份', entity_type: 'brand' }
+    ];
+    return {
+      mentions,
+      validated: validateMentions(mentions),
+      diagnostics: { stage: 'entity_extract', attempt_count: 1, model: 'deepseek-v4-flash' }
+    };
+  };
+  const semanticService = {
+    async judge({ catalog, sourceMap }) {
+      return {
+        structured: {
+          competitor_relations: [
+            { entity_id: 'E002', relation: 'competitor', reason: '同一候选集', semantic_context_source_ids: ['L002'] },
+            { entity_id: 'E003', relation: 'competitor', reason: '同一候选集', semantic_context_source_ids: ['L002'] }
+          ],
+          candidate_groups: [],
+          recommendations: [
+            { entity_id: 'E001', kind: 'explicit', semantic_context_source_ids: ['L002'] }
+          ],
+          sentiment: {
+            status: 'assessed',
+            label: 'positive',
+            reason: '优先考虑',
+            semantic_context_source_ids: ['L002'],
+            risk_terms: []
+          }
+        },
+        diagnostics: { stage: 'semantic_judge', attempt_count: 1, model: 'deepseek-v4-flash' }
+      };
+    }
+  };
+  const service = new AIResponseAnalysisV5Service({
+    entityExtractionService: { extract },
+    semanticJudgmentService: semanticService
+  });
+  const result = await service.analyze({
+    question: '大型园区安防有哪些厂家？',
+    responseText: answer,
+    brand: { name: '广拓', aliases: ['上海广拓'] }
+  });
+  const structure = result.analysis_structure;
+  // 目标推荐：occurrence L001（实体列举）+ semantic context L002（"优先考虑"），不同片段
+  assert.equal(structure.target_semantics.recommendation.status, 'assessed');
+  assert.deepEqual(
+    structure.target_semantics.recommendation.evidence.entity_occurrence_source_ids,
+    ['L001']
+  );
+  assert.deepEqual(
+    structure.target_semantics.recommendation.evidence.semantic_context_source_ids,
+    ['L002']
+  );
+  // 情绪同样跨片段
+  assert.equal(structure.target_semantics.sentiment.status, 'assessed');
+  assert.deepEqual(
+    structure.target_semantics.sentiment.evidence.entity_occurrence_source_ids,
+    ['L001']
+  );
+  assert.deepEqual(
+    structure.target_semantics.sentiment.evidence.semantic_context_source_ids,
+    ['L002']
+  );
+  // 竞品关系：程序 occurrence + 模型 semantic context 双角色（顶层指标字段）
+  assert.deepEqual(result.competition_entities[0].entity_occurrence_source_ids, ['L001']);
+  assert.deepEqual(result.competition_entities[0].semantic_context_source_ids, ['L002']);
+  // analysis_structure 透传模型 semantic context 供审计
+  assert.deepEqual(
+    structure.competitor_relations[0].semantic_context_source_ids,
+    ['L002']
+  );
+  // 目标语义可用，不是降级
+  assert.equal(structure.target_semantics.status, 'complete');
 });
 
 test('matched 与 unmatched 的已证明竞品按相同规则进入 scoped SOV 分子分母', async () => {
