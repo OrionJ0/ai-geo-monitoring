@@ -206,27 +206,21 @@ function requestDiagnostics(connection, platform, attempt) {
   };
 }
 
-function salvageGroundedMentions(mentions, sourceMap) {
+function quarantineUngroundedMentions(mentions, sourceMap) {
   const segments = Array.isArray(sourceMap?.segments) ? sourceMap.segments : [];
   const sourceById = new Map(segments.map((segment) => [segment.source_id, segment]));
-  let dropped = 0;
-  let relocated = 0;
-  const salvaged = [];
+  const grounded = [];
+  const quarantined = [];
   mentions.forEach((mention) => {
-    const claimed = sourceById.get(mention.source_id);
-    if (claimed?.text?.includes(mention.surface_form)) {
-      salvaged.push(mention);
-      return;
+    const segment = sourceById.get(mention.source_id);
+    if (segment && String(segment.text || '').includes(mention.surface_form)) {
+      grounded.push(mention);
+    } else {
+      // 无法在对应片段精确定位的表面词进入隔离，不得重新定位到其他片段。
+      quarantined.push(mention);
     }
-    const grounded = segments.find((segment) => segment.text.includes(mention.surface_form));
-    if (!grounded) {
-      dropped += 1;
-      return;
-    }
-    relocated += 1;
-    salvaged.push({ ...mention, source_id: grounded.source_id });
   });
-  return { mentions: salvaged, dropped, relocated };
+  return { mentions: grounded, quarantined };
 }
 
 class AIResponseEntityExtractionService {
@@ -315,20 +309,19 @@ class AIResponseEntityExtractionService {
         if (attempt >= ENTITY_MAX_ATTEMPTS) {
           if (lastError.code !== 'analysis_entity_grounding_invalid') throw lastError;
           const filtered = filterGenericMentions(parseEntityOutput(connection.text));
-          const salvaged = salvageGroundedMentions(
+          const { mentions, quarantined } = quarantineUngroundedMentions(
             filtered.mentions,
             sourceMap
           );
           const validated = typeof validateMentions === 'function'
-            ? validateMentions(salvaged.mentions)
+            ? validateMentions(mentions)
             : undefined;
           return {
-            mentions: salvaged.mentions,
+            mentions,
             ...(validated === undefined ? {} : { validated }),
             diagnostics: {
               ...diagnostics,
-              dropped_mentions: salvaged.dropped,
-              relocated_mentions: salvaged.relocated,
+              quarantined_mentions: quarantined.length,
               filtered_generic_mentions: filtered.dropped
             }
           };
@@ -349,5 +342,5 @@ module.exports.parseEntityOutput = parseEntityOutput;
 module.exports.assertFlashPlatform = assertFlashPlatform;
 module.exports.effectiveRequestOptions = effectiveRequestOptions;
 module.exports.ANALYSIS_TIMEOUT_SECONDS = ANALYSIS_TIMEOUT_SECONDS;
-module.exports.salvageGroundedMentions = salvageGroundedMentions;
+module.exports.quarantineUngroundedMentions = quarantineUngroundedMentions;
 module.exports.filterGenericMentions = filterGenericMentions;

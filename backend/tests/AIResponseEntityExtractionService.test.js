@@ -128,7 +128,7 @@ test('retries only entity extraction after a grounding failure without echoing t
   assert.equal(result.validated.entities[0].name, '海康威视');
 });
 
-test('drops only still-ungrounded mention rows after the repair attempt', async () => {
+test('quarantines mention rows that are still ungrounded after the repair attempt', async () => {
   const answer = '海康威视提供园区安防方案。';
   const sourceMap = createSourceMap(answer);
   let calls = 0;
@@ -179,15 +179,11 @@ test('drops only still-ungrounded mention rows after the repair attempt', async 
   });
 
   assert.equal(calls, 2);
-  assert.deepEqual(result.mentions, [{
-    source_id: 'L001',
-    surface_form: '海康威视',
-    canonical_name: '海康威视',
-    entity_type: 'company'
-  }]);
-  assert.equal(result.validated.entities.length, 1);
-  assert.equal(result.diagnostics.dropped_mentions, 1);
-  assert.equal(result.diagnostics.relocated_mentions, 1);
+  // 两条 mention 都声称了不存在的 source_id 或片段里不存在的表面词：
+  // 程序不得重新定位到其他片段，全部进入隔离
+  assert.deepEqual(result.mentions, []);
+  assert.equal(result.validated.entities.length, 0);
+  assert.equal(result.diagnostics.quarantined_mentions, 2);
 });
 
 test('filters descriptive category headings without removing grounded companies', async () => {

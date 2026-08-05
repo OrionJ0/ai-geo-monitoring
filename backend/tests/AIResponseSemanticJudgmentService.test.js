@@ -146,7 +146,7 @@ test('repairs only the semantic stage and cannot introduce an unknown entity', a
   );
 });
 
-test('grounds a heading-based candidate group by appending each member source line', () => {
+test('keeps heading-based candidate group evidence without auto-appending member lines', () => {
   const answer = [
     '第一梯队（行业头部）',
     '上海广拓',
@@ -165,24 +165,13 @@ test('grounds a heading-based candidate group by appending each member source li
     ],
     targetBrand: { name: '上海广拓', aliases: [] }
   });
-  const output = {
+  const incomplete = {
     competitor_relations: [
       { entity_id: 'E002', relation: 'competitor', reason: '同一采购场景', evidence_source_ids: ['L003'] },
       { entity_id: 'E003', relation: 'competitor', reason: '同一采购场景', evidence_source_ids: ['L005'] }
     ],
     candidate_groups: [
-      {
-        ordered: false,
-        entries: ['E001', 'E002'],
-        reason: '属于第一梯队',
-        evidence_source_ids: ['L001']
-      },
-      {
-        ordered: false,
-        entries: ['E003'],
-        reason: '属于第二梯队',
-        evidence_source_ids: ['L004']
-      }
+      { ordered: false, entries: ['E001', 'E002'], reason: '属于第一梯队', evidence_source_ids: ['L001'] }
     ],
     recommendations: [],
     sentiment: {
@@ -193,14 +182,25 @@ test('grounds a heading-based candidate group by appending each member source li
       risk_terms: []
     }
   };
+  // 模型只引用分组标题 L001，没有引用成员出现行 L002/L003，程序不得自动补
+  assert.throws(
+    () => parseSemanticOutput(JSON.stringify(incomplete), { sourceMap, catalog }),
+    (error) => error?.code === 'analysis_evidence_reference_invalid'
+  );
 
-  const parsed = parseSemanticOutput(JSON.stringify(output), { sourceMap, catalog });
-
+  const complete = {
+    ...incomplete,
+    candidate_groups: [
+      { ordered: false, entries: ['E001', 'E002'], reason: '属于第一梯队', evidence_source_ids: ['L001', 'L002', 'L003'] },
+      { ordered: false, entries: ['E003'], reason: '属于第二梯队', evidence_source_ids: ['L004', 'L005'] }
+    ]
+  };
+  const parsed = parseSemanticOutput(JSON.stringify(complete), { sourceMap, catalog });
   assert.deepEqual(parsed.candidate_groups[0].evidence_source_ids, ['L001', 'L002', 'L003']);
   assert.deepEqual(parsed.candidate_groups[1].evidence_source_ids, ['L004', 'L005']);
 });
 
-test('drops a redundant target relation and grounds target sentiment evidence', () => {
+test('drops a redundant target relation and rejects sentiment evidence that misses the target', () => {
   const context = challengeContext();
   const output = validSemanticOutput();
   output.competitor_relations.unshift({
@@ -209,33 +209,54 @@ test('drops a redundant target relation and grounds target sentiment evidence', 
     reason: '模型多余输出的目标关系',
     evidence_source_ids: ['L002']
   });
+  // 目标 E003 只出现在 L002，证据 L001 不含目标 -> 不得自动补 L002
   output.sentiment.evidence_source_ids = ['L001'];
 
-  const parsed = parseSemanticOutput(JSON.stringify(output), {
+  assert.throws(
+    () => parseSemanticOutput(JSON.stringify(output), {
+      sourceMap: context.sourceMap,
+      catalog: context.catalog
+    }),
+    (error) => error?.code === 'analysis_evidence_reference_invalid'
+  );
+
+  const fixed = validSemanticOutput();
+  fixed.competitor_relations.unshift({
+    entity_id: 'E003',
+    relation: 'competitor',
+    reason: '模型多余输出的目标关系',
+    evidence_source_ids: ['L002']
+  });
+  const parsed = parseSemanticOutput(JSON.stringify(fixed), {
     sourceMap: context.sourceMap,
     catalog: context.catalog
   });
-
   assert.deepEqual(
     parsed.competitor_relations.map((relation) => relation.entity_id),
     ['E001', 'E002']
   );
-  assert.deepEqual(parsed.sentiment.evidence_source_ids, ['L001', 'L002']);
+  assert.deepEqual(parsed.sentiment.evidence_source_ids, ['L002']);
 });
 
-test('combines semantic summary evidence with grounded entity lines for relations and recommendations', () => {
+test('rejects relation evidence that misses the entity line and keeps valid evidence', () => {
   const context = challengeContext();
+  // E001 只出现在 L001；把关系证据改成 L002 -> 不得自动补 L001
   const output = validSemanticOutput();
   output.competitor_relations[0].evidence_source_ids = ['L002'];
-  output.recommendations[0].evidence_source_ids = ['L001'];
+  assert.throws(
+    () => parseSemanticOutput(JSON.stringify(output), {
+      sourceMap: context.sourceMap,
+      catalog: context.catalog
+    }),
+    (error) => error?.code === 'analysis_evidence_reference_invalid'
+  );
 
-  const parsed = parseSemanticOutput(JSON.stringify(output), {
+  const parsed = parseSemanticOutput(JSON.stringify(validSemanticOutput()), {
     sourceMap: context.sourceMap,
     catalog: context.catalog
   });
-
-  assert.deepEqual(parsed.competitor_relations[0].evidence_source_ids, ['L002', 'L001']);
-  assert.deepEqual(parsed.recommendations[0].evidence_source_ids, ['L001', 'L002']);
+  assert.deepEqual(parsed.competitor_relations[0].evidence_source_ids, ['L001']);
+  assert.deepEqual(parsed.recommendations[0].evidence_source_ids, ['L002']);
 });
 
 test('normalizes sentiment to not_applicable when the target is absent', () => {

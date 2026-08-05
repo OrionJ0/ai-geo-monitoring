@@ -44,7 +44,6 @@ function combinedUsage(stages) {
 
 const RECOMMENDATION_CUE = /(?:首选|推荐|建议|选择|考虑|考察|联系|值得|优先|可选|备选|关注|专业厂家|最突出|黄金方案|采购参考)/u;
 const ENTITY_GROUP_CUE = /(?:品牌|厂家|厂商|企业)/u;
-const POSITIVE_CUE = /(?:较强|优势|领先|推荐|成熟|专业|全面|优秀|突出|最佳|完整|便捷|价值|稳定|可靠)/u;
 
 function mentionCount(entity) {
   return new Set(entity?.mentions?.map((mention) => mention.source_id) || []).size;
@@ -149,16 +148,10 @@ function calculate({ sourceMap, catalog, semantic, diagnostics }) {
     (recommendation) => recommendation.entity_id === catalog.target_entity_id
   );
   const targetRecommended = isGroundedTargetRecommendation(targetRecommendation, targetEntity);
-  const groundedPositive = Boolean(
-    semantic.sentiment?.evidence?.some((text) => (
-      POSITIVE_CUE.test(text)
-      && targetEntity?.surface_forms?.some((surfaceForm) => String(text).includes(surfaceForm))
-    ))
-  );
+  // 程序不得覆盖模型语义判断：情绪标签只来自阶段 2 的 assessed 结果，
+  // 目标未出现时使用 neutral 兼容占位（真实状态见 analysis_structure.sentiment.status）。
   const sentimentLabel = semantic.sentiment.status === 'assessed'
-    ? ((targetRecommended || groundedPositive) && semantic.sentiment.label === 'neutral'
-      ? 'positive'
-      : semantic.sentiment.label)
+    ? semantic.sentiment.label
     : 'neutral';
   const stages = diagnostics.filter(Boolean);
   const analysisStructure = {

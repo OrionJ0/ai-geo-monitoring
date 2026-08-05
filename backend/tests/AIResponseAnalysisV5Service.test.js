@@ -167,7 +167,8 @@ test('counts one mention per source line and derives recommendation and rank fro
   assert.equal(result.brand_mentions, 3);
   assert.equal(result.brand_rank, 1);
   assert.equal(result.brand_recommended, true);
-  assert.equal(result.sentiment, 'positive');
+  // 程序不覆盖模型语义判断：模型返回 neutral，即使目标被推荐也保持 neutral
+  assert.equal(result.sentiment, 'neutral');
   assert.equal(result.sov_denominator, 4);
 });
 

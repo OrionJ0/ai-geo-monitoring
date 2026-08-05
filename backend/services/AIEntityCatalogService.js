@@ -117,35 +117,6 @@ function hasAsciiBoundaries(text, index, value) {
   return !/[a-z0-9]/iu.test(before) && !/[a-z0-9]/iu.test(after);
 }
 
-function expandGroundedTargetAliases(entity, sourceMap, targetBrand) {
-  const aliases = [targetBrand?.name, ...(Array.isArray(targetBrand?.aliases) ? targetBrand.aliases : [])]
-    .map((value) => String(value || '').trim())
-    .filter(Boolean)
-    .sort((left, right) => right.length - left.length);
-  aliases.forEach((alias) => {
-    sourceMap.segments.forEach((segment) => {
-      occurrenceOffsets(segment.text, alias).forEach((localStart) => {
-        if (!hasAsciiBoundaries(segment.text, localStart, alias)) return;
-        const start = segment.start + localStart;
-        const end = start + alias.length;
-        const overlaps = entity.mentions.some((mention) => (
-          start < mention.end && end > mention.start
-        ));
-        if (overlaps) return;
-        entity.surface_forms.push(alias);
-        entity.mentions.push({
-          source_id: segment.source_id,
-          start,
-          end,
-          surface_form: alias
-        });
-      });
-    });
-  });
-  entity.surface_forms = [...new Set(entity.surface_forms)];
-  entity.mentions.sort((left, right) => left.start - right.start || right.end - left.end);
-}
-
 function buildTargetMentions(sourceMap, targetBrand) {
   const aliases = [targetBrand?.name, ...(Array.isArray(targetBrand?.aliases) ? targetBrand.aliases : [])]
     .map((value) => String(value || '').trim())
@@ -184,13 +155,9 @@ function buildTargetMentions(sourceMap, targetBrand) {
 }
 
 function expandGroundedEntityOccurrences(entity, sourceMap) {
-  const variants = new Set([entity.name, ...entity.surface_forms]);
-  if (entity.type === 'company') {
-    [...variants].forEach((value) => {
-      if (String(value).includes('市')) variants.add(String(value).replace('市', ''));
-    });
-  }
-  [...variants]
+  // 只使用已经通过原文锚定的 surface_forms 扫描全部片段；
+  // 不使用模型 canonical name，不派生未注册短名/别名，也不做"市"等变体替换。
+  [...new Set(entity.surface_forms)]
     .map((value) => String(value || '').trim())
     .filter(Boolean)
     .sort((left, right) => right.length - left.length)
@@ -214,57 +181,6 @@ function expandGroundedEntityOccurrences(entity, sourceMap) {
     });
   entity.surface_forms = [...new Set(entity.surface_forms)];
   entity.mentions.sort((left, right) => left.start - right.start || right.end - left.end);
-}
-
-const ADMINISTRATIVE_PREFIX = /^(?:北京市|上海市|天津市|重庆市|深圳市|广州市|东莞市|武汉市|杭州市|南京市|苏州市|沈阳市|合肥市|厦门市|佛山市|福州市|北京|上海|天津|重庆|深圳|广州|东莞|武汉|杭州|南京|苏州|沈阳|合肥|厦门|佛山|福州|浙江|广东|江苏|湖北)/u;
-const CORPORATE_SUFFIX = /(?:有限责任公司|信息技术有限公司|数字技术股份有限公司|安防设备有限公司|智能科技有限公司|科技发展有限公司|有限公司|信息技术|数字技术|安防设备|智能科技|电子科技|安全科技|科技发展|智慧感知|技术股份|股份|集团|技术|科技|电子|智能|光电|通信|公司)+$/u;
-
-function conservativeShortAliases(entity) {
-  const aliases = new Set();
-  [entity.name, ...entity.surface_forms].forEach((value) => {
-    const text = String(value || '').trim();
-    if (!/^[\p{Script=Han}]+$/u.test(text)) return;
-    const core = text.replace(ADMINISTRATIVE_PREFIX, '').replace(CORPORATE_SUFFIX, '');
-    if (core.length < 2 || core === text) return;
-    aliases.add(core);
-    if (core.length >= 4) aliases.add(core.slice(0, 2));
-  });
-  return [...aliases];
-}
-
-function expandGroundedUniqueShortAliases(entities, sourceMap) {
-  const owners = new Map();
-  entities.forEach((entity, entityIndex) => {
-    conservativeShortAliases(entity).forEach((candidate) => {
-      if (!owners.has(candidate)) owners.set(candidate, new Set());
-      owners.get(candidate).add(entityIndex);
-    });
-  });
-  entities.forEach((entity, entityIndex) => {
-    const candidates = [...owners.entries()]
-      .filter(([, ownerIndexes]) => ownerIndexes.size === 1 && ownerIndexes.has(entityIndex))
-      .map(([candidate]) => candidate)
-      .sort((left, right) => right.length - left.length || left.localeCompare(right));
-    candidates.forEach((surfaceForm) => {
-      sourceMap.segments.forEach((segment) => {
-        occurrenceOffsets(segment.text, surfaceForm).forEach((localStart) => {
-          const start = segment.start + localStart;
-          const end = start + surfaceForm.length;
-          const overlaps = entity.mentions.some((mention) => start < mention.end && end > mention.start);
-          if (overlaps) return;
-          entity.surface_forms.push(surfaceForm);
-          entity.mentions.push({
-            source_id: segment.source_id,
-            start,
-            end,
-            surface_form: surfaceForm
-          });
-        });
-      });
-    });
-    entity.surface_forms = [...new Set(entity.surface_forms)];
-    entity.mentions.sort((left, right) => left.start - right.start || right.end - left.end);
-  });
 }
 
 function buildEntityCatalog({ answer: inputAnswer, sourceMap, extractedMentions, targetBrand = {} }) {
@@ -374,11 +290,9 @@ function buildEntityCatalog({ answer: inputAnswer, sourceMap, extractedMentions,
       'analysis_target_mapping_ambiguous'
     );
   }
-  if (targetMatches.length === 1) {
-    expandGroundedTargetAliases(targetMatches[0], sourceMap, targetBrand);
-  }
+  // 目标别名扫描只发生在 buildTargetMentions（确定性目标事实轨）内，
+  // 不会把配置别名注入开放实体目录，避免派生未确认别名扩大 occurrence。
   entities.forEach((entity) => expandGroundedEntityOccurrences(entity, sourceMap));
-  expandGroundedUniqueShortAliases(entities, sourceMap);
 
   return {
     entities,

@@ -109,8 +109,7 @@ function validateEvidenceSourceIds({
   field,
   sourceById,
   requiredEntityIds,
-  entityById,
-  supplementMissingEntitySources = false
+  entityById
 }) {
   const sourceIds = stringArray(value, field);
   sourceIds.forEach((sourceId) => {
@@ -125,11 +124,9 @@ function validateEvidenceSourceIds({
   requiredEntityIds.forEach((entityId) => {
     const entity = entityById.get(entityId);
     const entitySourceIds = new Set(entity?.mentions?.map((mention) => mention.source_id) || []);
-    if (supplementMissingEntitySources && !sourceIds.some((sourceId) => entitySourceIds.has(sourceId))) {
-      const groundedSourceId = [...entitySourceIds][0];
-      if (groundedSourceId && !sourceIds.includes(groundedSourceId)) sourceIds.push(groundedSourceId);
-    }
     if (!sourceIds.some((sourceId) => entitySourceIds.has(sourceId))) {
+      // 程序不得为模型自动补一条"看起来相关"的原文片段作为证据；
+      // 证据缺失时该字段判为无效，由上层标记 unresolved/invalid。
       throw new AISemanticJudgmentError(
         `${field} 没有引用包含实体 ${entityId} 的原文片段`,
         'analysis_evidence_reference_invalid',
@@ -192,7 +189,6 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       sourceById,
       requiredEntityIds: [entityId],
       entityById,
-      supplementMissingEntitySources: true
     });
     return {
       entity_id: entityId,
@@ -239,7 +235,6 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       sourceById,
       requiredEntityIds: entries,
       entityById,
-      supplementMissingEntitySources: true
     });
     return {
       ordered: item.ordered && entries.length > 1,
@@ -274,7 +269,6 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       sourceById,
       requiredEntityIds: [entityId],
       entityById,
-      supplementMissingEntitySources: true
     });
     return {
       entity_id: entityId,
@@ -315,7 +309,6 @@ function parseSemanticOutput(outputText, { sourceMap, catalog }) {
       sourceById,
       requiredEntityIds: [catalog.target_entity_id],
       entityById,
-      supplementMissingEntitySources: true
     });
     normalizedSentiment = {
       status: 'assessed',

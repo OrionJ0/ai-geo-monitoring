@@ -117,7 +117,7 @@ test('matches a registered target alias inside a grounded full company name', ()
   assert.equal(catalog.target_entity_id, 'E001');
 });
 
-test('merges a parenthesized brand alias with its company and expands grounded target aliases', () => {
+test('merges a parenthesized brand alias with its company without injecting unconfirmed target aliases', () => {
   const answer = [
     '**上海广拓（TOTOLINK）**',
     '专业项目首选广拓。'
@@ -145,16 +145,17 @@ test('merges a parenthesized brand alias with its company and expands grounded t
   assert.equal(catalog.entities.length, 1);
   assert.equal(catalog.entities[0].name, '上海广拓');
   assert.equal(catalog.entities[0].type, 'company');
-  assert.deepEqual(catalog.entities[0].surface_forms, ['上海广拓', 'TOTOLINK', '广拓']);
+  // 括号别名经原文结构归并，但配置目标别名"广拓"不会被注入开放实体目录
+  assert.deepEqual(catalog.entities[0].surface_forms, ['上海广拓', 'TOTOLINK']);
   assert.deepEqual(
     catalog.entities[0].mentions.map(({ source_id, surface_form }) => ({ source_id, surface_form })),
     [
       { source_id: 'L001', surface_form: '上海广拓' },
-      { source_id: 'L001', surface_form: 'TOTOLINK' },
-      { source_id: 'L002', surface_form: '广拓' }
+      { source_id: 'L001', surface_form: 'TOTOLINK' }
     ]
   );
   assert.equal(catalog.target_entity_id, 'E001');
+  // 目标事实轨独立扫描注册别名：L001 上海广拓 + L002 广拓
   assert.deepEqual(
     catalog.target_mentions.map(({ source_id, surface_form }) => ({ source_id, surface_form })),
     [
@@ -191,7 +192,7 @@ test('resolves company and brand type variants for one canonical entity without 
   assert.deepEqual(catalog.entities[0].surface_forms, ['上海广拓', 'TANTECH']);
 });
 
-test('expands exact repeated company names and a grounded city-marker omission', () => {
+test('expands exact repeated company names without deriving a city-marker omission', () => {
   const answer = [
     '厂家：深圳市中安谐。',
     '备选仍可考虑深圳市中安谐。',
@@ -209,18 +210,18 @@ test('expands exact repeated company names and a grounded city-marker omission',
     targetBrand: { name: '广拓', aliases: [] }
   });
 
+  // 精确表面词在全文展开；"深圳中安谐"是程序派生的"市"变体，不进入目录
   assert.deepEqual(
     catalog.entities[0].mentions.map(({ source_id, surface_form }) => ({ source_id, surface_form })),
     [
       { source_id: 'L001', surface_form: '深圳市中安谐' },
-      { source_id: 'L002', surface_form: '深圳市中安谐' },
-      { source_id: 'L003', surface_form: '深圳中安谐' }
+      { source_id: 'L002', surface_form: '深圳市中安谐' }
     ]
   );
-  assert.deepEqual(catalog.entities[0].surface_forms, ['深圳市中安谐', '深圳中安谐']);
+  assert.deepEqual(catalog.entities[0].surface_forms, ['深圳市中安谐']);
 });
 
-test('maps a grounded shorthand only when it uniquely belongs to one catalog entity', () => {
+test('does not derive shorthand aliases from company full names', () => {
   const answer = [
     '候选厂家：杭州海康威视、上海亚安科技。',
     '系统集成首选海康，高端防护考虑亚安。'
@@ -245,13 +246,13 @@ test('maps a grounded shorthand only when it uniquely belongs to one catalog ent
     targetBrand: { name: '广拓', aliases: [] }
   });
 
-  assert.ok(catalog.entities[0].surface_forms.includes('海康'));
-  assert.ok(catalog.entities[1].surface_forms.includes('亚安'));
-  assert.equal(catalog.entities[0].mentions.some((mention) => mention.source_id === 'L002'), true);
-  assert.equal(catalog.entities[1].mentions.some((mention) => mention.source_id === 'L002'), true);
-  assert.equal(catalog.entities.some((entity) => entity.surface_forms.includes('科技')), false);
-  assert.equal(catalog.entities.some((entity) => entity.surface_forms.includes('智能')), false);
-  assert.equal(catalog.entities.some((entity) => entity.surface_forms.includes('发展')), false);
+  // "海康"、"亚安"是程序从公司全名派生的短名，未注册未确认，不得进入目录
+  assert.equal(catalog.entities.some((entity) => entity.surface_forms.includes('海康')), false);
+  assert.equal(catalog.entities.some((entity) => entity.surface_forms.includes('亚安')), false);
+  assert.equal(catalog.entities[0].mentions.some((mention) => mention.source_id === 'L002'), false);
+  assert.equal(catalog.entities[1].mentions.some((mention) => mention.source_id === 'L002'), false);
+  assert.equal(catalog.entities[0].surface_forms.includes('杭州海康威视'), true);
+  assert.equal(catalog.entities[1].surface_forms.includes('上海亚安科技'), true);
 });
 
 test('counts repeated registered target aliases in one long source line separately', () => {
