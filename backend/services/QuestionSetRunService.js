@@ -613,7 +613,14 @@ function normalizeNativeRow(record) {
   const metricSemanticsVersion = metric?.metric_semantics_version
     || row.metric_semantics_version
     || null;
-  const sov = metric ? GeoMetricSemanticsService.presentSov(metric) : null;
+  const isCurrentScope = metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+    || metricSemanticsVersion === SCOPED_METRIC_SEMANTICS;
+  let sov = null;
+  if (metric) {
+    sov = metricSemanticsVersion === SCOPED_METRIC_SEMANTICS
+      ? GeoMetricSemanticsService.presentScopedSov(metric)
+      : GeoMetricSemanticsService.presentSov(metric);
+  }
   const analysisDiagnostics = normalizeAnalysisDiagnostics(row.result_summary?.analysis);
   const failure = normalizeFailure(row.result_summary?.failure);
   const captureQuality = WebCaptureAnswerQualityService.evaluate({
@@ -666,18 +673,18 @@ function normalizeNativeRow(record) {
       ? { share_of_voice: metric?.share_of_voice == null ? null : finiteNumber(metric.share_of_voice) }
       : {}),
     answer_competitor_share: metric
-      && metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+      && isCurrentScope
       ? metric?.answer_competitor_share ?? null
       : null,
     sov_numerator: metric
-      && metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+      && isCurrentScope
       ? finiteNumber(metric?.sov_numerator)
       : null,
     sov_denominator: metric
-      && metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+      && isCurrentScope
       ? finiteNumber(metric?.sov_denominator)
       : null,
-    competition_entities: metricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+    competition_entities: isCurrentScope
       && Array.isArray(metric?.competition_entities)
       ? metric.competition_entities
       : [],
@@ -1184,3 +1191,4 @@ module.exports.deriveControlState = deriveControlState;
 module.exports.deriveCapabilities = deriveCapabilities;
 module.exports.summarize = summarize;
 module.exports.summarizeExecution = summarizeExecution;
+module.exports.normalizeNativeRow = normalizeNativeRow;

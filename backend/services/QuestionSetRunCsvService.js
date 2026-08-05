@@ -1,7 +1,8 @@
 const SCHEMA_VERSION = 'question_set_run_v1';
 const {
   CURRENT_METRIC_SEMANTICS,
-  LEGACY_METRIC_SEMANTICS
+  LEGACY_METRIC_SEMANTICS,
+  SCOPED_METRIC_SEMANTICS
 } = require('./GeoMetricSemanticsService');
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_ROWS = 5000;
@@ -508,7 +509,7 @@ function parseCsv(csv) {
     const currentMetricSemanticsVersion = hasMetricSemanticsHeaders
       ? valueAt(row, 'metric_semantics_version').trim()
       : LEGACY_METRIC_SEMANTICS;
-    if (![CURRENT_METRIC_SEMANTICS, LEGACY_METRIC_SEMANTICS].includes(currentMetricSemanticsVersion)) {
+    if (![CURRENT_METRIC_SEMANTICS, LEGACY_METRIC_SEMANTICS, SCOPED_METRIC_SEMANTICS].includes(currentMetricSemanticsVersion)) {
       throw fieldError(
         'UNSUPPORTED_METRIC_SEMANTICS',
         line,
@@ -582,12 +583,16 @@ function parseCsv(csv) {
           'competition_entities_json',
           line,
           {
+            // v5 竞品实体的证据由 source_id 封闭引用，CSV 不强制 evidence 数组
             requireEvidence: currentAnalysisContractVersion === 'ai_structured_v4',
             answer: valueAt(row, 'answer')
           }
         )
       : [];
-    if (currentMetricSemanticsVersion === CURRENT_METRIC_SEMANTICS) {
+    if (
+      currentMetricSemanticsVersion === CURRENT_METRIC_SEMANTICS
+      || currentMetricSemanticsVersion === SCOPED_METRIC_SEMANTICS
+    ) {
       if (shareOfVoice !== null) {
         throw fieldError(
           'METRIC_SEMANTICS_MISMATCH',
