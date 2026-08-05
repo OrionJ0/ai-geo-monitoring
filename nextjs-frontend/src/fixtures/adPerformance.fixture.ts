@@ -401,6 +401,9 @@ export function buildAdPerformanceFixture(
         impressions: '0',
         clicks: '0'
       },
+      previousState: 'UNAVAILABLE',
+      previousSummary: null,
+      previousUnavailableReason: '开发数据没有可用的上一周期。',
       currentTrend: [],
       previousTrend: [],
       structure: []
@@ -427,6 +430,9 @@ export function buildAdPerformanceFixture(
     availableTo: CURRENT_TO,
     period,
     summary: sumAdMetrics(currentTrend),
+    previousState: 'READY',
+    previousSummary: sumAdMetrics(previousTrend),
+    previousUnavailableReason: '',
     currentTrend,
     previousTrend,
     structure: buildNodes(

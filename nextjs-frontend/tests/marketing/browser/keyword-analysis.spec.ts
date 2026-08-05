@@ -892,15 +892,127 @@ test('advertising hierarchy pins the dashboard revision without reading legacy d
   await page.goto('/geo/ad-performance');
   await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
   expect(dashboardRequests).toHaveLength(3);
-  expect(hierarchyRequests).toHaveLength(1);
-  const hierarchyUrl = new URL(hierarchyRequests[0]);
+  expect(hierarchyRequests).toHaveLength(2);
+  const hierarchyUrls = hierarchyRequests.map((request) => new URL(request));
   const dashboardUrl = new URL(dashboardRequests.at(-1)!);
-  expect(hierarchyUrl.searchParams.get('revision'))
-    .toBe('keyword-analysis-fixture-revision');
-  expect(hierarchyUrl.searchParams.get('from'))
-    .toBe(dashboardUrl.searchParams.get('from'));
-  expect(hierarchyUrl.searchParams.get('to'))
-    .toBe(dashboardUrl.searchParams.get('to'));
+  expect(new Set(hierarchyUrls.map((url) => url.searchParams.get('revision'))))
+    .toEqual(new Set(['keyword-analysis-fixture-revision']));
+  const currentUrl = hierarchyUrls.find((url) => (
+    url.searchParams.get('from') === dashboardUrl.searchParams.get('from')
+    && url.searchParams.get('to') === dashboardUrl.searchParams.get('to')
+  ));
+  expect(currentUrl).toBeDefined();
+  const previousUrl = hierarchyUrls.find((url) => url !== currentUrl)!;
+  const currentFrom = Date.parse(`${currentUrl!.searchParams.get('from')}T00:00:00.000Z`);
+  const currentTo = Date.parse(`${currentUrl!.searchParams.get('to')}T00:00:00.000Z`);
+  const previousFrom = Date.parse(`${previousUrl.searchParams.get('from')}T00:00:00.000Z`);
+  const previousTo = Date.parse(`${previousUrl.searchParams.get('to')}T00:00:00.000Z`);
+  expect(previousTo + 86_400_000).toBe(currentFrom);
+  expect(previousTo - previousFrom).toBe(currentTo - currentFrom);
+  await expect(keywordMetric(page, '总展现'))
+    .toContainText(/上期\s*[\d,]+/u);
+  await expect(page.getByLabel('总展现上期：暂无数据')).toHaveCount(0);
+});
+
+test('advertising keeps current facts when the previous period is outside coverage', async ({ page }) => {
+  let hierarchyRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/ad-hierarchy**');
+  await page.route('**/api/marketing/projects/11/ad-hierarchy**', (route) => {
+    hierarchyRequestCount += 1;
+    if (hierarchyRequestCount === 2) {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'DASHBOARD_DATE_OUT_OF_RANGE',
+            message: '上一周期超出当前快照覆盖范围'
+          }
+        })
+      });
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(adHierarchyResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/ad-performance');
+  await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
+  await expect(page.getByRole('table', { name: '广告投放明细表格' }))
+    .toContainText('PC-周界报警');
+  const previous = page.getByLabel('总展现上期：暂无数据');
+  await expect(previous).toBeVisible();
+  await previous.hover();
+  await expect(page.getByRole('tooltip'))
+    .toContainText('上一周期超出当前快照覆盖范围');
+});
+
+test('advertising preserves retryable previous-period failure instead of calling it no data', async ({ page }) => {
+  let hierarchyRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/ad-hierarchy**');
+  await page.route('**/api/marketing/projects/11/ad-hierarchy**', (route) => {
+    hierarchyRequestCount += 1;
+    if (hierarchyRequestCount === 2) {
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'MARKETING_UPSTREAM_UNAVAILABLE',
+            message: '上一周期上游暂时不可用'
+          }
+        })
+      });
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(adHierarchyResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/ad-performance');
+  await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
+  const warning = page.getByRole('alert').filter({
+    hasText: '上一周期比较读取失败'
+  });
+  await expect(warning).toContainText('上一周期上游暂时不可用');
+  await expect(warning.getByRole('button', { name: /重\s*试/u })).toBeVisible();
+  await expect(page.getByRole('table', { name: '广告投放明细表格' }))
+    .toContainText('PC-周界报警');
+});
+
+test('advertising discards a late previous request generation after the date changes', async ({ page }) => {
+  let releaseFirstGeneration: (() => void) | undefined;
+  const firstGenerationGate = new Promise<void>((resolve) => {
+    releaseFirstGeneration = resolve;
+  });
+  let hierarchyRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/ad-hierarchy**');
+  await page.route('**/api/marketing/projects/11/ad-hierarchy**', async (route) => {
+    hierarchyRequestCount += 1;
+    if (hierarchyRequestCount <= 2) await firstGenerationGate;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(adHierarchyResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/ad-performance');
+  await expect.poll(() => hierarchyRequestCount).toBe(2);
+  await page.getByLabel('广告表现日期范围').first().click();
+  await page.getByText('最近 14 天', { exact: true }).last().click();
+  await expect.poll(() => hierarchyRequestCount).toBe(4);
+  await expect(page.getByRole('img', { name: /每日趋势，近 14 天与较前 14 天/u }))
+    .toBeVisible();
+
+  releaseFirstGeneration?.();
+  await expect.poll(() => page.getByRole('img', {
+    name: /每日趋势，近 14 天与较前 14 天/u
+  }).count())
+    .toBeGreaterThan(0);
+  await expect(page.getByRole('img', { name: /每日趋势，近 7 天与较前 7 天/u }))
+    .toHaveCount(0);
 });
 
 test('migrated detail pages use the lightweight dashboard root', async ({ page }) => {

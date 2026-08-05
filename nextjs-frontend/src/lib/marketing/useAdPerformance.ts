@@ -6,8 +6,11 @@ import {
   adaptMarketingAdHierarchy,
   assertMarketingAdHierarchyResponse,
   assertMarketingDashboardRootResponse,
+  buildAdPeriod,
+  classifyAdPreviousHierarchyError,
   marketingSnapshotWarning,
   type AdPerformanceModel,
+  type AdPreviousHierarchyResult,
   type MarketingAdHierarchyResponse
 } from '@/lib/marketing/adPerformanceAdapter';
 import { buildAdPerformanceFixture } from '@/fixtures/adPerformance.fixture';
@@ -40,6 +43,21 @@ export const AD_PERFORMANCE_FIXTURE_ENABLED = (
   &&
   process.env.NEXT_PUBLIC_AD_PERFORMANCE_FIXTURE === 'true'
 );
+
+function readErrorMessage(error: unknown): string | null {
+  const response = (
+    error && typeof error === 'object' && 'response' in error
+      ? (error as {
+          response?: {
+            data?: { error?: { code?: unknown; message?: unknown } };
+          };
+        }).response
+      : undefined
+  );
+  return typeof response?.data?.error?.message === 'string'
+    ? response.data.error.message
+    : null;
+}
 
 export default function useAdPerformance({
   projectId,
@@ -114,37 +132,74 @@ export default function useAdPerformance({
         || response.data.coverage?.to;
       const revision = response.data.revision;
       if (!from || !to || !revision) {
-        setData(adaptMarketingAdHierarchy(response.data, null, projectName));
+        setData(adaptMarketingAdHierarchy(
+          response.data,
+          null,
+          {
+            state: 'UNAVAILABLE',
+            hierarchy: null,
+            reason: '当前没有可比较的上一周期广告快照。'
+          },
+          projectName
+        ));
         return;
       }
-      const hierarchyResponse = await axios.get<MarketingAdHierarchyResponse>(
-        `/api/marketing/projects/${encodeURIComponent(projectId)}/ad-hierarchy`,
-        {
-          params: { revision: response.data.revision, from, to },
+      const period = buildAdPeriod(from, to);
+      const endpoint = `/api/marketing/projects/${encodeURIComponent(projectId)}/ad-hierarchy`;
+      const [currentResult, previousResult] = await Promise.allSettled([
+        axios.get<MarketingAdHierarchyResponse>(endpoint, {
+          params: { revision, from, to },
           timeout: 10_000
-        }
-      );
+        }),
+        axios.get<MarketingAdHierarchyResponse>(endpoint, {
+          params: {
+            revision,
+            from: period.previousFrom,
+            to: period.previousTo
+          },
+          timeout: 10_000
+        })
+      ]);
       if (requestId !== requestSequence.current) return;
+      if (currentResult.status === 'rejected') throw currentResult.reason;
       assertMarketingAdHierarchyResponse(
-        hierarchyResponse.data,
+        currentResult.value.data,
         response.data,
         { from, to }
       );
+      let previous: AdPreviousHierarchyResult;
+      if (previousResult.status === 'rejected') {
+        previous = classifyAdPreviousHierarchyError(previousResult.reason);
+      } else {
+        try {
+          assertMarketingAdHierarchyResponse(
+            previousResult.value.data,
+            response.data,
+            { from: period.previousFrom, to: period.previousTo },
+            { requireDashboardSummary: false }
+          );
+          previous = {
+            state: 'READY',
+            hierarchy: previousResult.value.data,
+            reason: ''
+          };
+        } catch {
+          previous = {
+            state: 'ERROR',
+            hierarchy: null,
+            reason: '上一周期广告响应合同无效，请重试。'
+          };
+        }
+      }
       setData(adaptMarketingAdHierarchy(
         response.data,
-        hierarchyResponse.data,
+        currentResult.value.data,
+        previous,
         projectName
       ));
     } catch (requestError: unknown) {
       if (requestId !== requestSequence.current) return;
-      const response = (
-        requestError && typeof requestError === 'object' && 'response' in requestError
-          ? (requestError as {
-              response?: { data?: { error?: { message?: unknown } } };
-            }).response
-          : undefined
-      );
-      const message = response?.data?.error?.message;
+      const message = readErrorMessage(requestError);
       setData(null);
       setWarning('');
       setError(

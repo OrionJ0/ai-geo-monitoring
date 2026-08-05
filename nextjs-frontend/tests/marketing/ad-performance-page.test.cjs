@@ -27,7 +27,16 @@ test('advertising page pins the hierarchy resource to the read-only dashboard ro
   assert.match(dashboardReaderSource, /clampMarketingDateRange/);
   assert.match(hookSource, /onDateRangeAdjusted\?\.\(response\.effectiveDateRange\)/);
   assert.match(hookSource, /\/ad-hierarchy/);
-  assert.match(hookSource, /revision: response\.data\.revision/);
+  assert.match(hookSource, /params: \{ revision, from, to \}/);
+  assert.match(hookSource, /Promise\.allSettled/);
+  assert.match(hookSource, /from: period\.previousFrom/);
+  assert.match(hookSource, /to: period\.previousTo/);
+  assert.match(hookSource, /requireDashboardSummary: false/);
+  assert.match(hookSource, /requestId !== requestSequence\.current/);
+  assert.match(adapterSource, /DASHBOARD_DATE_OUT_OF_RANGE/);
+  assert.match(pageSource, /previousState === 'ERROR'/);
+  assert.match(pageSource, /previousMissingReason=\{item\.previousMissingReason\}/);
+  assert.doesNotMatch(pageSource, /sumTrendMetrics\(performance\.data\?\.previousTrend/);
   assert.match(hookSource, /assertMarketingDashboardRootResponse\(response\.data, projectId\)/);
   assert.match(hookSource, /assertMarketingAdHierarchyResponse/);
   assert.match(hookSource, /adaptMarketingAdHierarchy/);
