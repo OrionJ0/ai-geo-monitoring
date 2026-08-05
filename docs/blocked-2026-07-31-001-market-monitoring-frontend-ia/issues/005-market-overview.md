@@ -8,7 +8,7 @@ resolution: superseded
 
 # 新版市场总览：全链路数据、投放效率与每日趋势
 
-> 处置（2026-08-05）：本 issue 对旧版首页改造的交付职责已结束。已完成部分保留为历史验收；渠道对比与趋势硬切由[市场总览渠道对比需求](../../active-2026-08-05-001-market-overview-channel-comparison/prd.md)承接，53KF 和正式真实数据验收分别由 `015-kf53-api-verification.md`、`016-real-data-release-acceptance.md` 承接。下方未勾选项不视为完成，也不再作为本 issue 的关闭门禁。
+> 处置（2026-08-05）：本 issue 对旧版首页改造的交付职责已结束。已完成部分保留为历史验收；渠道对比与趋势硬切已由[市场总览渠道对比需求](../../closed-2026-08-05-001-market-overview-channel-comparison/prd.md)完成，53KF 外部接入继续由 `015-kf53-api-verification.md` 跟踪，正式页面与生产日志验收已由 `016-real-data-release-acceptance.md` 完成并关闭。下方未勾选项不视为完成，也不再作为本 issue 的关闭门禁。
 
 ## Parent
 

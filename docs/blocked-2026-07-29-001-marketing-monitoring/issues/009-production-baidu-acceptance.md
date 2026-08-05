@@ -87,4 +87,11 @@ git diff --check
 
 - 公网 HTTPS callback、获批应用、动态 state 授权、Token 加密落库和真实账户目录已完成。
 - 搜索报表和百度统计站点/趋势接口均从服务器发起只读请求并成功返回；本地只保存脱敏 fixture。
-- 尚未从部署后的 `PILOT_DATA_READY` 页面完成账户绑定、快照与百度后台同口径核对，也未实际触发 Refresh Token grant 和代理/APM 秘密扫描，因此本 issue 仍为 blocked。
+- 截至 2026-07-30，尚未从部署后的 `PILOT_DATA_READY` 页面完成账户绑定、快照与百度后台同口径核对，也未实际触发 Refresh Token grant 和代理/APM 秘密扫描；后续进展与当前缺口见下一节。
+
+## 2026-08-05 已补生产证据与当前阻塞
+
+- 正式页面已经读取真实 Dashboard；生产数据库在同一 `refresh_run_id` 下保存计划、单元、关键词和搜索词四份事实，Nginx 请求链、systemd journal 与部署日志的敏感模式扫描均为零命中。精确窗口、计数和调用链证据见市场工作台 [Issue 016](../../blocked-2026-07-31-001-market-monitoring-frontend-ia/issues/016-real-data-release-acceptance.md)。
+- 上述证据已经关闭“页面是否走真实四报告链路、是否执行 fixture/旧 provider fallback、常规日志是否泄漏”的缺口；它不等于百度模块已经满足正式 `READY`。
+- 当前仍缺同账户、同日期、同时区和同统计时点的百度后台核对表，实际 Refresh Token grant/轮换与响应丢失行为证据，百度控制台新域名 callback 人工确认，完整代理/APM/浏览器秘密扫描，以及固定 VoiceOver/键盘脚本。Issue 008 的正式配置、PostgreSQL 和运维门禁也仍未全部关闭。
+- 因此本 issue 继续为 `blocked`；解除条件是补齐上述正式契约与生产准入证据并把模块从 `PILOT_DATA_READY` 提升为 `READY`，不是重复验证已经上线的四报告读取路径。
