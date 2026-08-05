@@ -1,8 +1,8 @@
 ---
 title: 百度统一 OAuth 凭据与营销 API 边界整理技术方案
 date: 2026-08-05
-status: blocked
-source: docs/blocked-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md
+status: active
+source: docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md
 scope: deep
 ---
 
@@ -889,9 +889,9 @@ A2 至少保存：
 
 ## 19. Handoff
 
-- PRD: `docs/blocked-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
-- Tech Spec: `docs/blocked-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Status: `blocked`；U1 工具与本地合同已完成，等待临时 SSH 运维会话后从服务器真实 HEAD 构造仅含探针的 fast-forward tooling bundle。正式业务运行路径尚未修改。
-- First issue: U1 tooling-only 探针发布与生产无状态只读验证。
+- PRD: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
+- Tech Spec: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
+- Status: `active`；U1 已在生产服务器以同一现役 OAuth Token 验证搜索推广四报表和百度统计，双产品均通过且状态前后不变。正式业务运行路径尚未修改。
+- First issue: U2 版本化产品能力状态。
 - Completion condition: U1–U5 通过、A2 正式入口验收完成、旧实现与旧文档删除。
 - Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件；默认顺序为 003 → 006 → 007 → 005。
