@@ -1,7 +1,7 @@
 ---
 title: 市场总览渠道对比与真实数据修复 PRD
 date: 2026-08-05
-status: active
+status: closed
 source: 2026-08-05 用户确认的 A+B 首页方向
 scope: product
 ---
@@ -198,6 +198,6 @@ ROAS、CPL、CPA、成交率和整体转化率只有在真实分子、分母及�
 
 ## Handoff
 
-- PRD path: `docs/active-2026-08-05-001-market-overview-channel-comparison/prd.md`
-- Current state: Issue 001–004 的合同、区间 API、首页切换、七渠道同图与表格联动已在本地实现并关闭；尚未完成 Issue 005 的旧固定趋势链消费者审计、代码退役、正式 Git Bundle 发布和生产登录后验收。
-- Recommended next step: 执行 `issues/005-retire-old-flow-and-production-acceptance.md`；在入口级证据证明新链为唯一正式路径前，本目录保持 `active`。
+- PRD path: `docs/closed-2026-08-05-001-market-overview-channel-comparison/prd.md`
+- Current state: Issue 001–005 已完成。新区间来源比较链是首页唯一正式路径，旧固定趋势路由和专属包装已删除；提交 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373` 已通过正式 Git Bundle workflow `30973958050` 发布并完成登录态生产对账。
+- Remaining external integrations: 官网生产只读凭据、53KF 和销售系统仍未接入；它们不是本需求范围，首页继续诚实显示不可用或缺失状态。

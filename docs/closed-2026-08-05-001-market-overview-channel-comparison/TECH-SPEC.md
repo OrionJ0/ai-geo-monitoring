@@ -1,14 +1,14 @@
 ---
 title: 市场总览渠道对比与真实数据修复技术方案
 date: 2026-08-05
-status: active
-source: docs/active-2026-08-05-001-market-overview-channel-comparison/prd.md
+status: closed
+source: docs/closed-2026-08-05-001-market-overview-channel-comparison/prd.md
 scope: deep
 ---
 
 # 市场总览渠道对比与真实数据修复技术方案
 
-> 实施状态（2026-08-05）：Issue 001–004 已完成；首页已使用区间来源比较合同，旧固定趋势路由和专属包装已删除。第 3 节保留为实施前基线，正式发布与生产验收仍以 Issue 005 为门禁。
+> 实施状态（2026-08-05）：Issue 001–005 已完成；首页已使用区间来源比较合同，旧固定趋势路由和专属包装已删除。正式版本 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373` 已发布并通过登录态生产验收。第 3 节保留为实施前历史基线。
 
 ## 1. 背景与目标
 
@@ -469,7 +469,7 @@ date, sourceKey, sourceLabel, exactValue, coordinate, isTotal
 - `docs/README.md`
 - `docs/API.md`
 - `docs/visual-design-spec.md`（仅在全局标签或交互规则确需同步时更新）
-- `docs/active-2026-08-05-001-market-overview-channel-comparison/`
+- `docs/closed-2026-08-05-001-market-overview-channel-comparison/`
 - `backend/modules/marketing/routes/marketingDashboardRoutes.js`
 - `backend/modules/marketing/services/BaiduTongjiService.js`
 - `backend/tests/marketing/MarketingTongjiSourceApi.test.js`
@@ -627,7 +627,7 @@ date, sourceKey, sourceLabel, exactValue, coordinate, isTotal
 
 ## 18. 后续衔接
 
-- 实施状态：U1–U4 已在本地实现并关闭；U5 的旧链退役、正式发布和生产入口验收仍未完成；
-- 当前执行入口：`issues/005-retire-old-flow-and-production-acceptance.md`；
+- 实施状态：U1–U5 已完成并关闭；新区间来源比较链已成为生产首页唯一正式路径；
+- 生产证据入口：`acceptance-evidence.md`；
 - 是否适合 TDD：适合。优先用失败的汇总/趋势不一致测试和广告稀疏日期测试建立红灯，再实现合同与页面切换；
-- 推荐下一步：审计旧固定趋势接口消费者，完成无 fallback 的退役与全量回归，再通过正式 Git Bundle 发布并从唯一生产域名验收。
+- 后续接入：官网生产只读凭据、53KF 和销售系统分别按独立需求推进，不得在本首页链路中模拟补齐。
