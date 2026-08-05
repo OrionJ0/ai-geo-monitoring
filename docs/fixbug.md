@@ -38,7 +38,7 @@
     - `backend/database.sqlite`
     - `backend/services/AIPlatformRequestService.js`
     - `backend/services/DoubaoWebAdapter.js`
-    - `docs/blocked-2026-07-27-002-doubao-web-monitoring/issues/004-doubao-single-prompt-trusted-capture.md`
+    - `docs/active-2026-07-27-002-doubao-web-monitoring/issues/004-doubao-single-prompt-trusted-capture.md`
   - 复现：在设置中心查看四个 API 的“联网能力”；运行一个要求豆包联网并列出可点击来源的问题，核对报告中的平台引用与检索候选。
   - 验证：已从设置中心真实执行四个平台联网能力检测。豆包 API 与千问 Responses 返回了供应商联网调用/来源证据，状态为“测试成功”；DeepSeek API 与腾讯混元调用成功但供应商响应没有可验证的联网证据，正确标为“证据不足”，没有误报成功。本地正式问题库运行 `#10`、记录 `id=17` 在豆包普通模式完成 713 字回答，报告只把最终正文中的 3 条 OpenAI 官方链接计入核心引用，并把 23 条网络检索结果单独列为检索候选；目标 URL 已从 `link.wtturl.cn` 安全跳转解析为 `openai.com`、`platform.openai.com` 和 `help.openai.com`，两张私有截图可正常读取。DeepSeek Web 正式运行 `#11` 也完成登录预检、智能搜索、回答、3 条页面引用和两张证据图。
 
@@ -236,8 +236,8 @@
   - 来源：
     - `backend/services/SchedulerService.js`
     - `nextjs-frontend/src/app/geo/projects/page.tsx`
-    - `docs/blocked-2026-07-27-002-doubao-web-monitoring/prd.md`
-    - `docs/blocked-2026-07-27-002-doubao-web-monitoring/TECH-SPEC.md`
+    - `docs/active-2026-07-27-002-doubao-web-monitoring/prd.md`
+    - `docs/active-2026-07-27-002-doubao-web-monitoring/TECH-SPEC.md`
   - 复现：让自动监测项目的任一 Web 平台登录失效并等待计划执行；检查项目列表、调度记录和需求文档。
   - 修复：调度器保留具体 Web 预检错误和平台，失败后按每日计划推进下一次执行且不自动重试；项目接口返回最近计划执行摘要，项目列表展示平台、原因、下一次时间和设置入口。PRD、Tech Spec、issue、README 与环境说明统一为双 Web 默认、严格整体阻断和豆包普通模式。
   - 验证：调度器、项目接口和前端状态工具专项测试通过；项目列表组件契约确认失败摘要和设置入口均来自真实调度记录。

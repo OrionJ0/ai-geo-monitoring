@@ -16,35 +16,6 @@ const {
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
 
-// 等待最新刷新运行达到终态（SUCCEEDED/FAILED/INTERRUPTED）且释放 active_project_key 槽，
-// 再给一拍让内存态（失败冷却）落定。后台刷新的 commit 与本次等待可能并发，
-// 因此不能只看 active 槽是否为空，必须同时确认最新运行已离开 QUEUED/RUNNING。
-async function waitForRefreshSettled(sequelize, projectId, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  const terminal = ['SUCCEEDED', 'FAILED', 'INTERRUPTED'];
-  while (Date.now() < deadline) {
-    const rows = await sequelize.query(
-      `SELECT status, active_project_key
-       FROM baidu_marketing_refresh_runs
-       WHERE project_id = :projectId
-       ORDER BY project_run_sequence DESC LIMIT 1`,
-      {
-        replacements: { projectId },
-        type: sequelize.QueryTypes.SELECT
-      }
-    );
-    if (
-      terminal.includes(rows[0]?.status)
-      && rows[0]?.active_project_key == null
-    ) {
-      await new Promise((resolve) => setImmediate(resolve));
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error('刷新运行未在超时内达到终态并释放项目槽');
-}
-
 test('on-demand admission rejection releases the project refresh slot', async (t) => {
   const database = await createMarketingTestDatabase('marketing-on-demand-reject-');
   t.after(database.close);
@@ -72,7 +43,6 @@ test('on-demand admission rejection releases the project refresh slot', async (t
     }
   });
 
-  // 首载无快照时仍同步等待，刷新被执行器拒绝会直接抛给前端。
   await assert.rejects(
     service.read({ projectId: 11 }),
     { code: 'MARKETING_EXECUTOR_QUEUE_FULL' }
@@ -133,7 +103,7 @@ test('dashboard refreshes advertising only when requested and reuses it for ten 
 
   assert.equal(providerCalls, 0, '没有访问时不得调用百度推广');
   const first = await service.read({ projectId: 11 });
-  assert.equal(providerCalls, 1, '首载无快照应同步刷新一次');
+  assert.equal(providerCalls, 1);
   assert.equal(first.summary.impressions, '1');
 
   now += 9 * 60 * 1000;
@@ -142,14 +112,8 @@ test('dashboard refreshes advertising only when requested and reuses it for ten 
   assert.equal(cached.revision, first.revision);
 
   now += 2 * 60 * 1000;
-  const staleRead = await service.read({ projectId: 11 });
-  assert.equal(staleRead.revision, first.revision, '过期时先返回旧快照，不阻塞读取');
-  assert.equal(staleRead.states.snapshotFreshnessState, 'STALE');
-  assert.ok(staleRead.activeRun?.runId, '后台刷新运行应暴露给前端轮询');
-
-  await waitForRefreshSettled(database.sequelize, 11);
   const refreshed = await service.read({ projectId: 11 });
-  assert.equal(providerCalls, 2, '后台刷新完成后应有一次新的上游调用');
+  assert.equal(providerCalls, 2);
   assert.notEqual(refreshed.revision, first.revision);
   assert.equal(refreshed.summary.impressions, '2');
 });
@@ -200,15 +164,10 @@ test('dashboard returns an old revision with an explicit stale failure state', a
   const first = await service.read({ projectId: 11 });
   now += 11 * 60 * 1000;
   const fallback = await service.read({ projectId: 11 });
-  assert.equal(fallback.revision, first.revision, '刷新失败时返回旧快照');
+  assert.equal(fallback.revision, first.revision);
   assert.equal(fallback.states.snapshotFreshnessState, 'STALE');
-  assert.ok(fallback.activeRun?.runId, '后台刷新运行应暴露给前端轮询');
-
-  await waitForRefreshSettled(database.sequelize, 11);
-  const settled = await service.read({ projectId: 11 });
-  assert.equal(settled.revision, first.revision);
   assert.equal(
-    settled.lastRun.failureCode,
+    fallback.lastRun.failureCode,
     'BAIDU_REPORT_SNAPSHOT_UNSTABLE'
   );
   const repeatedFallback = await service.read({ projectId: 11 });
@@ -260,7 +219,6 @@ test('crossed-day stale recovery refreshes once before coverage discovery and cl
 
   const first = await service.read({ projectId: 11 });
   now += 24 * 60 * 60 * 1000 + 11 * 60 * 1000;
-  // 带筛选读取保持同步刷新：上游失败落库后，仍对旧快照覆盖范围做校验并抛错。
   await assert.rejects(
     service.read({
       projectId: 11,

@@ -2,10 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from '@/lib/axiosConfig';
-import {
-  readWebsiteFormDisabledMessage,
-  rememberWebsiteFormDisabled
-} from './moduleState';
 import type {
   WebsiteFormConsultationData,
   WebsiteFormSource
@@ -148,14 +144,6 @@ export default function useWebsiteFormConsultationDays({
       setErrorMessage(null);
       return;
     }
-    const disabledMessage = readWebsiteFormDisabledMessage();
-    if (disabledMessage) {
-      setState('SOURCE_ERROR');
-      setData(null);
-      setErrorCode('WEBSITE_FORM_MODULE_DISABLED');
-      setErrorMessage(disabledMessage);
-      return;
-    }
     setState('LOADING');
     try {
       const response = await axios.get(
@@ -178,9 +166,6 @@ export default function useWebsiteFormConsultationDays({
     } catch (error) {
       if (request !== sequence.current) return;
       const details = errorDetails(error);
-      if (details.code === 'WEBSITE_FORM_MODULE_DISABLED') {
-        rememberWebsiteFormDisabled(details.message);
-      }
       setData(null);
       setState('SOURCE_ERROR');
       setErrorCode((error as { code?: string })?.code || details.code);

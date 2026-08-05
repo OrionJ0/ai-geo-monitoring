@@ -67,25 +67,3 @@ test('market overview labels website forms clearly and only merges exact source 
   assert.match(source, /websiteFormBySource\.get\(source\.sourceKey\)/u);
   assert.match(source, /官网成功表单记录/u);
 });
-
-test('website form hooks remember module DISABLED once per session and short-circuit reads', () => {
-  const moduleStatePath = path.resolve(
-    __dirname,
-    '../../src/lib/websiteData/moduleState.ts'
-  );
-  const moduleState = fs.readFileSync(moduleStatePath, 'utf8');
-  const aggregateHook = fs.readFileSync(hookPath, 'utf8');
-  const dailyHook = fs.readFileSync(dailyHookPath, 'utf8');
-
-  assert.match(moduleState, /rememberWebsiteFormDisabled/u);
-  assert.match(moduleState, /readWebsiteFormDisabledMessage/u);
-  [aggregateHook, dailyHook].forEach((source) => {
-    assert.match(source, /readWebsiteFormDisabledMessage\(\)/u);
-    assert.match(source, /rememberWebsiteFormDisabled\(/u);
-    assert.match(source, /WEBSITE_FORM_MODULE_DISABLED/u);
-    // 仍保持独立客户端的边界，不引入营销模块引用
-    assert.doesNotMatch(source, /\/api\/marketing/u);
-  });
-  // 聚合 hook 的 10 分钟 interval 结构保留，仅在 DISABLED 时短路 read 体
-  assert.match(aggregateHook, /10 \* 60 \* 1000/u);
-});

@@ -110,11 +110,6 @@ const QuestionRecord = sequelize.define('QuestionRecord', {
   metric_semantics_version: {
     type: DataTypes.STRING(50),
     allowNull: true
-  },
-  competitor_snapshot: {
-    type: DataTypes.JSON,
-    allowNull: true,
-    comment: '运行创建时冻结的竞品注册表快照，analysis-only 复用，不随实时配置漂移'
   }
 }, {
   tableName: 'question_records',

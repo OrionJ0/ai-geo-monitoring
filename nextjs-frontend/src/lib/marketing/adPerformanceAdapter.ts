@@ -122,14 +122,6 @@ export type MarketingDashboardResponse = {
     status: string;
     failureCode: string | null;
   } | null;
-  activeRun?: {
-    runId: string;
-    status: string;
-    coverage?: {
-      from: string;
-      to: string;
-    };
-  } | null;
 };
 
 const EMPTY_METRICS: AdExactMetrics = Object.freeze({

@@ -1,7 +1,5 @@
 # GEO 指标口径与回答内竞品提及占比 PRD
 
-> 状态：阻塞。指标实现、迁移、消费者升级和离线人工基线均已完成；当前只剩 Issue 009 的真实入口消费者证据。现役分析契约仍是 `ai_structured_v4` / `geo_metric_input_v4`，后继 Flash v5 可靠性改造不得被当成本目录已经完成正式切换的证据。
-
 ## Problem Statement
 
 当前 GEO 监测已经形成“采集原回答 → AI 结构化 → 程序计算指标 → 看板与报告聚合”的完整链路，但用户仍难以准确回答以下问题：
@@ -343,6 +341,5 @@
 
 ## Handoff
 
-- PRD path: `docs/blocked-2026-07-28-001-geo-entity-share-metrics/prd.md`
-- Current state: Issue 001–008 已关闭；Issue 009 仍需从真实入口覆盖看板、项目报告、问题集报告、PDF、CSV、告警和洞察，不能用单元测试或后继 v5 隔离基准替代。
-- Recommended next step: 完成 Issue 009 的真实入口消费者证据后关闭本目录；Flash v5 的实现与硬切独立由 `docs/active-2026-08-05-002-flash-structured-analysis-reliability/` 跟踪。
+- PRD path: `docs/draft-2026-07-28-001-geo-entity-share-metrics/prd.md`
+- Recommended next step: 先进行产品口径审阅，再使用 `$to-tech-spec` 明确新旧指标切换、数据版本、API、存储与入口级验收方案。

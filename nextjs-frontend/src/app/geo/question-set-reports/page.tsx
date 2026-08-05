@@ -86,9 +86,7 @@ type ReportSummary = {
   recommendation_rate?: number | null;
   sov_summary?: {
     metric_semantics_version?: string;
-    kind?: 'contextual_competitor_mentions' | 'legacy_configured_competitors' | 'observed_competitor_mentions';
-    scope?: string;
-    completeness?: string;
+    kind?: 'contextual_competitor_mentions' | 'legacy_configured_competitors';
     average?: number | null;
     calculable_answers?: number;
   } | null;
@@ -129,10 +127,8 @@ type SkippedPlatform = {
 };
 type AnswerSov = {
   metric_semantics_version?: string;
-  kind?: 'contextual_competitor_mentions' | 'legacy_configured_competitors' | 'observed_competitor_mentions';
-  status?: 'calculated' | 'not_applicable' | 'observed_only';
-  scope?: string;
-  completeness?: string;
+  kind?: 'contextual_competitor_mentions' | 'legacy_configured_competitors';
+  status?: 'calculated' | 'not_applicable';
   value?: number | null;
   numerator?: number | null;
   denominator?: number | null;
@@ -365,8 +361,8 @@ function formatRank(value?: number | null) {
 }
 
 function formatAnswerSov(row: ReportRow) {
-  if (row.sov?.kind === 'contextual_competitor_mentions' || row.sov?.kind === 'observed_competitor_mentions') {
-    if (row.sov.status === 'not_applicable' || (row.sov.status === 'observed_only' && (row.sov.denominator ?? 0) === 0)) return '—';
+  if (row.sov?.kind === 'contextual_competitor_mentions') {
+    if (row.sov.status === 'not_applicable') return '—';
     return `${percent(row.sov.value ?? undefined)}%（${row.sov.numerator ?? 0}/${row.sov.denominator ?? 0}）`;
   }
   return row.sov?.value == null ? '—' : `${percent(row.sov.value)}%`;
@@ -684,8 +680,7 @@ export default function QuestionSetReportsPage() {
   }, [report, selectedProject]);
   const summary = report?.summary || {};
   const hasCompetitorBaseline = summary.sov_summary?.kind === 'legacy_configured_competitors';
-  const hasCurrentSov = summary.sov_summary?.kind === 'contextual_competitor_mentions'
-    || summary.sov_summary?.kind === 'observed_competitor_mentions';
+  const hasCurrentSov = summary.sov_summary?.kind === 'contextual_competitor_mentions';
   const hasLegacyAnalysis = Boolean(report?.rows?.some(
     (row) => row.has_metrics
       && !['ai_structured_v1', 'ai_structured_v2', 'ai_structured_v3', 'ai_structured_v4'].includes(row.analysis_method || ''),
@@ -907,11 +902,9 @@ export default function QuestionSetReportsPage() {
             <Tag color={row.brand_mentioned ? 'blue' : 'default'}>{row.brand_mentioned ? '已提及' : '未提及'}</Tag>
             {row.brand_recommended ? <Tag color="green">明确推荐</Tag> : null}
           </Space>
-          {row.sov?.kind === 'contextual_competitor_mentions' || row.sov?.kind === 'observed_competitor_mentions' ? (
+          {row.sov?.kind === 'contextual_competitor_mentions' ? (
             <Text type="secondary">
-              {row.sov?.kind === 'observed_competitor_mentions'
-                ? '开放发现 SOV（仅基于本次已发现实体）'
-                : '回答内竞品提及占比（SOV）'} {formatAnswerSov(row)}
+              回答内竞品提及占比（SOV） {formatAnswerSov(row)}
             </Text>
           ) : hasCompetitorBaseline ? (
             <Text type="secondary">SOV {formatAnswerSov(row)}</Text>
@@ -1116,15 +1109,12 @@ export default function QuestionSetReportsPage() {
                   <div className={styles.primaryMetrics}>
                     <MetricItem
                       label={report.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
-                        || report.metric_semantics_version === 'contextual_competitor_mentions_sov_v2_scoped'
                         ? '分析覆盖率'
                         : '有效样本'}
                       value={report.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
-                        || report.metric_semantics_version === 'contextual_competitor_mentions_sov_v2_scoped'
                         ? formatAnalysisCoverage(summary)
                         : `${summary.valid_analyses || 0} / ${summary.total || 0}`}
                       help={report.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
-                        || report.metric_semantics_version === 'contextual_competitor_mentions_sov_v2_scoped'
                         ? '成功分析数 ÷ 已采集有效回答数；采集无效不进分母，分析失败不进品牌指标。'
                         : '有效指标样本数 ÷ 计划任务数。'}
                     />

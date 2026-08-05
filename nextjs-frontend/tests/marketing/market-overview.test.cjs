@@ -189,15 +189,3 @@ test('overview preserves local scrolling, responsive stacking and reduced motion
   assert.doesNotMatch(css, /font-family/);
   assert.doesNotMatch(css, /backdrop-filter|box-shadow:\s*0\s+\d{2,}px/);
 });
-
-test('overview hook polls the active refresh run when the snapshot is stale', () => {
-  const source = fs.readFileSync(hookPath, 'utf8');
-
-  assert.match(source, /ad\.data\?\.activeRun\?\.runId/u);
-  assert.match(source, /\/refresh-runs\//u);
-  assert.match(source, /setTimeout\(poll, 3000\)/u);
-  assert.match(source, /status === 'SUCCEEDED'/u);
-  assert.match(source, /void fetchOverview\(true\)/u);
-  // 轮询必须用 setTimeout 递归，保持不引入 setInterval。
-  assert.doesNotMatch(source, /setInterval/u);
-});

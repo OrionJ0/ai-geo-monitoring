@@ -63,25 +63,6 @@ class MarketingOnDemandDashboardService {
     return this.refreshes.get(key);
   }
 
-  enqueueBackgroundRefresh(runId, key) {
-    if (this.refreshes.has(key)) return;
-    const refresh = (async () => {
-      try {
-        return await this.executeRefresh(runId);
-      } catch (error) {
-        await this.refreshService.rejectQueuedRun(
-          runId,
-          error?.code || 'MARKETING_EXECUTOR_REJECTED'
-        );
-        this.failedRefreshes.set(key, this.clock());
-        throw error;
-      }
-    })().finally(() => this.refreshes.delete(key));
-    this.refreshes.set(key, refresh);
-    // 后台刷新失败已由失败冷却承担，这里吞掉 rejection 避免进程告警。
-    refresh.catch(() => {});
-  }
-
   async read(input) {
     const current = await this.dashboardService.read({
       projectId: input.projectId
@@ -94,39 +75,13 @@ class MarketingOnDemandDashboardService {
     const lastFailureAt = this.failedRefreshes.get(key);
     const coolingDown = Number.isFinite(lastFailureAt)
       && this.clock() - lastFailureAt < this.failedRefreshCooldownMs;
-    const defaultWindow = input.from === undefined && input.to === undefined;
     if (!coolingDown) {
-      if (current.revision && defaultWindow) {
-        // 默认窗口且有旧快照：后台刷新，立即返回旧快照，避免首页白等百度；
-        // 本次响应携带刚创建的 activeRun 供前端轮询刷新结果。
-        try {
-          const run = await this.refreshService.createRun({
-            projectId: input.projectId,
-            triggerType: 'ON_DEMAND',
-            userId: null
-          });
-          this.enqueueBackgroundRefresh(run.runId, key);
-          this.failedRefreshes.delete(key);
-          return {
-            ...current,
-            activeRun: {
-              runId: run.runId,
-              status: run.status,
-              coverage: run.coverage
-            }
-          };
-        } catch (error) {
-          this.failedRefreshes.set(key, this.clock());
-        }
-      } else {
-        // 无快照（首载）或带筛选读取：同步刷新，保证结果一致。
-        try {
-          await this.refresh(input.projectId);
-          this.failedRefreshes.delete(key);
-        } catch (error) {
-          this.failedRefreshes.set(key, this.clock());
-          if (!current.revision) throw error;
-        }
+      try {
+        await this.refresh(input.projectId);
+        this.failedRefreshes.delete(key);
+      } catch (error) {
+        this.failedRefreshes.set(key, this.clock());
+        if (!current.revision) throw error;
       }
     }
     return this.dashboardService.read(input);

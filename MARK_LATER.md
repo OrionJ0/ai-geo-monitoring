@@ -30,10 +30,10 @@
 - [ ] 2026-08-03：官网表单接入改用最小权限身份并完成生产验收
   - 来源：
     - `docs/adr/0001-marketing-funnel-data-source-of-truth.md`
-    - `docs/blocked-2026-07-31-001-market-monitoring-frontend-ia/issues/016-real-data-release-acceptance.md`
-  - 已完成前置：本地已实现独立官网聚合适配器、JWT 服务端缓存、响应校验、区间与最多 31 日逐日聚合、缓存回退、独立 API/迁移账本和首页展示；常规读取不包含联系人明细，2026-08-01 至 2026-08-04 的逐日合计已与同区间汇总完成真实只读对账。2026-08-05 提交 `98467f0` 新增官网模块 `DISABLED` 会话级跳过：生产凭据未配置时只发一次请求，页面挂载、10 分钟轮询与 visibilitychange 不再重复命中必然 503；该提交已推送到 GitHub，尚未部署或完成正式入口验收。
-  - 等待：取得专用最小权限只读服务账号或专用 API 密钥（共享管理员身份不得作为生产临时方案）；官网生产源码/schema/迁移/测试与线上聚合合同对齐。
-  - 恢复后：配置生产 `GATO_WEBSITE_FORM_*`（`PROJECT_ID=1`），执行独立官网迁移，部署，并从正式域名验收模块状态、区间与逐日真实接口和首页来源展示。
+    - `docs/active-2026-07-31-001-market-monitoring-frontend-ia/issues/005-market-overview.md`
+  - 已完成前置：本地已实现独立官网聚合适配器、JWT 服务端缓存、响应校验、区间与最多 31 日逐日聚合、缓存回退、独立 API/迁移账本和首页展示；常规读取不包含联系人明细，2026-08-01 至 2026-08-04 的逐日合计已与同区间汇总完成真实只读对账。
+  - 等待：官网生产源码/schema/迁移/测试与线上聚合合同完成对齐，并取得最小权限只读服务账号或专用 API 密钥。
+  - 恢复后：配置生产密钥、执行独立官网迁移、部署，并从正式域名验收模块状态、区间与逐日真实接口和首页来源展示。
 
 - [ ] 2026-08-03：接入 53KF 有效对话
   - 来源：
@@ -41,13 +41,21 @@
   - 等待：确认当前 53KF 账户的开放 API 权限、字段、限流、历史覆盖和去重合同。
   - 恢复后：只读验证来源和实际访客消息字段，仅把访客真实发送过消息的对话计为在线客服咨询。
 
+- [ ] 2026-08-04：完成两阶段 Git Bundle 正式发布
+  - 来源：
+    - `docs/SINGLE_HOST_DEPLOYMENT.md`
+    - `docs/active-2026-07-31-001-market-monitoring-frontend-ia/issues/016-real-data-release-acceptance.md`
+  - 已完成前置：桥接提交 `2bbd8c4` 已推送到 GitHub `main`；业务代码本地门禁已通过；发布开关已恢复为 false。
+  - 等待：production Environment 配置 `AI_GEO_DEPLOY_HOST`、`AI_GEO_DEPLOY_USER`、`AI_GEO_DEPLOY_SSH_KEY`、`AI_GEO_DEPLOY_KNOWN_HOSTS`，并确认 forced-command 公钥、主机指纹和恢复值守。
+  - 恢复后：先单独部署桥接并验证公网健康，再推送第二阶段业务提交，按正式域名逐页验收并审计日志和迁移。
+
 ## 以后再说
 
 - [ ] 2026-08-03：完成客服咨询到成交订单的来源全链路
   - 背景：官网表单、53KF、线索池和订单分别属于不同主数据源，不能用同期总量或比例伪造归因。
   - 来源：
     - `docs/adr/0001-marketing-funnel-data-source-of-truth.md`
-    - `docs/blocked-2026-07-31-001-market-monitoring-frontend-ia/prd.md`
+    - `docs/active-2026-07-31-001-market-monitoring-frontend-ia/prd.md`
   - 后续步骤：
     1. 在官网表单本地接入基础上完成生产验收，并独立接入 53KF 有效对话；
     2. 确认表单与在线对话并列计数或跨渠道去重规则；
@@ -57,18 +65,9 @@
 
 ## 已完成
 
-- [x] 2026-08-04：完成两阶段 Git Bundle 正式发布
-  - 完成时间：2026-08-05 11:01
-  - 来源：
-    - `docs/SINGLE_HOST_DEPLOYMENT.md`
-    - `docs/DEPLOYMENT.md`
-    - `docs/blocked-2026-07-31-001-market-monitoring-frontend-ia/issues/016-real-data-release-acceptance.md`
-  - 结果：桥接提交已安装，正式 workflow `30876793311` 将业务 revision `f265bd3` 快进部署；后续 workflow `30900162256` 又通过同一 Git Bundle 正式链路发布 `6894789`。服务器源码未被直接编辑，systemd、迁移与公网健康均已恢复。
-  - 验证：`/api/health` 与 `/api/frontend-health` 报告同一完整 revision，GitHub Actions 结论为 `success`；精确运行证据见 `docs/DEPLOYMENT.md#当前正式单机实例`。
-
-- [x] 2026-08-03：实现 GoodieAI 官网表单聚合适配器与首页本地接入（历史 v1，已由全部表单九键合同取代）
-  - 历史结果：当时新增独立 `backend/modules/websiteFormConsultations`、`/api/website-data`、官网数据迁移账本和前端 `src/lib/websiteData`，只统计可归因成功提交会话。2026-08-04 起该口径已由联系人列表全部表单记录与九键来源合同取代；当前总数、逐日和来源规则以 ADR 0001、API 文档和现役代码为准，不得继续执行或引用旧 v1 口径。
-  - 验证：后端完整 994/994、营销 131/131、官网数据 28/28、咨询记录 35/35、前端单元 72/72、部署专项 26/26、Playwright 23/23，lint 与 Next.js 38 路由 production build 通过；2026-08-01 至 2026-08-04 的官网逐日合计 3 与同区间汇总 3 一致。代码随后已通过正式 Git Bundle 链路进入生产 revision，但生产凭据尚未注入，模块继续保持 `DISABLED`，不得描述为官网数据已生产接通。
+- [x] 2026-08-03：实现 GoodieAI 官网表单聚合适配器与首页本地接入
+  - 结果：新增独立 `backend/modules/websiteFormConsultations`、`/api/website-data`、官网数据迁移账本和前端 `src/lib/websiteData`；区间汇总和最多 31 日逐日接口只同步可归因成功提交会话，不读取联系人明细，不与百度或 53KF 数据混用。上游不能证明全部表单记录数时，记录总数、未归因数和归因率保持不可用。
+  - 验证：后端完整 994/994、营销 131/131、官网数据 28/28、咨询记录 35/35、前端单元 72/72、部署专项 26/26、Playwright 23/23，lint 与 Next.js 38 路由 production build 通过；2026-08-01 至 2026-08-04 的官网逐日合计 3 与同区间汇总 3 一致。第二阶段业务变更仍未推送、部署或完成正式入口验收。
 
 ## 已取消
 

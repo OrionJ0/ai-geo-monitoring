@@ -2,7 +2,7 @@
 title: "visual-design-spec: 市场数据监控工作台通用视觉设计规范"
 date: 2026-08-03
 status: active
-source: 2026-08-03 设计讨论及最终口径确认；README.md；CONTEXT.md；docs/blocked-2026-07-31-001-market-monitoring-frontend-ia/prd.md；现有前端样式与页面实现
+source: 2026-08-03 设计讨论及最终口径确认；README.md；CONTEXT.md；docs/active-2026-07-31-001-market-monitoring-frontend-ia/prd.md；现有前端样式与页面实现
 scope: system
 ---
 
@@ -16,9 +16,9 @@ scope: system
 
 ### 1.1 实施状态与设计参考
 
-- 本规范与指标口径已经确认。`nextjs-frontend/src/app/geo/market-overview/page.tsx` 的新版结构已部署，正式页面已真实展示百度推广广告事实、CPC 与百度统计可信站内来源访问。独立 `/api/website-data` 已从联系人列表统计所选区间全部表单记录，并以原始 `referrer`、UTM 和付费标识统一首页与咨询页九键来源；缺少证据的记录归入 `UNKNOWN`。该代码已随生产 revision `6894789` 部署，但生产因缺少专用官网项目与只读账号凭据保持 `DISABLED`，因此尚无真实官网数据页面验收。53KF、线索/订单真实数据及其依赖指标仍未接入。数据源权威和语义见 `adr/0001-marketing-funnel-data-source-of-truth.md`。
-- 其他市场页面的本地实现与数据成熟度统一见 `README.md` 的“当前前端页面实施状态”，浏览器视觉证据见 `blocked-2026-07-31-001-market-monitoring-frontend-ia/design-qa.md`。本规范不把页面已实现、fixture 已验收、真实数据已接入和生产已生效合并为同一状态。
-- 最终首页设计参考图：[market-overview-home-final-2026-08-03.png](blocked-2026-07-31-001-market-monitoring-frontend-ia/assets/market-overview-home-final-2026-08-03.png)。该图定义结构、密度和视觉方向，不构成真实数据或上线证据。
+- 本规范与指标口径已经确认。`nextjs-frontend/src/app/geo/market-overview/page.tsx` 的新版结构已部署，正式页面已真实展示百度推广广告事实、CPC 与百度统计可信站内来源访问。独立 `/api/website-data` 的旧版“官网表单咨询”代码也已部署，但生产因缺少专用项目与只读账号凭据保持 `DISABLED`。2026-08-04 本地工作区已改为从联系人列表统计所选区间全部表单记录，并以原始 `referrer`、UTM 和付费标识统一首页与咨询页九键来源；缺少证据的记录归入 `UNKNOWN`。本轮修改尚未部署。53KF、线索/订单真实数据及其依赖指标仍未接入。数据源权威和语义见 `adr/0001-marketing-funnel-data-source-of-truth.md`。
+- 其他市场页面的本地实现与数据成熟度统一见 `README.md` 的“当前前端页面实施状态”，浏览器视觉证据见 `active-2026-07-31-001-market-monitoring-frontend-ia/design-qa.md`。本规范不把页面已实现、fixture 已验收、真实数据已接入和生产已生效合并为同一状态。
+- 最终首页设计参考图：[market-overview-home-final-2026-08-03.png](active-2026-07-31-001-market-monitoring-frontend-ia/assets/market-overview-home-final-2026-08-03.png)。该图定义结构、密度和视觉方向，不构成真实数据或上线证据。
 
 ## 2. 范围与非目标
 
@@ -64,7 +64,7 @@ scope: system
 | FACT-003 | 工作台顶部栏高 64px，使用蓝色渐变；桌面侧边栏宽 224px，默认展开；内容区基础内边距为 24px。 | `nextjs-frontend/src/app/geo/layout.tsx`、`nextjs-frontend/src/app/globals.css` |
 | FACT-004 | 当前内容页面使用 `#F6F8FB` 浅灰背景，Ant Design 卡片为白色、无常驻阴影、浅色边框、12px 圆角。 | `nextjs-frontend/src/app/geo/market-overview/market-overview.module.css`、`nextjs-frontend/src/app/globals.css` |
 | FACT-005 | 正式导航按市场总览、投放与流量、转化结果、AI 品牌监测、网站诊断、监测任务、常用网站和设置组织。 | `nextjs-frontend/src/utils/geoNavigation.cjs` |
-| FACT-006 | 项目文档要求正式工作台页面不重复侧边栏当前页名称，不展示无必要的介绍段。 | `docs/blocked-2026-07-31-001-market-monitoring-frontend-ia/prd.md` |
+| FACT-006 | 项目文档要求正式工作台页面不重复侧边栏当前页名称，不展示无必要的介绍段。 | `docs/active-2026-07-31-001-market-monitoring-frontend-ia/prd.md` |
 
 ### 4.2 本轮确认的设计决策
 

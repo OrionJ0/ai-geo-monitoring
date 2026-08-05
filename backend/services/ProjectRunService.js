@@ -25,60 +25,14 @@ const { SEMANTICS_VERSION: CITATION_SEMANTICS_VERSION } = require('./CitationMet
 const GeoMetricSemanticsService = require('./GeoMetricSemanticsService');
 const {
   CURRENT_ANALYSIS_CONTRACT,
-  CURRENT_METRIC_SEMANTICS,
-  V5_ANALYSIS_CONTRACT,
-  SCOPED_METRIC_SEMANTICS
+  CURRENT_METRIC_SEMANTICS
 } = require('./GeoMetricSemanticsService');
-const AIResponseAnalysisV5Service = require('./AIResponseAnalysisV5Service');
-const { AIResponseAnalysisV5Error } = require('./AIResponseAnalysisV5Service');
 const AlertEvaluationService = require('./AlertEvaluationService');
 const PromptCategoryService = require('./PromptCategoryService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
 const WebCaptureAnswerQualityService = require('./WebCaptureAnswerQualityService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
-
-const CURRENT_ANALYSIS_PROVIDER = 'v4';
-const V5_ANALYSIS_PROVIDER = 'v5';
-
-function isV5Provider(analysisProvider) {
-  return analysisProvider === V5_ANALYSIS_PROVIDER;
-}
-
-function resolveAnalysisContract(analysisProvider) {
-  return isV5Provider(analysisProvider) ? V5_ANALYSIS_CONTRACT : CURRENT_ANALYSIS_CONTRACT;
-}
-
-function resolveMetricSemantics(analysisProvider) {
-  return isV5Provider(analysisProvider) ? SCOPED_METRIC_SEMANTICS : CURRENT_METRIC_SEMANTICS;
-}
-
-function normalizeCompetitorSnapshot(competitors, fallbackSnapshot = null) {
-  if (Array.isArray(competitors) && competitors.length) {
-    return competitors.map((item) => {
-      const row = item?.toJSON ? item.toJSON() : item;
-      return {
-        id: Number(row?.id ?? row?.competitor_id) || null,
-        name: String(row?.name || ''),
-        aliases: Array.isArray(row?.aliases)
-          ? row.aliases.map((alias) => String(alias || '').trim()).filter(Boolean)
-          : [],
-        website: row?.website || null
-      };
-    });
-  }
-  return Array.isArray(fallbackSnapshot) ? fallbackSnapshot : [];
-}
-
-/**
- * 解析本次执行使用的不可变注册表快照：
- * analysis-only 优先复用原记录冻结的快照；新运行优先传入快照，
- * 再回退到从 competitors 实例构建。历史分析不随实时配置漂移。
- */
-function resolveFrozenSnapshot(record, competitors, competitorSnapshot = null) {
-  if (Array.isArray(record?.competitor_snapshot)) return record.competitor_snapshot;
-  return normalizeCompetitorSnapshot(competitors, competitorSnapshot);
-}
 
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
 const RETRY_SCHEDULE_FAILURE_MESSAGE = '失败项重试调度失败，请重新提交';
@@ -151,11 +105,7 @@ function metricFailureMessage(error) {
 }
 
 function metricFailureDiagnostics(error) {
-  if (
-    !(error instanceof AIAnalysisConfigError)
-    && !(error instanceof AIResponseAnalysisError)
-    && !(error instanceof AIResponseAnalysisV5Error)
-  ) {
+  if (!(error instanceof AIAnalysisConfigError) && !(error instanceof AIResponseAnalysisError)) {
     return null;
   }
   const details = error?.details && typeof error.details === 'object' ? error.details : {};
@@ -513,27 +463,17 @@ class ProjectRunService {
     citationAnalysis: providedCitationAnalysis,
     project,
     competitors,
-    prompt,
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
-    competitorSnapshot = null
+    prompt
   }) {
     const projectData = project.toJSON ? project.toJSON() : project;
     const competitorData = Array.isArray(competitors)
       ? competitors.map((item) => (item.toJSON ? item.toJSON() : item))
       : [];
-    const question = String(prompt?.question || record?.question || '').trim();
-    const analysis = isV5Provider(analysisProvider)
-      ? await AIResponseAnalysisV5Service.analyze({
-          question,
-          responseText,
-          brand: projectData,
-          competitors: Array.isArray(competitorSnapshot) ? competitorSnapshot : []
-        })
-      : await AIResponseAnalysisService.analyze({
-          question,
-          responseText,
-          brand: projectData
-        });
+    const analysis = await AIResponseAnalysisService.analyze({
+      question: String(prompt?.question || record?.question || '').trim(),
+      responseText,
+      brand: projectData
+    });
     const citationAnalysis = providedCitationAnalysis || this.buildCitationAnalysis({
       responseText,
       aiResponse,
@@ -729,9 +669,7 @@ class ProjectRunService {
     prompt,
     keywords,
     citationObservationStatus,
-    resultSummaryPatch = {},
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
-    competitorSnapshot = null
+    resultSummaryPatch = {}
   }) {
     const keywordCounts = countKeywordOccurrences(responseText, keywords, true);
     const projectData = project?.toJSON ? project.toJSON() : project;
@@ -756,9 +694,7 @@ class ProjectRunService {
         citationAnalysis,
         project,
         competitors,
-        prompt,
-        analysisProvider,
-        competitorSnapshot
+        prompt
       });
       const metric = await this.runInTransaction(async (transaction) => {
         if (persistResponseDetail) {
@@ -929,8 +865,6 @@ class ProjectRunService {
     runSlotIndex = null,
     executionMode = 'full_monitoring',
     retryBatchId = null,
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
-    competitorSnapshot = null,
     transaction = null
   }) {
     const prompt = target.prompt;
@@ -949,13 +883,8 @@ class ProjectRunService {
       question: prompt.question,
       brand: projectData.name,
       brand_keywords: keywords.join(','),
-      analysis_contract_version: isV5Provider(analysisProvider)
-        ? V5_ANALYSIS_CONTRACT
-        : CURRENT_ANALYSIS_CONTRACT,
-      metric_semantics_version: isV5Provider(analysisProvider)
-        ? SCOPED_METRIC_SEMANTICS
-        : CURRENT_METRIC_SEMANTICS,
-      competitor_snapshot: isV5Provider(analysisProvider) ? competitorSnapshot : null,
+      analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
+      metric_semantics_version: CURRENT_METRIC_SEMANTICS,
       status: 'pending'
     }, transaction ? { transaction } : undefined);
   }
@@ -968,9 +897,7 @@ class ProjectRunService {
     scheduledExecutionId = null,
     questionSetRunId = null,
     transaction = null,
-    afterRecordCreated = null,
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
-    competitorSnapshot = null
+    afterRecordCreated = null
   }) {
     const rows = [];
     for (const [runSlotIndex, target] of targets.entries()) {
@@ -982,8 +909,6 @@ class ProjectRunService {
         scheduledExecutionId,
         questionSetRunId,
         runSlotIndex: questionSetRunId ? runSlotIndex : null,
-        analysisProvider,
-        competitorSnapshot,
         transaction
       });
       rows.push({ target, record });
@@ -1004,7 +929,7 @@ class ProjectRunService {
     return 2;
   }
 
-  getRecordExecutionLeaseMs({ target = {}, runtimeSettings = {}, retryMode, analysisProvider } = {}) {
+  getRecordExecutionLeaseMs({ target = {}, runtimeSettings = {}, retryMode } = {}) {
     const rawMonitoringTimeoutSeconds = Number(
       target?.platformConfig?.request_timeout_seconds
       || runtimeSettings.ai_default_timeout_seconds
@@ -1028,18 +953,9 @@ class ProjectRunService {
         (_, index) => Math.min(5, 2 ** index)
       ).reduce((sum, seconds) => sum + seconds, 0)
       : 0;
-    // v5 分阶段分析：两阶段 × 每阶段最多 2 次 = 最多 4 次 Flash 调用，
-    // 每次 120 秒；正常 2 次也处于预算内。
-    let analysisSeconds;
-    if (isV5Provider(analysisProvider)) {
-      const { ANALYSIS_TIMEOUT_SECONDS } = require('./AIResponseEntityExtractionService');
-      const v5StageSeconds = Math.max(10, Number(ANALYSIS_TIMEOUT_SECONDS) || 120);
-      analysisSeconds = v5StageSeconds * 4;
-    } else {
-      const analysisProfile = AIResponseAnalysisService.ANALYSIS_REQUEST_PROFILE || {};
-      analysisSeconds = Math.max(10, Number(analysisProfile.timeout_seconds) || 120)
-        * Math.max(1, Number(analysisProfile.max_attempts) || 2);
-    }
+    const analysisProfile = AIResponseAnalysisService.ANALYSIS_REQUEST_PROFILE || {};
+    const analysisSeconds = Math.max(10, Number(analysisProfile.timeout_seconds) || 120)
+      * Math.max(1, Number(analysisProfile.max_attempts) || 2);
     return Math.max(
       MIN_RECORD_LEASE_MS,
       (monitoringSeconds + retryDelaySeconds + analysisSeconds + RECORD_LEASE_BUFFER_SECONDS) * 1000
@@ -2152,13 +2068,8 @@ class ProjectRunService {
           question: previousRecord.question,
           brand: previousRecord.brand || projectData.name,
           brand_keywords: previousRecord.brand_keywords || keywords.join(','),
-          analysis_contract_version: previousRecord.analysis_contract_version
-            || CURRENT_ANALYSIS_CONTRACT,
-          metric_semantics_version: previousRecord.metric_semantics_version
-            || CURRENT_METRIC_SEMANTICS,
-          competitor_snapshot: Array.isArray(previousRecord.competitor_snapshot)
-            ? previousRecord.competitor_snapshot
-            : null,
+          analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
+          metric_semantics_version: CURRENT_METRIC_SEMANTICS,
           status: 'pending',
           result_summary: {
             retry: {
@@ -2355,26 +2266,14 @@ class ProjectRunService {
     competitors,
     keywords,
     runtimeSettings,
-    executionToken = null,
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
-    competitorSnapshot = null
+    executionToken = null
   }) {
     const prompt = target.prompt;
     let record = preparedRecord;
     let generatedWebCapture = null;
     try {
-      // 冻结快照：analysis-only 复用原记录快照；否则优先传入快照，
-      // 再回退到从 competitors 实例构建，保持不可变身份。
-      const frozenSnapshot = resolveFrozenSnapshot(record, competitors, competitorSnapshot);
       if (!record) {
-        record = await this.createTargetRecord({
-          target,
-          runUser,
-          projectData,
-          keywords,
-          analysisProvider,
-          competitorSnapshot: frozenSnapshot
-        });
+        record = await this.createTargetRecord({ target, runUser, projectData, keywords });
       }
 
       let aiResult = { data: {} };
@@ -2549,9 +2448,7 @@ class ProjectRunService {
         competitors,
         prompt,
         keywords,
-        resultSummaryPatch,
-        analysisProvider,
-        competitorSnapshot: frozenSnapshot
+        resultSummaryPatch
       });
       if (!finalization.ok) {
         if (
@@ -2831,10 +2728,3 @@ class ProjectRunService {
 
 module.exports = new ProjectRunService();
 module.exports.ProjectRunService = ProjectRunService;
-module.exports.CURRENT_ANALYSIS_PROVIDER = CURRENT_ANALYSIS_PROVIDER;
-module.exports.V5_ANALYSIS_PROVIDER = V5_ANALYSIS_PROVIDER;
-module.exports.isV5Provider = isV5Provider;
-module.exports.metricFailureDiagnostics = metricFailureDiagnostics;
-module.exports.metricFailureMessage = metricFailureMessage;
-module.exports.normalizeCompetitorSnapshot = normalizeCompetitorSnapshot;
-module.exports.resolveFrozenSnapshot = resolveFrozenSnapshot;
