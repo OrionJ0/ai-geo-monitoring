@@ -949,8 +949,12 @@ class ProjectRunService {
       question: prompt.question,
       brand: projectData.name,
       brand_keywords: keywords.join(','),
-      analysis_contract_version: resolveAnalysisContract(analysisProvider),
-      metric_semantics_version: resolveMetricSemantics(analysisProvider),
+      analysis_contract_version: isV5Provider(analysisProvider)
+        ? V5_ANALYSIS_CONTRACT
+        : CURRENT_ANALYSIS_CONTRACT,
+      metric_semantics_version: isV5Provider(analysisProvider)
+        ? SCOPED_METRIC_SEMANTICS
+        : CURRENT_METRIC_SEMANTICS,
       competitor_snapshot: isV5Provider(analysisProvider) ? competitorSnapshot : null,
       status: 'pending'
     }, transaction ? { transaction } : undefined);
@@ -964,7 +968,9 @@ class ProjectRunService {
     scheduledExecutionId = null,
     questionSetRunId = null,
     transaction = null,
-    afterRecordCreated = null
+    afterRecordCreated = null,
+    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
+    competitorSnapshot = null
   }) {
     const rows = [];
     for (const [runSlotIndex, target] of targets.entries()) {
@@ -976,6 +982,8 @@ class ProjectRunService {
         scheduledExecutionId,
         questionSetRunId,
         runSlotIndex: questionSetRunId ? runSlotIndex : null,
+        analysisProvider,
+        competitorSnapshot,
         transaction
       });
       rows.push({ target, record });

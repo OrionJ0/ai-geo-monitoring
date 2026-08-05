@@ -69,6 +69,27 @@ test('createTargetRecord 默认写 v4 契约且不冻结快照（兼容现役正
   await record.destroy({ force: true });
 });
 
+test('createRunEntries provider=v5：运行内所有记录引用同一契约与快照', async () => {
+  const entries = await ProjectRunService.createRunEntries({
+    targets: [
+      { platform: 'deepseek', prompt: { id: 2, question: '问题一' } },
+      { platform: 'doubao', prompt: { id: 3, question: '问题二' } }
+    ],
+    runUser: runUser(),
+    projectData: projectData(),
+    keywords: ['电子围栏'],
+    analysisProvider: 'v5',
+    competitorSnapshot: SNAPSHOT
+  });
+  assert.equal(entries.length, 2);
+  entries.forEach(({ record }) => {
+    assert.equal(record.analysis_contract_version, V5_ANALYSIS_CONTRACT);
+    assert.equal(record.metric_semantics_version, SCOPED_METRIC_SEMANTICS);
+    assert.deepEqual(record.competitor_snapshot, SNAPSHOT);
+  });
+  await QuestionRecord.destroy({ where: { id: entries.map(({ record }) => record.id) }, force: true });
+});
+
 test('createTargetRecord provider=v5 写 v5 契约并冻结竞品快照', async () => {
   const record = await ProjectRunService.createTargetRecord({
     target: target(),

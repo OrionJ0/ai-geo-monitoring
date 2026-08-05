@@ -13,7 +13,9 @@ const GeoMetricSemanticsService = require('./GeoMetricSemanticsService');
 const WebCaptureAnswerQualityService = require('./WebCaptureAnswerQualityService');
 const {
   CURRENT_METRIC_SEMANTICS,
-  LEGACY_METRIC_SEMANTICS
+  LEGACY_METRIC_SEMANTICS,
+  SCOPED_METRIC_SEMANTICS,
+  V5_ANALYSIS_CONTRACT
 } = require('./GeoMetricSemanticsService');
 
 const SCHEMA_VERSION = 'question_set_run_v1';
@@ -21,8 +23,29 @@ const STRUCTURED_ANALYSIS_METHODS = new Set([
   'ai_structured_v1',
   'ai_structured_v2',
   'ai_structured_v3',
-  'ai_structured_v4'
+  'ai_structured_v4',
+  V5_ANALYSIS_CONTRACT
 ]);
+
+function isV5Metric(row) {
+  return String(row?.metric_semantics_version || '') === SCOPED_METRIC_SEMANTICS
+    || String(row?.analysis_method || '') === V5_ANALYSIS_CONTRACT;
+}
+
+function v5Structure(row) {
+  return row?.analysis_structure && typeof row.analysis_structure === 'object'
+    && !Array.isArray(row.analysis_structure)
+    ? row.analysis_structure
+    : {};
+}
+
+function v5FieldStatus(row, field) {
+  return String(v5Structure(row)?.target_semantics?.[field]?.status || '');
+}
+
+function v5TargetFactComplete(row) {
+  return v5Structure(row)?.target_fact?.status === 'complete';
+}
 
 function plain(row) {
   return row && typeof row.toJSON === 'function' ? row.toJSON() : row;
@@ -231,9 +254,10 @@ function deriveCapabilities({ source, status, summary, integrityStatus }) {
 
 function summarize(rows) {
   const completedRows = rows.filter((row) => row.status === 'completed');
-  const currentScopeRows = rows.filter(
-    (row) => row.metric_semantics_version === CURRENT_METRIC_SEMANTICS
-  );
+  const currentScopeRows = rows.filter((row) => (
+    row.metric_semantics_version === CURRENT_METRIC_SEMANTICS
+    || row.metric_semantics_version === SCOPED_METRIC_SEMANTICS
+  ));
   const usesCurrentSemantics = currentScopeRows.length > 0;
   const metricRows = completedRows.filter((row) => (
     row.has_metrics
@@ -241,6 +265,7 @@ function summarize(rows) {
     && (
       !usesCurrentSemantics
       || row.metric_semantics_version === CURRENT_METRIC_SEMANTICS
+      || row.metric_semantics_version === SCOPED_METRIC_SEMANTICS
     )
   ));
   const acquiredRows = usesCurrentSemantics
@@ -255,11 +280,23 @@ function summarize(rows) {
   const citationRows = usesCurrentSemantics
     ? acquiredRows.filter((row) => row.citation_evidence_status === 'explicit')
     : metricRows.filter((row) => row.citation_evidence_status === 'explicit');
-  const rankedRows = metricRows.filter((row) => finiteNumber(row.brand_rank) > 0);
+  const rankedRows = metricRows.filter((row) => {
+    if (isV5Metric(row)) {
+      const rank = v5Structure(row)?.target_semantics?.rank;
+      return rank?.status === 'assessed' && finiteNumber(rank?.value) > 0;
+    }
+    return finiteNumber(row.brand_rank) > 0;
+  });
   const sovCalculableRows = usesCurrentSemantics
-    ? metricRows.filter((row) => row.answer_competitor_share !== null
-      && row.answer_competitor_share !== undefined
-      && Number.isFinite(Number(row.answer_competitor_share)))
+    ? metricRows.filter((row) => {
+      if (isV5Metric(row)) {
+        const sov = v5Structure(row)?.sov;
+        return sov?.status === 'observed_only' && finiteNumber(sov?.denominator) > 0;
+      }
+      return row.answer_competitor_share !== null
+        && row.answer_competitor_share !== undefined
+        && Number.isFinite(Number(row.answer_competitor_share));
+    })
     : [];
   const legacySovRows = usesCurrentSemantics
     ? []
@@ -272,8 +309,23 @@ function summarize(rows) {
   );
   const sum = (key, list = metricRows) => list.reduce((total, row) => total + finiteNumber(row[key]), 0);
   const totalOwnedCitations = citationRows.reduce((total, row) => total + ownedCitationCount(row), 0);
-  const brandMentionedAnswers = metricRows.filter((row) => row.brand_mentioned).length;
-  const recommendedAnswers = metricRows.filter((row) => row.brand_recommended).length;
+  const brandMentionedAnswers = metricRows.filter((row) => {
+    if (isV5Metric(row)) {
+      return v5TargetFactComplete(row) && Boolean(v5Structure(row)?.target_fact?.brand_mentioned);
+    }
+    return row.brand_mentioned;
+  }).length;
+  // 推荐分母只纳入 target_semantics.recommendation.status === 'assessed' 的 v5 记录；
+  // v4 无字段状态，沿用既有全部记录语义。
+  const recommendationScope = metricRows.filter((row) => (
+    !isV5Metric(row) || v5FieldStatus(row, 'recommendation') === 'assessed'
+  ));
+  const recommendedAnswers = recommendationScope.filter((row) => {
+    if (isV5Metric(row)) {
+      return Boolean(v5Structure(row)?.target_semantics?.recommendation?.value);
+    }
+    return row.brand_recommended;
+  }).length;
 
   const common = {
     total: rows.length,
@@ -293,7 +345,14 @@ function summarize(rows) {
     sov_calculable_answers: usesCurrentSemantics ? sovCalculableRows.length : null,
     avg_answer_competitor_share: usesCurrentSemantics
       ? (sovCalculableRows.length
-          ? Number((sum('answer_competitor_share', sovCalculableRows) / sovCalculableRows.length).toFixed(2))
+          ? Number((sovCalculableRows.reduce(
+              (total, row) => total + (
+                isV5Metric(row)
+                  ? finiteNumber(v5Structure(row)?.sov?.value)
+                  : finiteNumber(row.answer_competitor_share)
+              ),
+              0
+            ) / sovCalculableRows.length).toFixed(2))
           : null)
       : null,
     citation_valid_analyses: citationRows.length,
@@ -305,8 +364,8 @@ function summarize(rows) {
       ? nullablePercent(brandMentionedAnswers, metricRows.length)
       : percent(brandMentionedAnswers, metricRows.length),
     recommendation_rate: usesCurrentSemantics
-      ? nullablePercent(recommendedAnswers, metricRows.length)
-      : percent(recommendedAnswers, metricRows.length),
+      ? nullablePercent(recommendedAnswers, recommendationScope.length)
+      : percent(recommendedAnswers, recommendationScope.length),
     citation_rate: percent(citationRows.filter((row) => finiteNumber(row.citation_count) > 0).length, citationRows.length),
     owned_citation_rate: percent(citationRows.filter((row) => ownedCitationCount(row) > 0).length, citationRows.length),
     avg_brand_rank: rankedRows.length ? Number((sum('brand_rank', rankedRows) / rankedRows.length).toFixed(2)) : null,
@@ -314,14 +373,20 @@ function summarize(rows) {
     total_owned_citations: totalOwnedCitations
   };
   if (usesCurrentSemantics) {
+    const scopedOnly = metricRows.length > 0 && metricRows.every(isV5Metric);
+    const sovSummary = {
+      metric_semantics_version: scopedOnly ? SCOPED_METRIC_SEMANTICS : CURRENT_METRIC_SEMANTICS,
+      kind: scopedOnly ? 'observed_competitor_mentions' : 'contextual_competitor_mentions',
+      average: common.avg_answer_competitor_share,
+      calculable_answers: sovCalculableRows.length
+    };
+    if (scopedOnly) {
+      sovSummary.scope = 'open_discovery';
+      sovSummary.completeness = 'not_proven';
+    }
     return {
       ...common,
-      sov_summary: {
-        metric_semantics_version: CURRENT_METRIC_SEMANTICS,
-        kind: 'contextual_competitor_mentions',
-        average: common.avg_answer_competitor_share,
-        calculable_answers: sovCalculableRows.length
-      }
+      sov_summary: sovSummary
     };
   }
   const legacyAverage = metricRows.length
