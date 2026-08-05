@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from '@/lib/axiosConfig';
 import {
+  readWebsiteFormDisabledMessage,
+  rememberWebsiteFormDisabled
+} from './moduleState';
+import {
   MARKETING_SOURCE_KEYS,
   type MarketingSourceKey
 } from '@/lib/marketing/sourceCatalog';
@@ -128,6 +132,15 @@ export default function useWebsiteFormConsultations({
       setErrorMessage(null);
       return;
     }
+    const disabledMessage = readWebsiteFormDisabledMessage();
+    if (disabledMessage) {
+      setState('SOURCE_ERROR');
+      setData(null);
+      setErrorCode('WEBSITE_FORM_MODULE_DISABLED');
+      setErrorMessage(disabledMessage);
+      lastReadAt.current = Date.now();
+      return;
+    }
     if (!silent) setState('LOADING');
     try {
       const encodedProjectId = encodeURIComponent(projectId);
@@ -152,6 +165,9 @@ export default function useWebsiteFormConsultations({
     } catch (error) {
       if (sequence !== requestSequence.current) return;
       const details = errorDetails(error);
+      if (details.code === 'WEBSITE_FORM_MODULE_DISABLED') {
+        rememberWebsiteFormDisabled(details.message);
+      }
       setData(null);
       setState('SOURCE_ERROR');
       setErrorCode(

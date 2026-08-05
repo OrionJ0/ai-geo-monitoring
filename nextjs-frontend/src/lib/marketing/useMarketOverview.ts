@@ -158,5 +158,38 @@ export default function useMarketOverview({
     };
   }, [fetchOverview]);
 
+  // 广告快照过期时后端已触发后台刷新并返回 STALE 旧快照 + activeRun；
+  // 前端轮询刷新运行，成功后静默重拉拿到新数据（轮询用定时器递归，不用周期轮询）。
+  useEffect(() => {
+    const runId = ad.data?.activeRun?.runId;
+    if (ad.state !== 'STALE' || !runId || !projectId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const response = await axios.get(
+          `/api/marketing/projects/${encodeURIComponent(projectId)}`
+            + `/refresh-runs/${runId}`
+        );
+        const status = response.data?.status;
+        if (cancelled) return;
+        if (status === 'SUCCEEDED') {
+          void fetchOverview(true);
+          return;
+        }
+        if (status === 'FAILED' || status === 'INTERRUPTED') return;
+        timer = setTimeout(poll, 3000);
+      } catch {
+        // 轮询失败停止，保留 STALE 旧快照与失败提示。
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [ad.state, ad.data?.activeRun?.runId, projectId, fetchOverview]);
+
   return { status, ad, reload };
 }
