@@ -364,6 +364,7 @@ function buildNodes(
       metrics: sumAdMetrics(currentTrend),
       currentTrend,
       previousTrend,
+      previousState: 'READY',
       details: definition.details,
       children: definition.children?.length
         ? buildNodes(

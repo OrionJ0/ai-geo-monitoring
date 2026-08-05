@@ -141,16 +141,19 @@ function exactMetric(
   value,
   {
     allowNull = true,
-    errorCode = 'TONGJI_RESPONSE_INVALID'
+    errorCode = 'TONGJI_RESPONSE_INVALID',
+    metric = null
   } = {}
 ) {
   if (value == null && allowNull) return null;
   if (typeof value !== 'string' || !/^\d+$/u.test(value)) {
-    throw new BaiduTongjiError(
+    const error = new BaiduTongjiError(
       '百度统计指标无效',
       errorCode,
       502
     );
+    if (metric) error.metric = metric;
+    throw error;
   }
   return BigInt(value).toString();
 }
@@ -165,6 +168,11 @@ function sumMetric(rows, field) {
     total += BigInt(exactMetric(value));
   }
   return observed ? total.toString() : null;
+}
+
+function completeMetric(rows, field) {
+  if (!rows.length || rows.some((row) => row[field] == null)) return null;
+  return sumMetric(rows, field);
 }
 
 function summarizeRows(rows) {
@@ -229,9 +237,7 @@ function normalizeRows(rows) {
     return {
       date: row.date,
       pageviews: exactMetric(row.pageviews),
-      visits: exactMetric(row.visits, {
-        errorCode: 'TONGJI_SOURCE_PARTITION_INVALID'
-      }),
+      visits: exactMetric(row.visits, { metric: 'visits' }),
       visitors: exactMetric(row.visitors)
     };
   }).sort((left, right) => left.date.localeCompare(right.date));
@@ -335,9 +341,7 @@ function normalizeSummaryRows(rows) {
       source,
       engineId,
       pageviews: exactMetric(row.pageviews),
-      visits: exactMetric(row.visits, {
-        errorCode: 'TONGJI_SOURCE_PARTITION_INVALID'
-      }),
+      visits: exactMetric(row.visits, { metric: 'visits' }),
       visitors: exactMetric(row.visitors)
     };
   });
@@ -375,9 +379,8 @@ function normalizeSummary(summary, errorCode = 'TONGJI_SOURCE_RESPONSE_INVALID')
   return Object.fromEntries(METRICS.map((metric) => [
     metric,
     exactMetric(summary[metric], {
-      errorCode: metric === 'visits'
-        ? 'TONGJI_SOURCE_PARTITION_INVALID'
-        : errorCode
+      errorCode,
+      metric: metric === 'visits' ? 'visits' : null
     })
   ]));
 }
@@ -402,6 +405,7 @@ function buildRemainderSummary({ total, excluded }) {
       BigInt(exactMetric(operands[0]))
     );
     if (value < 0n) {
+      if (metric === 'visits') throw sourcePartitionInvalid();
       throw new BaiduTongjiError(
         '百度统计来源拆分结果无效',
         'TONGJI_SOURCE_RESPONSE_INVALID',
@@ -471,6 +475,10 @@ function buildSourcePartition(totalVisits, rows) {
 function assertSourcePartition(trend, sources) {
   const total = summarizeRows(trend);
   for (const metric of ['pageviews', 'visits']) {
+    if (
+      metric === 'visits'
+      && trend.some((row) => row.visits == null)
+    ) continue;
     const sourceValues = sources.map((source) => source.summary?.[metric]);
     if (total[metric] == null || sourceValues.some((value) => value == null)) {
       continue;
@@ -1968,6 +1976,7 @@ class BaiduTongjiService {
   }
 
   async readSourceComparison(projectId, currentSnapshot, previousSnapshot) {
+    const totalVisits = completeMetric(currentSnapshot.trend, 'visits');
     const results = await mapWithConcurrency(
       SOURCE_DEFINITIONS,
       3,
@@ -1983,7 +1992,7 @@ class BaiduTongjiService {
           ),
           trafficShare: trafficShare(
             currentSource.summary.visits,
-            currentSnapshot.summary.visits
+            totalVisits
           )
         };
         if (currentSource.summary.visits === null) {
@@ -2048,7 +2057,7 @@ class BaiduTongjiService {
           ? 'PARTIAL'
           : 'COMPLETE',
         partition: buildSourcePartition(
-          currentSnapshot.summary.visits,
+          totalVisits,
           rows
         ),
         rows
@@ -2076,20 +2085,35 @@ class BaiduTongjiService {
     const requireQuality = this.capabilities.qualityMetrics;
     const requireSources = this.capabilities.sourceTraffic
       || includeSourceComparison;
-    const [currentSnapshot, previousSnapshot] = await Promise.all([
-      this.readSnapshotForCoverage(
-        projectId,
-        device,
-        coverage,
-        { requireQuality, requireSources, cacheScope: 'RANGE' }
-      ),
-      this.readSnapshotForCoverage(
-        projectId,
-        device,
-        previous,
-        { requireQuality, requireSources, cacheScope: 'RANGE' }
-      )
-    ]);
+    let currentSnapshot;
+    let previousSnapshot;
+    try {
+      [currentSnapshot, previousSnapshot] = await Promise.all([
+        this.readSnapshotForCoverage(
+          projectId,
+          device,
+          coverage,
+          { requireQuality, requireSources, cacheScope: 'RANGE' }
+        ),
+        this.readSnapshotForCoverage(
+          projectId,
+          device,
+          previous,
+          { requireQuality, requireSources, cacheScope: 'RANGE' }
+        )
+      ]);
+    } catch (error) {
+      if (
+        includeSourceComparison
+        && error?.metric === 'visits'
+        && [
+          'BAIDU_TONGJI_RESPONSE_INVALID',
+          'TONGJI_RESPONSE_INVALID',
+          'TONGJI_SOURCE_RESPONSE_INVALID'
+        ].includes(error?.code)
+      ) throw sourcePartitionInvalid();
+      throw error;
+    }
     const [currentSource, previousSource, comparisonResult] = await Promise.all([
       sourceKey === 'ALL'
         ? sourceForSnapshot(currentSnapshot, sourceKey)
@@ -2108,16 +2132,28 @@ class BaiduTongjiService {
         502
       );
     }
+    const exactVisits = {
+      current: completeMetric(currentSnapshot.trend, 'visits'),
+      previous: completeMetric(previousSnapshot.trend, 'visits')
+    };
     const summary = Object.fromEntries([
       'visits',
       'visitors',
       'pageviews'
     ].map((field) => [field, {
-      current: currentSnapshot.summary[field],
-      previous: previousSnapshot.summary[field],
+      current: field === 'visits'
+        ? exactVisits.current
+        : currentSnapshot.summary[field],
+      previous: field === 'visits'
+        ? exactVisits.previous
+        : previousSnapshot.summary[field],
       changePercent: comparisonValue(
-        currentSnapshot.summary[field],
-        previousSnapshot.summary[field]
+        field === 'visits'
+          ? exactVisits.current
+          : currentSnapshot.summary[field],
+        field === 'visits'
+          ? exactVisits.previous
+          : previousSnapshot.summary[field]
       )
     }]));
     Object.assign(summary, {
@@ -2166,7 +2202,7 @@ class BaiduTongjiService {
         visits: source.summary.visits,
         trafficShare: trafficShare(
           source.summary.visits,
-          currentSnapshot.summary.visits
+          exactVisits.current
         ),
         bounceRate: null,
         averageVisitTime: null,
@@ -2432,7 +2468,7 @@ class BaiduTongjiService {
     disambiguated.sort((left, right) => {
       const compared = comparePageMetrics(left[sortBy], right[sortBy]);
       if (compared !== 0) return sortOrder === 'ascend' ? compared : -compared;
-      const pathCompared = compareCodePoints(left.path, right.path);
+      const pathCompared = left.path.localeCompare(right.path, 'zh-CN');
       if (pathCompared !== 0) return pathCompared;
       return comparePageIdentity(left.pageId, right.pageId);
     });

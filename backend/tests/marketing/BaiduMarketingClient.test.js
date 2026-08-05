@@ -661,6 +661,25 @@ test('Tongji trend rejects truncated and unsafe numeric responses', async () => 
     }),
     { code: 'BAIDU_TONGJI_RESPONSE_INVALID' }
   );
+
+  const invalidVisitsFixture = JSON.parse(fs.readFileSync(path.resolve(
+    __dirname,
+    '../../modules/marketing/contracts/baidu/baidu-marketing-pilot-2026-07-30/fixtures/tongji-trend.success.redacted.json'
+  ), 'utf8'));
+  invalidVisitsFixture.body.data[0].result.items[1][0][1] = '1.5';
+  const invalidVisitsClient = createClient(async () => invalidVisitsFixture);
+  await assert.rejects(
+    invalidVisitsClient.fetchTongjiTrend({
+      accountName: '脱敏搜索账户',
+      accessToken: 'access-token-fixture',
+      siteId: '301',
+      coverage: {
+        from: '2026-07-28',
+        to: '2026-07-30'
+      }
+    }),
+    { code: 'BAIDU_TONGJI_RESPONSE_INVALID', metric: 'visits' }
+  );
 });
 
 test('Tongji trend accepts only documented stable source filters', async () => {

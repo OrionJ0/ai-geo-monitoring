@@ -60,6 +60,41 @@ test('网站流量 decoder 接受 83/82 PARTIAL 且拒绝伪造差额来源', ()
   );
 });
 
+test('网站流量 decoder 在逐日访问缺失时拒绝伪造精确总量和占比', () => {
+  const value = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+  value.response.trend[0].current = null;
+  value.response.summary.visits.current = null;
+  value.response.summary.visits.changePercent = null;
+  value.response.sourceComparison.partition = {
+    metric: 'visits',
+    state: 'PARTIAL',
+    totalVisits: null,
+    classifiedVisits: '82',
+    unclassifiedVisits: null,
+    reasonCode: 'SOURCE_TOTAL_UNAVAILABLE'
+  };
+  for (const row of value.response.sourceComparison.rows) {
+    row.summary.trafficShare = null;
+  }
+  const { assertWebsiteTrafficOverview } = loadTypes();
+
+  assert.doesNotThrow(() => assertWebsiteTrafficOverview(
+    value.response,
+    value.query
+  ));
+  value.response.sourceComparison.partition.totalVisits = '83';
+  assert.throws(
+    () => assertWebsiteTrafficOverview(value.response, value.query),
+    { code: 'WEBSITE_TRAFFIC_RESPONSE_INVALID' }
+  );
+  value.response.sourceComparison.partition.totalVisits = null;
+  value.response.summary.visits.current = '83';
+  assert.throws(
+    () => assertWebsiteTrafficOverview(value.response, value.query),
+    { code: 'WEBSITE_TRAFFIC_RESPONSE_INVALID' }
+  );
+});
+
 test('网站流量与市场总览直接展示服务端分区且不把差额命名为来源', () => {
   const componentPath = path.resolve(
     frontendRoot,

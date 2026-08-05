@@ -570,7 +570,7 @@ test('desktop layout matches the final structure and is keyboard/axe clean', asy
   await expect(page.getByRole('heading', { name: '投放效率' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '全链路数据' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '每日趋势' })).toBeVisible();
-  await expect(page.getByRole('alert').filter({
+  await expect(page.getByRole('status').filter({
     hasText: '来源分类覆盖不完整'
   })).toContainText('差额仅表示当前分类未覆盖');
   await expect(page.getByText('CPC', { exact: true })).toBeVisible();

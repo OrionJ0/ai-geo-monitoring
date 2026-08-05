@@ -54,7 +54,7 @@ test('advertising page pins the hierarchy resource to the read-only dashboard ro
 test('page follows the approved breadcrumb, date, summary, trend, and drilldown order', () => {
   const breadcrumb = pageSource.indexOf("{ title: '首页' }");
   const summary = pageSource.indexOf('周期汇总指标');
-  const trend = pageSource.indexOf("selectedNode?.name || '总体'");
+  const trend = pageSource.indexOf("<h2>{selectedNode?.name || '总体'} · 每日趋势</h2>");
   const drilldown = pageSource.indexOf('<h2>投放明细</h2>');
 
   assert.ok(breadcrumb >= 0 && breadcrumb < summary);
@@ -82,6 +82,15 @@ test('trend offers exactly the five advertising metrics and one selected object'
   assert.match(adapterSource, /currentTrend: normalizeTrend\(campaign\.trend\)/);
   assert.match(adapterSource, /currentTrend: normalizeTrend\(adGroup\.trend\)/);
   assert.match(adapterSource, /currentTrend: normalizeTrend\(keyword\.trend\)/);
+});
+
+test('sparse trend axis labels use calendar slots instead of row indexes', () => {
+  assert.match(pageSource, /shiftIsoDate\(/);
+  assert.match(pageSource, /performance\.data\?\.period\.currentFrom/);
+  assert.doesNotMatch(
+    pageSource,
+    /currentTrend\[Math\.round\(Number\(value\)\)\]/
+  );
 });
 
 test('drilldown table keeps the required columns, hierarchy filters, and parent paths', () => {

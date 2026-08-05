@@ -750,7 +750,7 @@ function normalizeTongjiEnvelope(response) {
   return data[0];
 }
 
-function normalizeTongjiMetric(value) {
+function normalizeTongjiMetric(value, metric = null) {
   if (value === '--') return null;
   if (Number.isSafeInteger(value) && value >= 0) {
     return String(value);
@@ -759,11 +759,13 @@ function normalizeTongjiMetric(value) {
     typeof value !== 'string'
     || !/^\d{1,3}(?:,\d{3})*$|^\d+$/u.test(value)
   ) {
-    throw new BaiduMarketingError(
+    const error = new BaiduMarketingError(
       '百度统计指标无效',
       'BAIDU_TONGJI_RESPONSE_INVALID',
       502
     );
+    if (metric) error.metric = metric;
+    throw error;
   }
   return BigInt(value.replaceAll(',', '')).toString();
 }
@@ -977,7 +979,7 @@ function normalizeTongjiPageReportResult(
       return {
         pageId,
         pageUrl,
-        visits: normalizeTongjiMetric(metricRow[0]),
+        visits: normalizeTongjiMetric(metricRow[0], 'visits'),
         contributionPageviews: normalizeTongjiMetric(metricRow[1]),
         bounceRate: normalizeTongjiDecimalMetric(metricRow[2]),
         averageVisitTimeSeconds: normalizeTongjiDecimalMetric(metricRow[3]),
@@ -1058,7 +1060,7 @@ function normalizeTongjiSourceResult(result, metrics, report) {
       engineId,
       url,
       pageviews: normalizeTongjiMetric(metricRow[0]),
-      visits: normalizeTongjiMetric(metricRow[1]),
+      visits: normalizeTongjiMetric(metricRow[1], 'visits'),
       visitors: normalizeTongjiMetric(metricRow[2])
     };
   });
@@ -1721,7 +1723,7 @@ class BaiduMarketingClient {
       return {
         date,
         pageviews: normalizeTongjiMetric(metricRow[0]),
-        visits: normalizeTongjiMetric(metricRow[1]),
+        visits: normalizeTongjiMetric(metricRow[1], 'visits'),
         visitors: normalizeTongjiMetric(metricRow[2])
       };
     }).sort((left, right) => left.date.localeCompare(right.date));

@@ -724,9 +724,9 @@ test('keyword comparison keeps current facts when the previous period is outside
   await page.goto('/geo/keyword-analysis');
   await expect(page.getByRole('table', { name: '全部关键词明细表' }))
     .toContainText('电子围栏厂家');
-  const previous = page.getByLabel('广告关键词数上期：暂无数据');
+  const previous = page.getByLabel(/广告关键词数上期：暂无数据。上一周期超出当前快照覆盖范围/u);
   await expect(previous).toBeVisible();
-  await previous.hover();
+  await previous.focus();
   await expect(page.getByRole('tooltip'))
     .toContainText('上一周期超出当前快照覆盖范围');
 });
@@ -1129,11 +1129,52 @@ test('advertising keeps current facts when the previous period is outside covera
   await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
   await expect(page.getByRole('table', { name: '广告投放明细表格' }))
     .toContainText('PC-周界报警');
-  const previous = page.getByLabel('总展现上期：暂无数据');
+  const previous = page.getByRole('note', {
+    name: /总展现上期：暂无数据。上一周期超出当前快照覆盖范围/u
+  });
   await expect(previous).toBeVisible();
-  await previous.hover();
+  await previous.focus();
   await expect(page.getByRole('tooltip'))
     .toContainText('上一周期超出当前快照覆盖范围');
+  const trend = page.getByRole('img', {
+    name: /总体消费每日趋势.*仅展示本期，上期不可用：上一周期超出当前快照覆盖范围/u
+  });
+  await expect(trend).toBeVisible();
+  await expect(trend.getByText(/较前 7 天/u)).toHaveCount(0);
+});
+
+test('advertising selected object without previous identity hides the comparison series', async ({ page }) => {
+  let hierarchyRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/ad-hierarchy**');
+  await page.route('**/api/marketing/projects/11/ad-hierarchy**', (route) => {
+    hierarchyRequestCount += 1;
+    const fixture = adHierarchyResourceFixture(route.request().url());
+    if (hierarchyRequestCount === 2) {
+      const previousIdentity = <T extends { campaignId: string }>(row: T) => ({
+        ...row,
+        campaignId: `${row.campaignId}-previous`
+      });
+      fixture.campaigns = fixture.campaigns.map(previousIdentity);
+      fixture.adGroups = fixture.adGroups.map(previousIdentity);
+      fixture.keywords = fixture.keywords.map(previousIdentity);
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(fixture)
+    });
+  });
+
+  await page.goto('/geo/ad-performance');
+  const campaignRow = page.getByRole('table', { name: '广告投放明细表格' })
+    .getByRole('row')
+    .filter({ hasText: 'PC-周界报警' })
+    .first();
+  await campaignRow.click();
+  const trend = page.getByRole('img', {
+    name: /PC-周界报警消费每日趋势.*仅展示本期，上期不可用：所选对象在上一周期没有可匹配事实/u
+  });
+  await expect(trend).toBeVisible();
+  await expect(trend.getByText(/较前 7 天/u)).toHaveCount(0);
 });
 
 test('advertising preserves retryable previous-period failure instead of calling it no data', async ({ page }) => {

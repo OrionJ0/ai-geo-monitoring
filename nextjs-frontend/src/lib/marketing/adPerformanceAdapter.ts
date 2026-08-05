@@ -37,6 +37,7 @@ export type AdHierarchyNode = {
   metrics: AdExactMetrics;
   currentTrend: AdDailyMetrics[];
   previousTrend: AdDailyMetrics[];
+  previousState: 'READY' | 'UNAVAILABLE';
   details: AdDetailItem[];
   children?: AdHierarchyNode[];
 };
@@ -475,6 +476,20 @@ export function inclusiveDayCount(from: string, to: string): number {
   return Math.floor((end - start) / 86_400_000) + 1;
 }
 
+export function periodDaySlot(
+  date: string,
+  periodFrom: string,
+  days: number
+): number | null {
+  const point = new Date(`${date}T00:00:00.000Z`).getTime();
+  const start = new Date(`${periodFrom}T00:00:00.000Z`).getTime();
+  if (!Number.isFinite(point) || !Number.isFinite(start)) {
+    throw new TypeError('日期无效');
+  }
+  const slot = Math.floor((point - start) / 86_400_000);
+  return slot >= 0 && slot < days ? slot : null;
+}
+
 export function buildAdPeriod(from: string, to: string): AdPeriod {
   const days = inclusiveDayCount(from, to);
   const previousTo = shiftIsoDate(from, -1);
@@ -679,6 +694,7 @@ export function adaptMarketingAdHierarchy(
           metrics: normalizeMetrics(keyword),
           currentTrend: normalizeTrend(keyword.trend),
           previousTrend: normalizeTrend(previousKeyword?.trend),
+          previousState: previousKeyword ? 'READY' : 'UNAVAILABLE',
           details: [
             { label: '关键词 ID', value: String(keyword.keywordId) },
             { label: '所属单元', value: keyword.adGroupName },
@@ -701,6 +717,7 @@ export function adaptMarketingAdHierarchy(
         metrics: normalizeMetrics(adGroup),
         currentTrend: normalizeTrend(adGroup.trend),
         previousTrend: normalizeTrend(previousAdGroup?.trend),
+        previousState: previousAdGroup ? 'READY' : 'UNAVAILABLE',
         details: [
           { label: '单元 ID', value: String(adGroup.adGroupId) },
           { label: '所属计划', value: campaign.campaignName },
@@ -721,6 +738,7 @@ export function adaptMarketingAdHierarchy(
       metrics: normalizeMetrics(campaign),
       currentTrend: normalizeTrend(campaign.trend),
       previousTrend: normalizeTrend(previousCampaign?.trend),
+      previousState: previousCampaign ? 'READY' : 'UNAVAILABLE',
       details: [
         { label: '计划 ID', value: String(campaign.campaignId) },
         { label: '所属项目', value: projectName },
@@ -751,6 +769,7 @@ export function adaptMarketingAdHierarchy(
     metrics: summary,
     currentTrend,
     previousTrend,
+    previousState: previousHierarchy ? 'READY' : 'UNAVAILABLE',
     details: [
       { label: '项目 ID', value: String(dashboard.projectId) },
       { label: '项目状态', value: projectStateLabel },
