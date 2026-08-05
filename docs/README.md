@@ -61,7 +61,7 @@
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
 | [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 已定义目标事实/目标语义/开放竞品三轨合同、scoped SOV，以及“阶段 1 开放发现 → 模型外竞品注册表归一 → 阶段 2 无身份先验判断”的安全边界；S05 真实 Flash 定向复测 3/3 通过，但注册表 resolver/快照、不变性测试、自我修复清理、状态消费者和 41×3 新合同重跑尚未完成，暂不硬切，当前生产仍使用 v4 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
-| [百度 Provider 模块化重构](active-2026-08-05-005-baidu-provider-modularization/prd.md) | Issues 001–002 已关闭：等价基线、唯一安全 HTTP 内核和 OAuth 客户端已完成且未发布；当前进入 Issue 003 抽取搜索推广客户端 |
+| [百度 Provider 模块化重构](active-2026-08-05-005-baidu-provider-modularization/prd.md) | Issues 001–003 已关闭：等价基线、唯一安全 HTTP 内核、OAuth 与搜索推广客户端已完成且未发布；当前进入 Issue 004 迁移百度统计并清理 facade 旧实现 |
 
 ## 阻塞需求
 
