@@ -159,6 +159,59 @@ test('阶段 2 失败降级：目标出现时语义字段 unresolved、开放竞
   assert.equal(result.brand_mentioned, true);
 });
 
+test('目标映射歧义：target_fact complete、target_mapping ambiguous、目标语义 unavailable、整条不失败', async () => {
+  const answer = [
+    '国内脉冲电子围栏成熟厂家：',
+    '1. **广拓（Gato）**：上海广拓信息技术有限公司，以智能安防管理平台为核心。',
+    '2. **海康威视（HIKVISION）**：杭州海康威视数字技术股份有限公司。'
+  ].join('\n');
+  const s55Extract = async ({ sourceMap, validateMentions }) => {
+    const mentions = [
+      { source_id: 'L002', surface_form: '广拓', canonical_name: '广拓', entity_type: 'brand' },
+      { source_id: 'L002', surface_form: '上海广拓信息技术有限公司', canonical_name: '上海广拓信息技术有限公司', entity_type: 'company' },
+      { source_id: 'L003', surface_form: '海康威视', canonical_name: '海康威视', entity_type: 'brand' }
+    ];
+    return {
+      mentions,
+      validated: validateMentions(mentions),
+      diagnostics: { stage: 'entity_extract', attempt_count: 1, model: 'deepseek-v4-flash' }
+    };
+  };
+  const service = buildService({
+    answer,
+    targetBrand: { name: '广拓', aliases: ['上海广拓', 'Gato'] },
+    semantic: makeSemantic(false),
+    entityExtract: s55Extract
+  });
+  const result = await service.analyze({
+    question: '脉冲电子围栏国内哪几家做得比较成熟？',
+    responseText: answer,
+    brand: { name: '广拓', aliases: ['上海广拓', 'Gato'] }
+  });
+
+  const structure = result.analysis_structure;
+  // 目标事实保留确定性扫描（广拓 + 上海广拓 = 2）
+  assert.equal(structure.target_fact.status, 'complete');
+  assert.equal(structure.target_fact.brand_mentioned, true);
+  assert.equal(structure.target_fact.brand_mentions, 2);
+  // 目标映射歧义：不任选、不自动合并、不抛整条错误
+  assert.equal(structure.target_mapping.status, 'ambiguous');
+  assert.equal(structure.target_mapping.target_entity_id, null);
+  assert.equal(structure.target_entity_id, null);
+  assert.deepEqual(
+    [...structure.target_mapping.candidate_entity_ids].sort(),
+    ['E001', 'E002']
+  );
+  // 目标语义因缺唯一实体 ID 而 unavailable
+  assert.equal(structure.target_semantics.status, 'unavailable');
+  assert.equal(structure.target_semantics.recommendation.status, 'unavailable');
+  assert.equal(structure.target_semantics.rank.status, 'unavailable');
+  assert.equal(structure.target_semantics.sentiment.status, 'unavailable');
+  // 开放竞品实体保留，未解决实体全部登记
+  assert.equal(structure.competition_analysis.status, 'partial');
+  assert.deepEqual(structure.competition_analysis.entities, ['E001', 'E002', 'E003']);
+});
+
 test('目标未出现且阶段 2 失败：语义字段仍为 not_applicable，目标事实不被清空', async () => {
   const service = buildService({
     answer: TARGET_ABSENT_ANSWER,

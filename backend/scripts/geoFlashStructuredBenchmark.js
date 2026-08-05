@@ -45,7 +45,8 @@ function cacheIdentityFor(arm) {
       experimentRevision: EXPERIMENT_REVISION
     };
   }
-  const definition = AIResponseAnalysisService.getPromptDefinition();
+  const singleton = require('../services/AIResponseAnalysisService');
+  const definition = singleton.getPromptDefinition();
   return {
     promptRevision: definition.prompt_revision,
     model: 'deepseek-v4-flash',

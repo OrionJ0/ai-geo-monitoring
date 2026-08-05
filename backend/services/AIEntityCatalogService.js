@@ -284,22 +284,33 @@ function buildEntityCatalog({ answer: inputAnswer, sourceMap, extractedMentions,
   const targetMatches = entities.filter((entity) => (
     entity.surface_forms.some((surfaceForm) => targetAliasMatchesSurface(surfaceForm, targetAliases))
   ));
-  if (targetMatches.length > 1) {
-    throw new AIEntityCatalogError(
-      '多个实体同时命中目标品牌别名',
-      'analysis_target_mapping_ambiguous'
-    );
-  }
+  // 目标事实轨与目标映射分离：presence/count 由确定性 buildTargetMentions 决定，
+  // 映射歧义只关闭需要唯一实体 ID 的目标语义，不清空目标事实、不抛整条错误。
+  const targetEntityId = targetMatches.length === 1 ? targetMatches[0].entity_id : null;
+  const targetMentions = targetAliases.length > 0
+    ? buildTargetMentions(sourceMap, targetBrand)
+    : [];
+  const targetMappingStatus = targetAliases.length === 0
+    ? 'invalid_input'
+    : (targetMatches.length === 0
+      ? 'not_applicable'
+      : (targetMatches.length === 1 ? 'resolved' : 'ambiguous'));
+  const targetMapping = {
+    status: targetMappingStatus,
+    target_entity_id: targetEntityId,
+    candidate_entity_ids: targetMatches.length > 1
+      ? targetMatches.map((entity) => entity.entity_id)
+      : []
+  };
   // 目标别名扫描只发生在 buildTargetMentions（确定性目标事实轨）内，
   // 不会把配置别名注入开放实体目录，避免派生未确认别名扩大 occurrence。
   entities.forEach((entity) => expandGroundedEntityOccurrences(entity, sourceMap));
 
   return {
     entities,
-    target_entity_id: targetMatches[0]?.entity_id || null,
-    target_mentions: targetMatches.length === 1
-      ? buildTargetMentions(sourceMap, targetBrand)
-      : []
+    target_entity_id: targetEntityId,
+    target_mentions: targetMentions,
+    target_mapping: targetMapping
   };
 }
 

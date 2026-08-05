@@ -84,6 +84,8 @@ test('maps the target only from grounded registered surface forms', () => {
     targetBrand: { name: '广拓', aliases: ['上海广拓'] }
   });
   assert.equal(poisonedCatalog.target_entity_id, null);
+  assert.equal(poisonedCatalog.target_mapping.status, 'not_applicable');
+  assert.deepEqual(poisonedCatalog.target_mentions, []);
 
   const targetAnswer = '上海广拓提供周界报警方案。';
   const targetCatalog = buildEntityCatalog({
@@ -98,6 +100,28 @@ test('maps the target only from grounded registered surface forms', () => {
     targetBrand: { name: '广拓', aliases: ['上海广拓'] }
   });
   assert.equal(targetCatalog.target_entity_id, 'E001');
+  assert.equal(targetCatalog.target_mapping.status, 'resolved');
+  assert.equal(targetCatalog.target_mapping.target_entity_id, 'E001');
+  assert.deepEqual(targetCatalog.target_mapping.candidate_entity_ids, []);
+});
+
+test('目标配置无效时 target_mapping=invalid_input，不抛错且不生成目标提及', () => {
+  const answer = '海康威视提供园区安防方案。';
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap: createSourceMap(answer),
+    extractedMentions: [{
+      source_id: 'L001',
+      surface_form: '海康威视',
+      canonical_name: '海康威视',
+      entity_type: 'brand'
+    }],
+    targetBrand: { name: '', aliases: [] }
+  });
+  assert.equal(catalog.target_entity_id, null);
+  assert.equal(catalog.target_mapping.status, 'invalid_input');
+  assert.deepEqual(catalog.target_mentions, []);
+  assert.equal(catalog.entities.length, 1);
 });
 
 test('matches a registered target alias inside a grounded full company name', () => {
@@ -289,4 +313,37 @@ test('counts a bilingual parenthesized target display name as one mention', () =
 
   assert.equal(catalog.target_entity_id, 'E001');
   assert.equal(catalog.target_mentions.length, 1);
+});
+
+test('S55 同形：短名与公司全称被拆成多个实体时不抛错，target_mapping=ambiguous、target_fact 保留', () => {
+  const answer = [
+    '国内脉冲电子围栏成熟厂家：',
+    '1. **广拓（Gato）**：上海广拓信息技术有限公司，以智能安防管理平台为核心。',
+    '2. **海康威视（HIKVISION）**：杭州海康威视数字技术股份有限公司。'
+  ].join('\n');
+  const sourceMap = createSourceMap(answer);
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap,
+    extractedMentions: [
+      { source_id: 'L002', surface_form: '广拓', canonical_name: '广拓', entity_type: 'brand' },
+      { source_id: 'L002', surface_form: '上海广拓信息技术有限公司', canonical_name: '上海广拓信息技术有限公司', entity_type: 'company' },
+      { source_id: 'L003', surface_form: '海康威视', canonical_name: '海康威视', entity_type: 'brand' }
+    ],
+    targetBrand: { name: '广拓', aliases: ['上海广拓', 'Gato'] }
+  });
+
+  // 目标事实保留确定性扫描结果，不受映射歧义影响
+  assert.equal(catalog.target_mentions.length, 2);
+  // 多个实体同时命中目标别名：不任选、不自动合并
+  assert.equal(catalog.target_mapping.status, 'ambiguous');
+  assert.equal(catalog.target_mapping.target_entity_id, null);
+  assert.equal(catalog.target_entity_id, null);
+  assert.deepEqual(
+    [...catalog.target_mapping.candidate_entity_ids].sort(),
+    ['E001', 'E002']
+  );
+  // 开放竞品实体全部保留
+  assert.equal(catalog.entities.length, 3);
+  assert.equal(catalog.entities.some((entity) => entity.entity_id === 'E003'), true);
 });

@@ -30,9 +30,9 @@ scope: deep
   → 原子写入 VisibilityMetric
 ```
 
-目标是将新分析升级为 `ai_structured_v5` / `geo_metric_input_v5`，合同修订号为 `three_track_partial_v1`。目标提及事实必须达到确定性可用；推荐、排名、情绪和开放竞品允许按字段部分完成，但未知不得冒充业务否定值。SOV 计算公式可以保留，语义版本改为带范围的 `contextual_competitor_mentions_sov_v2_scoped`，开放发现结果明确标记 `observed_only / open_discovery / not_proven`。只有真实同题对比证明 v5 达到 PRD 门槛后，才硬切正式入口。
+目标是将新分析升级为 `ai_structured_v5` / `geo_metric_input_v5`。issue 001–008 已实现的候选合同为 `three_track_partial_v1`；009 真实 Flash 门禁未通过后，本轮修复合同升级为 `three_track_partial_v2`，语义证据合同升级为 `semantic_evidence_v2`。目标提及事实必须达到确定性可用；推荐、排名、情绪和开放竞品允许按字段部分完成，但未知不得冒充业务否定值。SOV 计算公式可以保留，语义版本继续使用带范围的 `contextual_competitor_mentions_sov_v2_scoped`，开放发现结果明确标记 `observed_only / open_discovery / not_proven`。只有新修订真实同题对比证明 v5 达到 PRD 门槛后，才硬切正式入口。
 
-本 Tech Spec 已有隔离实现作为候选：source map、实体目录、分阶段抽取/判断、编排器和基准服务及其单元测试已存在；它们尚未接入正式运行入口，也未设为默认。当前生产实际仍走 v4。
+当前代码状态是：issue 001–008 已完成，v5 已贯通候选运行、持久化、API、CSV、页面与历史兼容，但仅在显式 `analysisProvider='v5'` 时生效；009 已完成真实对比并作出“不批准硬切”决定。正式入口默认仍是 `ai_structured_v4 / geo_metric_input_v4`，当前 DeepSeek 默认分析配置为 `deepseek-v4-pro`；v5 候选自身强制 `deepseek-v4-flash`。010 尚未执行，v4 运行时、默认值和现役兼容文档仍存在。
 
 ## 2. 范围与非目标
 
@@ -345,7 +345,8 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
 4. 实体类型冲突时进入阶段 1 修复，程序不以多数票猜测。
 5. 目标事实轨在阶段 1 之前或并行执行：使用目标名称和项目已配置别名直接扫描完整原回答，采用 NFKC、大小写折叠和边界感知比较，不使用编辑距离、模型标准名或程序派生别名猜测。
 6. `target_fact.mentions` 由该确定性扫描直接产生；阶段 1 漏掉目标实体不影响目标事实。
-7. 阶段 2 如需 `target_entity_id`，程序只可把目标事实命中的原文 span 与已验证实体 span 做精确对齐；无法唯一对齐时目标事实仍可完成，但目标语义标为 `unavailable/ambiguous`，不能任选实体。
+7. 阶段 2 如需 `target_entity_id`，程序只可把目标事实命中的原文 span 与已验证实体 span 做精确对齐；无法唯一对齐时目标事实仍为 `complete`，同时写 `target_mapping.status=ambiguous`、`target_entity_id=null`，目标语义标为 `unavailable`，不能任选实体或抛出整条 `analysis_target_mapping_ambiguous`。
+8. `target_mapping` 与 `target_fact` 分离，状态为 `resolved / not_applicable / ambiguous / unavailable`。S55 这类同时出现品牌短名与公司全称、并被阶段 1 拆成多个实体的输入必须保留全部 grounded 实体和确定性目标 mentions。
 
 ### 5.5 竞品注册表快照与身份归一
 
@@ -437,7 +438,7 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
       "entity_id": "E001",
       "relation": "competitor",
       "reason": "回答将其作为当前园区安防采购的可选供应品牌",
-      "evidence_source_ids": ["L036", "L038"]
+      "semantic_context_source_ids": ["L036", "L038"]
     }
   ],
   "candidate_groups": [
@@ -445,21 +446,21 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
       "ordered": false,
       "entries": ["E001", "E002", "E003"],
       "reason": "同一类别内并列列举，没有表达先后",
-      "evidence_source_ids": ["L036"]
+      "semantic_context_source_ids": ["L036"]
     }
   ],
   "recommendations": [
     {
       "entity_id": "E001",
       "kind": "explicit",
-      "evidence_source_ids": ["L036"]
+      "semantic_context_source_ids": ["L036"]
     }
   ],
   "sentiment": {
     "status": "not_applicable",
     "label": null,
     "reason": "目标品牌未在回答出现",
-    "evidence_source_ids": [],
+    "semantic_context_source_ids": [],
     "risk_terms": []
   }
 }
@@ -470,9 +471,29 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
 - `competitor_relations` 是已解决关系的子集，关系只允许 `competitor / non_competitor`；程序以实体目录减去该子集得到 `unresolved_entity_ids`。开放发现范围固定标记为 `competition_scope=open_discovery`、`competition_completeness=not_proven`。
 - `candidate_groups.entries` 至少两个不同实体 ID；多个类别必须分组，不得压平成全局排名。
 - `recommendations.kind` 首版只允许 `explicit`。
-- 所有证据只返回 `source_id`；程序从 source map 生成最终可展示的原文文本。
+- 阶段 2 模型只返回 `semantic_context_source_ids`；程序从 source map 生成最终可展示的语义上下文文本。模型不负责重复输出实体 occurrence 证据。
 - 目标存在时 `sentiment.status=assessed` 且 `label` 为 `positive / neutral / negative`；目标不存在时必须为 `not_applicable` 且 `label=null`。
 - `claims` 不在本合同中。
+
+#### `semantic_evidence_v2` 证据角色
+
+最终持久化的每个语义断言使用同形证据包：
+
+```json
+{
+  "entity_id": "E001",
+  "evidence": {
+    "entity_occurrence_source_ids": ["L010"],
+    "semantic_context_source_ids": ["L036", "L038"]
+  }
+}
+```
+
+- `entity_occurrence_source_ids` 由程序从阶段 1 已冻结的 `entities[].mentions[].source_id` 投影，只证明实体身份与原文出现；它不是模型语义输出，也不得被当成推荐、关系或情绪证据。
+- `semantic_context_source_ids` 由 Flash 返回，只证明当前语义断言。每个 ID 必须存在于本次 source map；不再要求对应片段同时逐字包含该实体，因为真实回答可能先列出实体、后在其他片段使用简称、代词、集合或顺序表达语义。
+- 两类证据通过同一个 `entity_id` 绑定。程序可以组装证据包，但不得自动选择、添加或替换 `semantic_context_source_ids`。
+- 静态校验继续拒绝未知 ID、越界 ID、空的必需语义上下文、跨实体引用和明显不满足断言类型的上下文；语义是否真正支持结论最终由人工真值评测约束，不能用“片段包含实体字符串”的机械规则替代。
+- 修复请求必须携带失败断言、允许引用的 source map 及该实体已知 occurrence IDs，明确要求重新选择语义上下文；仍失败时只把对应字段或竞品项降级，不清空目标事实。
 
 ### 5.7 最终 v5 结构
 
@@ -481,7 +502,7 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
 ```json
 {
   "schema_version": "geo_metric_input_v5",
-  "contract_revision": "three_track_partial_v1",
+  "contract_revision": "three_track_partial_v2",
   "source_map_version": "answer_source_lines_v1",
   "answer_sha256": "<hash>",
   "competitor_registry_snapshot": {
@@ -495,11 +516,16 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
     "brand_mentions": 0,
     "mentions": []
   },
+  "target_mapping": {
+    "status": "not_applicable",
+    "target_entity_id": null,
+    "candidate_entity_ids": []
+  },
   "target_semantics": {
     "status": "complete",
-    "recommendation": { "status": "not_applicable", "value": null, "evidence_source_ids": [] },
-    "rank": { "status": "not_applicable", "value": null, "evidence_source_ids": [] },
-    "sentiment": { "status": "not_applicable", "value": null, "evidence_source_ids": [] }
+    "recommendation": { "status": "not_applicable", "value": null, "evidence": { "entity_occurrence_source_ids": [], "semantic_context_source_ids": [] } },
+    "rank": { "status": "not_applicable", "value": null, "evidence": { "entity_occurrence_source_ids": [], "semantic_context_source_ids": [] } },
+    "sentiment": { "status": "not_applicable", "value": null, "evidence": { "entity_occurrence_source_ids": [], "semantic_context_source_ids": [] } }
   },
   "competition_analysis": {
     "status": "partial",
@@ -548,7 +574,7 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
     "status": "not_applicable",
     "label": null,
     "reason": "目标品牌未在回答出现",
-    "evidence_source_ids": []
+    "semantic_context_source_ids": []
   },
   "claims": {
     "status": "not_collected",
@@ -556,14 +582,14 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
   },
   "diagnostics": {
     "entity_prompt_revision": "grounded_entity_catalog_v1",
-    "semantic_prompt_revision": "closed_entity_semantics_v3",
+    "semantic_prompt_revision": "closed_entity_semantics_v4_evidence_roles",
     "model": "deepseek-v4-flash",
     "stages": []
   }
 }
 ```
 
-最终结构中的所有 `mentions.start/end` 必须再次与 `answer_sha256` 对应原文校验。对当前报告需要的 `evidence` 文本，由程序从 `evidence_source_ids` 和原回答提取，不信任模型自由文本。顶层旧字段可暂时保留为兼容镜像，但三轨结构是 v5 的权威事实。
+最终结构中的所有 `mentions.start/end` 必须再次与 `answer_sha256` 对应原文校验。对当前报告需要的 occurrence 与 semantic context 文本，由程序分别从证据包中的两类 source IDs 和原回答提取，不信任模型自由文本。顶层旧字段可暂时保留为兼容镜像，但三轨结构是 v5 的权威事实。
 
 `competitor_registry_snapshot` 只保存本次使用的版本、哈希和数量；完整快照由运行/记录的不可变配置保存。CSV 和报告可展示每个实体的匹配状态，但不能据此改变关系语义。`unmatched/ambiguous` 的实体结构与 `matched` 等价可用。
 
@@ -643,10 +669,10 @@ entity_extract → entity_repair? → semantic_judge → semantic_repair?
 | `analysis_input_too_long` | prepare | 完整输入超出模型上下文，未截断 |
 | `analysis_entity_output_invalid` | entity_extract | 阶段 1 JSON 或字段结构无效 |
 | `analysis_entity_grounding_invalid` | entity_validate | 表面词或 source ID 无法精确锚定 |
-| `analysis_target_mapping_ambiguous` | target_map | 多个实体同时命中目标别名 |
+| `analysis_target_mapping_ambiguous` | target_map | v1 历史错误码；v2 多个实体同时命中目标别名时改写 `target_mapping.status=ambiguous`，不再抛整条错误 |
 | `analysis_semantic_output_invalid` | semantic_judge | 阶段 2 JSON 或字段结构无效 |
 | `analysis_relation_incomplete` | semantic_validate | 历史错误码；v5 新合同中单纯缺失转为 `unresolved_entity_ids`，只有重复/未知 ID 作为坏项处理 |
-| `analysis_evidence_reference_invalid` | semantic_validate | 证据 source ID 不存在或与实体/结论无关；对应字段无效，不自动补证据 |
+| `analysis_evidence_reference_invalid` | semantic_validate | semantic context source ID 不存在、越界或不支持结论；对应字段无效，不自动补语义上下文，也不要求该片段重复实体 occurrence |
 | `analysis_output_truncated` | request | 任一阶段输出截断 |
 
 对外不得再把所有非完整结果统一显示为“AI 结构化结果无效，本条未计入品牌指标”。应按状态显示“目标事实已完成；目标语义部分未解决；开放竞品为尽力发现”等信息；只有目标事实轨真实失败时才使用未计入目标提及指标的失败文案。诊断结构示例：
@@ -655,7 +681,7 @@ entity_extract → entity_repair? → semantic_judge → semantic_repair?
 {
   "status": "partial",
   "error_code": "analysis_evidence_reference_invalid",
-  "stage": "entity_validate",
+  "stage": "semantic_validate",
   "field": "target_semantics.recommendation",
   "attempt_count": 2,
   "total_call_count": 2,
@@ -742,6 +768,14 @@ DeepSeek 官方 JSON mode 保证模型输出可解析 JSON 的能力，但不保
 ### KTD-013：复用现有主表，表外观察保留在分析结构
 
 `brand_competitors` 已承担项目配置、别名、官网引用和运行快照职责，新增第二张竞品主表会产生双重真值。本需求复用现有表；表外发现作为 `analysis_structure.entities[].registry_match.status=unmatched` 保存。自动候选池、人工审核和提升流程延后，且未来也不得自动把一次模型发现写入主表。
+
+### KTD-014：目标事实与目标实体映射必须是独立状态机
+
+目标事实回答“目标注册名称/别名是否在原回答出现”，目标实体映射回答“哪个阶段 1 实体承载这些 occurrence”。前者由程序确定性扫描，后者可能因模型把短名、英文名和公司全称拆成多个实体而歧义。映射歧义只关闭需要唯一实体 ID 的目标语义，不得把已证明的 presence/count 变成失败。不得通过猜一个实体或无合同自动合并来提高完成率。
+
+### KTD-015：实体 occurrence 证据与语义上下文证据分轨
+
+009 的主要降级不是 JSON 语法错误，而是单一证据数组被要求同时证明实体出现和语义结论。`semantic_evidence_v2` 让程序持有确定性的 occurrence 证据，让模型只选择 semantic context；两者通过封闭 `entity_id` 组合审计。该设计不恢复自动语义补证据，因为程序永远不能生成 semantic context。代价是静态校验不再把“同一片段含实体字面量”当作语义正确性的充分或必要条件，必须依靠断言类型约束和人工真值评测保证 precision。
 
 ## 7. 真实 Flash 对比实验设计
 
@@ -901,9 +935,15 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 
 **需求修订说明：** 上表及“不批准硬切”结论是首轮实验历史事实，保留不改写。用户随后明确竞品允许遗漏，因此完整开放竞品集合不再进入目标核心稳定门槛；下一轮改用目标核心签名硬门槛，并将竞品集合 Jaccard、未解决率和已输出关系 precision 分开报告。在新合同重跑完成前仍不批准硬切。
 
+#### `three_track_partial_v1` 第二轮结果（issue 009）
+
+issue 001–008 完成后，41 条冻结语料和 15 条补充样本按新合同再次执行真实 A/B/C。主语料 v5 完成率为 100%，目标出现准确率和 grounding 均为 100%，但目标核心签名稳定率为 95.12%，低于 99%；补充样本 v5 完成率为 93.33%，3 次失败均来自 S55 的多实体目标映射歧义。主语料 73/123（59.3%）在阶段 2 因 `analysis_evidence_reference_invalid` 降级。
+
+assessed 幸存样本中的推荐 21/21、情绪 21/21 和排名 4/4 不能证明整体语义可靠：大量降级形成选择偏差，排名也未达到每项至少 20 个已复核实例的预注册要求。实体 grounding 只证明字符串可定位，不能证明实体切分和 canonicalization 正确。issue 009 因此保持“不批准硬切”，其原始结果不得在 v2 实验中覆盖。
+
 ## 8. 实现切片
 
-当前进度：U1–U4 与 U5 的隔离编排/计算部分已有候选代码和测试；U7 已完成首轮 A/B/C 并得出不批准硬切。U5 的正式持久化接入、U6 消费者兼容和 U8 均未开始。隔离代码不等于正式生效。
+当前进度：对应 issue 001–008 的 U1–U6 和候选正式入口接线已经完成；U7/issue 009 已完成第二轮真实 A/B/C，但门槛失败。U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。U10/issue 012 `semantic_evidence_v2`、U11/issue 013 真值审计、U12/issue 014–015 探针与全量门禁待执行。
 
 ### U1. 冻结真实语料与评测合同
 
@@ -1183,6 +1223,62 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 
 **验收方式：** 入口级证据同时证明 v5 被调用、v4 未被调用、Flash 参数生效、旧运行时已删除；完成后才把需求目录改为 `closed`。
 
+### U9. 目标映射歧义隔离
+
+**目标：** 消除 S55 类多实体命中目标别名导致的整条失败，保持目标事实确定性完成。
+
+**依赖：** U2、U5 已完成能力。
+
+**涉及文件：** 实体目录、v5 编排器、目标事实/目标语义状态测试和真实 benchmark fixture。
+
+**方案：** 把 `target_mapping` 从 `target_fact` 拆出；多个实体命中时保存 `ambiguous` 和候选实体 ID，不任选、不自动合并、不抛整条错误。目标语义标为 unavailable，目标 presence/count 正常持久化。
+
+**测试场景：** 同时出现“广拓（Gato）”与“上海广拓信息技术有限公司”；目标未出现；唯一实体命中；多个实体存在但只有一个覆盖目标 occurrence。
+
+**验收方式：** S55 回归不再返回 `analysis_target_mapping_ambiguous`，真实 Flash 定向 3/3 保留完整目标事实。
+
+### U10. `semantic_evidence_v2` 与定向修复
+
+**目标：** 支持实体列举与推荐/情绪/关系语句分处不同片段的真实回答，同时保持语义证据不可伪造。
+
+**依赖：** U3、U4 已完成能力。
+
+**涉及文件：** 阶段 2 prompt/schema、证据校验器、修复提示、v5 结构版本分派及相关测试。
+
+**方案：** 模型输出 `semantic_context_source_ids`；程序从冻结实体目录投影 `entity_occurrence_source_ids` 并组装证据包。校验两者的角色、ID 闭集和断言一致性，但不再要求语义片段逐字重复实体表面词。定向修复向模型展示错误断言、source map 和 occurrence IDs，仍失败则字段降级。
+
+**测试场景：** 实体与推荐同片段；实体先列举、后用短名推荐；集合推荐；无效或未知 semantic source ID；模型不提供上下文；修复仍失败。
+
+**验收方式：** 程序生成 semantic context 数为 0，已知机械性 evidence-reference fixture 全部按字段正确 assessed 或降级，不影响 target fact。
+
+### U11. 真值与评测合同审计
+
+**目标：** 消除补充标注未复核、幸存者偏差和 grounding 代替实体正确性的评测缺口。
+
+**依赖：** 无，可与 U9/U10 并行准备。
+
+**涉及文件：** 冻结语料 labeling/truth、benchmark 指标与报告文档；真实语料仍保存在忽略目录。
+
+**方案：** 按数据集版本记录人工复核；推荐、排名、情绪和已输出关系分别凑足至少 20 个盲标实例；增加实体 precision/recall/canonicalization、阶段 2 降级率和机械性证据错误率。整体语义指标包含 unresolved，不只评价 assessed 幸存样本。
+
+**测试场景：** 旧语料已确认但补充语料待复核；组合实体；同品牌短名/全名拆分；某语义维度不足 20。
+
+**验收方式：** benchmark 在真值不足时明确 `NOT EVALUABLE`，不能输出 PASS；每个参与门禁的数据集有独立确认记录。
+
+### U12. 定向探针与全量新门禁
+
+**目标：** 先低成本选择可行证据合同，再对最终候选执行不可变的完整对比并决定是否解锁 U8。
+
+**依赖：** U9、U10、U11。
+
+**涉及文件：** benchmark 候选配置、定向样本 manifest、独立 v2 比较报告和 issue 014/015。
+
+**方案：** 先对 10–15 条已知失败样本各运行 3 次，对比 prompt-only 与 `semantic_evidence_v2`；探针通过后冻结 `three_track_partial_v2`，再对相同 41 条主语料、补充真值集和 A/B/C 全量重跑。旧 009 缓存、结果和报告只读。
+
+**测试场景：** S55、推荐跨片段、情绪跨片段、关系证据、长回答和多实体回答。
+
+**验收方式：** 探针先达到目标事实 100%、机械性证据引用错误 0、核心稳定率 ≥99%；完整重跑随后满足全部预注册门槛并取得明确人工批准，才解锁 U8。
+
 ## 9. 验收标准
 
 - AC-001：Given 目标品牌只存在于任务配置、不存在于回答，When 分析运行，Then 阶段 1 请求不含目标信息，`target_fact.status=complete`、`brand_mentioned=false`，且不写虚假目标提及。
@@ -1208,6 +1304,13 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - AC-021：Given 阶段 2 判断当前问题中的竞品关系，When 构建模型请求，Then 请求中不存在完整注册表、注册表标准名、`competitor_id`、匹配状态或“已知竞品”标签；同一 grounded 目录在不同注册表下的阶段 2 实体投影字节级一致，matched 与 unmatched 实体适用同一关系 schema 和校验规则。
 - AC-022：Given 原运行完成后管理员修改竞品表，When 对原记录执行 analysis-only，Then 使用原运行冻结快照；新运行使用新快照，但相同回答的阶段 1 请求不变。
 - AC-023：Given 正常、一次阶段 1 修复、一次阶段 2 修复和双阶段各一次修复，When 统计模型调用，Then 分别为 2、3、3、4 次；注册表命中、未命中或歧义均不增加调用次数。
+- AC-024：Given 同一目标品牌的短名、英文名和公司全称映射到多个 grounded 实体，When 构建目标映射，Then `target_fact.status=complete`、`target_mapping.status=ambiguous`、`target_entity_id=null`，仅目标语义不可用，整条分析不失败。
+- AC-025：Given 一个实体在 L005 出现、在 L019 被明确推荐，When Flash 返回该推荐，Then最终证据包包含 occurrence L005 与 semantic context L019；校验不要求 L019 重复实体表面词。
+- AC-026：Given semantic context ID 未知、为空或不支持断言且定向修复仍失败，When 编排完成，Then 只把对应字段/竞品项标为 unresolved/invalid；程序不得自动选择上下文，target fact 保持 complete。
+- AC-027：Given 新增补充真值仍为待复核或某语义维度少于 20 个实例，When benchmark 汇总，Then 对应门禁为 `NOT EVALUABLE`，不得用 assessed 幸存样本准确率宣布 PASS。
+- AC-028：Given grounded 组合字符串可以逐字定位但错误合并多个品牌，When 评价实体质量，Then grounding 仍单独报告且该实体在 precision/canonicalization 中计错。
+- AC-029：Given v2 定向探针任一硬门槛失败，When 决定是否执行全量实验，Then 停止并保留 010 阻塞；不得直接消耗全量调用或改写 009。
+- AC-030：Given v2 探针通过，When 执行独立全量 A/B/C，Then 使用新缓存键、修订号和报告，不覆盖 009；全部门槛通过并经人工批准后才允许开始 U8/010。
 
 ## 10. 测试与验证计划
 
@@ -1216,6 +1319,8 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - source map 无损性、偏移、哈希和稳定 ID。
 - 实体表面词精确定位、非重叠计数、保守归并，以及独立目标名称/别名原文扫描。
 - 两阶段 JSON/schema/ID/evidence 校验，坏竞品行隔离、关系未解决和目标语义字段状态转换。
+- `target_mapping` 独立状态机，以及多个目标实体命中不影响 `target_fact` 的 S55 回归。
+- `semantic_evidence_v2` 双角色校验：occurrence 程序投影、semantic context 模型提供、跨片段组合、未知 ID 和禁止程序补语义上下文。
 - 目标情绪状态机、候选组和推荐计算。
 - 字段级修复授权边界与四调用上限。
 - 指标计算保留 SOV 数学公式，但输出 v2 scope/status/completeness 并阻止与历史 v1 混算。
@@ -1237,8 +1342,10 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 验证分三层，不能互相替代：
 
 1. **可行性探针**：已完成真实挑战样本的 v4、降温 v4、阶段 1 和完整 v5 调用。
-2. **正式对比基线**：已完成旧合同 41 条 × 3 次 × A/B/C，结果为完整稳定性 FAIL；该结果保留为历史证据。下一修订必须按 `three_track_partial_v1` 重跑，并补齐推荐、排名、情绪和已输出关系各不少于 20 个真值实例。
-3. **真实入口验收**：尚未执行。只有正式对比全部通过后才能硬切，并从四类入口证明 v5 实际生效、v4 未调用。
+2. **正式对比基线**：旧合同和 `three_track_partial_v1` 的两轮 A/B/C 均已完成并明确不批准硬切；结果保留为历史证据，不覆盖。
+3. **v2 定向探针**：修复后先对 10–15 条已知失败样本比较 prompt-only 与 `semantic_evidence_v2`，各重复 3 次；未通过不进入全量实验。
+4. **v2 全量门禁**：探针通过后按 `three_track_partial_v2` 重跑 A/B/C，并使用每项至少 20 个已复核实例作语义结论。
+5. **真实入口验收**：尚未执行。只有 v2 全量门禁全部通过后才能硬切，并从四类入口证明 v5 实际生效、v4 未调用。
 
 ### 10.4 生产验证证据
 
@@ -1300,7 +1407,10 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 | 阶段 1 漏实体但结构合法 | 开放 SOV 分母和竞品关系不完整 | 明示 `observed_only / open_discovery / not_proven`；报告 recall、Jaccard、未解决率和分母波动，不把遗漏升级为整条失败 |
 | canonical name 错误归并 | 多个品牌被合并或拆分 | 原文 span 保留；canonical 仅展示，未经注册/原文证明的派生别名不得影响扫描或指标 |
 | 目标别名未配置 | 目标假阴性 | 将真实别名作为品牌资料质量问题暴露；不使用模型猜测兜底 |
-| 阶段 2 reason 正确但证据 ID 不相关 | 审计结论不可信 | 证据 ID 必须存在并包含相关实体；人工语义基线检查 wrong-but-schema-valid |
+| 阶段 2 reason 正确但 semantic context 不支持结论 | 审计结论不可信 | occurrence 与 semantic context 分轨校验；上下文必须存在且支持断言，人工语义基线检查 wrong-but-schema-valid |
+| 单一证据数组同时承担实体出现与语义结论 | 合法的跨片段推荐/关系被机械拒绝并随机降级 | 使用 `semantic_evidence_v2` 分离 occurrence 与 semantic context；程序只能投影前者，后者仍由 Flash 提供 |
+| 多个 grounded 实体命中同一目标别名 | 已证明的目标事实被错误中断 | 独立 `target_mapping` 状态机；歧义只关闭目标语义，不抛整条错误、不猜实体 |
+| 只评价 assessed 幸存样本 | 大量 unresolved 被排除后产生虚假的 100% | 报告整体可用率与降级率；每个语义维度至少 20 个已复核真值，否则 NOT EVALUABLE |
 | strict tool beta 能力变化 | 实验 D 不稳定 | C 不依赖 D；D 不支持时明确退出，不运行时 fallback |
 | 管理员请求参数覆盖固定策略 | 重现 0.7 温度偏差 | 固定键最后合并、设置接口校验、最终 HTTP body 测试与运行诊断 |
 | 最坏 4 次调用超过执行租约 | 迟到 worker 被 fencing 拒绝 | 更新分析时间预算和租约测试；保持外部调用不在事务内 |
@@ -1349,7 +1459,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 
 - Tech Spec path: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/TECH-SPEC.md`
 - Validation report: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/validation-report.md`
-- 可拆 issue：U1–U8 可分别拆为垂直 issue；当前应优先落实 KTD-002、KTD-008、KTD-010 至 KTD-013，删除自我修复路径、实现模型外竞品注册表 resolver 与不可变快照、补齐三轨状态和消费者聚合，再扩充真值。U8 只能在新一轮 U7 全部通过后开始。
-- 建议下一个 issue：先删除语义证据自动补齐、未确认别名派生和情绪覆盖，并实现“阶段 1 开放发现 → 程序注册表归一 → 阶段 2 无先验关系判断”及其十二项不变性测试；随后把推荐、排名、情绪和已输出关系真值扩充到每项至少 20 个可评估实例，按新合同重跑，不修改生产默认入口。
+- 可拆 issue：U1–U7 已由 001–009 承接；U9–U12 对应 011–015。010/U8 只能在 015 的 `three_track_partial_v2` 全部门槛通过并人工批准后开始。
+- 建议下一个 issue：先执行 011，消除 S55 的确定性目标映射失败；012 与 013 随后完成证据合同和真值审计，014 做小样本真实 Flash 探针，015 做独立全量门禁。
 - 是否适合 TDD：适合。source map、ID 合同、验证器、指标计算、请求体和报告兼容均应先写失败测试；真实 Flash 基线作为单元测试之外的独立验收层。
-- 当前正式路径：仍为 `ai_structured_v4` / `geo_metric_input_v4`；v5 隔离模块已按“竞品允许漏”修改候选合同，但尚未完成新合同全量重跑、正式接入或默认切换，v4 运行时代码和现役调用方尚未删除。
+- 当前正式路径：仍为 `ai_structured_v4` / `geo_metric_input_v4`，默认 DeepSeek 分析配置为 `deepseek-v4-pro`；v5 显式候选路径强制 `deepseek-v4-flash`。v5 未设为默认，v4 运行时代码、兼容和现役调用方尚未删除。

@@ -174,25 +174,37 @@ function calculate({
     : 'neutral';
 
   // ---- 三轨字段级状态派生 ----
+  // target_mapping 与 target_fact 独立：映射歧义只关闭需要唯一实体 ID 的目标语义，
+  // 目标 presence/count 由确定性 target_mentions 扫描决定，不清空、不失败。
+  const mappingStatus = catalog.target_mapping?.status
+    || (catalog.target_entity_id ? 'resolved' : 'not_applicable');
+  const mappingAmbiguous = mappingStatus === 'ambiguous';
   const semanticAvailable = !semantic?.degraded;
   const targetAppears = brandMentioned;
-  const recommendationField = targetAppears
-    ? (semanticAvailable
-      ? { status: 'assessed', value: targetRecommended }
-      : { status: 'unresolved', value: null })
-    : { status: 'not_applicable', value: null };
-  const rankField = targetAppears
-    ? (semanticAvailable
-      ? { status: 'assessed', value: calculatedTargetRank }
-      : { status: 'unresolved', value: null })
-    : { status: 'not_applicable', value: null };
-  const sentimentField = targetAppears
-    ? (semanticAvailable
-      ? (semantic.sentiment.status === 'assessed'
-        ? { status: 'assessed', value: semantic.sentiment.label }
-        : { status: 'unresolved', value: null })
-      : { status: 'unresolved', value: null })
-    : { status: 'not_applicable', value: null };
+  const semanticsUnavailable = targetAppears && mappingAmbiguous;
+  const recommendationField = !targetAppears
+    ? { status: 'not_applicable', value: null }
+    : (semanticsUnavailable
+      ? { status: 'unavailable', value: null }
+      : (semanticAvailable
+        ? { status: 'assessed', value: targetRecommended }
+        : { status: 'unresolved', value: null }));
+  const rankField = !targetAppears
+    ? { status: 'not_applicable', value: null }
+    : (semanticsUnavailable
+      ? { status: 'unavailable', value: null }
+      : (semanticAvailable
+        ? { status: 'assessed', value: calculatedTargetRank }
+        : { status: 'unresolved', value: null }));
+  const sentimentField = !targetAppears
+    ? { status: 'not_applicable', value: null }
+    : (semanticsUnavailable
+      ? { status: 'unavailable', value: null }
+      : (semanticAvailable
+        ? (semantic.sentiment.status === 'assessed'
+          ? { status: 'assessed', value: semantic.sentiment.label }
+          : { status: 'unresolved', value: null })
+        : { status: 'unresolved', value: null }));
   const semanticsFieldStatuses = [
     recommendationField.status,
     rankField.status,
@@ -200,11 +212,13 @@ function calculate({
   ];
   const targetSemanticsStatus = !targetAppears
     ? 'complete'
-    : (semanticsFieldStatuses.every((status) => (
-      status === 'assessed' || status === 'not_applicable'
-    ))
-      ? 'complete'
-      : 'partial');
+    : (semanticsUnavailable
+      ? 'unavailable'
+      : (semanticsFieldStatuses.every((status) => (
+        status === 'assessed' || status === 'not_applicable'
+      ))
+        ? 'complete'
+        : 'partial'));
   const competitionStatus = !semanticAvailable
     ? 'unavailable'
     : (unresolvedEntityIds.length || quarantinedItems.length ? 'partial' : 'complete');
@@ -216,7 +230,7 @@ function calculate({
     : []).map((relation) => relation.entity_id);
 
   const targetFact = {
-    status: 'complete',
+    status: mappingStatus === 'invalid_input' ? 'invalid_input' : 'complete',
     brand_mentioned: brandMentioned,
     brand_mentions: targetMentions,
     mentions: catalog.target_mentions || []
@@ -282,6 +296,11 @@ function calculate({
     answer_sha256: sourceMap.answer_sha256,
     competitor_registry_snapshot: snapshotMeta,
     target_fact: targetFact,
+    target_mapping: catalog.target_mapping || {
+      status: catalog.target_entity_id ? 'resolved' : 'not_applicable',
+      target_entity_id: catalog.target_entity_id,
+      candidate_entity_ids: []
+    },
     target_semantics: targetSemantics,
     competition_analysis: competitionAnalysis,
     sov,

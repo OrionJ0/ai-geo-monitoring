@@ -15,6 +15,8 @@
 
 本需求要解决的产品问题是：在**必须继续使用 `deepseek-v4-flash`** 的前提下，让有效完整回答稳定地产生可审计的目标品牌指标；竞品发现属于尽力而为的开放式增强，允许遗漏并明确记录覆盖状态，但任何进入指标的事实仍须可证明，不以伪造数据换取表面成功率。
 
+2026-08-05 完成 issue 001–008 并执行新合同真实对比后，v5 在 41×3 主语料上达到 100% 完成率，但目标核心签名稳定率仅为 95.12%；15 条补充样本完成率为 93.33%。进一步诊断确认剩余问题不是“Flash 不会输出 JSON”，而是两个更具体的合同缺陷：其一，同一目标品牌的短名、英文名和公司全称被抽成多个 grounded 实体时，目标实体映射歧义会错误中断整条分析；其二，现有单一 `evidence_source_ids` 同时承担实体出现证明与语义结论证明，要求推荐语句必须在同一片段重复实体表面词，导致真实回答中的跨片段推荐、情绪和关系证据被机械性拒绝。009 因硬门槛失败保持阻塞，010 不得硬切。
+
 ## Solution
 
 提供一条面向 Flash 的分阶段结构化分析能力，并把原来的单一“成功/失败”结果拆成三条互不拖累的事实轨：
@@ -36,7 +38,7 @@
 7. **先比较、后切换**：先用冻结的真实回答对当前 v4、降温 v4 和分阶段候选方案做同题、同模型、重复对比；只有候选方案通过预先定义的质量、稳定性和成本门槛，才允许进入正式入口硬切。
 8. **竞品表只管身份、不管发现和关系**：复用现有 `brand_competitors` 作为项目级已验证竞品注册表。完整竞品表不得进入任何模型提示；阶段 1 必须在不知道竞品表内容的情况下开放发现，程序只在实体已经由原文证明后使用注册名称/别名做身份归一。表外实体必须保留，表内但原文未出现的品牌不得被注入结果。
 
-新分析版本拟使用 `ai_structured_v5` / `geo_metric_input_v5`，结构合同修订号为 `three_track_partial_v1`。原有 SOV 计算公式可以保留，但含义必须显式带范围：开放发现模式使用新的 `contextual_competitor_mentions_sov_v2_scoped`，状态为 `observed_only`、范围为 `open_discovery`、完整性为 `not_proven`。它只表示“本次已发现且已证明的上下文实体中的提及份额”，不是完整市场竞品份额。历史 `contextual_competitor_mentions_sov_v1` 保持只读，不与 v2 静默拼接趋势。
+新分析版本继续使用 `ai_structured_v5` / `geo_metric_input_v5`。已完成但未获准硬切的结构合同修订号为 `three_track_partial_v1`；本轮修复目标使用 `three_track_partial_v2`，并引入 `semantic_evidence_v2`。原有 SOV 计算公式可以保留，但含义必须显式带范围：开放发现模式使用新的 `contextual_competitor_mentions_sov_v2_scoped`，状态为 `observed_only`、范围为 `open_discovery`、完整性为 `not_proven`。它只表示“本次已发现且已证明的上下文实体中的提及份额”，不是完整市场竞品份额。历史 `contextual_competitor_mentions_sov_v1` 保持只读，不与 v2 静默拼接趋势。
 
 ## User Stories
 
@@ -123,16 +125,17 @@
 - 程序只使用项目已保存的目标品牌名称和别名，直接对完整原回答做 NFKC、大小写折叠和边界感知的确定性扫描；该结果不依赖开放实体目录的召回。
 - 回答未出现任何目标品牌名称或别名时，`target_entity_id` 必须为空，品牌未提及、未推荐、无排名，情绪状态为不适用。
 - 模型给出的标准显示名不能单独证明目标品牌出现，防止把其他实体错误归一为目标品牌。
+- 目标原文扫描与目标实体映射是两件事。只要目标名称或已配置别名在有效原回答中可确定性定位，`target_fact.status` 就必须为 `complete`；多个 grounded 实体同时覆盖这些目标命中时，只把 `target_mapping.status` 标为 `ambiguous`、`target_entity_id` 置空并降级目标语义，不得清空目标事实或使整条分析失败。
 
 ### 三轨结果状态
 
 | 轨道 | 最小状态 | 可用于什么指标 | 不得表达成什么 |
 | --- | --- | --- | --- |
-| `target_fact` | `complete / ambiguous / invalid_input` | `complete` 时可计算是否提及、提及次数及证据位置 | 开放竞品漏抽不能让它失败 |
+| `target_fact` | `complete / invalid_input` | `complete` 时可计算是否提及、提及次数及证据位置 | 开放竞品漏抽、实体拆分或目标实体映射歧义不能让它失败 |
 | `target_semantics` | 总状态 `complete / partial / unavailable`；推荐、排名、情绪各自为 `assessed / not_applicable / unresolved / invalid` | 只有单字段 `assessed` 才进入该指标分母 | `unresolved` 不得当作未推荐、中性或无排名 |
 | `competition_analysis` | `complete / partial / unavailable`，且固定携带 `scope=open_discovery`、`completeness=not_proven` | 只使用已验证实体和已证明关系；保存未解决与隔离数量 | 不得宣称完整发现全部竞品 |
 
-整条记录的“可用”不再等于所有轨道全成功。只要输入有效且 `target_fact.status=complete`，目标提及事实即可使用；目标语义和开放竞品各自按状态参与对应聚合。只有原回答缺失/无效、source map 与原文哈希不一致、目标别名发生不可判定歧义、目标事实无法安全计算或事务写入失败，才把目标事实轨判为失败。
+整条记录的“可用”不再等于所有轨道全成功。只要输入有效且 `target_fact.status=complete`，目标提及事实即可使用；目标语义和开放竞品各自按状态参与对应聚合。只有原回答缺失/无效、source map 与原文哈希不一致、目标配置本身无有效名称/别名、目标事实无法安全计算或事务写入失败，才把目标事实轨判为失败。目标实体映射歧义属于语义映射状态，不属于目标事实失败。
 
 这里的“100%”边界必须明确：对给定的有效原回答和已配置目标别名，程序扫描、原文定位、状态分流和“坏数据不进入指标”可以要求 100%；开放竞品召回和 Flash 语义判断属于概率任务，不能诚实承诺每次都完整且正确，只能要求已输出事实高精度、未知显式化和不连带失败。产品完成率因此按轨定义，而不是继续追求一个掩盖未知的单一 100%。
 
@@ -144,6 +147,8 @@
 - 明确推荐必须同时引用实体 ID 和支持推荐的原文片段 ID。
 - 目标品牌未出现时不要求模型生成目标情绪；目标品牌出现时才返回正面、中性或负面及证据片段。
 - 程序只做 schema、ID、原文证据和业务不变量验证，不得自动补语义证据、从仅含实体名的片段推导推荐/竞品关系，也不得把模型的中性情绪程序性改写为正面。
+- `semantic_evidence_v2` 把证据拆成两个角色：`entity_occurrence_source_ids` 由程序从已经冻结的实体 occurrence 确定性提供，只证明“该实体在回答中出现”；`semantic_context_source_ids` 必须由 Flash 返回，只证明推荐、关系、候选顺序或情绪结论。两者可以位于不同原文片段，不能再强制语义上下文片段重复实体表面词。
+- 程序可以把确定性的 occurrence 证据与模型返回的 semantic context 组合成可审计证据包，但不得替模型选择、补写或猜测 `semantic_context_source_ids`。语义上下文缺失或不能支持结论时只降级对应字段。
 
 ### 重试与失败
 
@@ -182,6 +187,8 @@
 
 上线决策必须同时看结构有效率、原文锚定、语义正确性、重复稳定性、Token 和延迟。任何候选未通过硬门槛时，结论必须是“尚不可切换”，不得只挑成功样例发布。
 
+009 失败后的新修订必须先用 10–15 条已知失败样本、每条 3 次做低成本探针，对比“只增强提示词并显式给出允许引用的 occurrence source IDs”和 `semantic_evidence_v2`。只有探针达到目标事实 100%、机械性证据引用错误为 0、目标核心签名稳定率不低于 99%，才允许新建独立的全量门禁实验。旧 009 的输入、结果、门槛和“不批准硬切”结论不得被覆盖或改写。
+
 ## Acceptance Criteria
 
 - AC-001：正式候选和最终生产配置的模型均为 `deepseek-v4-flash`；没有 Pro、其他模型或 v4 运行时 fallback。
@@ -212,6 +219,13 @@
 - AC-026：正常 v5 仍为 2 次模型调用、每阶段最多 2 次；竞品表命中失败、表外品牌出现或竞品遗漏不得触发额外模型调用。
 - AC-027：同一 grounded 实体目录在空表、正常表和冲突表下，第二阶段的实体投影与请求体必须字节级一致；注册表身份只能在第二阶段完成后回接，不能影响关系判断。
 - AC-028：原运行完成后竞品表发生变化时，analysis-only 必须复用原运行的注册表快照；新运行才读取新快照，历史分析不能随实时配置漂移。
+- AC-029：同一目标品牌的短名、英文名和公司全称被抽成多个 grounded 实体时，目标事实仍为 `complete`；`target_mapping.status=ambiguous`、`target_entity_id=null`，目标语义可降级但整条分析不得失败。
+- AC-030：每个语义断言的最终证据包同时包含程序确定的 `entity_occurrence_source_ids` 和 Flash 返回的 `semantic_context_source_ids`；两类 source ID 均存在于同一冻结 source map，但不要求位于同一片段。
+- AC-031：程序自动创建或补写 `semantic_context_source_ids` 的数量为 0；语义上下文无效只影响对应字段或竞品项，不影响 `target_fact`。
+- AC-032：定向探针覆盖至少 10 条已知 `analysis_evidence_reference_invalid` 样本和目标映射歧义样本，每个候选每条运行 3 次；只有机械性证据引用错误为 0、目标事实可用率 100%、目标核心签名稳定率不低于 99% 才进入全量实验。
+- AC-033：新增或补充语义真值必须由未查看候选输出的人员复核，并按数据集版本记录确认状态；旧语料的全局 `human_review_confirmed` 不得自动证明补充样本已复核。
+- AC-034：推荐、排名、情绪和已输出竞品关系各自不少于 20 个已复核可评估实例；只在 `assessed` 幸存样本上得到 100% 不得表述为整体语义可靠。
+- AC-035：实体质量除 grounding 外还必须报告实体 precision、recall 和 canonicalization；逐字可定位但把多个品牌合成一个实体的输出不得计为实体正确。
 
 ## Metrics / Success
 
@@ -227,6 +241,8 @@
 - “结构合法但语义错误”的错误率。
 - 竞品注册表匹配率、未匹配率和歧义率；这些是知识覆盖诊断，不是分析完成门槛。
 - 阶段 1 对竞品表配置的输入不变性，以及表外实体保留率。
+- 目标实体映射 `resolved / not_applicable / ambiguous / unavailable` 分布，以及映射歧义导致的整条失败数；后者必须为 0。
+- `entity_occurrence_source_ids` 与 `semantic_context_source_ids` 各自的有效率、修复率和最终降级率；机械性 `analysis_evidence_reference_invalid` 必须单独统计。
 
 ### 稳定性与成本指标
 
@@ -263,6 +279,6 @@
 ## Handoff
 
 - PRD path: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/prd.md`
-- Current state: 已新增 v5 source map、实体目录、分阶段抽取/判断、编排器和基准服务等隔离模块及单元测试；首轮 41×3×A/B/C 中 v5 完成 121/123。用户已确认竞品允许遗漏，并进一步确认现有竞品表只作为模型外已验证身份注册表，不能限制开放发现。当前候选尚未实现注册表快照/匹配状态、三轨消费者和新合同全量真实重跑；正式生产仍使用 v4，结构化分析尚未使用竞品表。
+- Current state: issue 001–008 已完成并提交；009 已执行 41×3 主语料和 15 条补充样本真实 Flash 对比，但目标核心稳定率和补充集完成率未过门槛，因此明确不批准硬切。issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。012 `semantic_evidence_v2`、013 真值审计、014 定向探针、015 全量门禁待执行。当前正式入口仍使用 `ai_structured_v4 / geo_metric_input_v4`，默认 DeepSeek 分析配置为 `deepseek-v4-pro`；v5 只有显式候选路径固定使用 `deepseek-v4-flash`。010 保持阻塞，v4 运行时和现役文档尚未退役。
 - Validation report: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/validation-report.md`
-- Recommended next step: 删除语义证据自动补齐、未确认别名派生和情绪覆盖；实现独立目标事实、竞品注册表冻结快照与模型外身份归一，并用输入不变性、空表、表外品牌保留和无制造测试封死 closed-world bias。随后扩充真值并按新合同重跑候选；门槛通过后再接正式入口、硬切并删除 v4 运行时。
+- Recommended next step: 按 issue 012–015 依次完成 `semantic_evidence_v2`、真值审计、定向真实 Flash 探针和 `three_track_partial_v2` 全量门禁；015 全部通过并经人工批准后才可执行 010。
