@@ -406,6 +406,66 @@ export function assertMarketingDashboardResponse(
   }
 }
 
+export function assertMarketingDashboardRootResponse(
+  value: unknown,
+  expectedProjectId: string
+): asserts value is MarketingDashboardResponse {
+  if (
+    !objectRecord(value)
+    || !text(value.projectId, 128)
+    || value.projectId !== expectedProjectId
+    || !objectRecord(value.states)
+  ) invalidDashboard();
+  const snapshotState = value.states.snapshotContentState;
+  const freshnessState = value.states.snapshotFreshnessState;
+  if (
+    !['NONE', 'ZERO', 'DATA'].includes(String(snapshotState))
+    || !['NA', 'FRESH', 'STALE'].includes(String(freshnessState))
+  ) invalidDashboard();
+  const coverage = value.coverage;
+  if (snapshotState === 'NONE') {
+    if (coverage !== null || value.revision !== null || freshnessState !== 'NA') {
+      invalidDashboard();
+    }
+  } else if (
+    !text(value.revision, 128)
+    || !objectRecord(coverage)
+    || !dateText(coverage.from)
+    || !dateText(coverage.to)
+    || coverage.from > coverage.to
+    || !text(coverage.currency, 16)
+    || !Number.isSafeInteger(coverage.costScale)
+    || Number(coverage.costScale) < 0
+    || Number(coverage.costScale) > 12
+    || !['FRESH', 'STALE'].includes(String(freshnessState))
+  ) invalidDashboard();
+  if (
+    value.filter !== null
+    && value.filter !== undefined
+    && (
+      !objectRecord(value.filter)
+      || !dateText(value.filter.from)
+      || !dateText(value.filter.to)
+      || value.filter.from > value.filter.to
+    )
+  ) invalidDashboard();
+  if (
+    !exactMetrics(value.summary)
+    || !exactTrend(value.trend)
+    || !Array.isArray(value.bindings)
+    || !value.bindings.every((row) => objectRecord(row)
+      && text(row.accountId, 128) && text(row.accountName))
+  ) invalidDashboard();
+  const hierarchyCounts = value.hierarchyCounts;
+  if (
+    !objectRecord(hierarchyCounts)
+    || !['campaigns', 'adGroups', 'keywords', 'searchTerms'].every((field) => (
+      Number.isSafeInteger(hierarchyCounts[field])
+      && Number(hierarchyCounts[field]) >= 0
+    ))
+  ) invalidDashboard();
+}
+
 export function marketingSnapshotWarning(
   dashboard: MarketingDashboardResponse
 ): string {

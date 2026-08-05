@@ -47,7 +47,8 @@ import {
 } from '@/fixtures/keywordAnalysis.fixture.cjs';
 import useKeywordAnalysis, {
   KEYWORD_ANALYSIS_FIXTURE_ENABLED,
-  type KeywordFixtureState
+  type KeywordFixtureState,
+  type KeywordResourceSort
 } from '@/lib/marketing/useKeywordAnalysis';
 import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
 import { useMarketingFilters } from '@/components/marketing/MarketingFiltersContext';
@@ -59,10 +60,10 @@ import sharedStyles from '../ad-performance/ad-performance.module.css';
 import styles from './keyword-analysis.module.css';
 
 const KEYWORD_SUMMARY_PLACEHOLDERS = Object.freeze([
-  { title: '有展现关键词' },
-  { title: '有点击关键词' },
-  { title: '点击覆盖率' },
-  { title: '未获点击' }
+  { title: '广告关键词数' },
+  { title: '展现' },
+  { title: '点击' },
+  { title: '消费' }
 ]);
 type TagFilter = 'all' | KeywordTag;
 type BenchmarkMode = 'median' | 'account-average';
@@ -135,18 +136,6 @@ function formatPercent(value: number | null, digits = 2): string {
     : `${value.toFixed(digits)}%`;
 }
 
-function compareExact(left: string, right: string): number {
-  const difference = BigInt(left) - BigInt(right);
-  return difference < BigInt(0) ? -1 : difference > BigInt(0) ? 1 : 0;
-}
-
-function compareOptionalNumber(left: number | null, right: number | null): number {
-  if (left == null && right == null) return 0;
-  if (left == null) return 1;
-  if (right == null) return -1;
-  return left - right;
-}
-
 function fixtureStateFromLocation(): KeywordFixtureState {
   if (!KEYWORD_ANALYSIS_FIXTURE_ENABLED || typeof window === 'undefined') {
     return 'ready';
@@ -169,8 +158,6 @@ function KeywordTagValue({ tag }: { tag: KeywordTag | null }) {
 }
 
 function MatchedSearchTermsValue({ record }: { record: KeywordAnalysisRow }) {
-  const terms = record.matchedSearchTerms;
-  if (!terms.length) return <span className={styles.mutedValue}>—</span>;
   return (
     <Link
       href={{
@@ -181,11 +168,11 @@ function MatchedSearchTermsValue({ record }: { record: KeywordAnalysisRow }) {
         }
       }}
       className={styles.searchTermLink}
-      aria-label={`查看“${record.keyword}”命中的 ${terms.length} 个广告搜索词`}
+      aria-label={`查看“${record.keyword}”命中的广告搜索词`}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      查看 {terms.length} 个
+      查看
     </Link>
   );
 }
@@ -242,6 +229,8 @@ export default function KeywordAnalysisPage() {
   const [selectedKeywordKey, setSelectedKeywordKey] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [sortBy, setSortBy] = useState<KeywordResourceSort>('costAmountScaled');
+  const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('descend');
 
   useEffect(() => setFixtureState(fixtureStateFromLocation()), []);
 
@@ -251,6 +240,14 @@ export default function KeywordAnalysisPage() {
   const enabled = fixtureEnabled || (
     Boolean(projectId) && marketing.capabilities.adsRead
   );
+  const resourceQuery = useMemo(() => ({
+    page,
+    pageSize,
+    sortBy,
+    sortOrder,
+    query: searchValue,
+    adGroupId: unitFilter === 'all' ? undefined : unitFilter
+  }), [page, pageSize, searchValue, sortBy, sortOrder, unitFilter]);
   const analysis = useKeywordAnalysis({
     projectId,
     projectName: defaultContext.project?.name,
@@ -258,6 +255,7 @@ export default function KeywordAnalysisPage() {
     dateRange,
     fixtureEnabled,
     fixtureState,
+    resourceQuery,
     onDateRangeAdjusted: setDateRange
   });
   const model = analysis.data;
@@ -379,6 +377,10 @@ export default function KeywordAnalysisPage() {
     || costRange !== 'all'
     || anomalyFilter !== 'all'
     || Boolean(searchValue);
+  const hasPageOnlyFilters = stageFilter !== 'all'
+    || tagFilter !== 'all'
+    || costRange !== 'all'
+    || anomalyFilter !== 'all';
 
   const selectedKeyword = selectedKeywordKey
     ? rowByKey.get(selectedKeywordKey) || null
@@ -390,9 +392,11 @@ export default function KeywordAnalysisPage() {
       {
         title: '关键词',
         dataIndex: 'keyword',
-        key: 'keyword',
+        key: 'keywordName',
         width: 252,
         fixed: 'left',
+        sorter: true,
+        sortOrder: sortBy === 'keywordName' ? sortOrder : null,
         render: (keyword: string, record) => (
           <Tooltip title={`${record.accountName} / ${record.path}`} placement="topLeft" trigger={['hover']}>
             <span className={styles.keywordCell}>
@@ -420,11 +424,11 @@ export default function KeywordAnalysisPage() {
       {
         title: '消费',
         dataIndex: 'costAmountScaled',
-        key: 'cost',
+        key: 'costAmountScaled',
         width: 142,
         align: 'right',
-        sorter: (left, right) => compareExact(left.costAmountScaled, right.costAmountScaled),
-        defaultSortOrder: 'descend',
+        sorter: true,
+        sortOrder: sortBy === 'costAmountScaled' ? sortOrder : null,
         render: (value: string) => (
           <strong className={styles.primaryMetric}>
             {formatMoney(value, model.costScale, 0, model.currency)}
@@ -437,7 +441,8 @@ export default function KeywordAnalysisPage() {
         key: 'impressions',
         width: 124,
         align: 'right',
-        sorter: (left, right) => compareExact(left.impressions, right.impressions),
+        sorter: true,
+        sortOrder: sortBy === 'impressions' ? sortOrder : null,
         render: (value: string) => <span className={styles.secondaryMetric}>{groupDigits(value)}</span>
       },
       {
@@ -446,7 +451,8 @@ export default function KeywordAnalysisPage() {
         key: 'clicks',
         width: 112,
         align: 'right',
-        sorter: (left, right) => compareExact(left.clicks, right.clicks),
+        sorter: true,
+        sortOrder: sortBy === 'clicks' ? sortOrder : null,
         render: (value: string) => <span className={styles.secondaryMetric}>{groupDigits(value)}</span>
       },
       {
@@ -455,7 +461,8 @@ export default function KeywordAnalysisPage() {
         key: 'ctr',
         width: 118,
         align: 'right',
-        sorter: (left, right) => compareOptionalNumber(left.ctrPercent, right.ctrPercent),
+        sorter: true,
+        sortOrder: sortBy === 'ctr' ? sortOrder : null,
         render: (value: number | null) => (
           <strong className={styles.primaryMetric}>{formatPercent(value)}</strong>
         )
@@ -463,10 +470,11 @@ export default function KeywordAnalysisPage() {
       {
         title: '平均 CPC',
         dataIndex: 'averageCpc',
-        key: 'cpc',
+        key: 'averageCpc',
         width: 142,
         align: 'right',
-        sorter: (left, right) => compareOptionalNumber(left.averageCpc, right.averageCpc),
+        sorter: true,
+        sortOrder: sortBy === 'averageCpc' ? sortOrder : null,
         render: (value: number | null) => (
           <strong className={styles.primaryMetric}>
             {value == null
@@ -476,7 +484,7 @@ export default function KeywordAnalysisPage() {
         )
       }
     ];
-  }, [model]);
+  }, [model, sortBy, sortOrder]);
 
   const chartRows = useMemo(() => scatterPoints.map((point) => ({
     ...point,
@@ -630,50 +638,45 @@ export default function KeywordAnalysisPage() {
         <div className={styles.moduleStack}>
           <MarketingMetricGrid ariaLabel="关键词覆盖摘要">
             <MarketingMetricCard
-              title="有展现关键词"
-              current={String(model.coverage.impressionKeywordCount)}
+              title="广告关键词数"
+              current={String(model.pagination.totalItems)}
               previous={null}
               change={null}
-              info="有展现的关键词数；点击卡片可筛选。"
-              previousMissingReason="当前关键词合同尚未提供上一周期覆盖摘要。"
-              changeMissingReason="缺少上一周期摘要，无法比较。"
-              selected={stageFilter === 'impressions'}
-              onActivate={() => setStageFilter((current) => current === 'impressions' ? 'all' : 'impressions')}
+              info="当前服务端完整筛选范围内的广告关键词数，不受当前页大小影响。"
+              previousMissingReason="上一周期比较由 007 交付。"
+              changeMissingReason="上一周期比较由 007 交付。"
             />
             <MarketingMetricCard
-              title="有点击关键词"
-              current={String(model.coverage.clickedKeywordCount)}
+              title="展现"
+              current={groupDigits(model.summary.impressions)}
               previous={null}
               change={null}
-              info="有点击的关键词数；点击卡片可筛选。"
-              previousMissingReason="当前关键词合同尚未提供上一周期覆盖摘要。"
-              changeMissingReason="缺少上一周期摘要，无法比较。"
-              selected={stageFilter === 'clicked'}
-              onActivate={() => setStageFilter((current) => current === 'clicked' ? 'all' : 'clicked')}
+              info="当前服务端完整筛选范围内的关键词展现总量。"
+              previousMissingReason="上一周期比较由 007 交付。"
+              changeMissingReason="上一周期比较由 007 交付。"
             />
             <MarketingMetricCard
-              title="点击覆盖率"
-              current={model.coverage.clickCoverageRate == null
-                ? null
-                : formatPercent(model.coverage.clickCoverageRate * 100)}
+              title="点击"
+              current={groupDigits(model.summary.clicks)}
               previous={null}
               change={null}
-              info="有点击关键词数 ÷ 有展现关键词数。"
-              currentMissingReason="当前没有可用的关键词覆盖分母。"
-              previousMissingReason="当前关键词合同尚未提供上一周期覆盖摘要。"
-              changeMissingReason="缺少上一周期摘要，无法比较。"
+              info="当前服务端完整筛选范围内的关键词点击总量。"
+              previousMissingReason="上一周期比较由 007 交付。"
+              changeMissingReason="上一周期比较由 007 交付。"
             />
             <MarketingMetricCard
-              title="未获点击"
-              current={String(model.coverage.unclickedKeywordCount)}
+              title="消费"
+              current={formatMoney(
+                model.summary.costAmountScaled,
+                model.costScale,
+                0,
+                model.currency
+              )}
               previous={null}
               change={null}
-              tone="bad"
-              info="有展现但没有点击的关键词数；点击卡片可筛选。"
-              previousMissingReason="当前关键词合同尚未提供上一周期覆盖摘要。"
-              changeMissingReason="缺少上一周期摘要，无法比较。"
-              selected={stageFilter === 'unclicked'}
-              onActivate={() => setStageFilter((current) => current === 'unclicked' ? 'all' : 'unclicked')}
+              info="当前服务端完整筛选范围内的关键词消费总额。"
+              previousMissingReason="上一周期比较由 007 交付。"
+              changeMissingReason="上一周期比较由 007 交付。"
             />
           </MarketingMetricGrid>
 
@@ -735,12 +738,21 @@ export default function KeywordAnalysisPage() {
             </div>
           </Card>
 
+          {hasPageOnlyFilters ? (
+            <Alert
+              type="info"
+              showIcon
+              title="优化标签、消费区间和 CTR/CPC 异常仅筛选当前页"
+              description="关键词名称与推广单元由服务端筛选；当前冻结合同未提供其余全量筛选字段，因此不会把当前页结果冒充完整筛选范围。"
+            />
+          ) : null}
+
           <Card className={styles.analysisCard}>
             <div className={styles.analysisGrid}>
               <div className={styles.chartPane}>
                 <div className={styles.chartHeader}>
                   <div className={styles.chartTitleGroup}>
-                    <h2>关键词效率分布</h2>
+                    <h2>当前页关键词效率分布</h2>
                     <Radio.Group
                       aria-label="四象限判断基准"
                       value={benchmarkMode}
@@ -996,7 +1008,9 @@ export default function KeywordAnalysisPage() {
           <Card className={styles.tableCard}>
             <div className={styles.tableToolbar}>
               <h2>全部关键词明细</h2>
-              <span>{filteredRows.length} 条</span>
+              <span>
+                当前页显示 {filteredRows.length} 条 · 全部 {model.pagination.totalItems} 条
+              </span>
             </div>
             <Table<KeywordAnalysisRow>
               aria-label="全部关键词明细表"
@@ -1032,13 +1046,24 @@ export default function KeywordAnalysisPage() {
               pagination={{
                 current: page,
                 pageSize,
-                total: filteredRows.length,
+                total: model.pagination.totalItems,
                 showSizeChanger: true,
                 pageSizeOptions: [10, 20, 50],
-                showTotal: (total) => `共 ${total} 条`,
-                onChange: (nextPage, nextPageSize) => {
-                  setPage(nextPageSize !== pageSize ? 1 : nextPage);
-                  setPageSize(nextPageSize);
+                showTotal: (total) => `共 ${total} 条`
+              }}
+              onChange={(pagination, _filters, sorter, extra) => {
+                const selectedSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+                const nextPageSize = pagination.pageSize || pageSize;
+                setPageSize(nextPageSize);
+                setPage(nextPageSize === pageSize ? pagination.current || 1 : 1);
+                if (
+                  extra.action === 'sort'
+                  && selectedSorter?.order
+                  && typeof selectedSorter.columnKey === 'string'
+                ) {
+                  setSortBy(selectedSorter.columnKey as KeywordResourceSort);
+                  setSortOrder(selectedSorter.order);
+                  setPage(1);
                 }
               }}
             />

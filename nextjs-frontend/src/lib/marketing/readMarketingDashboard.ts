@@ -3,7 +3,7 @@ import {
   clampMarketingDateRange
 } from '@/components/marketing/MarketingFiltersContext';
 import {
-  assertMarketingDashboardResponse,
+  assertMarketingDashboardRootResponse,
   type MarketingDashboardResponse
 } from './adPerformanceAdapter';
 
@@ -49,7 +49,7 @@ export async function readMarketingDashboard({
       || responseErrorCode(error) !== 'DASHBOARD_DATE_OUT_OF_RANGE'
     ) throw error;
     const coverageResponse = await read(null);
-    assertMarketingDashboardResponse(coverageResponse.data, projectId);
+    assertMarketingDashboardRootResponse(coverageResponse.data, projectId);
     const coverage = coverageResponse.data.coverage;
     if (!coverage) return { data: coverageResponse.data, effectiveDateRange: null };
     const effectiveDateRange = clampMarketingDateRange(dateRange, coverage);

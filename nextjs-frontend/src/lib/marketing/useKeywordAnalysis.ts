@@ -1,23 +1,43 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import axios from '@/lib/axiosConfig';
 import {
   buildKeywordFixture,
   KEYWORD_FIXTURE_RANGE
 } from '@/fixtures/keywordAnalysis.fixture.cjs';
 import {
   adaptKeywordAnalysis,
-  adaptMarketingDashboardKeywords,
+  adaptMarketingKeywordResource,
+  assertMarketingKeywordResourceResponse,
   type KeywordAnalysisModel,
-  type KeywordAnalysisPayload
+  type KeywordAnalysisPayload,
+  type MarketingKeywordResourceResponse
 } from '@/lib/marketing/keywordAnalysisAdapter';
 import {
-  assertMarketingDashboardResponse,
+  assertMarketingDashboardRootResponse,
   marketingSnapshotWarning
 } from '@/lib/marketing/adPerformanceAdapter';
 import { readMarketingDashboard } from './readMarketingDashboard';
 
 export type KeywordFixtureState = 'ready' | 'loading' | 'empty' | 'error';
+export type KeywordResourceSort =
+  | 'keywordName'
+  | 'impressions'
+  | 'clicks'
+  | 'costAmountScaled'
+  | 'ctr'
+  | 'averageCpc';
+
+export type KeywordResourceQuery = {
+  page: number;
+  pageSize: number;
+  sortBy: KeywordResourceSort;
+  sortOrder: 'ascend' | 'descend';
+  query: string;
+  campaignId?: string;
+  adGroupId?: string;
+};
 
 type UseKeywordAnalysisOptions = {
   projectId: string;
@@ -26,6 +46,7 @@ type UseKeywordAnalysisOptions = {
   dateRange: [string, string] | null;
   fixtureEnabled?: boolean;
   fixtureState?: KeywordFixtureState;
+  resourceQuery: KeywordResourceQuery;
   onDateRangeAdjusted?: (range: [string, string]) => void;
 };
 
@@ -51,6 +72,7 @@ export default function useKeywordAnalysis({
   dateRange,
   fixtureEnabled = KEYWORD_ANALYSIS_FIXTURE_ENABLED,
   fixtureState = 'ready',
+  resourceQuery,
   onDateRangeAdjusted
 }: UseKeywordAnalysisOptions): UseKeywordAnalysisState {
   const [data, setData] = useState<KeywordAnalysisModel | null>(null);
@@ -59,8 +81,12 @@ export default function useKeywordAnalysis({
   const [warning, setWarning] = useState('');
   const requestSequence = useRef(0);
   const skipAutomaticRangeReload = useRef('');
+  const dashboardCache = useRef<{
+    keys: string[];
+    result: Awaited<ReturnType<typeof readMarketingDashboard>>;
+  } | null>(null);
 
-  const reload = useCallback(async () => {
+  const load = useCallback(async (refreshRoot = false) => {
     const requestId = ++requestSequence.current;
     if (!fixtureEnabled && (!enabled || !projectId)) {
       setData(null);
@@ -98,9 +124,33 @@ export default function useKeywordAnalysis({
         ));
         return;
       }
-      const response = await readMarketingDashboard({ projectId, dateRange });
+      const requestedDashboardKey = `${projectId}:${dateRange?.join(':') || 'default'}`;
+      let response = !refreshRoot
+        && dashboardCache.current?.keys.includes(requestedDashboardKey)
+        ? dashboardCache.current.result
+        : null;
+      if (!response) {
+        response = await readMarketingDashboard({ projectId, dateRange });
+        const effectiveKey = response.effectiveDateRange
+          ? `${projectId}:${response.effectiveDateRange.join(':')}`
+          : requestedDashboardKey;
+        dashboardCache.current = {
+          keys: [...new Set([requestedDashboardKey, effectiveKey])],
+          result: response
+        };
+      }
       if (requestId !== requestSequence.current) return;
-      assertMarketingDashboardResponse(response.data, projectId);
+      assertMarketingDashboardRootResponse(response.data, projectId);
+      const from = response.effectiveDateRange?.[0]
+        || response.data.filter?.from
+        || response.data.coverage?.from;
+      const to = response.effectiveDateRange?.[1]
+        || response.data.filter?.to
+        || response.data.coverage?.to;
+      const revision = response.data.revision;
+      if (!from || !to || !revision) {
+        throw new TypeError('当前没有可用的广告关键词快照。');
+      }
       if (response.effectiveDateRange) {
         if (
           !dateRange
@@ -112,15 +162,36 @@ export default function useKeywordAnalysis({
         onDateRangeAdjusted?.(response.effectiveDateRange);
       }
       setWarning(marketingSnapshotWarning(response.data));
-      setData(adaptMarketingDashboardKeywords(
+      const endpoint = `/api/marketing/projects/${encodeURIComponent(projectId)}/keywords`;
+      const resourceResponse = await axios.get<MarketingKeywordResourceResponse>(
+        endpoint,
+        {
+          params: {
+            revision: response.data.revision,
+            from,
+            to,
+            page: resourceQuery.page,
+            pageSize: resourceQuery.pageSize,
+            sortBy: resourceQuery.sortBy,
+            sortOrder: resourceQuery.sortOrder,
+            query: resourceQuery.query || undefined,
+            campaignId: resourceQuery.campaignId,
+            adGroupId: resourceQuery.adGroupId
+          },
+          timeout: 10_000
+        }
+      );
+      if (requestId !== requestSequence.current) return;
+      assertMarketingKeywordResourceResponse(
+        resourceResponse.data,
+        projectId,
+        revision,
+        { from, to }
+      );
+      setData(adaptMarketingKeywordResource(
+        resourceResponse.data,
         response.data,
-        projectName,
-        response.effectiveDateRange
-          ? {
-              from: response.effectiveDateRange[0],
-              to: response.effectiveDateRange[1]
-            }
-          : undefined
+        projectName
       ));
     } catch (requestError: unknown) {
       if (requestId !== requestSequence.current) return;
@@ -149,8 +220,17 @@ export default function useKeywordAnalysis({
     fixtureState,
     onDateRangeAdjusted,
     projectId,
-    projectName
+    projectName,
+    resourceQuery.adGroupId,
+    resourceQuery.campaignId,
+    resourceQuery.page,
+    resourceQuery.pageSize,
+    resourceQuery.query,
+    resourceQuery.sortBy,
+    resourceQuery.sortOrder
   ]);
+
+  const reload = useCallback(() => load(true), [load]);
 
   useEffect(() => {
     const rangeKey = dateRange?.join(':') || '';
@@ -158,8 +238,8 @@ export default function useKeywordAnalysis({
       skipAutomaticRangeReload.current = '';
       return;
     }
-    void reload();
-  }, [dateRange, reload]);
+    void load();
+  }, [dateRange, load]);
 
   return {
     data,

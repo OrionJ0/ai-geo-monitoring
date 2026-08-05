@@ -13,6 +13,8 @@ import {
   explicitKeywordTagStrategy
 } from '@/utils/keywordAnalysis.cjs';
 import type {
+  AdDailyMetrics,
+  DashboardKeyword,
   DashboardSearchTerm,
   MarketingDashboardResponse
 } from '@/lib/marketing/adPerformanceAdapter';
@@ -39,7 +41,182 @@ export type KeywordAnalysisModel = Omit<
   rows: KeywordAnalysisRow[];
   coverage: KeywordCoverage;
   scatter: KeywordScatter;
+  summary: {
+    impressions: string;
+    clicks: string;
+    costAmountScaled: string;
+  };
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
 };
+
+export type MarketingKeywordResourceResponse = {
+  schemaVersion: 'marketing_keywords_v1';
+  projectId: string;
+  revision: string;
+  coverage: {
+    from: string;
+    to: string;
+    lastSuccessfulAt?: string;
+    currency: string;
+    costScale: number;
+  };
+  filter: { from: string; to: string };
+  summary: {
+    impressions: string;
+    clicks: string;
+    costAmountScaled: string;
+  };
+  items: Array<Omit<DashboardKeyword, 'trend'> & { trend: AdDailyMetrics[] }>;
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+};
+
+function invalidKeywordResource(): never {
+  const error = new TypeError('广告关键词资源响应合同无效');
+  (error as TypeError & { code: string }).code =
+    'MARKETING_KEYWORD_RESOURCE_RESPONSE_INVALID';
+  throw error;
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function dateText(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime())
+    && parsed.toISOString().slice(0, 10) === value;
+}
+
+function text(value: unknown, maximum = 512): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maximum;
+}
+
+function decimalText(value: unknown): value is string {
+  return typeof value === 'string' && /^\d+$/u.test(value);
+}
+
+function keywordItem(
+  value: unknown,
+  range: { from: string; to: string }
+): value is Omit<DashboardKeyword, 'trend'> & { trend: AdDailyMetrics[] } {
+  if (!record(value)) return false;
+  const valid = text(value.accountId)
+    && text(value.campaignId)
+    && text(value.campaignName)
+    && text(value.adGroupId)
+    && text(value.adGroupName)
+    && text(value.keywordId)
+    && text(value.keywordName)
+    && ['KEYWORD', 'WORD_PACKAGE', 'AUTO_EXPANSION']
+      .includes(String(value.targetingType))
+    && decimalText(value.impressions)
+    && decimalText(value.clicks)
+    && decimalText(value.costAmountScaled)
+    && Array.isArray(value.trend)
+    && value.trend.every((point) => record(point)
+      && dateText(point.date)
+      && point.date >= range.from
+      && point.date <= range.to
+      && decimalText(point.impressions)
+      && decimalText(point.clicks)
+      && decimalText(point.costAmountScaled));
+  if (!valid) return false;
+  const trend = value.trend as AdDailyMetrics[];
+  if (new Set(trend.map((point) => point.date)).size !== trend.length) return false;
+  const total = trend.reduce((sum, point) => ({
+    impressions: sum.impressions + BigInt(point.impressions),
+    clicks: sum.clicks + BigInt(point.clicks),
+    costAmountScaled: sum.costAmountScaled + BigInt(point.costAmountScaled)
+  }), {
+    impressions: BigInt(0),
+    clicks: BigInt(0),
+    costAmountScaled: BigInt(0)
+  });
+  return total.impressions.toString() === value.impressions
+    && total.clicks.toString() === value.clicks
+    && total.costAmountScaled.toString() === value.costAmountScaled;
+}
+
+export function assertMarketingKeywordResourceResponse(
+  value: unknown,
+  expectedProjectId: string,
+  expectedRevision: string,
+  expectedRange: { from: string; to: string }
+): asserts value is MarketingKeywordResourceResponse {
+  if (!record(value)) invalidKeywordResource();
+  const coverage = value.coverage;
+  const filter = value.filter;
+  const summary = value.summary;
+  const pagination = value.pagination;
+  if (
+    value.schemaVersion !== 'marketing_keywords_v1'
+    || value.projectId !== expectedProjectId
+    || value.revision !== expectedRevision
+    || !record(coverage)
+    || !dateText(coverage.from)
+    || !dateText(coverage.to)
+    || coverage.from > coverage.to
+    || !text(coverage.currency, 16)
+    || (
+      coverage.lastSuccessfulAt !== undefined
+      && (
+        !text(coverage.lastSuccessfulAt, 64)
+        || !Number.isFinite(Date.parse(coverage.lastSuccessfulAt))
+      )
+    )
+    || !Number.isSafeInteger(coverage.costScale)
+    || Number(coverage.costScale) < 0
+    || Number(coverage.costScale) > 12
+    || !record(filter)
+    || filter.from !== expectedRange.from
+    || filter.to !== expectedRange.to
+    || !record(summary)
+    || !decimalText(summary.impressions)
+    || !decimalText(summary.clicks)
+    || !decimalText(summary.costAmountScaled)
+    || !Array.isArray(value.items)
+    || !value.items.every((item) => keywordItem(item, expectedRange))
+    || !record(pagination)
+    || !Number.isSafeInteger(pagination.page)
+    || Number(pagination.page) < 1
+    || !Number.isSafeInteger(pagination.pageSize)
+    || Number(pagination.pageSize) < 1
+    || Number(pagination.pageSize) > 200
+    || !Number.isSafeInteger(pagination.totalItems)
+    || Number(pagination.totalItems) < 0
+    || !Number.isSafeInteger(pagination.totalPages)
+    || Number(pagination.totalPages) < 0
+    || Number(pagination.totalPages) !== (
+      Number(pagination.totalItems) === 0
+        ? 0
+        : Math.ceil(Number(pagination.totalItems) / Number(pagination.pageSize))
+    )
+    || value.items.length > Number(pagination.pageSize)
+  ) invalidKeywordResource();
+}
+
+function sumRows(rows: KeywordAnalysisRow[]) {
+  return rows.reduce((total, row) => ({
+    impressions: (BigInt(total.impressions) + BigInt(row.impressions)).toString(),
+    clicks: (BigInt(total.clicks) + BigInt(row.clicks)).toString(),
+    costAmountScaled: (
+      BigInt(total.costAmountScaled) + BigInt(row.costAmountScaled)
+    ).toString()
+  }), { impressions: '0', clicks: '0', costAmountScaled: '0' });
+}
 
 export interface KeywordTagStrategy {
   resolve(fact: Partial<KeywordDailyFact>): KeywordTag | null;
@@ -80,7 +257,66 @@ export function adaptKeywordAnalysis(
     range,
     rows,
     coverage: buildKeywordCoverage(rows),
-    scatter: buildKeywordScatter(rows) as KeywordScatter
+    scatter: buildKeywordScatter(rows) as KeywordScatter,
+    summary: sumRows(rows),
+    pagination: {
+      page: 1,
+      pageSize: Math.max(rows.length, 1),
+      totalItems: rows.length,
+      totalPages: rows.length ? 1 : 0
+    }
+  };
+}
+
+export function adaptMarketingKeywordResource(
+  resource: MarketingKeywordResourceResponse,
+  dashboard: MarketingDashboardResponse,
+  fallbackProjectName = '默认监控项目'
+): KeywordAnalysisModel {
+  const accountNames = new Map(
+    (dashboard.bindings || []).map((binding) => [
+      binding.accountId,
+      binding.accountName
+    ])
+  );
+  const projectName = dashboard.projectName || fallbackProjectName;
+  const model = adaptKeywordAnalysis({
+    source: 'keyword-report',
+    dataState: resource.pagination.totalItems ? 'ready' : 'empty',
+    projectId: resource.projectId,
+    projectName,
+    currency: resource.coverage.currency,
+    costScale: resource.coverage.costScale,
+    updatedAt: resource.coverage.lastSuccessfulAt,
+    availableFrom: resource.coverage.from,
+    availableTo: resource.coverage.to,
+    facts: resource.items.flatMap((keyword) => keyword.trend.map((point) => ({
+      date: point.date,
+      accountId: keyword.accountId,
+      accountName: accountNames.get(keyword.accountId) || keyword.accountId,
+      projectId: resource.projectId,
+      projectName,
+      schemeId: keyword.campaignId,
+      schemeName: keyword.campaignName,
+      unitId: keyword.adGroupId,
+      unitName: keyword.adGroupName,
+      keywordId: keyword.keywordId,
+      keyword: keyword.keywordName,
+      tag: null,
+      costAmountScaled: point.costAmountScaled,
+      impressions: point.impressions,
+      clicks: point.clicks
+    })))
+  }, resource.filter);
+  return {
+    ...model,
+    dataState: resource.pagination.totalItems ? 'ready' : 'empty',
+    summary: {
+      impressions: BigInt(resource.summary.impressions).toString(),
+      clicks: BigInt(resource.summary.clicks).toString(),
+      costAmountScaled: BigInt(resource.summary.costAmountScaled).toString()
+    },
+    pagination: resource.pagination
   };
 }
 
