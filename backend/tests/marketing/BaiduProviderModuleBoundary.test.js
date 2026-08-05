@@ -11,6 +11,10 @@ const {
 const {
   BaiduOAuthClient
 } = require('../../modules/marketing/adapters/baidu/BaiduOAuthClient');
+const searchExports = require(
+  '../../modules/marketing/adapters/baidu/BaiduSearchAdsClient'
+);
+const { BaiduSearchAdsClient } = searchExports;
 const {
   loadBaiduContract
 } = require('../../modules/marketing/contracts/baidu/loadBaiduContract');
@@ -34,11 +38,53 @@ test('facade owns one shared HTTP kernel and keeps the Secret only in OAuth', ()
 
   assert.equal(client.httpKernel instanceof BaiduHttpKernel, true);
   assert.equal(client.oauthClient instanceof BaiduOAuthClient, true);
+  assert.equal(client.searchAdsClient instanceof BaiduSearchAdsClient, true);
   assert.equal(client.oauthClient.httpKernel, client.httpKernel);
+  assert.equal(client.searchAdsClient.httpKernel, client.httpKernel);
   assert.equal(Object.hasOwn(client, 'secretKey'), false);
   assert.equal(Object.hasOwn(client, 'transport'), false);
   assert.equal(Object.hasOwn(client, 'allowlist'), false);
   assert.equal(client.oauthClient.secretKey, '0123456789abcdef-synthetic-secret');
+  assert.equal(Object.hasOwn(client.searchAdsClient, 'secretKey'), false);
+});
+
+test('facade delegates every SEARCH method to the one search client', async () => {
+  const client = createClient();
+  const calls = [];
+  for (const method of [
+    'createSearchReportBudget',
+    'acquireSearchReportSlot',
+    'fetchConfiguredSearchReport',
+    'fetchSearchReport',
+    'fetchSearchAdGroupReport',
+    'fetchSearchKeywordReport',
+    'fetchSearchTermReport',
+    'fetchSearchReports'
+  ]) {
+    client.searchAdsClient[method] = async (...args) => {
+      calls.push({ method, args });
+      return method;
+    };
+  }
+
+  assert.equal(await client.createSearchReportBudget(), 'createSearchReportBudget');
+  assert.equal(await client.acquireSearchReportSlot('slot'), 'acquireSearchReportSlot');
+  assert.equal(await client.fetchConfiguredSearchReport('configured'), 'fetchConfiguredSearchReport');
+  assert.equal(await client.fetchSearchReport('campaign'), 'fetchSearchReport');
+  assert.equal(await client.fetchSearchAdGroupReport('group'), 'fetchSearchAdGroupReport');
+  assert.equal(await client.fetchSearchKeywordReport('keyword'), 'fetchSearchKeywordReport');
+  assert.equal(await client.fetchSearchTermReport('term'), 'fetchSearchTermReport');
+  assert.equal(await client.fetchSearchReports('all'), 'fetchSearchReports');
+  assert.deepEqual(calls.map(({ method }) => method), [
+    'createSearchReportBudget',
+    'acquireSearchReportSlot',
+    'fetchConfiguredSearchReport',
+    'fetchSearchReport',
+    'fetchSearchAdGroupReport',
+    'fetchSearchKeywordReport',
+    'fetchSearchTermReport',
+    'fetchSearchReports'
+  ]);
 });
 
 test('facade re-exports the one shared error class identity', () => {
@@ -46,6 +92,10 @@ test('facade re-exports the one shared error class identity', () => {
   assert.equal(
     facadeExports.BaiduContractBlockedError,
     errorExports.BaiduContractBlockedError
+  );
+  assert.equal(
+    facadeExports.decimalNumberToScaledText,
+    searchExports.decimalNumberToScaledText
   );
 });
 

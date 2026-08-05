@@ -170,5 +170,5 @@ scope: product
 ## Handoff
 
 - PRD path: `docs/active-2026-08-05-005-baidu-provider-modularization/prd.md`
-- Current state: active；Issues 001–002 已关闭，候选实现已有唯一安全 HTTP 内核与独立 OAuth 客户端，且中间态未发布。
-- Recommended next step: 严格进入 Issue 003，只抽取搜索推广客户端并保持四报表、预算、双读和原子快照等价。
+- Current state: active；Issues 001–003 已关闭，候选实现已有唯一安全 HTTP 内核、OAuth 与搜索推广客户端，且中间态未发布。
+- Recommended next step: 严格进入 Issue 004，完整迁移百度统计客户端并删除 facade 内最后的产品实现与重复逻辑。
