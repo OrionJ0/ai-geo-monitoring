@@ -258,7 +258,7 @@ test('deployment builds the current frontend before browser acceptance and migra
   const applyIndex = trace.findIndex((line) => line.startsWith('migration:--apply '));
   const auditIndex = trace.indexOf('migration:');
   const marketingApplyIndex = trace.indexOf(
-    'marketing-migration:--apply --expected-latest=015-drop-legacy-tongji-credentials'
+    'marketing-migration:--apply --expected-latest=016-revisioned-ad-snapshot-facts'
   );
   const marketingAuditIndex = trace.indexOf('marketing-migration:');
   const websiteDataTestIndex = trace.indexOf('npm:run test:website-data');

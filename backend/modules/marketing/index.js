@@ -593,6 +593,7 @@ function createMarketingModule({
         adResourceService,
         refreshService,
         tongjiService,
+        logger: console,
         enqueue: (runId) => executor.enqueue(runId)
       }));
     } else {

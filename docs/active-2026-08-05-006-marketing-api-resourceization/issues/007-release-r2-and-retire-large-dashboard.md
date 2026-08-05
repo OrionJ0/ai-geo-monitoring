@@ -1,6 +1,6 @@
 ---
 title: "发布 R2 并正式退役 Dashboard 大响应"
-status: open
+status: active
 type: HITL
 blocked_by:
   - "006-hard-cut-lightweight-dashboard.md"
@@ -25,6 +25,8 @@ blocked_by:
 
 用独立 Git Bundle 发布 R2，从正式域名验证轻量 Dashboard 和三个详情资源成为唯一生产路径。完成响应预算、数据库查询、浏览器页面、旧调用清零、代码与文档清理证据后关闭 006，并移交 007 修复生产数据正确性；007 关闭后才解除 005 的实施门禁。
 
+R2 范围例外已由用户的统一 HITL 授权覆盖：新增不可变迁移 016，以 `refresh_run_id` 区分四张事实表的 revision，并冻结“当前 + 紧邻上一成功 revision”保留窗口。迁移既有 R1 数据时只把当前成功 revision 标为可读；更早或已裁剪 revision 必须返回 `409 MARKETING_SNAPSHOT_UNAVAILABLE`。该例外不改变百度四报表、预算、双读、同一 `refresh_run_id` 或全成全败原子提交。
+
 ## Acceptance criteria
 
 - [ ] 公开 backend/frontend revision 与 R2 目标一致，健康和就绪检查通过。
@@ -35,6 +37,7 @@ blocked_by:
 - [ ] R2 相对基线降低不必要响应字节，查询和页面 P95 无阻断回归。
 - [ ] 不存在 `/v1`、长期旧合同、feature flag、兼容 adapter 或运行时 fallback。
 - [ ] 阻断失败只通过 R2 后代 revert revision 快进恢复完整 R1，并记录再次硬切的退出条件。
+- [ ] 恢复 revision 永久保留迁移 016 文件、checksum、部署最高迁移和兼容 schema，只回退 R2 运行时合同；用已应用 016 的数据库副本完成恢复门禁。
 
 ## Blocked by
 

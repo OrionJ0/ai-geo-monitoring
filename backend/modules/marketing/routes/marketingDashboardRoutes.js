@@ -15,11 +15,30 @@ function sendError(res, error) {
   });
 }
 
+function writeAdReadLog(logger, level, entry) {
+  try {
+    logger?.[level]?.(entry);
+  } catch {
+    // Observability must never replace the stable API outcome.
+  }
+}
+
+function adReadLogEntry({ event, operation, status, error, startedAt }) {
+  return {
+    event,
+    operation,
+    status,
+    errorCode: error?.code || null,
+    durationMs: Math.max(0, Date.now() - startedAt)
+  };
+}
+
 function createMarketingDashboardRouter({
   dashboardService,
   adResourceService = null,
   refreshService,
   tongjiService = null,
+  logger = null,
   enqueue = (runId) => {
     setImmediate(() => {
       refreshService.executeRun(runId).catch(() => {});
@@ -29,6 +48,7 @@ function createMarketingDashboardRouter({
   const router = express.Router();
 
   router.get('/projects/:projectId/dashboard', async (req, res) => {
+    const startedAt = Date.now();
     try {
       await dashboardService.assertAccess({
         projectId: req.params.projectId,
@@ -40,8 +60,21 @@ function createMarketingDashboardRouter({
         to: req.query.to
       });
       res.set('Cache-Control', 'private, no-store');
+      writeAdReadLog(logger, 'info', adReadLogEntry({
+        event: 'marketing_ad_read_completed',
+        operation: 'dashboard',
+        status: 200,
+        startedAt
+      }));
       return res.json(result);
     } catch (error) {
+      writeAdReadLog(logger, 'warn', adReadLogEntry({
+        event: 'marketing_ad_read_failed',
+        operation: 'dashboard',
+        status: error?.status || 500,
+        error,
+        startedAt
+      }));
       return sendError(res, error);
     }
   });
@@ -49,6 +82,7 @@ function createMarketingDashboardRouter({
   if (adResourceService) router.get(
     '/projects/:projectId/search-terms',
     async (req, res) => {
+      const startedAt = Date.now();
       try {
         await dashboardService.assertAccess({
           projectId: req.params.projectId,
@@ -72,8 +106,22 @@ function createMarketingDashboardRouter({
           matchType: req.query.matchType
         });
         res.set('Cache-Control', 'private, max-age=60');
+        res.vary('Authorization');
+        writeAdReadLog(logger, 'info', adReadLogEntry({
+          event: 'marketing_ad_read_completed',
+          operation: 'search-terms',
+          status: 200,
+          startedAt
+        }));
         return res.json(result);
       } catch (error) {
+        writeAdReadLog(logger, 'warn', adReadLogEntry({
+          event: 'marketing_ad_read_failed',
+          operation: 'search-terms',
+          status: error?.status || 500,
+          error,
+          startedAt
+        }));
         return sendError(res, error);
       }
     }
@@ -82,6 +130,7 @@ function createMarketingDashboardRouter({
   if (adResourceService) router.get(
     '/projects/:projectId/keywords',
     async (req, res) => {
+      const startedAt = Date.now();
       try {
         await dashboardService.assertAccess({
           projectId: req.params.projectId,
@@ -101,8 +150,22 @@ function createMarketingDashboardRouter({
           adGroupId: req.query.adGroupId
         });
         res.set('Cache-Control', 'private, max-age=60');
+        res.vary('Authorization');
+        writeAdReadLog(logger, 'info', adReadLogEntry({
+          event: 'marketing_ad_read_completed',
+          operation: 'keywords',
+          status: 200,
+          startedAt
+        }));
         return res.json(result);
       } catch (error) {
+        writeAdReadLog(logger, 'warn', adReadLogEntry({
+          event: 'marketing_ad_read_failed',
+          operation: 'keywords',
+          status: error?.status || 500,
+          error,
+          startedAt
+        }));
         return sendError(res, error);
       }
     }
@@ -111,6 +174,7 @@ function createMarketingDashboardRouter({
   if (adResourceService) router.get(
     '/projects/:projectId/ad-hierarchy',
     async (req, res) => {
+      const startedAt = Date.now();
       try {
         await dashboardService.assertAccess({
           projectId: req.params.projectId,
@@ -123,8 +187,22 @@ function createMarketingDashboardRouter({
           to: req.query.to
         });
         res.set('Cache-Control', 'private, max-age=60');
+        res.vary('Authorization');
+        writeAdReadLog(logger, 'info', adReadLogEntry({
+          event: 'marketing_ad_read_completed',
+          operation: 'ad-hierarchy',
+          status: 200,
+          startedAt
+        }));
         return res.json(result);
       } catch (error) {
+        writeAdReadLog(logger, 'warn', adReadLogEntry({
+          event: 'marketing_ad_read_failed',
+          operation: 'ad-hierarchy',
+          status: error?.status || 500,
+          error,
+          startedAt
+        }));
         return sendError(res, error);
       }
     }

@@ -25,6 +25,53 @@ let server;
 let baseUrl;
 let directoryCalls = 0;
 
+test('PostgreSQL binding deletion locks the project before invalidating revisions', async () => {
+  const statements = [];
+  const transaction = { id: 'delete-binding-transaction' };
+  const service = new BaiduBindingService({
+    sequelize: {
+      getDialect: () => 'postgres',
+      transaction: (task) => task(transaction),
+      async query(sql, options) {
+        statements.push({ sql: String(sql), options });
+        if (String(sql).includes('FROM brand_projects')) {
+          return [{ id: 11, status: 'active' }];
+        }
+        if (String(sql).includes('FROM baidu_project_bindings')) {
+          return [{
+            id: 'binding-1',
+            project_id: 11,
+            connection_id: 'connection-1',
+            external_account_id: 'account-1',
+            external_account_name: '账户一',
+            tongji_site_id: 'site-1',
+            tongji_site_domain: 'example.test',
+            status: 'ACTIVE',
+            binding_version: 0,
+            paused_reason: null
+          }];
+        }
+        return [];
+      }
+    },
+    accountDirectory: {},
+    siteDirectory: {}
+  });
+
+  const deleted = await service.deleteBinding({
+    projectId: 11,
+    bindingId: 'binding-1'
+  });
+  assert.equal(deleted.deleted, true);
+  assert.match(statements[0].sql, /FROM brand_projects[\s\S]*FOR UPDATE/u);
+  assert.match(statements[1].sql, /FROM baidu_project_bindings/u);
+  assert.match(statements[2].sql, /UPDATE baidu_marketing_refresh_runs/u);
+  assert.match(statements[3].sql, /DELETE FROM baidu_project_bindings/u);
+  assert.equal(statements.every(({ options }) => (
+    options.transaction === transaction
+  )), true);
+});
+
 test.before(async () => {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'baidu-binding-api-'));
   sequelize = new Sequelize({

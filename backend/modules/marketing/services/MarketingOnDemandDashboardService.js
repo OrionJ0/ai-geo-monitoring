@@ -64,25 +64,42 @@ class MarketingOnDemandDashboardService {
   }
 
   async read(input) {
-    const current = await this.dashboardService.read({
-      projectId: input.projectId
-    });
-    if (!this.shouldRefresh(current)) {
-      if (input.from === undefined && input.to === undefined) return current;
-      return this.dashboardService.read(input);
+    let current;
+    let deferredFilterError = null;
+    try {
+      current = await this.dashboardService.read(input);
+    } catch (error) {
+      const hasDateFilter = input.from !== undefined || input.to !== undefined;
+      if (
+        !hasDateFilter
+        || ![
+          'DASHBOARD_DATE_OUT_OF_RANGE',
+          'DASHBOARD_FILTER_WITHOUT_SNAPSHOT'
+        ].includes(error?.code)
+      ) {
+        throw error;
+      }
+      deferredFilterError = error;
+      current = await this.dashboardService.read({
+        projectId: input.projectId
+      });
+      if (!this.shouldRefresh(current)) throw error;
     }
+    if (!this.shouldRefresh(current)) return current;
     const key = String(input.projectId);
     const lastFailureAt = this.failedRefreshes.get(key);
     const coolingDown = Number.isFinite(lastFailureAt)
       && this.clock() - lastFailureAt < this.failedRefreshCooldownMs;
-    if (!coolingDown) {
-      try {
-        await this.refresh(input.projectId);
-        this.failedRefreshes.delete(key);
-      } catch (error) {
-        this.failedRefreshes.set(key, this.clock());
-        if (!current.revision) throw error;
-      }
+    if (coolingDown) {
+      if (deferredFilterError) throw deferredFilterError;
+      return current;
+    }
+    try {
+      await this.refresh(input.projectId);
+      this.failedRefreshes.delete(key);
+    } catch (error) {
+      this.failedRefreshes.set(key, this.clock());
+      if (!current.revision) throw error;
     }
     return this.dashboardService.read(input);
   }

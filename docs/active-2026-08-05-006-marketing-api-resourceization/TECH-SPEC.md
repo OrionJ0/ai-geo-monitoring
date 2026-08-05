@@ -118,7 +118,7 @@ R1 必须逐个迁移后三类详细消费者；R2 才能改变 `readMarketingDa
 - REQ-009：R1 保持旧 Dashboard 合同；R2 完成唯一正式路径硬切并删除旧实现。
 - REQ-010：无快照、无效 revision、越界日期和合法空页必须可区分。
 
-- CON-001：不修改事实表和已应用迁移。
+- CON-001：不得改写已应用迁移。为兑现 AC-006，R2 已批准唯一范围例外：新增不可变迁移 016，把四张事实表唯一约束纳入 `refresh_run_id` 并给 refresh run 增加事实保留标记；不得借此修改四报表、预算、双读、主数据源或原子提交语义。
 - CON-002：不改变四报表刷新事务或 `refresh_run_id` 语义。
 - CON-003：项目权限检查必须先于 revision 存在性检查。
 - CON-004：所有排序、筛选和 page size 使用服务端允许列表或绑定参数。
@@ -426,7 +426,9 @@ revision 不替代 project 条件。禁止仅凭全局 run ID 查询事实。
 
 ### 8.3 索引与迁移
 
-006 首版不预设新索引或迁移。实现时先对真实规模执行 `EXPLAIN (ANALYZE, BUFFERS)`，证明现有 `(project_id, refresh_run_id, metric_date, ...)` 索引是否满足查询预算。只有出现真实慢查询证据时另增只服务该读路径的迁移，不能改写已应用迁移。
+R1 不预设新索引或迁移。R2 对抗式审查发现原事实唯一键不含 `refresh_run_id`，且成功刷新会删除上一 revision 事实，导致 AC-006 无法实现；因此新增且只新增迁移 016。迁移 016 不改写历史迁移：四张事实唯一键以 `refresh_run_id` 开头，并在 refresh run 上持久化 `snapshot_facts_retained`。迁移既有 R1 数据时只把每项目最新成功 run 标为可读，因为 R1 不能证明更早 run 仍有事实；首次 R2 刷新后形成“当前 + 紧邻上一成功 revision”的固定窗口，更早 revision 明确返回 `409 MARKETING_SNAPSHOT_UNAVAILABLE`，不得伪装为空页。
+
+实现与发布仍须对真实规模执行查询计划和 P95 验证。只有出现真实慢查询证据时才能再增只服务该读路径的索引迁移，不能改写已应用迁移。
 
 ## 9. 前端读取流程
 
@@ -644,7 +646,7 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 ## 16. 假设与开放问题
 
 - Issue 001 已确认仓库内只有 Next.js 消费者；后端 CLI、诊断脚本和当前 Nginx 留存窗口未发现额外明细消费者，R1/R2 前仍须重新搜索与观察；
-- refresh run 对应事实保留期足够支持页面所用 revision；若有清理策略，必须先固定可读取窗口和错误语义；
+- revision 事实保留窗口固定为当前与紧邻上一成功 run；迁移时只信任 R1 当前 run。超出窗口或标记为未保留的成功 revision 返回 `409 MARKETING_SNAPSHOT_UNAVAILABLE`；
 - 默认 page size 50、最大 200 已用生产 898 个关键词和 350 个搜索词基线验证并冻结；
 - 现役 UI 的排序/筛选字段已在 Issue 001 冻结，唯一机器合同位于 `backend/modules/marketing/contracts/goodieai-marketing-ad-read.openapi.json`；后端运行时合同和前端生成类型都由它派生，后续不能为假想场景扩大允许列表；
 - 若真实 SQL 计划证明必须增加索引，另增迁移并重新评审发布范围。

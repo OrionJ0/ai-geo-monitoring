@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodieAI 营销广告快照读取 API",
     "version": "2026-08-05-r2",
-    "description": "GoodieAI 浏览器到服务端的现役广告快照读取合同。数据只来自服务器数据库中的完整成功快照；这些读取接口不调用百度上游。"
+    "description": "GoodieAI 浏览器到服务端的现役广告快照读取合同。Dashboard 是唯一可在无快照或过期时协调百度四报表刷新的入口；三个详情资源严格只读取服务器数据库中的完整成功快照。"
   },
   "security": [
     { "BearerAuth": [] }
@@ -20,6 +20,14 @@
       "defaultPageSize": 50,
       "maximumPageSize": 200,
       "maximumQueryLength": 200
+    },
+    "filterMaximumLengths": {
+      "accountId": 512,
+      "campaignId": 512,
+      "adGroupId": 512,
+      "keywordName": 512,
+      "queryStatus": 24,
+      "matchType": 40
     },
     "sortOrders": ["ascend", "descend"],
     "summaryFields": ["impressions", "clicks", "costAmountScaled"],
@@ -45,7 +53,9 @@
       "requiredForDetails": true,
       "source": "complete-succeeded-refresh-run",
       "projectScoped": true,
-      "coverageBound": true
+      "coverageBound": true,
+      "retainedSuccessfulRevisions": 2,
+      "prunedRevisionError": "MARKETING_SNAPSHOT_UNAVAILABLE"
     },
     "cacheControl": {
       "dashboard": "private, no-store",
@@ -57,6 +67,7 @@
       "revisionNotFound": "MARKETING_REVISION_NOT_FOUND",
       "snapshotUnavailable": "MARKETING_SNAPSHOT_UNAVAILABLE",
       "dateOutOfRange": "DASHBOARD_DATE_OUT_OF_RANGE",
+      "filterWithoutSnapshot": "DASHBOARD_FILTER_WITHOUT_SNAPSHOT",
       "internalFailure": "MARKETING_AD_RESOURCE_FAILED"
     }
   },
@@ -65,9 +76,9 @@
       "get": {
         "operationId": "readMarketingDashboard",
         "summary": "读取当前轻量广告快照根",
-        "description": "返回当前完整快照的状态、覆盖范围、汇总、趋势和四类事实计数。无快照时 revision、coverage、filter 为 null，summary 为精确零，但 states.snapshotContentState 为 NONE，不能解释成真实零数据快照。",
+        "description": "返回当前完整快照的状态、覆盖范围、汇总、趋势和四类事实计数。该唯一协调入口在无快照或快照过期时可同步触发一次四报表刷新；详情资源只读本地。无快照时 revision、coverage、filter 为 null，summary 为精确零，但 states.snapshotContentState 为 NONE，不能解释成真实零数据快照。",
         "x-data-source": "local-complete-ad-snapshot",
-        "x-upstream-calls": "none",
+        "x-upstream-calls": "conditional-on-demand-refresh",
         "parameters": [
           { "$ref": "#/components/parameters/ProjectId" },
           { "$ref": "#/components/parameters/OptionalFrom" },
@@ -84,11 +95,14 @@
             }
           },
           "400": { "$ref": "#/components/responses/ErrorResponse" },
+          "401": { "$ref": "#/components/responses/AuthenticationErrorResponse" },
           "403": { "$ref": "#/components/responses/ErrorResponse" },
           "404": { "$ref": "#/components/responses/ErrorResponse" },
           "409": { "$ref": "#/components/responses/ErrorResponse" },
           "422": { "$ref": "#/components/responses/ErrorResponse" },
-          "500": { "$ref": "#/components/responses/ErrorResponse" }
+          "500": { "$ref": "#/components/responses/ServerErrorResponse" },
+          "502": { "$ref": "#/components/responses/ErrorResponse" },
+          "503": { "$ref": "#/components/responses/UnavailableResponse" }
         }
       }
     },
@@ -102,25 +116,29 @@
         "parameters": [
           { "$ref": "#/components/parameters/ProjectId" },
           { "$ref": "#/components/parameters/Revision" },
-          { "$ref": "#/components/parameters/From" },
-          { "$ref": "#/components/parameters/To" }
+          { "$ref": "#/components/parameters/OptionalFrom" },
+          { "$ref": "#/components/parameters/OptionalTo" }
         ],
         "responses": {
           "200": {
             "description": "同一 revision 的完整广告层级。",
             "headers": {
-              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } }
+              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } },
+              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string" } }
             },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MarketingAdHierarchyResponse" } }
             }
           },
           "400": { "$ref": "#/components/responses/ErrorResponse" },
+          "401": { "$ref": "#/components/responses/AuthenticationErrorResponse" },
           "403": { "$ref": "#/components/responses/ErrorResponse" },
           "404": { "$ref": "#/components/responses/ErrorResponse" },
           "409": { "$ref": "#/components/responses/ErrorResponse" },
           "422": { "$ref": "#/components/responses/ErrorResponse" },
-          "500": { "$ref": "#/components/responses/ErrorResponse" }
+          "500": { "$ref": "#/components/responses/ServerErrorResponse" },
+          "502": { "$ref": "#/components/responses/ErrorResponse" },
+          "503": { "$ref": "#/components/responses/UnavailableResponse" }
         }
       }
     },
@@ -134,8 +152,8 @@
         "parameters": [
           { "$ref": "#/components/parameters/ProjectId" },
           { "$ref": "#/components/parameters/Revision" },
-          { "$ref": "#/components/parameters/From" },
-          { "$ref": "#/components/parameters/To" },
+          { "$ref": "#/components/parameters/OptionalFrom" },
+          { "$ref": "#/components/parameters/OptionalTo" },
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
           { "name": "sortBy", "in": "query", "schema": { "type": "string", "enum": ["keywordName", "impressions", "clicks", "costAmountScaled", "ctr", "averageCpc"], "default": "impressions" } },
@@ -148,18 +166,22 @@
           "200": {
             "description": "有界关键词页及完整筛选范围 summary。",
             "headers": {
-              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } }
+              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } },
+              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string" } }
             },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MarketingKeywordResponse" } }
             }
           },
           "400": { "$ref": "#/components/responses/ErrorResponse" },
+          "401": { "$ref": "#/components/responses/AuthenticationErrorResponse" },
           "403": { "$ref": "#/components/responses/ErrorResponse" },
           "404": { "$ref": "#/components/responses/ErrorResponse" },
           "409": { "$ref": "#/components/responses/ErrorResponse" },
           "422": { "$ref": "#/components/responses/ErrorResponse" },
-          "500": { "$ref": "#/components/responses/ErrorResponse" }
+          "500": { "$ref": "#/components/responses/ServerErrorResponse" },
+          "502": { "$ref": "#/components/responses/ErrorResponse" },
+          "503": { "$ref": "#/components/responses/UnavailableResponse" }
         }
       }
     },
@@ -173,8 +195,8 @@
         "parameters": [
           { "$ref": "#/components/parameters/ProjectId" },
           { "$ref": "#/components/parameters/Revision" },
-          { "$ref": "#/components/parameters/From" },
-          { "$ref": "#/components/parameters/To" },
+          { "$ref": "#/components/parameters/OptionalFrom" },
+          { "$ref": "#/components/parameters/OptionalTo" },
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
           { "name": "sortBy", "in": "query", "schema": { "type": "string", "enum": ["searchTerm", "keywordName", "impressions", "clicks", "costAmountScaled", "ctr", "averageCpc"], "default": "impressions" } },
@@ -191,18 +213,22 @@
           "200": {
             "description": "有界搜索词页；items 中没有 keywordId。",
             "headers": {
-              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } }
+              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } },
+              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string" } }
             },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MarketingSearchTermResponse" } }
             }
           },
           "400": { "$ref": "#/components/responses/ErrorResponse" },
+          "401": { "$ref": "#/components/responses/AuthenticationErrorResponse" },
           "403": { "$ref": "#/components/responses/ErrorResponse" },
           "404": { "$ref": "#/components/responses/ErrorResponse" },
           "409": { "$ref": "#/components/responses/ErrorResponse" },
           "422": { "$ref": "#/components/responses/ErrorResponse" },
-          "500": { "$ref": "#/components/responses/ErrorResponse" }
+          "500": { "$ref": "#/components/responses/ServerErrorResponse" },
+          "502": { "$ref": "#/components/responses/ErrorResponse" },
+          "503": { "$ref": "#/components/responses/UnavailableResponse" }
         }
       }
     }
@@ -218,21 +244,21 @@
     },
     "parameters": {
       "ProjectId": { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
-      "Revision": { "name": "revision", "in": "query", "required": true, "description": "当前项目一次完整 SUCCEEDED refresh run 的不透明 revision。", "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
+      "Revision": { "name": "revision", "in": "query", "required": true, "description": "当前项目一次完整 SUCCEEDED refresh run 的不透明 revision。服务端保留当前与紧邻上一成功 revision；更早 revision 返回 409 MARKETING_SNAPSHOT_UNAVAILABLE。", "schema": { "type": "string", "minLength": 1 } },
       "From": { "name": "from", "in": "query", "required": true, "schema": { "type": "string", "format": "date" } },
       "To": { "name": "to", "in": "query", "required": true, "schema": { "type": "string", "format": "date" } },
-      "OptionalFrom": { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } },
-      "OptionalTo": { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } },
+      "OptionalFrom": { "name": "from", "in": "query", "description": "省略时使用 revision 的完整覆盖起始日。", "schema": { "type": "string", "format": "date" } },
+      "OptionalTo": { "name": "to", "in": "query", "description": "省略时使用 revision 的完整覆盖结束日。", "schema": { "type": "string", "format": "date" } },
       "Page": { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1, "default": 1 } },
       "PageSize": { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
       "SortOrder": { "name": "sortOrder", "in": "query", "schema": { "type": "string", "enum": ["ascend", "descend"], "default": "descend" } },
-      "Query": { "name": "query", "in": "query", "schema": { "type": "string", "maxLength": 200 } },
-      "AccountId": { "name": "accountId", "in": "query", "schema": { "type": "string", "maxLength": 128 } },
-      "CampaignId": { "name": "campaignId", "in": "query", "schema": { "type": "string", "maxLength": 128 } },
-      "AdGroupId": { "name": "adGroupId", "in": "query", "schema": { "type": "string", "maxLength": 128 } },
-      "KeywordName": { "name": "keywordName", "in": "query", "schema": { "type": "string", "maxLength": 200 } },
+      "Query": { "name": "query", "in": "query", "schema": { "type": "string", "minLength": 1, "maxLength": 200 } },
+      "AccountId": { "name": "accountId", "in": "query", "schema": { "type": "string", "minLength": 1, "maxLength": 512 } },
+      "CampaignId": { "name": "campaignId", "in": "query", "schema": { "type": "string", "minLength": 1, "maxLength": 512 } },
+      "AdGroupId": { "name": "adGroupId", "in": "query", "schema": { "type": "string", "minLength": 1, "maxLength": 512 } },
+      "KeywordName": { "name": "keywordName", "in": "query", "schema": { "type": "string", "minLength": 1, "maxLength": 512 } },
       "QueryStatus": { "name": "queryStatus", "in": "query", "schema": { "type": "string", "enum": ["ADDED", "NOT_ADDED", "NOT_ADDABLE"] } },
-      "MatchType": { "name": "matchType", "in": "query", "schema": { "type": "string", "maxLength": 64 } }
+      "MatchType": { "name": "matchType", "in": "query", "schema": { "type": "string", "minLength": 1, "maxLength": 40 } }
     },
     "responses": {
       "ErrorResponse": {
@@ -242,6 +268,38 @@
         },
         "content": {
           "application/json": { "schema": { "$ref": "#/components/schemas/MarketingErrorResponse" } }
+        }
+      },
+      "AuthenticationErrorResponse": {
+        "description": "Bearer Token 缺失、无效、过期或账户停用。",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/AuthenticationError" } }
+        }
+      },
+      "ServerErrorResponse": {
+        "description": "营销读取内部失败或鉴权服务配置失败。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                { "$ref": "#/components/schemas/MarketingErrorResponse" },
+                { "$ref": "#/components/schemas/AuthenticationError" }
+              ]
+            }
+          }
+        }
+      },
+      "UnavailableResponse": {
+        "description": "营销模块、上游协调或鉴权账户读取暂时不可用。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                { "$ref": "#/components/schemas/MarketingErrorResponse" },
+                { "$ref": "#/components/schemas/AuthenticationError" }
+              ]
+            }
+          }
         }
       }
     },
@@ -507,7 +565,16 @@
         "additionalProperties": false,
         "required": ["code", "message"],
         "properties": {
-          "code": { "type": "string", "enum": ["MARKETING_REVISION_REQUIRED", "MARKETING_AD_RESOURCE_QUERY_INVALID", "MARKETING_PROJECT_NOT_ALLOWED", "PROJECT_FORBIDDEN", "PROJECT_NOT_FOUND", "MARKETING_REVISION_NOT_FOUND", "MARKETING_SNAPSHOT_UNAVAILABLE", "DASHBOARD_DATE_OUT_OF_RANGE", "MARKETING_AD_RESOURCE_FAILED", "MARKETING_DASHBOARD_FAILED"] },
+          "code": { "type": "string", "description": "稳定机器错误码；可能包含刷新协调和百度上游错误码。", "examples": ["MARKETING_REVISION_REQUIRED", "MARKETING_AD_RESOURCE_QUERY_INVALID", "DASHBOARD_FILTER_WITHOUT_SNAPSHOT", "BAIDU_REPORT_API_FAILED"] },
+          "message": { "type": "string" }
+        }
+      },
+      "AuthenticationError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["success", "message"],
+        "properties": {
+          "success": { "type": "boolean", "const": false },
           "message": { "type": "string" }
         }
       },

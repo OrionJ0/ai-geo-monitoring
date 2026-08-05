@@ -162,7 +162,11 @@ export type MarketingSearchTermResponse = {
   pagination: MarketingPagination;
 };
 export type MarketingError = {
-  code: "MARKETING_REVISION_REQUIRED" | "MARKETING_AD_RESOURCE_QUERY_INVALID" | "MARKETING_PROJECT_NOT_ALLOWED" | "PROJECT_FORBIDDEN" | "PROJECT_NOT_FOUND" | "MARKETING_REVISION_NOT_FOUND" | "MARKETING_SNAPSHOT_UNAVAILABLE" | "DASHBOARD_DATE_OUT_OF_RANGE" | "MARKETING_AD_RESOURCE_FAILED" | "MARKETING_DASHBOARD_FAILED";
+  code: string;
+  message: string;
+};
+export type AuthenticationError = {
+  success: false;
   message: string;
 };
 export type MarketingErrorResponse = {

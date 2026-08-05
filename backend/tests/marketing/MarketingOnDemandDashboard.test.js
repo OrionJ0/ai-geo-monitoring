@@ -16,6 +16,91 @@ const {
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
 
+test('fresh filtered dashboard reads facts only once', async () => {
+  const reads = [];
+  const dashboard = {
+    states: {
+      projectState: 'ACTIVE',
+      sourceSummaryState: 'CONNECTED',
+      bindingSummaryState: 'ACTIVE',
+      snapshotFreshnessState: 'FRESH'
+    }
+  };
+  const service = new MarketingOnDemandDashboardService({
+    dashboardService: {
+      assertAccess() {},
+      async read(input) {
+        reads.push(input);
+        return dashboard;
+      }
+    },
+    refreshService: {
+      async createRun() {
+        throw new Error('fresh dashboard must not create a refresh run');
+      }
+    },
+    executeRefresh: async () => {
+      throw new Error('fresh dashboard must not execute a refresh run');
+    }
+  });
+
+  const input = {
+    projectId: 11,
+    from: '2026-07-28',
+    to: '2026-08-03'
+  };
+  assert.equal(await service.read(input), dashboard);
+  assert.deepEqual(reads, [input]);
+});
+
+test('first filtered dashboard request refreshes before applying the requested range', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-on-demand-filter-first-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  let providerCalls = 0;
+  const now = Date.parse('2026-08-03T04:00:00.000Z');
+  const refreshService = new MarketingRefreshService({
+    sequelize: database.sequelize,
+    reportProvider: {
+      async fetchSearchReports({ binding, coverage }) {
+        providerCalls += 1;
+        return campaignOnlyReports([{
+          accountId: binding.accountId,
+          campaignId: 'campaign-filter-first',
+          campaignName: '首次筛选计划',
+          metricDate: coverage.to,
+          impressions: '3',
+          clicks: '1',
+          costAmountScaled: '2'
+        }]);
+      }
+    },
+    contractVersion: 'fixture-contract-v1',
+    currencyCode: 'CNY',
+    costScale: 6,
+    clock: () => now
+  });
+  const service = new MarketingOnDemandDashboardService({
+    dashboardService: new MarketingDashboardService({
+      sequelize: database.sequelize,
+      clock: () => now
+    }),
+    refreshService,
+    executeRefresh: (runId) => refreshService.executeRun(runId)
+  });
+
+  const result = await service.read({
+    projectId: 11,
+    from: '2026-07-31',
+    to: '2026-08-02'
+  });
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(result.filter, {
+    from: '2026-07-31',
+    to: '2026-08-02'
+  });
+});
+
 test('on-demand admission rejection releases the project refresh slot', async (t) => {
   const database = await createMarketingTestDatabase('marketing-on-demand-reject-');
   t.after(database.close);
@@ -219,6 +304,14 @@ test('crossed-day stale recovery refreshes once before coverage discovery and cl
 
   const first = await service.read({ projectId: 11 });
   now += 24 * 60 * 60 * 1000 + 11 * 60 * 1000;
+  await assert.rejects(
+    service.read({
+      projectId: 11,
+      from: first.coverage.from,
+      to: '2026-08-03'
+    }),
+    { code: 'DASHBOARD_DATE_OUT_OF_RANGE', status: 422 }
+  );
   await assert.rejects(
     service.read({
       projectId: 11,

@@ -1,12 +1,22 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { QueryTypes } = require('sequelize');
 
 const {
   MarketingDashboardService
 } = require('../../modules/marketing/services/MarketingDashboardService');
 const {
+  MarketingAdResourceService
+} = require('../../modules/marketing/services/MarketingAdResourceService');
+const {
   MarketingRefreshService
 } = require('../../modules/marketing/services/MarketingRefreshService');
+const {
+  MarketingSnapshotSelector
+} = require('../../modules/marketing/services/MarketingSnapshotSelector');
+const {
+  BaiduBindingService
+} = require('../../modules/marketing/services/BaiduBindingService');
 const {
   createMarketingTestDatabase,
   seedConnectionAndBinding
@@ -108,6 +118,110 @@ test('one refresh commits campaign, ad group, keyword and search-term facts atom
   }
 });
 
+test('a page keeps reading its pinned revision after the next refresh succeeds', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-pinned-refresh-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize, { accountId: '1234' });
+  let campaignName = '旧快照';
+  let now = Date.parse('2026-07-30T04:00:00.000Z');
+  const refresh = new MarketingRefreshService({
+    sequelize: database.sequelize,
+    reportProvider: {
+      async fetchSearchReports({ binding }) {
+        return completeReportSet(binding, campaignName);
+      }
+    },
+    contractVersion: 'fixture-contract-v1',
+    currencyCode: 'CNY',
+    costScale: 2,
+    clock: () => now
+  });
+  const firstRun = await refresh.createRun({
+    projectId: 11,
+    triggerType: 'MANUAL',
+    userId: 2
+  });
+  await refresh.executeRun(firstRun.runId);
+
+  const dashboard = await new MarketingDashboardService({
+    sequelize: database.sequelize,
+    clock: () => now
+  }).read({ projectId: 11 });
+  assert.equal(dashboard.revision, firstRun.runId);
+
+  campaignName = '新快照';
+  now += 60 * 1000;
+  const secondRun = await refresh.createRun({
+    projectId: 11,
+    triggerType: 'MANUAL',
+    userId: 2
+  });
+  await refresh.executeRun(secondRun.runId);
+
+  const resources = new MarketingAdResourceService({
+    sequelize: database.sequelize,
+    snapshotSelector: new MarketingSnapshotSelector({
+      sequelize: database.sequelize
+    })
+  });
+  const input = {
+    projectId: 11,
+    revision: dashboard.revision,
+    from: dashboard.coverage.from,
+    to: dashboard.coverage.to
+  };
+  const [hierarchy, keywords, searchTerms] = await Promise.all([
+    resources.readAdHierarchy(input),
+    resources.readKeywords(input),
+    resources.readSearchTerms(input)
+  ]);
+
+  assert.equal(hierarchy.campaigns[0].campaignName, '旧快照');
+  assert.equal(keywords.items[0].campaignName, '旧快照');
+  assert.equal(searchTerms.items[0].campaignName, '旧快照');
+  assert.equal(hierarchy.revision, firstRun.runId);
+  assert.equal(keywords.revision, firstRun.runId);
+  assert.equal(searchTerms.revision, firstRun.runId);
+
+  const secondDashboard = await new MarketingDashboardService({
+    sequelize: database.sequelize,
+    clock: () => now
+  }).read({ projectId: 11 });
+  assert.equal(secondDashboard.revision, secondRun.runId);
+
+  campaignName = '第三快照';
+  now += 60 * 1000;
+  const thirdRun = await refresh.createRun({
+    projectId: 11,
+    triggerType: 'MANUAL',
+    userId: 2
+  });
+  await refresh.executeRun(thirdRun.runId);
+
+  const previous = await resources.readAdHierarchy({
+    ...input,
+    revision: secondRun.runId
+  });
+  assert.equal(previous.campaigns[0].campaignName, '新快照');
+  await assert.rejects(
+    resources.readAdHierarchy(input),
+    {
+      code: 'MARKETING_SNAPSHOT_UNAVAILABLE',
+      status: 409
+    }
+  );
+  const retainedRuns = await database.sequelize.query(
+    `SELECT DISTINCT refresh_run_id
+     FROM baidu_campaign_daily_metrics
+     ORDER BY refresh_run_id`,
+    { type: QueryTypes.SELECT }
+  );
+  assert.deepEqual(
+    retainedRuns.map((row) => row.refresh_run_id).sort(),
+    [secondRun.runId, thirdRun.runId].sort()
+  );
+});
+
 test('an unstable verification read fails the run and preserves the complete active revision', async (t) => {
   const database = await createMarketingTestDatabase('marketing-unstable-refresh-');
   t.after(database.close);
@@ -194,6 +308,60 @@ test('an unstable verification read fails the run and preserves the complete act
     keywords: 1,
     searchTerms: 1
   });
+});
+
+test('deleting a binding invalidates retained revisions before facts cascade away', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-binding-delete-revision-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize, { accountId: '1234' });
+  const refresh = new MarketingRefreshService({
+    sequelize: database.sequelize,
+    reportProvider: {
+      async fetchSearchReports({ binding }) {
+        return completeReportSet(binding);
+      }
+    },
+    contractVersion: 'fixture-contract-v1',
+    currencyCode: 'CNY',
+    costScale: 2,
+    clock: () => Date.parse('2026-07-30T04:00:00.000Z')
+  });
+  const run = await refresh.createRun({
+    projectId: 11,
+    triggerType: 'MANUAL',
+    userId: 2
+  });
+  await refresh.executeRun(run.runId);
+  const selector = new MarketingSnapshotSelector({
+    sequelize: database.sequelize
+  });
+  assert.equal((await selector.selectRevision({
+    projectId: 11,
+    revision: run.runId
+  })).run.id, run.runId);
+
+  await new BaiduBindingService({
+    sequelize: database.sequelize,
+    accountDirectory: {},
+    siteDirectory: {}
+  }).deleteBinding({
+    projectId: 11,
+    bindingId: 'binding-1'
+  });
+
+  await assert.rejects(
+    selector.selectRevision({ projectId: 11, revision: run.runId }),
+    { code: 'MARKETING_SNAPSHOT_UNAVAILABLE', status: 409 }
+  );
+  const facts = await database.sequelize.query(
+    `SELECT id FROM baidu_campaign_daily_metrics
+     WHERE refresh_run_id = :revision`,
+    {
+      replacements: { revision: run.runId },
+      type: QueryTypes.SELECT
+    }
+  );
+  assert.deepEqual(facts, []);
 });
 
 test('refresh rejects orphan hierarchy rows instead of hiding them in the UI', async (t) => {

@@ -157,7 +157,7 @@ async function run() {
     const result = await createMarketingMigrationRunner({
       sequelize: database
     }).apply({
-      expectedLatest: '015-drop-legacy-tongji-credentials'
+      expectedLatest: '016-revisioned-ad-snapshot-facts'
     });
     const expectedVersions = migrations.map(({ version }) => version);
     const connectionColumns = await database.getQueryInterface().describeTable(

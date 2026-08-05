@@ -147,6 +147,21 @@ test('dashboard rejects filters outside the saved coverage', async (t) => {
   );
 });
 
+test('dashboard rejects a date filter when no snapshot exists', async (t) => {
+  const database = await createMarketingTestDatabase();
+  t.after(database.close);
+  const dashboard = new MarketingDashboardService({
+    sequelize: database.sequelize
+  });
+  await assert.rejects(
+    dashboard.read({
+      projectId: 11,
+      from: '2026-07-01'
+    }),
+    { code: 'DASHBOARD_FILTER_WITHOUT_SNAPSHOT', status: 422 }
+  );
+});
+
 test('restoring an old binding fingerprint does not revive deleted facts', async (t) => {
   const database = await createMarketingTestDatabase();
   t.after(database.close);

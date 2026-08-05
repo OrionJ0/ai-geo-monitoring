@@ -729,13 +729,41 @@ class MarketingRefreshService {
         'baidu_campaign_daily_metrics'
       ]) {
         await this.sequelize.query(
-          `DELETE FROM ${table} WHERE project_id = :projectId`,
+          `DELETE FROM ${table}
+           WHERE project_id = :projectId
+             AND refresh_run_id NOT IN (
+               SELECT id
+               FROM baidu_marketing_refresh_runs
+               WHERE project_id = :projectId
+                 AND status = 'SUCCEEDED'
+               ORDER BY project_run_sequence DESC
+               LIMIT 1
+             )`,
           {
             replacements: { projectId: run.project_id },
             transaction
           }
         );
       }
+      await this.sequelize.query(
+        `UPDATE baidu_marketing_refresh_runs
+         SET snapshot_facts_retained = FALSE
+         WHERE project_id = :projectId
+           AND status = 'SUCCEEDED'
+           AND snapshot_facts_retained = TRUE
+           AND id NOT IN (
+             SELECT id
+             FROM baidu_marketing_refresh_runs
+             WHERE project_id = :projectId
+               AND status = 'SUCCEEDED'
+             ORDER BY project_run_sequence DESC
+             LIMIT 1
+           )`,
+        {
+          replacements: { projectId: run.project_id },
+          transaction
+        }
+      );
       const createdAt = new Date(this.clock()).toISOString();
       const commonInsert = (metric) => ({
         id: crypto.randomUUID(),
@@ -803,6 +831,7 @@ class MarketingRefreshService {
          SET status = 'SUCCEEDED',
              active_project_key = NULL,
              snapshot_content_state = :contentState,
+             snapshot_facts_retained = TRUE,
              failure_code = NULL,
              finished_at = :finishedAt,
              updated_at = :finishedAt

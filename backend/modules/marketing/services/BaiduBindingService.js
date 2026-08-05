@@ -184,13 +184,16 @@ class BaiduBindingService {
     }
   }
 
-  async requireActiveProject(projectId, transaction) {
+  async requireActiveProject(projectId, transaction, lock = false) {
     this.assertProjectAllowed(projectId);
+    const lockClause = (
+      lock && this.sequelize.getDialect() === 'postgres'
+    ) ? ' FOR UPDATE' : '';
     const rows = await this.sequelize.query(
       `SELECT id, status
        FROM brand_projects
        WHERE id = :projectId
-       LIMIT 1`,
+       LIMIT 1${lockClause}`,
       {
         replacements: { projectId },
         type: QueryTypes.SELECT,
@@ -673,9 +676,20 @@ class BaiduBindingService {
   }
 
   async deleteBinding({ projectId, bindingId }) {
-    return this.sequelize.transaction(async (transaction) => {
-      await this.requireActiveProject(projectId, transaction);
+    return this.bindingMutationTransaction(async (transaction) => {
+      await this.requireActiveProject(projectId, transaction, true);
       const binding = await this.findBinding(projectId, bindingId, transaction);
+      await this.sequelize.query(
+        `UPDATE baidu_marketing_refresh_runs
+         SET snapshot_facts_retained = FALSE
+         WHERE project_id = :projectId
+           AND status = 'SUCCEEDED'
+           AND snapshot_facts_retained = TRUE`,
+        {
+          replacements: { projectId },
+          transaction
+        }
+      );
       await this.sequelize.query(
         `DELETE FROM baidu_project_bindings
          WHERE project_id = :projectId AND id = :bindingId`,

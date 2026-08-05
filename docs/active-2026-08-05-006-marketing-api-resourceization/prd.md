@@ -66,6 +66,7 @@ GET /api/marketing/projects/:projectId/search-terms
 - 前端按搜索词、关键词、广告表现、市场总览顺序迁移；
 - 两次发布完成 additive 迁移和旧 Dashboard 大数组硬退役；
 - 建立接口合同、消费者、响应体积、数据库查询和浏览器验收证据。
+- 新增不可变迁移 016，使事实唯一键包含 `refresh_run_id`，并显式记录 revision 事实保留状态；这是实现 AC-006 所必需的 R2 范围例外。
 
 ### Out of scope
 
@@ -216,7 +217,7 @@ R1、R2 都是完整 Git Bundle 发布。出现阻断回归时使用后代 rever
 - revision 必须来自完整成功快照，不允许调用方传任意 run ID 读取部分事实；
 - page size、排序和过滤字段必须使用服务端允许列表；
 - 精确金额继续使用字符串缩放值，不转换为浮点；
-- 不修改已应用迁移，不需要新数据库迁移；
+- 不修改任何已应用迁移；R2 只允许新增迁移 016。迁移时只信任 R1 当前成功 revision，R2 运行期固定保留当前与紧邻上一成功 revision，更早 revision 返回 `409 MARKETING_SNAPSHOT_UNAVAILABLE`；
 - R1/R2 不与 003、005、007 的实现或生产观察窗口重叠；
 - 不把代码已完成描述为生产已经切换。
 

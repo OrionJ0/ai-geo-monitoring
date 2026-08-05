@@ -294,6 +294,14 @@ test('search-term resource distinguishes revision and coverage errors', async (t
     }),
     { code: 'MARKETING_AD_RESOURCE_QUERY_INVALID', status: 400 }
   );
+  await assert.rejects(
+    service.readSearchTerms({
+      projectId: '11',
+      revision: 'available-revision',
+      campaignId: 'x'.repeat(513)
+    }),
+    { code: 'MARKETING_AD_RESOURCE_QUERY_INVALID', status: 400 }
+  );
 });
 
 test('search-term HTTP endpoint authorizes before resolving revision', async (t) => {
@@ -336,6 +344,7 @@ test('search-term HTTP endpoint authorizes before resolving revision', async (t)
   );
   assert.equal(allowed.status, 200);
   assert.equal(allowed.headers.get('cache-control'), 'private, max-age=60');
+  assert.equal(allowed.headers.get('vary'), 'Authorization');
   assert.deepEqual(await allowed.json(), {
     revision: 'old-revision',
     items: []
