@@ -1,0 +1,26 @@
+{
+  "dashboard": {
+    "projectId": "synthetic-project",
+    "revision": "synthetic-revision-unavailable",
+    "coverage": { "from": "2026-07-08", "to": "2026-07-14", "currency": "CNY", "costScale": 2 }
+  },
+  "current": {
+    "revision": "synthetic-revision-unavailable",
+    "filter": { "from": "2026-07-08", "to": "2026-07-14" },
+    "summary": { "impressions": "70", "clicks": "7", "costAmountScaled": "700" }
+  },
+  "previousRequest": {
+    "revision": "synthetic-revision-unavailable",
+    "filter": { "from": "2026-07-01", "to": "2026-07-07" }
+  },
+  "error": {
+    "status": 422,
+    "body": {
+      "error": {
+        "code": "DASHBOARD_DATE_OUT_OF_RANGE",
+        "message": "所选日期超出广告快照覆盖范围"
+      }
+    }
+  },
+  "expectedPreviousState": "UNAVAILABLE"
+}

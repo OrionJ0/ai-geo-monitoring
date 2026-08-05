@@ -1,0 +1,41 @@
+{
+  "query": {
+    "projectId": "synthetic-project",
+    "device": "all",
+    "from": "2026-08-01",
+    "to": "2026-08-01",
+    "view": "landing",
+    "page": 1,
+    "pageSize": 2,
+    "sortBy": "visits",
+    "sortOrder": "descend",
+    "query": ""
+  },
+  "response": {
+    "projectId": "synthetic-project",
+    "source": "BAIDU_TONGJI",
+    "device": "all",
+    "coverage": { "from": "2026-08-01", "to": "2026-08-01" },
+    "view": "landing",
+    "dataState": "DATA",
+    "rows": [
+      { "key": "baidu-page:1001", "pageId": "1001", "title": null, "path": "/", "visits": "12", "contributionPageviews": "18", "bounceRate": "40", "averageVisitTime": "30", "averageVisitPages": "2" },
+      { "key": "baidu-page:1002", "pageId": "1002", "title": null, "path": "/", "visits": "12", "contributionPageviews": "17", "bounceRate": "55", "averageVisitTime": "21", "averageVisitPages": "1.5" }
+    ],
+    "pagination": { "page": 1, "pageSize": 2, "totalItems": 2, "totalPages": 1 },
+    "sort": { "field": "visits", "order": "descend" },
+    "query": "",
+    "scope": { "source": "ALL", "label": "全部来源" },
+    "dataQuality": { "excludedCrossDomainRows": 0 },
+    "capabilities": { "trafficCounts": true, "sourceTraffic": true, "qualityMetrics": false, "pageReports": true, "sourcePageCorrelation": false, "unavailableReason": "" }
+  },
+  "expectedOrder": ["1001", "1002"],
+  "identityRule": {
+    "numeric": "BigInt ascending",
+    "opaque": "Unicode code-point ascending"
+  },
+  "expectedCollision": [
+    { "pageId": "1001", "ordinal": 1, "count": 2 },
+    { "pageId": "1002", "ordinal": 2, "count": 2 }
+  ]
+}

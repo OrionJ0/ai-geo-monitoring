@@ -1,0 +1,148 @@
+{
+  "dashboard": {
+    "schemaVersion": "marketing_dashboard_v2",
+    "projectId": "synthetic-project",
+    "projectName": "虚构营销项目",
+    "revision": "synthetic-revision-ready",
+    "states": {
+      "moduleState": "READY",
+      "projectState": "ACTIVE",
+      "sourceSummaryState": "CONNECTED",
+      "bindingSummaryState": "ACTIVE",
+      "snapshotContentState": "DATA",
+      "snapshotFreshnessState": "FRESH",
+      "refreshState": "SUCCEEDED"
+    },
+    "bindings": [
+      {
+        "bindingId": "synthetic-binding",
+        "accountId": "synthetic-account",
+        "accountName": "虚构广告账户",
+        "sourceState": "CONNECTED",
+        "bindingState": "ACTIVE",
+        "blockingCode": null
+      }
+    ],
+    "coverage": {
+      "from": "2026-07-01",
+      "to": "2026-07-14",
+      "lastSuccessfulAt": "2026-07-15T01:00:00.000Z",
+      "currency": "CNY",
+      "costScale": 2
+    },
+    "filter": { "from": "2026-07-08", "to": "2026-07-14" },
+    "summary": { "impressions": "70", "clicks": "7", "costAmountScaled": "700" },
+    "trend": [
+      { "date": "2026-07-08", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+      { "date": "2026-07-09", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+      { "date": "2026-07-10", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+      { "date": "2026-07-11", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+      { "date": "2026-07-12", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+      { "date": "2026-07-13", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+      { "date": "2026-07-14", "impressions": "10", "clicks": "1", "costAmountScaled": "100" }
+    ],
+    "hierarchyCounts": { "campaigns": 1, "adGroups": 1, "keywords": 1, "searchTerms": 1 },
+    "activeRun": null,
+    "lastRun": { "runId": "synthetic-revision-ready", "status": "SUCCEEDED", "failureCode": null }
+  },
+  "current": {
+    "range": { "from": "2026-07-08", "to": "2026-07-14" },
+    "adHierarchy": {
+      "schemaVersion": "marketing_ad_hierarchy_v1",
+      "projectId": "synthetic-project",
+      "revision": "synthetic-revision-ready",
+      "coverage": { "from": "2026-07-01", "to": "2026-07-14", "lastSuccessfulAt": "2026-07-15T01:00:00.000Z", "currency": "CNY", "costScale": 2 },
+      "filter": { "from": "2026-07-08", "to": "2026-07-14" },
+      "summary": { "impressions": "70", "clicks": "7", "costAmountScaled": "700" },
+      "campaigns": [
+        { "accountId": "synthetic-account", "campaignId": "synthetic-campaign", "campaignName": "虚构计划", "impressions": "70", "clicks": "7", "costAmountScaled": "700", "trend": [
+          { "date": "2026-07-08", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-09", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-10", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-11", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-12", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-13", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-14", "impressions": "10", "clicks": "1", "costAmountScaled": "100" }
+        ] }
+      ],
+      "adGroups": [
+        { "accountId": "synthetic-account", "campaignId": "synthetic-campaign", "campaignName": "虚构计划", "adGroupId": "synthetic-group", "adGroupName": "虚构单元", "impressions": "70", "clicks": "7", "costAmountScaled": "700", "trend": [
+          { "date": "2026-07-08", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-09", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-10", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-11", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-12", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-13", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-14", "impressions": "10", "clicks": "1", "costAmountScaled": "100" }
+        ] }
+      ],
+      "keywords": [
+        { "accountId": "synthetic-account", "campaignId": "synthetic-campaign", "campaignName": "虚构计划", "adGroupId": "synthetic-group", "adGroupName": "虚构单元", "keywordId": "synthetic-term", "keywordName": "虚构词项甲", "targetingType": "KEYWORD", "impressions": "70", "clicks": "7", "costAmountScaled": "700", "trend": [
+          { "date": "2026-07-08", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-09", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-10", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-11", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-12", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-13", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-14", "impressions": "10", "clicks": "1", "costAmountScaled": "100" }
+        ] }
+      ],
+      "hierarchyCounts": { "campaigns": 1, "adGroups": 1, "keywords": 1 }
+    },
+    "keywords": {
+      "schemaVersion": "marketing_keywords_v1",
+      "projectId": "synthetic-project",
+      "revision": "synthetic-revision-ready",
+      "coverage": { "from": "2026-07-01", "to": "2026-07-14", "lastSuccessfulAt": "2026-07-15T01:00:00.000Z", "currency": "CNY", "costScale": 2 },
+      "filter": { "from": "2026-07-08", "to": "2026-07-14" },
+      "summary": { "impressions": "70", "clicks": "7", "costAmountScaled": "700" },
+      "items": [
+        { "accountId": "synthetic-account", "campaignId": "synthetic-campaign", "campaignName": "虚构计划", "adGroupId": "synthetic-group", "adGroupName": "虚构单元", "keywordId": "synthetic-term", "keywordName": "虚构词项甲", "targetingType": "KEYWORD", "impressions": "70", "clicks": "7", "costAmountScaled": "700", "trend": [
+          { "date": "2026-07-08", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-09", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-10", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-11", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-12", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-13", "impressions": "10", "clicks": "1", "costAmountScaled": "100" },
+          { "date": "2026-07-14", "impressions": "10", "clicks": "1", "costAmountScaled": "100" }
+        ] }
+      ],
+      "pagination": { "page": 1, "pageSize": 1, "totalItems": 1, "totalPages": 1 }
+    }
+  },
+  "previous": {
+    "range": { "from": "2026-07-01", "to": "2026-07-07" },
+    "adHierarchy": {
+      "schemaVersion": "marketing_ad_hierarchy_v1",
+      "projectId": "synthetic-project",
+      "revision": "synthetic-revision-ready",
+      "coverage": { "from": "2026-07-01", "to": "2026-07-14", "lastSuccessfulAt": "2026-07-15T01:00:00.000Z", "currency": "CNY", "costScale": 2 },
+      "filter": { "from": "2026-07-01", "to": "2026-07-07" },
+      "summary": { "impressions": "35", "clicks": "7", "costAmountScaled": "350" },
+      "campaigns": [
+        { "accountId": "synthetic-account", "campaignId": "synthetic-campaign", "campaignName": "虚构计划", "impressions": "35", "clicks": "7", "costAmountScaled": "350", "trend": [
+          { "date": "2026-07-01", "impressions": "5", "clicks": "1", "costAmountScaled": "50" },
+          { "date": "2026-07-02", "impressions": "5", "clicks": "1", "costAmountScaled": "50" },
+          { "date": "2026-07-03", "impressions": "5", "clicks": "1", "costAmountScaled": "50" },
+          { "date": "2026-07-04", "impressions": "5", "clicks": "1", "costAmountScaled": "50" },
+          { "date": "2026-07-05", "impressions": "5", "clicks": "1", "costAmountScaled": "50" },
+          { "date": "2026-07-06", "impressions": "5", "clicks": "1", "costAmountScaled": "50" },
+          { "date": "2026-07-07", "impressions": "5", "clicks": "1", "costAmountScaled": "50" }
+        ] }
+      ],
+      "adGroups": [],
+      "keywords": [],
+      "hierarchyCounts": { "campaigns": 1, "adGroups": 0, "keywords": 0 }
+    },
+    "keywords": {
+      "schemaVersion": "marketing_keywords_v1",
+      "projectId": "synthetic-project",
+      "revision": "synthetic-revision-ready",
+      "coverage": { "from": "2026-07-01", "to": "2026-07-14", "lastSuccessfulAt": "2026-07-15T01:00:00.000Z", "currency": "CNY", "costScale": 2 },
+      "filter": { "from": "2026-07-01", "to": "2026-07-07" },
+      "summary": { "impressions": "35", "clicks": "7", "costAmountScaled": "350" },
+      "items": [],
+      "pagination": { "page": 1, "pageSize": 1, "totalItems": 0, "totalPages": 0 }
+    }
+  }
+}

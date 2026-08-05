@@ -1,8 +1,8 @@
 ---
 title: 营销生产数据正确性与双周期回归技术方案
 date: 2026-08-05
-status: draft
-source: docs/draft-2026-08-05-007-marketing-production-data-correctness/prd.md
+status: active
+source: docs/active-2026-08-05-007-marketing-production-data-correctness/prd.md
 scope: deep
 ---
 
@@ -108,8 +108,7 @@ upstream pageId + URL + metrics
   "summary": {
     "impressions": "123",
     "clicks": "12",
-    "costAmountScaled": "4567",
-    "conversions": null
+    "costAmountScaled": "4567"
   }
 }
 ```
@@ -182,7 +181,7 @@ type PeriodComparison<T> = {
 }
 ```
 
-若现役 `sourceComparison` 是数组，则采用最小 additive 方案：保留数组字段不变，在同级增加 `sourcePartition`；不得为了增加元数据无必要破坏现役数组消费者。实现前以 006 关闭后的真实合同为准冻结最终字段位置。
+006 关闭后的现役 `sourceComparison` 是 `{ metric, state, rows }` 对象。最小 additive 位置冻结为 `sourceComparison.partition`；保留 `rows` 字段与七个既有来源行不变，不增加同级第二份来源数组，也不创建新的来源 key。
 
 状态规则：
 
@@ -227,7 +226,7 @@ type PeriodComparison<T> = {
 
 1. 按现役规则规范化全部过滤后的 URL 为展示 path；
 2. 在分页前按 path 分组；
-3. 组内按稳定 page identity 排序：数字 ID 先按数值，否则按不透明字符串 code-point 顺序；
+3. 组内按稳定 page identity 排序：生产现役 pageId 已确认是唯一数字字符串，使用 `BigInt` 数值升序；合同同时冻结未来不透明字符串按 Unicode code-point 升序，不使用区域化 collation；
 4. 给 count > 1 的行写入 `ordinal` 与 `count`；
 5. 再执行现役主排序和分页；主排序相同时把 page identity 作为最终 tie-breaker。
 
@@ -268,7 +267,7 @@ PARTIAL 是成功响应中的数据质量状态，不是 5xx。合法零值是�
 - 关键词、搜索词、站点、统计用户名和账号名使用虚构值或直接删除；
 - 不含 Token、Secret、Authorization header、Cookie、联系人、电话、邮箱、IP、会话 ID；
 - 在测试中执行敏感键和高风险模式扫描；
-- fixture schema 经后端 presenter 和前端 decoder 双向合同测试验证。
+- fixture schema 经后端 OpenAPI 合同和前端真实 decoder 双向验证。
 
 本地不开启生产百度模块，也不读取服务器密文。fixture 是回归证据，不是“本地已接入生产”。
 
@@ -365,13 +364,13 @@ PARTIAL 是成功响应中的数据质量状态，不是 5xx。合法零值是�
 - 现役百度页面报告保留稳定 page identity；
 - source report 的总访问与来源访问采用同一百度统计指标和日期/设备范围。
 
-实现前用真实脱敏响应确认 83/82 的具体原因、page identity 类型和页面实际 KPI 字段；发现合同不同先更新本 Tech Spec，不靠前端猜测修补。
+Issue 001 已用只读规范化生产响应确认：来源差额并非 83/82 单一样本，当前范围还出现 200/198、153/152、89/88 且被误标为 `COMPLETE`；具体上游覆盖原因尚不可证明，因此一律只表达为覆盖证据。现役 pageId 是唯一数字字符串，同路径碰撞在 57 行样本中形成一个 35 行组。广告层级与关键词 summary 冻结为 `impressions`、`clicks`、`costAmountScaled` 三个精确十进制字符串字段，不增加 conversions 占位。
 
 ## 13. Handoff
 
-- PRD: `docs/draft-2026-08-05-007-marketing-production-data-correctness/prd.md`
-- Tech Spec: `docs/draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md`
-- Status: `draft`；只完成方案，不改变当前接口或页面。
+- PRD: `docs/active-2026-08-05-007-marketing-production-data-correctness/prd.md`
+- Tech Spec: `docs/active-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md`
+- Status: `active`；003 与 006 已关闭，当前按 issue 执行。
 - First implementation gate: 003 和 006 均已从正式入口验收并关闭。
 - Suggested issue split: U1–U5；本次尚未创建 issues。
 - Completion condition: 正式入口双周期、来源对账、路径消歧和未接入状态全部验收通过，随后解除 005 门禁。
