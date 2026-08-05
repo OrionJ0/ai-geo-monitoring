@@ -891,7 +891,7 @@ A2 至少保存：
 
 - PRD: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
 - Tech Spec: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Status: `active`；U1 生产双产品探针已通过，U2 已交付迁移 014 与版本化产品状态，U3 已在独立 worktree 完成统一统计上下文硬切、旧运行时/UI 退役和真实 Chrome 验收。014 与 U3 尚未生产发布，生产仍使用 A1 前旧独立 Token 路径。
-- First issue: U4 A1 发布与统一运行时验证；正式发布需 HITL 批准。
+- Status: `active`；U1–U4 已通过。A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41` 已正式发布，014 已应用；统一运行时完成真实 OAuth 刷新和当前 Token 版本双产品复验，正式 Chrome 页面及管理入口通过。旧三个数据库列仍按 A1 观察期保留，运行时代码与旧路由已退役。
+- First issue: U5 / Issue 005 新增迁移 015 并删除旧统计凭据列；A2 必须使用独立于 A1 的新 revision 和 Git Bundle 正式发布。
 - Completion condition: U1–U5 通过、A2 正式入口验收完成、旧实现与旧文档删除。
 - Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件；默认顺序为 003 → 006 → 007 → 005。

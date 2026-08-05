@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-04 Git Bundle workflow `30876793311` 已部署 `f265bd365e563e828a82dca51028f3d3d4dc40dc`；是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-05 A1 正式 Git Bundle 已部署 `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -41,6 +41,15 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 - `ai-geo-backend.service` 与 `ai-geo-frontend.service` 均由 systemd 正常启动；`/api/ready` 返回 `ready`，SQLite 为 WAL 且 scheduler 已启动；`/api/frontend-health` 返回完整 revision `f265bd365e563e828a82dca51028f3d3d4dc40dc`。
 - 登录后的正式关键词页显示“百度推广 · 真实数据 · 数据截至 2026-08-03”，共有 863 条有展现关键词、237 条有点击关键词；页面不再出现“广告关键词数据尚未开放”。广告表现返回消费、展现、点击和严格下钻入口，网站流量返回百度统计访问、UV、PV、质量和页面数据。
 - 官网代码与迁移已经部署，但生产 `GATO_WEBSITE_FORM_*` 未配置完整，模块保持 `DISABLED`；53KF 保持 `NOT_CONNECTED`；订单页继续诚实显示销售系统 `UNAVAILABLE`。这三项不是部署失败，也不得用 fixture 或假 API 填充。
+
+### 2026-08-05 百度统一 OAuth A1 正式发布与验收
+
+- 独立 Git Bundle 将服务器只快进到 `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41`，Bundle SHA-256 为 `3c0a3734b755c79d76915a4febc5d1d86e8387bf8ca9b5cef622767e7ded69d1`。最终源码树以原正式 revision `ba0b1eb3a76ae59847594a7647e68e35eb7bd373` 为运行基线，只叠加 003 文档和 A1，不含并行的 0805-002 Flash 工作线。
+- A1 前恢复备份为 `/opt/ai-geo-monitoring/backend/releases/database.pre-9789ee096798c9309d649c01d63b4c02b36ec524.sqlite`。营销迁移 `001`–`014` 已应用且无 pending；A1 仓库不存在 015，三个旧统计凭据列仍保留，等待 A2 独立迁移删除。
+- `ai-geo-backend.service` 与 `ai-geo-frontend.service` 由正式部署入口启动；公开 `/api/health`、`/api/ready`、`/api/frontend-health` 均成功并返回 A1 revision。服务器工作区干净，服务器的 `origin/main` 只是远端跟踪引用，不作为运行真值。
+- 现役连接服务已在服务器内存中完成一次真实 OAuth 刷新，Token 版本从 5 增至 6；刷新后搜索推广账户目录、百度统计站点目录和最小趋势请求均通过，两个产品状态均为当前版本 `VERIFIED`。Token、Cookie、数据库和原始百度响应未复制到本地或写入证据。
+- `/usr/bin/google-chrome` 从 `https://insight.guangtuo.com` 验收市场总览、广告表现、关键词、搜索词、网站流量和管理页；页面与营销 API 均为 200。管理页仅展示统一 OAuth 和必要统计用户名，旧统计凭据路由返回 404。服务器截图位于 `output/playwright/a1-production-e8de9d5/`。
+- 当前正式路径已经硬切为搜索推广和百度统计共用版本化 Access Context；不存在双 Token fallback。旧数据库列只是 A1 观察期恢复边界，不再有现役代码读写；在 A2 正式发布前不得宣称旧字段已完成不可逆退役。
 
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`

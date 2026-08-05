@@ -20,7 +20,7 @@
 本节只保留帮助读者判断文档状态所需的最小快照；完整运行证据以[部署与运维](DEPLOYMENT.md#当前正式单机实例)为准。
 
 - 唯一支持的正式入口是 `https://insight.guangtuo.com`；历史域名和直接 IP 不是支持入口。
-- 2026-08-05 13:58 CST 已重新核验公开健康与前后端 revision；精确 revision、本地/远端/生产的版本关系及未核验项统一见[部署与运维](DEPLOYMENT.md#当前正式单机实例)。
+- 2026-08-05 21:06 CST 已重新核验公开健康与前后端 revision；A1 统一 OAuth 已正式生效，精确 revision、本地/远端/生产的版本关系及未核验项统一见[部署与运维](DEPLOYMENT.md#当前正式单机实例)。
 - 百度营销、百度统计和既有 AI/GEO 数据已有生产真实数据证据。官网九键统计与脱敏咨询代码已部署，但生产仍缺专用官网项目和只读账号凭据，因此模块保持 `DISABLED`；代码已部署不等于官网数据已生产接通。53KF、线索池和销售订单仍未接入。
 
 ## 当前前端页面实施状态
@@ -61,7 +61,7 @@
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
 | [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 已定义目标事实/目标语义/开放竞品三轨合同、scoped SOV，以及“阶段 1 开放发现 → 模型外竞品注册表归一 → 阶段 2 无身份先验判断”的安全边界；S05 真实 Flash 定向复测 3/3 通过，但注册表 resolver/快照、不变性测试、自我修复清理、状态消费者和 41×3 新合同重跑尚未完成，暂不硬切，当前生产仍使用 v4 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
-| [百度统一 OAuth 凭据与营销 API 架构](active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) | Issue 001–003 已完成：生产双产品探针通过，本地已交付迁移 014、版本化 Access Context、统一统计上下文硬切与旧运行时/UI 退役；尚未生产发布，正式运行时仍为 A1 前双凭据，下一步需 HITL 批准 A1 发布与真实入口验证 |
+| [百度统一 OAuth 凭据与营销 API 架构](active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) | Issue 001–004 已完成：A1 已正式发布，迁移 014、版本化 Access Context、统一统计上下文硬切和旧运行时/UI 退役均已生效；真实 OAuth 刷新后搜索推广与百度统计均为当前版本 `VERIFIED`，下一步实施迁移 015 与 A2 旧列退役 |
 
 ## 草案需求
 
