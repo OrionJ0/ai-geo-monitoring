@@ -38,6 +38,7 @@ import {
 import MarketingMetricCard, {
   MarketingMetricGrid
 } from '@/components/marketing/MarketingMetricCard';
+import WebsiteSourcePartitionNotice from '@/components/marketing/WebsiteSourcePartitionNotice';
 import { groupDigits } from '@/utils/marketingValues.cjs';
 import {
   buildDailyChannelComparison,
@@ -897,6 +898,10 @@ export default function MarketOverviewPage() {
       <StatusMessages
         defaultContext={defaultContext}
         marketing={marketing}
+      />
+
+      <WebsiteSourcePartitionNotice
+        partition={trafficData?.sourceComparison?.partition}
       />
 
       {!defaultContext.errorMessage ? (

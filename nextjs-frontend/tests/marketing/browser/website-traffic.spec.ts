@@ -27,6 +27,8 @@ const metricTotals: Record<string, [string, string]> = {
   averageVisitPages: ['2.88', '2.71']
 };
 
+let sourcePartitionMode: 'complete' | 'partial' = 'complete';
+
 const landingRows = Array.from({ length: 23 }, (_, index) => ({
   key: `baidu-page:${index + 1}`,
   pageId: String(index + 1),
@@ -111,6 +113,35 @@ async function installRoutes(page: Page) {
       current: String(((currentTotal / 30) * ratio * (0.82 + ((index % 7) * 0.055))).toFixed(metric.includes('average') || metric === 'bounceRate' ? 2 : 0)),
       previous: String(((previousTotal / 30) * ratio * (0.86 + ((index % 6) * 0.045))).toFixed(metric.includes('average') || metric === 'bounceRate' ? 2 : 0))
     }));
+    const sourceComparison = url.searchParams.get('includeSourceComparison') === 'true'
+      ? {
+          metric: 'visits',
+          state: 'COMPLETE',
+          partition: {
+            metric: 'visits',
+            state: sourcePartitionMode === 'complete' ? 'COMPLETE' : 'PARTIAL',
+            totalVisits: sourcePartitionMode === 'complete' ? '61842' : '61843',
+            classifiedVisits: '61842',
+            unclassifiedVisits: sourcePartitionMode === 'complete' ? '0' : '1',
+            reasonCode: sourcePartitionMode === 'complete'
+              ? null
+              : 'SOURCE_COVERAGE_INCOMPLETE'
+          },
+          rows: sourceRows.map((row) => ({
+            sourceKey: row.sourceKey,
+            sourceLabel: row.sourceLabel,
+            summaryState: 'DATA',
+            trendState: 'DATA',
+            summary: {
+              current: row.visits,
+              previous: row.visits,
+              changePercent: '0.0',
+              trafficShare: row.trafficShare
+            },
+            trend: [{ date: from, visits: row.visits }]
+          }))
+        }
+      : undefined;
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -131,7 +162,11 @@ async function installRoutes(page: Page) {
         selectedMetricState: 'DATA',
         dataState: 'DATA',
         summary: {
-          visits: { current: '61842', previous: '57712', changePercent: '7.2' },
+          visits: {
+            current: sourcePartitionMode === 'complete' ? '61842' : '61843',
+            previous: '57712',
+            changePercent: '7.2'
+          },
           visitors: { current: '49618', previous: '46734', changePercent: '6.2' },
           pageviews: { current: '159420', previous: '146503', changePercent: '8.8' },
           bounceRate: { current: '42.6', previous: '44.4', changePoints: '-1.8' },
@@ -140,6 +175,7 @@ async function installRoutes(page: Page) {
         },
         trend,
         sourceQuality: { allSiteBounceRate: '42.6', rows: sourceRows },
+        ...(sourceComparison ? { sourceComparison } : {}),
         capabilities: {
           trafficCounts: true,
           sourceTraffic: true,
@@ -265,6 +301,31 @@ async function installUnavailableDataRoutes(page: Page) {
           dataState: 'NO_DATA'
         }))
       },
+      sourceComparison: {
+        metric: 'visits',
+        state: 'COMPLETE',
+        partition: {
+          metric: 'visits',
+          state: 'PARTIAL',
+          totalVisits: '61842',
+          classifiedVisits: '0',
+          unclassifiedVisits: '61842',
+          reasonCode: 'SOURCE_METRIC_MISSING'
+        },
+        rows: sourceRows.map((row) => ({
+          sourceKey: row.sourceKey,
+          sourceLabel: row.sourceLabel,
+          summaryState: 'NO_DATA',
+          trendState: 'NO_DATA',
+          summary: {
+            current: null,
+            previous: null,
+            changePercent: null,
+            trafficShare: null
+          },
+          trend: []
+        }))
+      },
       capabilities,
       cache: { state: 'HIT' }
       })
@@ -298,6 +359,7 @@ async function installUnavailableDataRoutes(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-04T04:00:00.000Z'));
+  sourcePartitionMode = 'complete';
   await installRoutes(page);
 });
 
@@ -367,6 +429,21 @@ test('matches the final desktop structure and supports source trend recovery', a
     fullPage: false
   });
   expect(consoleErrors).toEqual([]);
+});
+
+test('shows 61843/61842 as PARTIAL without renormalizing visible source shares', async ({ page }) => {
+  sourcePartitionMode = 'partial';
+  await page.goto('/geo/website-traffic');
+
+  const partition = page.getByRole('alert').filter({
+    hasText: '来源分类覆盖不完整'
+  });
+  await expect(partition).toContainText('全站访问 61,843');
+  await expect(partition).toContainText('当前来源已分类 61,842');
+  await expect(partition).toContainText('未覆盖 1');
+  await expect(partition).toContainText('不代表任何业务来源');
+  await expect(page.getByRole('row', { name: /直接访问/ })).toContainText('30.1%');
+  await expect(page.getByText(/未分类来源|未知来源/u)).toHaveCount(0);
 });
 
 test('switches page contracts, searches, sorts and paginates', async ({ page }) => {

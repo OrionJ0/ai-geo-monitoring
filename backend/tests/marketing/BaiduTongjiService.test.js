@@ -119,9 +119,22 @@ test('Tongji ratios use exact half-up rounding and reject impossible shares', ()
   );
 });
 
-test('Tongji snapshot rejects a source partition that does not reconcile', () => {
+test('Tongji snapshot rejects a source partition whose classified visits exceed the total', () => {
   const invalid = trafficSnapshot();
   invalid.allTrend = rows(100, 14, 10);
+  assert.throws(
+    () => buildSnapshotPayload(
+      invalid,
+      { from: '2026-07-29', to: '2026-07-30' },
+      'all'
+    ),
+    { code: 'TONGJI_SOURCE_PARTITION_INVALID', status: 502 }
+  );
+});
+
+test('Tongji snapshot keeps the existing exact pageview partition contract', () => {
+  const invalid = trafficSnapshot();
+  invalid.allTrend = rows(101, 15, 10);
   assert.throws(
     () => buildSnapshotPayload(
       invalid,
@@ -948,9 +961,12 @@ test('website source comparison only accepts all-source visits requests', async 
 
 test('website source comparison returns every canonical source in one response', async (t) => {
   const sourceValues = {
+    BAIDU_PAID: { pageviews: [0, 0], visits: [0, 0], visitors: [0, 0] },
     DIRECT: { pageviews: [20, 30], visits: [10, 20], visitors: [10, 10] },
     BAIDU_SEARCH: { pageviews: [30, 30], visits: [20, 20], visitors: [15, 15] },
     BING_SEARCH: { pageviews: [15, 15], visits: [10, 10], visitors: [5, 5] },
+    GOOGLE_SEARCH: { pageviews: [0, 0], visits: [0, 0], visitors: [0, 0] },
+    OTHER_SEARCH: { pageviews: [0, 0], visits: [0, 0], visitors: [0, 0] },
     EXTERNAL_REFERRAL: { pageviews: [10, 10], visits: [5, 5], visitors: [5, 5] }
   };
   const sourceCalls = [];
@@ -958,8 +974,37 @@ test('website source comparison returns every canonical source in one response',
     capabilities: { sourceTraffic: true },
     provider: {
       async readTrafficSnapshot({ coverage }) {
+        const snapshot = rangeSnapshot(coverage);
+        const sourcePageviewTotal = coverage.from === '2026-07-29'
+          ? '170'
+          : '136';
         return {
-          ...rangeSnapshot(coverage),
+          ...snapshot,
+          allTrend: snapshot.allTrend.map((row, index) => ({
+            ...row,
+            pageviews: index === 0 ? sourcePageviewTotal : '0'
+          })),
+          sourceSummaries: [
+            ...snapshot.sourceSummaries,
+            {
+              name: '百度推广',
+              source: 'searchBaiduPro',
+              pageviews: '0',
+              visits: '0',
+              visitors: '0'
+            }
+          ],
+          engineSummaries: [
+            ...snapshot.engineSummaries,
+            {
+              name: 'Google',
+              source: 'search,2',
+              engineId: '2',
+              pageviews: '0',
+              visits: '0',
+              visitors: '0'
+            }
+          ],
           sourceReportsIncluded: true
         };
       },
@@ -985,7 +1030,15 @@ test('website source comparison returns every canonical source in one response',
 
   assert.deepEqual(
     sourceCalls.map((call) => call.sourceKey).sort(),
-    ['BAIDU_SEARCH', 'BING_SEARCH', 'DIRECT', 'EXTERNAL_REFERRAL']
+    [
+      'BAIDU_PAID',
+      'BAIDU_SEARCH',
+      'BING_SEARCH',
+      'DIRECT',
+      'EXTERNAL_REFERRAL',
+      'GOOGLE_SEARCH',
+      'OTHER_SEARCH'
+    ]
   );
   assert.ok(sourceCalls.every((call) => (
     call.coverage.from === '2026-07-29'
@@ -993,6 +1046,14 @@ test('website source comparison returns every canonical source in one response',
   )));
   assert.equal(result.sourceComparison.metric, 'visits');
   assert.equal(result.sourceComparison.state, 'COMPLETE');
+  assert.deepEqual(result.sourceComparison.partition, {
+    metric: 'visits',
+    state: 'COMPLETE',
+    totalVisits: '100',
+    classifiedVisits: '100',
+    unclassifiedVisits: '0',
+    reasonCode: null
+  });
   assert.deepEqual(
     result.sourceComparison.rows.map((row) => row.sourceKey),
     [
@@ -1008,15 +1069,18 @@ test('website source comparison returns every canonical source in one response',
   assert.deepEqual(result.sourceComparison.rows[0], {
     sourceKey: 'BAIDU_PAID',
     sourceLabel: '百度推广',
-    summaryState: 'NO_DATA',
-    trendState: 'NO_DATA',
+    summaryState: 'DATA',
+    trendState: 'DATA',
     summary: {
-      current: null,
-      previous: null,
+      current: '0',
+      previous: '0',
       changePercent: null,
-      trafficShare: null
+      trafficShare: '0.0'
     },
-    trend: []
+    trend: [
+      { date: '2026-07-29', visits: '0' },
+      { date: '2026-07-30', visits: '0' }
+    ]
   });
   assert.deepEqual(result.sourceComparison.rows[1], {
     sourceKey: 'DIRECT',

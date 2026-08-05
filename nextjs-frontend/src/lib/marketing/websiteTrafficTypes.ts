@@ -32,6 +32,19 @@ export type WebsiteSourceComparisonRow = {
   trend: Array<{ date: string; visits: string | null }>;
 };
 
+export type WebsiteSourcePartition = {
+  metric: 'visits';
+  state: 'COMPLETE' | 'PARTIAL';
+  totalVisits: string | null;
+  classifiedVisits: string;
+  unclassifiedVisits: string | null;
+  reasonCode:
+    | 'SOURCE_METRIC_MISSING'
+    | 'SOURCE_COVERAGE_INCOMPLETE'
+    | 'SOURCE_TOTAL_UNAVAILABLE'
+    | null;
+};
+
 export type WebsiteTrafficOverview = {
   projectId: string;
   source: 'BAIDU_TONGJI';
@@ -89,6 +102,7 @@ export type WebsiteTrafficOverview = {
   sourceComparison?: {
     metric: 'visits';
     state: 'COMPLETE' | 'PARTIAL';
+    partition: WebsiteSourcePartition;
     rows: WebsiteSourceComparisonRow[];
   };
   capabilities: {
@@ -165,6 +179,13 @@ function metric(value: unknown, nullable = true): boolean {
       && value.length <= 64);
 }
 
+function unsignedMetric(value: unknown, nullable = false): boolean {
+  return (nullable && value === null)
+    || (typeof value === 'string'
+      && /^\d+$/u.test(value)
+      && value.length <= 64);
+}
+
 function coverage(value: unknown, from: string, to: string): boolean {
   return record(value) && value.from === from && value.to === to;
 }
@@ -221,7 +242,8 @@ function sourceQualityRows(value: unknown): boolean {
 function sourceComparison(
   value: unknown,
   from: string,
-  to: string
+  to: string,
+  totalVisits: unknown
 ): boolean {
   if (!record(value) || value.metric !== 'visits') return false;
   if (!['COMPLETE', 'PARTIAL'].includes(String(value.state))) return false;
@@ -248,6 +270,53 @@ function sourceComparison(
       && point.date <= to
       && metric(point.visits))
   ))) return false;
+  const partition = value.partition;
+  if (
+    !record(partition)
+    || partition.metric !== 'visits'
+    || !['COMPLETE', 'PARTIAL'].includes(String(partition.state))
+    || !unsignedMetric(partition.totalVisits, true)
+    || !unsignedMetric(partition.classifiedVisits)
+    || !unsignedMetric(partition.unclassifiedVisits, true)
+    || ![
+      null,
+      'SOURCE_METRIC_MISSING',
+      'SOURCE_COVERAGE_INCOMPLETE',
+      'SOURCE_TOTAL_UNAVAILABLE'
+    ].includes(partition.reasonCode as string | null)
+    || partition.totalVisits !== totalVisits
+  ) return false;
+  const classified = rows.reduce((sum, row) => (
+    sum + BigInt(record(row) && record(row.summary)
+      && typeof row.summary.current === 'string'
+      ? row.summary.current
+      : '0')
+  ), BigInt(0));
+  if (partition.classifiedVisits !== classified.toString()) return false;
+  const hasMissingSource = rows.some((row) => (
+    record(row) && record(row.summary) && row.summary.current === null
+  ));
+  if (partition.totalVisits === null) {
+    if (
+      partition.state !== 'PARTIAL'
+      || partition.unclassifiedVisits !== null
+      || partition.reasonCode !== 'SOURCE_TOTAL_UNAVAILABLE'
+    ) return false;
+  } else {
+    const total = BigInt(String(partition.totalVisits));
+    if (classified > total) return false;
+    const residual = (total - classified).toString();
+    const complete = !hasMissingSource && residual === '0';
+    if (
+      partition.unclassifiedVisits !== residual
+      || partition.state !== (complete ? 'COMPLETE' : 'PARTIAL')
+      || partition.reasonCode !== (complete
+        ? null
+        : hasMissingSource
+          ? 'SOURCE_METRIC_MISSING'
+          : 'SOURCE_COVERAGE_INCOMPLETE')
+    ) return false;
+  }
   const hasUnavailable = rows.some((row) => (
     record(row) && row.trendState === 'UNAVAILABLE'
   ));
@@ -323,9 +392,19 @@ export function assertWebsiteTrafficOverview(
     || !sourceQualityRows(sourceQuality.rows)
     || (
       query.includeSourceComparison === true
-        ? !sourceComparison(value.sourceComparison, query.from, query.to)
+        ? !sourceComparison(
+            value.sourceComparison,
+            query.from,
+            query.to,
+            record(summary.visits) ? summary.visits.current : null
+          )
         : value.sourceComparison !== undefined
-          && !sourceComparison(value.sourceComparison, query.from, query.to)
+          && !sourceComparison(
+            value.sourceComparison,
+            query.from,
+            query.to,
+            record(summary.visits) ? summary.visits.current : null
+          )
     )
     || !capabilities(responseCapabilities)
     || !record(value.cache)

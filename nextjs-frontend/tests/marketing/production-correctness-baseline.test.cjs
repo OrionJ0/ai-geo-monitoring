@@ -72,7 +72,7 @@ test('广告 fixture 通过现役 decoder 并冻结真实双周期合同', () =>
   );
 });
 
-test('现役网站流量 decoder 接受 83/82 但没有 partition，稳定重现来源缺口', () => {
+test('网站流量 decoder 将 83/82 冻结为 PARTIAL 分区证据', () => {
   const value = fixture('tongji-source-partial-83-82.json');
   const traffic = loadTypeScriptModule('lib/marketing/websiteTrafficTypes.ts');
   traffic.assertWebsiteTrafficOverview(value.response, value.query);
@@ -82,7 +82,10 @@ test('现役网站流量 decoder 接受 83/82 但没有 partition，稳定重现
   );
   assert.equal(classified.toString(), '82');
   assert.equal(value.response.summary.visits.current, '83');
-  assert.equal(Object.hasOwn(value.response.sourceComparison, 'partition'), false);
+  assert.deepEqual(
+    value.response.sourceComparison.partition,
+    value.expectedPartition
+  );
 });
 
 test('现役页面 decoder 保留两个同路径 pageId 但尚无稳定消歧元数据', () => {

@@ -92,6 +92,12 @@ test('website traffic APIs authorize the project and retired Tongji routes stay 
     tongjiService: {
       async readProjectWebsiteTraffic(projectId, options) {
         calls.push(['overview', projectId, options]);
+        if (options.source === 'DIRECT') {
+          const error = new Error('classified visits exceed total visits');
+          error.code = 'TONGJI_SOURCE_PARTITION_INVALID';
+          error.status = 502;
+          throw error;
+        }
         if (options.metric === 'pageviews') {
           const error = new Error('upstream failed');
           error.code = 'TONGJI_UPSTREAM_FAILED';
@@ -178,4 +184,19 @@ test('website traffic APIs authorize the project and retired Tongji routes stay 
   assert.equal(failedResponse.status, 502);
   assert.equal(failedResponse.headers.get('cache-control'), 'private, no-store');
   assert.equal(failedResponse.headers.get('retry-after'), '2');
+
+  const invalidPartitionResponse = await fetch(
+    `http://127.0.0.1:${address.port}/api/marketing/projects/11/website-traffic-overview?device=all&from=2026-07-01&to=2026-07-30&source=DIRECT&metric=visits&includeSourceComparison=true`
+  );
+  assert.equal(invalidPartitionResponse.status, 502);
+  assert.equal(
+    invalidPartitionResponse.headers.get('cache-control'),
+    'private, no-store'
+  );
+  assert.deepEqual(await invalidPartitionResponse.json(), {
+    error: {
+      code: 'TONGJI_SOURCE_PARTITION_INVALID',
+      message: '营销看板暂时不可用'
+    }
+  });
 });

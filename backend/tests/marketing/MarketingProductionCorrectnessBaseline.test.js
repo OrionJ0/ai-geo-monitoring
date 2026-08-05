@@ -90,7 +90,10 @@ test('来源 83/82 基线冻结 additive partition 位置且不创造差额来�
   assert.equal(value.expectedPartition.unclassifiedVisits, '1');
   assert.equal(value.expectedPartition.reasonCode, 'SOURCE_COVERAGE_INCOMPLETE');
   assert.equal(value.additiveFieldPath, 'sourceComparison.partition');
-  assert.equal(Object.hasOwn(value.response.sourceComparison, 'partition'), false);
+  assert.deepEqual(
+    value.response.sourceComparison.partition,
+    value.expectedPartition
+  );
   assert.equal(
     value.response.sourceComparison.rows.some((row) => (
       ['UNCLASSIFIED', 'OTHER'].includes(row.sourceKey)
