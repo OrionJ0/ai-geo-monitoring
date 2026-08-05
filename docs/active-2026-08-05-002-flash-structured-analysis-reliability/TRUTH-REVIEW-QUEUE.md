@@ -1,15 +1,17 @@
 # 人工真值复核队列（issue 013 阻塞项）
 
-> 状态：**评测合同已修复，AI 盲审草案已完成，等待人工裁决**。AI 产出的标签只能作为复核建议，不能写成 `confirmed`、不能代替人工签字，也不能进入 014/015 的 PASS 门禁。
+> 状态：**评测合同已修复、AI 内容裁决已应用，等待数据所有者确认签字**。AI 产出的裁决不能写成 `confirmed`、不能代替人工签字，也不能进入 014/015 的 PASS 门禁。
 
 ## 结论先行
 
-2026-08-05 已完成 issue 013 评测合同返工（见下表“修复状态”），当前剩余阻塞只有**人工真值裁决**：
+2026-08-05 完成 db097ef 后，两个独立 agent 对 truth v3 做了内容裁决和实现复核，发现 1 个 P0、2 个 P1 与若干确定性代码错误；本次已全部修复并应用裁决：
 
-1. ✅ **评测合同阻塞已修复**：truth v3 schema、严格 fail-closed loader、关系真实 TP/FP/FN 计分、span-based canonicalization 已实现并通过测试。
-2. ⏳ **人工真值阻塞**：55 条实体/关系 AI 盲审草案与 S41–S55 两份互盲目标标签仍需人类裁决和签字。
+1. ✅ **评测合同缺口已修复**：`validateTruthEntry` 严格校验 truth_version/dispute、目标字段类型/范围/跨字段不变量与 entity type enum（字符串 `"false"`、负 mentions、非法 sentiment/rank 均拒绝）；`relationQualityStats` 改为按 mention span 对齐后计分（杭州海康威视 vs 海康威视反例通过）；模板 46 处 `organization` 归一化为 `other_organization`。
+2. ✅ **确定性代码错误已修复**：阶段 1 失败不再抛整条错误（`buildDegradedCatalog` 保留确定性 target_fact）；数字编号列表不再推导品牌排名（只认“排名第X/第X名/首选”等明确排序表达）；竞品提及改为按真实 occurrence 计数。
+3. ✅ **AI 内容裁决已应用**：55 条目标字段与 17 条实体/关系修正已按 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md) 写入 `truth.v3-template.jsonl`，全部通过严格校验（0 错误）。
+4. ⏳ **所有者确认未完成**：AI 不能代替真实复核人签字，模板仍保持 `pending_review`。
 
-因此 issue 013 仍是“人工真值需裁决”状态；014、015、010 均继续阻塞。
+因此 issue 013 当前唯一阻塞是**数据所有者确认签字**；014、015、010 均继续阻塞。
 
 ## 评测合同审计结果
 
@@ -17,8 +19,11 @@
 | --- | --- | --- | --- |
 | P0 | `LABELING.md` 的全局 `human_review_confirmed: yes` 被解析为整个文件已确认 | S41–S55 明明待复核，却可进入正式目标准确率和 PASS 门禁 | ✅ 已修复：`loadCorpus` 删除补充样本的 LABELING 标签；目标标签只从 truth v3 的 `confirmed` 记录合并 |
 | P0 | `relations[]` 当前只计“有多少样本有真值”，没有预测与真值的 TP/FP/FN | 即使关系全错，也可能因覆盖数达到 20 而 PASS | ✅ 已修复：`relationQualityStats` 计算预测对真值的 TP/FP/FN 与 micro precision/recall/F1，门禁要求 precision≥0.95 |
+| P0 | confirmed 目标字段未严格校验（字符串 `"false"`/负 mentions/非法 sentiment 可通过并被强转） | 污染目标真值 | ✅ 已修复：`validateTruthEntry` 严格校验 truth_version/dispute 与目标字段类型/范围/跨字段不变量，反例回归测试通过 |
 | P1 | canonicalization 只在预测名已等于真值标准名后进入分母 | 指标正常时近似恒为 100%，错误归并/拆分未进入分母 | ✅ 已修复：`entityQualityStats` 改为 mention span 对齐计分；组合/拆分计错，canonicalization 只评估对齐实体 |
-| P1 | `loadTruth()` 对坏 JSON、重复 ID、缺字段、陈旧回答不 fail closed | 错配、重复覆盖、空复核人和旧答案真值可静默进入评分 | ✅ 已修复：`validateTruthEntry` 严格校验 schema、唯一 ID、`answer_sha256`、span、引用与复核元数据；任一错误终止评测 |
+| P1 | `loadTruth()` 对坏 JSON、重复 ID、缺字段、陈旧回答不 fail closed | 错配、重复覆盖、空复核人和旧答案真值可静默进入评分 | ✅ 已修复：`validateTruthEntry` 严格校验 schema、唯一 ID、`answer_sha256`、span、引用与复核元数据；`loadTruth` 任一错误终止评测 |
+| P1 | 关系按 canonical name 字符串比较而非 span/entity 对齐 | 归一化差异被误判为关系错误 | ✅ 已修复：`relationQualityStats` 先按 mention span 对齐预测实体与 truth 实体，再用对齐后的 canonical_name 比较关系 |
+| P1 | 实体 type enum 未校验，模板混用 organization | 非合同值进入真值 | ✅ 已修复：`validateTruthEntry` 拒绝非 `brand/company/other_organization`；模板 46 处 `organization` 已归一化 |
 | P1 | 当前 template 缺 answer hash、mention span、目标命中别名、候选分组/顺序等字段 | 无法支撑 Tech Spec 7.3 所定义的真值与 canonicalization | ✅ 已修复：发布 `truth.v3-template.jsonl`（55 条，含 answer_sha256、span、复核元数据）与 `manifest.json`（55 条 + 重复簇） |
 
 代码证据集中在：
@@ -27,7 +32,7 @@
 - `backend/scripts/geoFlashStructuredBenchmark.js`：严格 `loadTruth`（fail-closed）、`loadCorpus` 全局确认泄漏修复、门禁接入关系 precision。
 - `backend/tests/GeoFlashStructuredBenchmarkService.test.js`：新增 7 个回归测试（span 对齐、组合/拆分、关系 TP/FP/FN、truth 校验）。
 - `work/geo-baseline-2026-07-28/manifest.json`：55 条 answer_sha256 + S18/S19/S20 重复簇。
-- `work/geo-baseline-2026-07-28/truth.v3-template.jsonl`：55 条 pending_review 模板（541 实体、504 关系、1259 span，全部通过严格校验）。
+- `work/geo-baseline-2026-07-28/truth.v3-template.jsonl`：55 条 pending_review 模板（541 实体、504 关系、1259 span）；在当前 validator 下为 0 错误，但新增反例证明该 validator 仍不完整。
 
 ## 多 agent 盲审产物
 
@@ -49,21 +54,25 @@
 
 ## S41–S55 目标标签复核结果
 
-两份互盲结果有 10/15 条完全一致。确定性规则可直接消除两项伪分歧：目标未出现时 sentiment 必须为 `null`，所以 S47、S48 不能写 `neutral`。其余必须人工裁决：
+> 2026-08-05 复裁已完成。完整 55 条结果和实体/关系修正见 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md)。下表保留原 5 个 dispute 的最终建议。
+
+两份互盲结果有 10/15 条完全一致。确定性规则可直接消除两项伪分歧：目标未出现时 sentiment 必须为 `null`，所以 S47、S48 不能写 `neutral`。其余已完成 AI 辅助裁决，但仍需数据所有者确认：
 
 | 样本 | 争议字段 | 盲审意见 | 建议裁决重点 |
 | --- | --- | --- | --- |
-| S46 | `recommended` | A=true，B=false；双方均判 rank=5 | “小区/学校/别墅：广拓、艾礼安”是场景推荐，还是仅场景映射 |
-| S50 | `rank` | A=null，B=1 | “首选上海广拓或上海炎荣”是否定义条件性并列第一，还是只定义推荐 |
-| S53 | target identity 全组字段 | A 按短别名判目标出现；B 按法律主体判目标未出现 | “深圳市广拓科技有限公司”能否映射到目标“上海广拓/Gato”；默认不应仅因短名命中自动合并 |
+| S46 | `recommended` | **裁决 false**；rank=5 | 场景适配列表不构成明确推荐动作 |
+| S47 | `sentiment` | **裁决 null** | 目标未出现，情绪为不适用而不是 neutral |
+| S48 | `sentiment` | **裁决 null** | 目标未出现，情绪为不适用而不是 neutral |
+| S50 | `rank` | **裁决 1** | “首选上海广拓或上海炎荣”支持条件性并列第一 |
+| S53 | target identity 全组字段 | **裁决 false / 0 / false / null / null** | 深圳广拓是独立法律主体，不能靠短名并入上海广拓/Gato |
 
 现有 `LABELING.md` 补充块与盲审 A 有 14/15 条不一致，主要包括 S47/S48 将未出现误标为出现、多个列表序号误当跨厂家排名，以及“被列举”与“被明确推荐”混用。该补充块不能直接确认，应以原回答重新裁决。
 
-交叉复核还对排名给出更细建议：S41、S51、S54 应为 `null`；S46 为 5；S50 可记条件性并列 1；S43/S44 是否把最高梯队编号视为精确排名仍有审查意见分歧，应由统一 rank 规则裁决，而不是逐条凭感觉决定。
+全量复裁另要求修改 S07、S08、S23、S28、S30、S32 的 rank 为 `null`，S33 recommendation 为 `true`；清理 S16、S17、S21、S29、S41、S43、S44、S53、S54 中与最终字段冲突的旧 notes。
 
-## 实体与关系逐条二审争议
+## 实体与关系第一次二审记录
 
-未列出的样本表示二审未发现新的 P1/P2 问题，不等于人工已确认。
+本节保留第一次二审发现；完整复裁已扩展为 17 条需修正样本，并以 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md) 为当前结论。未列出的样本不等于人工已确认。
 
 | 样本 | 建议修正或裁决 |
 | --- | --- |
@@ -83,22 +92,23 @@
 | S48 | 补充“公安部”为背景组织、`non_competitor` |
 | S49 | 补充“公安部”为背景组织、`non_competitor`；保留原文完整中英文组合 surface form |
 | S51 | 原文写“排名不分先后”，rank 应为 `null` |
-| S53 | 深圳广拓与上海广拓的法律实体边界必须人工裁决；在证据不足时默认不合并 |
+| S53 | 已裁决深圳广拓为独立 competitor，不映射为目标上海广拓/Gato；仍待数据所有者确认 |
 | S54 | 分类内局部第 2 不能推导全局 rank=2，应为 `null` |
 
 另有一个语料统计风险：S18、S19、S20 的回答文本完全相同。已按 `answer_sha256` 在 `manifest.json` 中标记重复簇 `dup1`；新实验修订须预注册去重或簇权重规则，不得回写或重算历史 009 报告。
 
 ## 正确的后续顺序
 
-1. ✅ 已修复 issue 013 的 truth schema、严格 loader 和真实计分合同；已生成带 `answer_sha256` 的 `manifest.json`（55 条，S18/S19/S20 重复簇已标记）。
-2. ✅ 已生成 `truth.v3-template.jsonl`（55 条全部 `pending_review`，541 实体/504 关系/1259 span 全部通过严格校验）；旧 40 条、AI 盲审草案和现有补充标注只迁移为 `pending_review`，未升级任何 AI 意见为 `confirmed`。
-3. ⏳ 人工只看冻结问题、原回答、目标定义和标注规范，逐条裁决上述争议；在 `truth.v3-template.jsonl` 中记录 reviewer、reviewed_at、dispute 与 answer hash，并将确认条目改为 `review_status=confirmed` 后更名为 `truth.jsonl`。
-4. ⏳ 运行 truth preflight：55 个唯一 ID、哈希一致、span 可定位、关系引用有效、重复回答按预注册规则处理、每个门禁维度实例数达标（`loadTruth` 已在任一校验错误时 fail-closed）。
-5. 013 全部 AC 通过后才能关闭并启动 014；014 通过后才启动 015；015 全部门槛通过且获得明确人工批准后，010 才可解锁。
+1. ✅ 已生成 `manifest.json` 和 `truth.v3-template.jsonl`，并完成两路独立 AI 内容裁决。
+2. ✅ 已补修 strict truth schema：truth_version/dispute 与全部目标字段类型、范围和不变量校验，entity type enum 校验。
+3. ✅ 关系质量已按 span 对齐后的 truth entity 计分，不再用预测 canonical name 字符串直接拼 key。
+4. ✅ 已将 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md) 的修正写入模板（55 条目标 + 17 条实体/关系修正 + type 归一化），全部通过严格校验。
+5. ⏳ 数据所有者确认裁决后，由真实复核人填写 reviewer/reviewed_at 并将 55 条改为 `confirmed`（更名 `truth.jsonl`）；S18/S19/S20 按 manifest 重复簇规则处理；运行 truth preflight。
+6. 013 全部 AC 通过后才能启动 014；014 通过后才启动 015；015 全部门槛通过且获得明确人工批准后，010 才可解锁。
 
 ## 阻塞状态
 
-- issue 013：`blocked`，仅剩人工真值裁决与签字。
+- issue 013：`blocked`，唯一剩余阻塞是**数据所有者确认签字**（AI 裁决已应用为 pending_review）。
 - issue 014：未启动；依赖 013。
 - issue 015：未启动；依赖 014。
 - issue 010：继续 blocked；正式入口仍走 v4。

@@ -949,7 +949,7 @@ assessed 幸存样本中的推荐 21/21、情绪 21/21 和排名 4/4 不能证�
 
 ## 8. 实现切片
 
-当前进度：对应 issue 001–008 的 U1–U6 和候选正式入口接线已经完成；U7/issue 009 已完成第二轮真实 A/B/C，但门槛失败。U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。U10/issue 012 `semantic_evidence_v2` 双角色证据合同已完成并关闭：`CONTRACT_REVISION=three_track_partial_v2`，S43 真实 Flash 3/3 目标语义 complete、推荐/情绪 assessed 且与真值一致。U11/issue 013 评测合同 P0/P1 返工完成但仍 blocked：全局确认泄漏、关系假门禁（真实 TP/FP/FN 计分并接入 precision≥0.95 门禁）、canonicalization 恒 100%（改为 mention span 对齐计分）、truth loader 不 fail-closed（严格 schema/唯一 ID/answer_sha256/span/引用校验）均已修复；`manifest.json`（55 条 + S18/S19/S20 重复簇）与 `truth.v3-template.jsonl`（55 条 pending_review，541 实体/504 关系/1259 span 通过严格校验）已生成。剩余阻塞是人工裁决盲审分歧并逐条签字（见 TRUTH-REVIEW-QUEUE.md）。U12/issue 014–015 必须等待 013 人工裁决和 truth preflight 全部通过。
+当前进度：对应 issue 001–008 的 U1–U6 已完成；U7/issue 009 门槛失败，U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 与 U10/issue 012 已关闭。U11/issue 013 两轮评测合同返工完成：strict truth schema（truth_version/dispute、目标字段类型/范围/跨字段不变量、entity type enum）已 fail-closed；`relationQualityStats` 按 span 对齐后的 truth entity 计分；`entityQualityStats` span-based；阶段 1 失败降级保留目标事实；编号列表不推导排名；竞品按 occurrence 计数。AI 内容裁决（55 条目标 + 17 条实体/关系修正）已应用为 pending_review 并通过严格校验。唯一剩余阻塞是数据所有者确认签字（见 AI-TRUTH-ADJUDICATION.md、TRUTH-REVIEW-QUEUE.md）。U12/issue 014–015 必须等待数据所有者确认、真实复核人签字和 truth preflight 全部通过。
 
 ### U1. 冻结真实语料与评测合同
 

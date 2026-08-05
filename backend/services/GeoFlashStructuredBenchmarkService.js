@@ -325,10 +325,23 @@ function relationQualityStats(entries, truthBySample = new Map()) {
       entity.entity_id,
       String(entity?.name || '').trim()
     ]));
+    // P1：预测实体先按 mention span 对齐 truth 实体，再用对齐后的 truth
+    // canonical_name 与真值关系比较；归一化差异（杭州海康威视 vs 海康威视
+    // 同一 span）不误判为关系错误。
+    const predictedEntities = extractPredictedEntities(entry.result);
+    const truthEntities = Array.isArray(truth.entities) ? truth.entities : [];
     const predicted = new Set(structure.competitor_relations
       .map((relation) => {
-        const name = nameById.get(relation.entity_id);
-        return name ? `${name}::${relation.relation}` : null;
+        const predictedName = nameById.get(relation.entity_id);
+        if (!predictedName) return null;
+        const predictedEntity = predictedEntities.find((entity) => entity.name === predictedName);
+        const aligned = predictedEntity
+          ? alignedTruthEntities(predictedEntity, truthEntities)
+          : [];
+        const keyName = aligned.length === 1
+          ? String(aligned[0].canonical_name || '').trim()
+          : predictedName;
+        return keyName ? `${keyName}::${relation.relation}` : null;
       })
       .filter(Boolean));
     const expected = new Set((Array.isArray(truth.relations) ? truth.relations : [])
@@ -375,6 +388,9 @@ function answerSha256(text) {
  * 重复 canonical_name、relation 引用悬空、span 与原文不一致、
  * 未在冻结语料中的 sample_id 均返回错误；调用方必须 fail-closed。
  */
+const VALID_ENTITY_TYPES = new Set(['brand', 'company', 'other_organization']);
+const VALID_SENTIMENTS = new Set(['positive', 'neutral', 'negative']);
+
 function validateTruthEntry(entry, sampleById = new Map()) {
   const errors = [];
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -388,8 +404,43 @@ function validateTruthEntry(entry, sampleById = new Map()) {
     if (!String(entry.reviewer || '').trim()) errors.push('confirmed 必须记录 reviewer');
     if (!String(entry.reviewed_at || '').trim()) errors.push('confirmed 必须记录 reviewed_at');
   }
+  // P0：truth_version 与 dispute 必填（版本化数据集合同）
+  if (!/^truth_v\d+/.test(String(entry.truth_version || ''))) {
+    errors.push(`truth_version 无效: ${String(entry.truth_version)}`);
+  }
+  if (entry.dispute === undefined || entry.dispute === null || !String(entry.dispute || '').trim()) {
+    errors.push('dispute 必须记录（无争议填 none）');
+  }
   if (!/^[a-f0-9]{64}$/i.test(String(entry.answer_sha256 || ''))) {
     errors.push('answer_sha256 必须是 64 位 hex');
+  }
+  // P0：目标字段严格类型校验——字符串 "false" 会被 Boolean() 强转 true，必须拒绝
+  if (entry.mentioned !== undefined && entry.mentioned !== null && typeof entry.mentioned !== 'boolean') {
+    errors.push(`mentioned 必须是 boolean: ${JSON.stringify(entry.mentioned)}`);
+  }
+  if (entry.mentions !== undefined && entry.mentions !== null) {
+    if (!Number.isInteger(entry.mentions) || entry.mentions < 0) {
+      errors.push(`mentions 必须是非负整数: ${JSON.stringify(entry.mentions)}`);
+    }
+  }
+  if (entry.recommendation !== undefined && entry.recommendation !== null
+    && typeof entry.recommendation !== 'boolean') {
+    errors.push(`recommendation 必须是 boolean: ${JSON.stringify(entry.recommendation)}`);
+  }
+  if (entry.rank !== undefined && entry.rank !== null && entry.rank !== 'none') {
+    if (!Number.isInteger(entry.rank) || entry.rank < 1) {
+      errors.push(`rank 必须是 null 或正整数: ${JSON.stringify(entry.rank)}`);
+    }
+  }
+  if (entry.sentiment !== undefined && entry.sentiment !== null && entry.sentiment !== 'none'
+    && !VALID_SENTIMENTS.has(entry.sentiment)) {
+    errors.push(`sentiment 必须是 null 或 positive/neutral/negative: ${JSON.stringify(entry.sentiment)}`);
+  }
+  // 目标未出现时的字段组合约束
+  if (entry.mentioned === false) {
+    if (Number(entry.mentions) !== 0) errors.push('mentioned=false 时 mentions 必须为 0');
+    if (entry.rank !== null && entry.rank !== undefined) errors.push('mentioned=false 时 rank 必须为 null');
+    if (entry.sentiment !== null && entry.sentiment !== undefined) errors.push('mentioned=false 时 sentiment 必须为 null');
   }
   const sample = entry.sample_id ? sampleById.get(entry.sample_id) : undefined;
   if (!sample) {
@@ -413,6 +464,11 @@ function validateTruthEntry(entry, sampleById = new Map()) {
       names.add(name);
       if (!Array.isArray(entity.surface_forms) || !entity.surface_forms.length) {
         errors.push(`${field}.surface_forms 必须非空`);
+      }
+      // P1：实体 type enum 校验（模板不得混用 organization 等非合同值）
+      if (entity.type !== undefined && entity.type !== null && String(entity.type || '').trim()
+        && !VALID_ENTITY_TYPES.has(String(entity.type || '').trim())) {
+        errors.push(`${field}.type 必须是 brand/company/other_organization: ${entity.type}`);
       }
       if (!Array.isArray(entity.mentions)) {
         errors.push(`${field}.mentions 必须是数组`);

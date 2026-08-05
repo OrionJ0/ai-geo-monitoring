@@ -111,7 +111,7 @@ test('computes v5 GEO metrics from grounded entities and closed semantic IDs', a
   });
 });
 
-test('counts one mention per source line and derives recommendation and rank from grounded wording', () => {
+test('counts occurrences per entity and does not derive rank from a numbered list', () => {
   const answer = [
     '1. 上海广拓（GATO）',
     '2. 海康威视',
@@ -164,12 +164,88 @@ test('counts one mention per source line and derives recommendation and rank fro
 
   const result = calculate({ sourceMap, catalog, semantic, diagnostics: [] });
 
-  assert.equal(result.brand_mentions, 3);
-  assert.equal(result.brand_rank, 1);
+  // 目标按真实 occurrence 计数：L001 两处（上海广拓 + GATO）+ L003 + L004 = 4
+  assert.equal(result.brand_mentions, 4);
+  // 数字编号列表（1. 2.）不构成排名（AI 裁决规则）
+  assert.equal(result.brand_rank, null);
   assert.equal(result.brand_recommended, true);
   // 程序不覆盖模型语义判断：模型返回 neutral，即使目标被推荐也保持 neutral
   assert.equal(result.sentiment, 'neutral');
-  assert.equal(result.sov_denominator, 4);
+  // 竞品按 occurrence 计数：目标 4 + 海康威视 1 = 5
+  assert.equal(result.sov_denominator, 5);
+});
+
+test('只有明确排序声明才产生排名：排名第X/第X名/首选，编号列表不算', () => {
+  const answer = [
+    '1. 上海广拓（GATO）',
+    '2. 海康威视',
+    '综合排名第2名。'
+  ].join('\n');
+  const sourceMap = createSourceMap(answer);
+  const catalog = {
+    target_entity_id: 'E001',
+    entities: [
+      {
+        entity_id: 'E001', name: '上海广拓', type: 'company', surface_forms: ['上海广拓', 'GATO'],
+        mentions: [
+          { source_id: 'L001', start: 3, end: 7, surface_form: '上海广拓' },
+          { source_id: 'L003', start: 20, end: 24, surface_form: '上海广拓' }
+        ]
+      },
+      {
+        entity_id: 'E002', name: '海康威视', type: 'company', surface_forms: ['海康威视'],
+        mentions: [{ source_id: 'L002', start: 3, end: 7, surface_form: '海康威视' }]
+      }
+    ]
+  };
+  const baseSemantic = {
+    competitor_relations: [],
+    candidate_groups: [],
+    recommendations: [],
+    sentiment: { status: 'not_applicable', label: null, reason: 'x', semantic_context_source_ids: [], risk_terms: [] }
+  };
+  // 编号列表（无明确排序声明）-> null
+  const numbered = calculate({
+    sourceMap,
+    catalog,
+    semantic: {
+      ...baseSemantic,
+      candidate_groups: [{
+        ordered: false, entries: ['E001', 'E002'], reason: '编号列表',
+        evidence_source_ids: ['L001', 'L002'], evidence: ['1. 上海广拓（GATO）', '2. 海康威视']
+      }]
+    },
+    diagnostics: []
+  });
+  assert.equal(numbered.brand_rank, null);
+  // 明确"排名第2名" -> 2
+  const explicit = calculate({
+    sourceMap,
+    catalog,
+    semantic: {
+      ...baseSemantic,
+      candidate_groups: [{
+        ordered: false, entries: ['E001', 'E002'], reason: '明确排名',
+        evidence_source_ids: ['L003'], evidence: ['综合排名第2名。']
+      }]
+    },
+    diagnostics: []
+  });
+  assert.equal(explicit.brand_rank, 2);
+  // ordered=true 的组 -> 组内顺序
+  const ordered = calculate({
+    sourceMap,
+    catalog,
+    semantic: {
+      ...baseSemantic,
+      candidate_groups: [{
+        ordered: true, entries: ['E001', 'E002'], reason: '有顺序',
+        evidence_source_ids: ['L001'], evidence: ['1. 上海广拓（GATO）']
+      }]
+    },
+    diagnostics: []
+  });
+  assert.equal(ordered.brand_rank, 1);
 });
 
 test('does not treat a numbered selection step as brand rank', () => {

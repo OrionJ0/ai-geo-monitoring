@@ -1,7 +1,7 @@
 const AIResponseEntityExtractionService = require('./AIResponseEntityExtractionService');
 const AIResponseSemanticJudgmentService = require('./AIResponseSemanticJudgmentService');
 const { createSourceMap, SOURCE_MAP_VERSION } = require('./AIAnalysisSourceMapService');
-const { buildEntityCatalog } = require('./AIEntityCatalogService');
+const { buildEntityCatalog, buildTargetMentions } = require('./AIEntityCatalogService');
 const { ENTITY_PROMPT_REVISION } = require('./AIResponseEntityExtractionService');
 const { SEMANTIC_PROMPT_REVISION } = require('./AIResponseSemanticJudgmentService');
 const { SCOPED_METRIC_SEMANTICS } = require('./GeoMetricSemanticsService');
@@ -60,14 +60,10 @@ function occurrenceSourceIds(entity) {
   return [...new Set((entity?.mentions || []).map((mention) => mention.source_id))];
 }
 
+// 竞品提及按真实 occurrence 计数（与目标事实轨一致）；
+// 同一片段出现两次只算一次的旧行为会扭曲 SOV 分母。
 function mentionCount(entity) {
-  return new Set(entity?.mentions?.map((mention) => mention.source_id) || []).size;
-}
-
-function sourceOrdinal(text) {
-  const normalized = String(text || '').replace(/^[\s#*_>\-|]+/u, '');
-  const match = normalized.match(/^(\d{1,3})\s*[.、．)]/u);
-  return match ? Number(match[1]) : null;
+  return Array.isArray(entity?.mentions) ? entity.mentions.length : 0;
 }
 
 function sourceLineNumber(sourceId) {
@@ -108,16 +104,21 @@ function isGroundedTargetRecommendation(recommendation, targetEntity) {
   )));
 }
 
+// 明确排序声明：数字编号、表格顺序、梯队内顺序不构成排名（AI 真值裁决规则），
+// 只有"排名第X / 第X名 / 首选 / 优先推荐"等明确排序表达才产生排名。
+const EXPLICIT_RANK_RE = /(?:排名第?\s*(\d+)|第\s*(\d+)\s*名|位列第?\s*(\d+)|排行第?\s*(\d+)|首选|第一优先|优先推荐)/u;
+
 function targetRank({ sourceMap, targetEntity, semantic, targetEntityId }) {
   const sourceById = new Map(sourceMap.segments.map((segment) => [segment.source_id, segment.text]));
-  const targetSourceIds = new Set(targetEntity?.mentions?.map((mention) => mention.source_id) || []);
   for (const group of semantic.candidate_groups) {
     if (!group.entries.includes(targetEntityId) || group.entries.length < 2) continue;
-    const explicitOrdinal = semanticContextOf(group)
-      .filter((sourceId) => targetSourceIds.has(sourceId))
-      .map((sourceId) => sourceOrdinal(sourceById.get(sourceId)))
-      .find((ordinal) => ordinal !== null);
-    if (explicitOrdinal !== undefined) return explicitOrdinal;
+    const explicitMatch = semanticContextOf(group)
+      .map((sourceId) => sourceById.get(sourceId) || '')
+      .map((text) => text.match(EXPLICIT_RANK_RE))
+      .find((match) => match !== null);
+    if (explicitMatch) {
+      return Number(explicitMatch[1] || explicitMatch[2] || explicitMatch[3] || explicitMatch[4]) || 1;
+    }
     if (group.ordered) return group.entries.indexOf(targetEntityId) + 1;
   }
   return null;
@@ -201,7 +202,9 @@ function calculate({
   const mappingAmbiguous = mappingStatus === 'ambiguous';
   const semanticAvailable = !semantic?.degraded;
   const targetAppears = brandMentioned;
-  const semanticsUnavailable = targetAppears && mappingAmbiguous;
+  // 映射歧义（多个实体命中）或阶段 1 失败（无实体可映射）都使目标语义 unavailable
+  const semanticsUnavailable = targetAppears
+    && (mappingAmbiguous || mappingStatus === 'unavailable');
   const recommendationField = !targetAppears
     ? { status: 'not_applicable', value: null }
     : (semanticsUnavailable
@@ -395,6 +398,31 @@ function calculate({
   };
 }
 
+/**
+ * 阶段 1 失败时的降级实体目录：确定性目标事实仍由程序扫描保留，
+ * 开放竞品轨为空；target_mapping 在目标出现但无实体可映射时为 unavailable。
+ */
+function buildDegradedCatalog({ sourceMap, targetBrand }) {
+  const targetAliases = [targetBrand?.name, ...(Array.isArray(targetBrand?.aliases) ? targetBrand.aliases : [])]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  const targetMentions = targetAliases.length
+    ? buildTargetMentions(sourceMap, targetBrand)
+    : [];
+  return {
+    entities: [],
+    target_entity_id: null,
+    target_mentions: targetMentions,
+    target_mapping: {
+      status: targetAliases.length === 0
+        ? 'invalid_input'
+        : (targetMentions.length ? 'unavailable' : 'not_applicable'),
+      target_entity_id: null,
+      candidate_entity_ids: []
+    }
+  };
+}
+
 function buildDegradedSemantic(catalog, error) {
   const targetAppears = Boolean(catalog?.target_entity_id);
   const nonTargetIds = (Array.isArray(catalog?.entities) ? catalog.entities : [])
@@ -453,10 +481,11 @@ class AIResponseAnalysisV5Service {
     // 竞品注册表快照在阶段 1 之后、阶段 2 之前做纯程序身份归一；
     // 阶段 1 请求不接收注册表，匹配不改变 occurrence，也不增加模型调用。
     const registrySnapshot = buildRegistrySnapshot(competitors);
-    let extracted;
+    let entityDiagnostics;
+    let catalog;
     let semanticResult;
     try {
-      extracted = await this.entityExtractionService.extract({
+      const extracted = await this.entityExtractionService.extract({
         answer,
         sourceMap,
         validateMentions: (mentions) => buildEntityCatalog({
@@ -466,13 +495,29 @@ class AIResponseAnalysisV5Service {
           targetBrand
         })
       });
-      const catalog = extracted.validated || buildEntityCatalog({
+      catalog = extracted.validated || buildEntityCatalog({
         answer,
         sourceMap,
         extractedMentions: extracted.mentions,
         targetBrand
       });
-      const registryCatalog = withRegistryMatches(catalog, registrySnapshot);
+      entityDiagnostics = extracted.diagnostics;
+    } catch (error) {
+      // 阶段 1 达到上限：确定性目标事实仍由程序扫描保留（target_fact 不丢），
+      // 无实体可给阶段 2 -> 目标语义与开放竞品轨 unavailable，不抛整条错误。
+      catalog = buildDegradedCatalog({ sourceMap, targetBrand });
+      entityDiagnostics = {
+        stage: 'entity_extract',
+        attempt_count: Number(error?.details?.attempt_count) || 2,
+        platform: String(error?.details?.platform || 'deepseek'),
+        model: String(error?.details?.model || 'deepseek-v4-flash'),
+        degraded: true,
+        error_code: String(error?.code || 'analysis_entity_output_invalid'),
+        message: String(error?.message || '实体抽取不可用').slice(0, 200)
+      };
+    }
+    const registryCatalog = withRegistryMatches(catalog, registrySnapshot);
+    if (catalog.entities.length) {
       try {
         semanticResult = await this.semanticJudgmentService.judge({
           question: normalizedQuestion,
@@ -486,38 +531,37 @@ class AIResponseAnalysisV5Service {
         // 已发现竞品进入 unresolved，不回退 v4 或 Pro。
         semanticResult = buildDegradedSemantic(registryCatalog, semanticError);
       }
-      const calculated = calculate({
-        sourceMap,
-        catalog: registryCatalog,
-        semantic: semanticResult.structured,
-        diagnostics: [extracted.diagnostics, semanticResult.diagnostics],
-        registrySnapshot,
-        quarantinedItems: extracted.diagnostics?.quarantined_items || []
-      });
-      const model = extracted.diagnostics?.model
-        || semanticResult.diagnostics?.model
-        || 'deepseek-v4-flash';
-      return {
-        ...calculated,
-        analysis_method: ANALYSIS_METHOD,
-        analysis_prompt_revision: `${ENTITY_PROMPT_REVISION}+${SEMANTIC_PROMPT_REVISION}`,
-        analysis_platform: extracted.diagnostics?.platform
-          || semanticResult.diagnostics?.platform
-          || 'deepseek',
-        analysis_model: model,
-        analysis_attempts: totalAttempts([
-          extracted.diagnostics,
-          semanticResult.diagnostics
-        ])
-      };
-    } catch (error) {
-      if (error instanceof AIResponseAnalysisV5Error) throw error;
-      throw new AIResponseAnalysisV5Error(
-        error?.message || 'AI 结构化分析失败',
-        error?.code || 'invalid_analysis_output',
-        error?.details || {}
-      );
+    } else {
+      // 阶段 1 失败：不调用阶段 2，直接按阶段 1 错误降级语义轨
+      const stageOneError = new Error(entityDiagnostics?.message || '实体抽取不可用');
+      stageOneError.code = entityDiagnostics?.error_code || 'analysis_entity_output_invalid';
+      stageOneError.details = entityDiagnostics || {};
+      semanticResult = buildDegradedSemantic(registryCatalog, stageOneError);
     }
+    const calculated = calculate({
+      sourceMap,
+      catalog: registryCatalog,
+      semantic: semanticResult.structured,
+      diagnostics: [entityDiagnostics, semanticResult.diagnostics],
+      registrySnapshot,
+      quarantinedItems: entityDiagnostics?.quarantined_items || []
+    });
+    const model = entityDiagnostics?.model
+      || semanticResult.diagnostics?.model
+      || 'deepseek-v4-flash';
+    return {
+      ...calculated,
+      analysis_method: ANALYSIS_METHOD,
+      analysis_prompt_revision: `${ENTITY_PROMPT_REVISION}+${SEMANTIC_PROMPT_REVISION}`,
+      analysis_platform: entityDiagnostics?.platform
+        || semanticResult.diagnostics?.platform
+        || 'deepseek',
+      analysis_model: model,
+      analysis_attempts: totalAttempts([
+        entityDiagnostics,
+        semanticResult.diagnostics
+      ])
+    };
   }
 }
 

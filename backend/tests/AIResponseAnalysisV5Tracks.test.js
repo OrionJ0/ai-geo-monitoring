@@ -359,6 +359,44 @@ test('阶段 2 第二次仍无效时按字段降级，不回退 v4 或 Pro', asy
   assert.equal(result.analysis_structure.competition_analysis.status, 'unavailable');
 });
 
+test('阶段 1 失败时目标事实仍保留、竞品轨 unavailable、不抛整条错误', async () => {
+  const answer = '上海广拓为首选。\n海康威视可选。';
+  let judgeCalled = false;
+  const failingExtract = async () => {
+    const error = new Error('实体抽取两次尝试后仍无法锚定');
+    error.code = 'analysis_entity_grounding_invalid';
+    error.details = { attempt_count: 2, model: 'deepseek-v4-flash' };
+    throw error;
+  };
+  const service = new AIResponseAnalysisV5Service({
+    entityExtractionService: { extract: failingExtract },
+    semanticJudgmentService: {
+      judge: async () => {
+        judgeCalled = true;
+        throw new Error('阶段 1 失败后不应再调用阶段 2');
+      }
+    }
+  });
+  const result = await service.analyze({
+    question: '大型园区安防有哪些厂家？',
+    responseText: answer,
+    brand: { name: '广拓', aliases: ['上海广拓'] }
+  });
+
+  assert.equal(judgeCalled, false);
+  const structure = result.analysis_structure;
+  // 确定性目标事实不被阶段 1 失败拖累
+  assert.equal(structure.target_fact.status, 'complete');
+  assert.equal(structure.target_fact.brand_mentioned, true);
+  assert.equal(structure.target_fact.brand_mentions, 1);
+  assert.equal(structure.target_mapping.status, 'unavailable');
+  assert.equal(structure.target_semantics.status, 'unavailable');
+  assert.equal(structure.competition_analysis.status, 'unavailable');
+  // 诊断记录阶段 1 失败
+  assert.equal(structure.diagnostics.stages[0].degraded, true);
+  assert.equal(result.analysis_method, 'ai_structured_v5');
+});
+
 test('semantic_evidence_v2：跨片段推荐时证据包同时含程序 occurrence 与模型 semantic context', async () => {
   const answer = [
     '候选品牌：上海广拓、海康威视、大华股份。',

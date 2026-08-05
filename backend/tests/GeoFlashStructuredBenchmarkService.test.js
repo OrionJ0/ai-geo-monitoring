@@ -326,6 +326,91 @@ test('relationQualityStats 关系全错时 precision 为 0，不因覆盖数达�
   assert.equal(stats.precision, 0);
 });
 
+test('validateTruthEntry P0：confirmed 目标字段类型严格校验，字符串 false/负 mentions/非法 sentiment 拒绝', () => {
+  const sampleById = new Map([
+    ['S01', { response_text: '海康威视、大华股份。' }]
+  ]);
+  const hash = require('node:crypto').createHash('sha256').update('海康威视、大华股份。').digest('hex');
+  const base = v3Truth({ answer_sha256: hash });
+  // 合法 confirmed 记录通过
+  assert.deepEqual(validateTruthEntry(base, sampleById), []);
+  // 字符串 "false" 会被 Boolean() 强转 true，必须拒绝
+  const strFalse = { ...base, mentioned: 'false' };
+  assert.ok(validateTruthEntry(strFalse, sampleById).some((error) => /mentioned/.test(error)));
+  const strFalseRec = { ...base, recommendation: 'false' };
+  assert.ok(validateTruthEntry(strFalseRec, sampleById).some((error) => /recommendation/.test(error)));
+  // 负 mentions 拒绝
+  const negMentions = { ...base, mentions: -7 };
+  assert.ok(validateTruthEntry(negMentions, sampleById).some((error) => /mentions/.test(error)));
+  // 非整数 mentions 拒绝
+  const floatMentions = { ...base, mentions: 1.5 };
+  assert.ok(validateTruthEntry(floatMentions, sampleById).some((error) => /mentions/.test(error)));
+  // 非法 sentiment 拒绝
+  const badSentiment = { ...base, sentiment: 'excellent' };
+  assert.ok(validateTruthEntry(badSentiment, sampleById).some((error) => /sentiment/.test(error)));
+  // 非法 rank 拒绝
+  const badRank = { ...base, rank: 'first' };
+  assert.ok(validateTruthEntry(badRank, sampleById).some((error) => /rank/.test(error)));
+  // 缺 truth_version / dispute 拒绝
+  const noVersion = { ...base };
+  delete noVersion.truth_version;
+  assert.ok(validateTruthEntry(noVersion, sampleById).some((error) => /truth_version/.test(error)));
+  const noDispute = { ...base };
+  delete noDispute.dispute;
+  assert.ok(validateTruthEntry(noDispute, sampleById).some((error) => /dispute/.test(error)));
+  // 目标未出现时字段组合约束：mentioned=false 时 mentions 必须为 0、rank/sentiment 必须为 null
+  const inconsistent = { ...base, mentioned: false, mentions: 2 };
+  assert.ok(validateTruthEntry(inconsistent, sampleById).some((error) => /mentioned/.test(error)));
+});
+
+test('validateTruthEntry P1：实体 type 必须是 brand/company/other_organization', () => {
+  const sampleById = new Map([
+    ['S01', { response_text: '海康威视、大华股份。' }]
+  ]);
+  const hash = require('node:crypto').createHash('sha256').update('海康威视、大华股份。').digest('hex');
+  const base = v3Truth({ answer_sha256: hash });
+  const badType = { ...base, entities: [{ ...base.entities[0], type: 'organization' }] };
+  assert.ok(validateTruthEntry(badType, sampleById).some((error) => /type/.test(error)));
+  const goodType = {
+    ...base,
+    entities: base.entities.map((entity, index) => ({
+      ...entity,
+      type: index === 0 ? 'other_organization' : 'brand'
+    }))
+  };
+  assert.deepEqual(validateTruthEntry(goodType, sampleById), []);
+});
+
+test('relationQualityStats P1：按 span 对齐实体计分，归一化差异（杭州海康威视 vs 海康威视）不算 FP', () => {
+  const entries = [{
+    sample_id: 'S01',
+    repeat: 1,
+    ok: true,
+    result: {
+      analysis_structure: {
+        entities: [{ entity_id: 'E001', name: '杭州海康威视' }],
+        mentions: [{ entity_id: 'E001', start: 0, end: 6, surface_form: '杭州海康威视' }],
+        competitor_relations: [{ entity_id: 'E001', relation: 'competitor' }]
+      }
+    }
+  }];
+  const truthBySample = new Map([['S01', v3Truth({
+    entities: [{
+      canonical_name: '海康威视',
+      surface_forms: ['海康威视'],
+      type: 'brand',
+      mentions: [{ source_id: 'L001', start: 2, end: 6, surface_form: '海康威视' }]
+    }],
+    relations: [{ canonical_name: '海康威视', relation: 'competitor' }]
+  })]]);
+  const stats = relationQualityStats(entries, truthBySample);
+  assert.equal(stats.status, 'EVALUATED');
+  assert.equal(stats.tp, 1);
+  assert.equal(stats.fp, 0);
+  assert.equal(stats.fn, 0);
+  assert.equal(stats.precision, 1);
+});
+
 test('validateTruthEntry fail-closed：缺字段、哈希不匹配、重复 ID、引用悬空均报错', () => {
   const sampleById = new Map([
     ['S01', { response_text: '海康威视、大华股份。' }]

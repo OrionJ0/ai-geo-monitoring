@@ -321,9 +321,9 @@ S43（目标唯一命中，v1 下属 59.3% 降级样本）真实 `deepseek-v4-fl
 
 ---
 
-## 2026-08-05 issue 013 评测合同返工（P0/P1 修复完成）
+## 2026-08-05 issue 013 评测合同初次返工（db097ef；后续复核发现剩余缺口）
 
-多 agent 盲审发现 5 项评测合同缺口，本次全部修复：
+db097ef 针对多 agent 盲审发现的 5 项评测合同缺口完成了第一轮修复：
 
 | 缺口 | 修复 |
 | --- | --- |
@@ -339,4 +339,31 @@ S43（目标唯一命中，v1 下属 59.3% 降级样本）真实 `deepseek-v4-fl
 - `work/geo-baseline-2026-07-28/truth.v3-template.jsonl`：541 实体 / 504 关系 / 1259 span，全部 `pending_review`，**通过严格校验 0 错误**（含 emoji 回答的 UTF-16 span 一致性）。
 - 新增 7 个 benchmark 服务回归测试；全量相关测试 198 个全部通过。
 
-剩余阻塞：人工裁决 S46/S50/S53 等 5 处盲审分歧并逐条签字（AI 草案不升级为 confirmed），完成后 013 才可关闭。014/015/010 保持阻塞，正式入口仍走 v4。
+该提交的 12 个定向测试通过，但后续内容裁决阶段又构造出未覆盖的反例，因此不能再表述为“只剩人工签字”。
+
+### 两 agent 内容裁决与实现反例复核
+
+- 55 条目标字段全部复核；相对模板需要修改 S07、S08、S23、S28、S30、S32、S33、S46、S50、S53。
+- 实体/关系 38 条通过、17 条需修正；所有内容级争议均已有建议裁决，见 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md)。
+- 反例 1：confirmed 记录缺失 truth_version/dispute 且目标字段为非法字符串/负数时，`validateTruthEntry()` 返回 0 个错误；loader 的 `Boolean("false")` 会产生目标真值假阳性。
+- 反例 2：预测“海康威视”和 truth“杭州海康威视”即使代表同一 span 实体且关系相同，当前关系评分仍为 TP=0、FP=1、FN=1，证明关系没有按对齐 truth entity ID 计分。
+- 模板仍混用 `organization` 与 `other_organization`，而 validator 不校验实体 type enum。
+
+### 第二轮返工（1 P0 + 2 P1 + 确定性代码，已提交）
+
+反例全部修复并补回归测试：
+
+| 缺口 | 修复 |
+| --- | --- |
+| P0 confirmed 目标字段未严格校验 | `validateTruthEntry` 拒绝字符串 `"false"`（原被 `Boolean()` 强转 true）、负/非整数 mentions、非法 rank/sentiment、`mentioned=false` 时字段组合不一致、缺 truth_version/dispute |
+| P1 关系未按对齐实体计分 | `relationQualityStats` 先按 mention span 对齐预测实体与 truth 实体，再用对齐后的 canonical_name 比较；“杭州海康威视 vs 海康威视”反例 TP=1/FP=0/FN=0 |
+| P1 实体 type enum 未校验 | `validateTruthEntry` 拒绝非 `brand/company/other_organization`；模板 46 处 `organization` 归一化 |
+| 确定性：阶段 1 失败丢 target_fact | `buildDegradedCatalog` 保留确定性目标事实，目标语义/竞品轨 unavailable，不抛整条错误 |
+| 确定性：编号列表伪造排名 | `targetRank` 只认“排名第X/第X名/首选”等明确排序表达；`ordered=false` 的编号列表不再产生排名 |
+| 确定性：竞品按行数计数扭曲 SOV | `mentionCount` 改为按真实 occurrence 计数（与目标轨一致） |
+
+**AI 裁决已应用**：按 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md) 将 55 条目标字段最终建议与 17 条实体/关系修正写入 `truth.v3-template.jsonl`（S07/S08/S23/S28/S30/S32 rank→null、S33 recommendation→true、S46 rec=false rank=5、S47/S48/S53 未出现、S50 rank=1 等），模板 55 条全部通过严格校验（0 错误）且保持 `pending_review`。
+
+回归：新增 10 个测试，全量相关测试 177 个全部通过。
+
+结论：013 仍 blocked，唯一剩余阻塞是**数据所有者确认 AI 裁决并由真实复核人签字**（改 `confirmed` 更名 `truth.jsonl`）。014/015/010 保持阻塞，正式入口仍走 v4。
