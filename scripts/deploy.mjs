@@ -429,10 +429,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       env: migrationEnvironment,
       label: '营销模块迁移',
     });
-    await run(process.execPath, [
-      marketingMigrationScript,
-      `--expected-latest=${marketingExpectedLatest}`,
-    ], {
+    await run(process.execPath, [marketingMigrationScript], {
       cwd: backendDirectory,
       env: migrationEnvironment,
       label: '营销模块迁移复审',

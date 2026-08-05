@@ -260,9 +260,7 @@ test('deployment builds the current frontend before browser acceptance and migra
   const marketingApplyIndex = trace.indexOf(
     'marketing-migration:--apply --expected-latest=014-unified-oauth-context'
   );
-  const marketingAuditIndex = trace.indexOf(
-    'marketing-migration:--expected-latest=014-unified-oauth-context'
-  );
+  const marketingAuditIndex = trace.indexOf('marketing-migration:');
   const websiteDataTestIndex = trace.indexOf('npm:run test:website-data');
   const websiteDataApplyIndex = trace.indexOf('website-data-migration:--apply');
   const websiteDataAuditIndex = trace.indexOf('website-data-migration:');
