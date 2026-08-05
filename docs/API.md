@@ -351,6 +351,10 @@ Authorization: Bearer <token>
 
 营销模块默认关闭；未知或越级使用的契约会 fail-closed。所有外部 ID 和指标均以十进制或不透明字符串返回。
 
+本节是现役 GoodieAI 接口的人类可读摘要，不是完整字段真值。006 实施时将为其负责的广告读取路由交付唯一 OpenAPI 3.1 合同；在该文件实际交付并随 R1/R2 切换前，当前运行真值仍以本节、路由代码和现役合同测试为准。
+
+百度营销与百度统计的上游合同不进入 GoodieAI OpenAPI；仓库只维护实际使用部分，并以 `backend/modules/marketing/contracts/baidu/` 中的版本化 manifest、脱敏 fixture 和合同测试为机器真值，不在此复制百度整套官方文档。
+
 - `GET /api/marketing/status`：读取模块状态，不探测百度网络；授权试点返回 `PILOT_READY`，真实数据只读试点返回 `PILOT_DATA_READY`。
 - `GET /api/marketing/projects/:projectId/dashboard`：读取同一百度广告快照 revision；可同时传 `from`、`to` 筛选当前本地覆盖范围。响应分别包含范围汇总 `summary`、逐日 `trend`、`campaigns`、`adGroups`、`keywords`、`searchTerms` 和 `hierarchyCounts`。前三组用账户/计划/单元/关键词 ID 形成严格层级；`searchTerms` 不返回 `keywordId`，因为百度搜索词报告没有该字段，不得由名称补造。
 - `GET /api/marketing/projects/:projectId/website-traffic-overview?device=all|pc|mobile&from=YYYY-MM-DD&to=YYYY-MM-DD&source=ALL|BAIDU_PAID|DIRECT|BAIDU_SEARCH|BING_SEARCH|GOOGLE_SEARCH|OTHER_SEARCH|EXTERNAL_REFERRAL&metric=visits|visitors|pageviews|bounceRate|averageVisitTime|averageVisitPages&includeSourceComparison=true|false`：网站流量和市场总览共用的正式区间合同，返回当前/上一周期汇总、单一渠道/指标趋势和来源质量。仅 `source=ALL&metric=visits` 可以启用 `includeSourceComparison=true`；此时额外返回七个固定渠道的本期汇总、占比、周期变化和逐日访问趋势，单渠道读取失败时按行返回 `UNAVAILABLE`，不会抹掉其他渠道。渠道目录固定为百度推广、直接访问、百度搜索、必应搜索、Google 搜索、其他搜索和外部引荐；没有访问也保留渠道行。`device=all` 表示不向百度添加设备过滤；当前/上一周期必须是等长、连续的自然日。响应用 `capabilities`、`selectedMetricState` 和来源比较状态区分已验证真实数据、无数据与未开放能力。百度推广行的站内访问只来自百度统计 `BAIDU_PAID`，不得用 Dashboard 广告点击数代替。

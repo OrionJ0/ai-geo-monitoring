@@ -29,6 +29,8 @@ scope: deep
 ### 2.1 范围
 
 - 抽取唯一广告快照选择器；
+- 在新路由实现前冻结 006 广告读取路由的唯一 OpenAPI 3.1 合同；
+- 从 OpenAPI 生成前端 wire type，并以后端合同测试验证实际响应；
 - 建立轻量 Dashboard 合同；
 - 新增广告层级、关键词和搜索词三个只读端点；
 - 详情端点强制要求并回显 `revision`；
@@ -46,6 +48,7 @@ scope: deep
 - 不修改 005 的 provider、HTTP 内核或第三方客户端；
 - 不修改百度统计和官网数据 API；
 - 不增加 URL `/v1`、请求头版本、通用 API gateway 或外部开发者平台；
+- 不为百度上游 API 建 OpenAPI，不复制整套官方文档，不建 Swagger UI；
 - 不把计划、单元和关键词改成可写 CRUD；
 - 不建设独立 composition root 整理；
 - 不支持多账号、多统计用户名、合同漂移监测、53KF 或销售数据。
@@ -124,6 +127,10 @@ R1 必须逐个迁移后三类详细消费者；R2 才能改变 `readMarketingDa
 - REQ-010：无快照、无效 revision、越界日期和合法空页必须可区分。
 - REQ-011：三个详情资源只读取数据库事实，不调用百度 Provider、不创建 refresh run，也不执行 stale/background refresh。
 - REQ-012：本目录是广告页面读 API 资源化的唯一实现归属，不增加并行的 `view`、页面 BFF 或同义资源合同。
+- REQ-013：`docs/openapi/marketing-ad-read.openapi.yaml` 是 006 广告读取路由的唯一机器可读合同，必须在 operation 和候选 schema 上标记 R0、R1 和 R2 的真实生命周期，不得把 planned 写成 live。
+- REQ-014：每个 operation 必须定义请求、响应、空值、错误、缓存、`x-data-source` 和 `x-upstream-behavior`。
+- REQ-015：前端 wire type 由 OpenAPI 生成；手写类型只能表达 UI view model，不得重复网络合同。
+- REQ-016：后端合同测试必须用同一 OpenAPI 校验路由实际响应；生成物过期或文档漂移时门禁失败。
 
 - CON-001：不修改事实表和已应用迁移。
 - CON-002：不改变四报表刷新事务或 `refresh_run_id` 语义。
@@ -131,6 +138,7 @@ R1 必须逐个迁移后三类详细消费者；R2 才能改变 `readMarketingDa
 - CON-004：所有排序、筛选和 page size 使用服务端允许列表或绑定参数。
 - CON-005：R1 与 R2 是两个独立 Git Bundle 发布，不以运行时开关维持双合同。
 - CON-006：003、005、006 或 007 的生产观察窗口不能重叠。
+- CON-007：OpenAPI 不包含百度上游、百度统计流量或官网接口；`docs/API.md` 只保留人类摘要和合同指针。
 
 - PAT-001：复用现役项目 allowlist、所有权校验、错误信封和 SQL replacements。
 - PAT-002：读取使用只读 `REPEATABLE READ` 事务。
@@ -138,7 +146,25 @@ R1 必须逐个迁移后三类详细消费者；R2 才能改变 `readMarketingDa
 - PAT-004：前端先取根 revision，再并发读取页面需要的详情资源。
 - PAT-005：只有现役根读取/刷新协调路径可以判断快照过期并合并项目级刷新；详情请求不得按页面数放大四报表上游调用。
 
-## 5. 公共响应元数据
+## 5. 契约真值与公共响应元数据
+
+### 5.1 唯一机器合同
+
+006 只为它负责的四个 GoodieAI 广告读取 operation 建立：
+
+```text
+docs/openapi/marketing-ad-read.openapi.yaml
+```
+
+同一文件随发布阶段演进：Issue 001 将现役完整 Dashboard operation 标为 `LIVE_R0`，将三个详情 operation 标为 `PLANNED_R1`，将轻量 Dashboard 候选 schema 标为 `PLANNED_R2`；R1 将三个 additive 详情 operation 标为 `LIVE_R1`，Dashboard 仍保留大响应；R2 在原 operation 上硬切 Dashboard v2，删除旧数组与过期 v1 候选。仓库不同时保留 v1/v2 两份文件或生成第二套手写字段表。
+
+四个 operation 的 `x-data-source` 固定为 `BAIDU_MARKETING_SNAPSHOT`。Dashboard 的 `x-upstream-behavior` 为 `COORDINATED_REFRESH_ALLOWED`，表示它可通过现役单一协调路径合并刷新；三个详情 operation 固定为 `DATABASE_ONLY`。
+
+前端生成物目标为 `nextjs-frontend/src/lib/marketing/marketingAdReadApi.generated.ts`。生成命令与 stale check 在 Issue 001 固定后进入仓库；手写 adapter 只从生成类型构建 UI view model。后端不要为每个生产响应加一层重复运行时校验，而是在 API 合同测试中用同一 OpenAPI 校验真实 route 响应。
+
+`docs/API.md` 只记录当前 live 路由、业务语义和合同链接；不把 planned operation 描述为现役，不复制 schema 字段。百度上游仍以 `backend/modules/marketing/contracts/baidu/` 为真值，不进入该文件。
+
+### 5.2 公共响应元数据
 
 三个详情资源共享以下元数据，但不建立通用运行时“API 平台”抽象：
 
@@ -455,7 +481,7 @@ R1 期间轻量根尚未正式硬切，前端可从旧 Dashboard 获取相同 re
 
 ### U1：基线、选择器与合同测试
 
-**目标：** 冻结现役 Dashboard 和消费者合同，建立唯一 selector。
+**目标：** 冻结现役 Dashboard 和消费者合同，先交付唯一 OpenAPI 3.1 契约及生成/漂移门禁，再建立唯一 selector。
 
 **涉及文件：**
 
@@ -464,8 +490,11 @@ R1 期间轻量根尚未正式硬切，前端可从旧 Dashboard 获取相同 re
 - `backend/tests/marketing/MarketingSnapshotSelector.test.js`；
 - `backend/tests/marketing/MarketingDashboardReader.test.js`；
 - `backend/tests/marketing/MarketingDashboardApi.test.js`。
+- `docs/openapi/marketing-ad-read.openapi.yaml`；
+- OpenAPI 合同校验与前端 wire type 生成脚本；
+- `nextjs-frontend/src/lib/marketing/marketingAdReadApi.generated.ts`。
 
-**验收：** R1 的 Dashboard JSON、错误和缓存合同无变化；current 与 explicit revision 选择均有竞争和 coverage 测试。
+**验收：** R1 的 Dashboard JSON、错误和缓存合同无变化；current 与 explicit revision 选择均有竞争和 coverage 测试；OpenAPI 标明真实发布阶段，生成物和后端响应漂移门禁均可执行。
 
 ### U2：R1 additive 后端资源
 
@@ -549,6 +578,9 @@ R1 期间轻量根尚未正式硬切，前端可从旧 Dashboard 获取相同 re
 - AC-013：Given 正式域名登录用户，When 查看市场总览、广告表现、关键词和搜索词，Then 来源、日期、状态、指标和 revision 一致性正确。
 - AC-014：Given 全仓搜索，When R2 完成，Then 旧大 Dashboard adapter、fallback 和当前文档引用为 0。
 - AC-015：Given 任一详情资源请求，When 读取 revision，Then 百度 Provider 调用、refresh run 创建和后台刷新触发次数均为 0。
+- AC-016：Given Issue 001 完成，When 检查契约，Then 唯一 OpenAPI 覆盖请求、响应、null、错误、缓存、数据源、上游行为和真实发布阶段。
+- AC-017：Given OpenAPI 或路由响应改变，When 执行合同门禁，Then 过期的前端生成类型或不符合的后端响应必须失败。
+- AC-018：Given 文档盘点，When 检查范围，Then OpenAPI 不包含百度上游或 006 之外接口，`docs/API.md` 不存在第二套字段真值。
 
 ## 12. 测试与验证计划
 
@@ -561,6 +593,7 @@ R1 期间轻量根尚未正式硬切，前端可从旧 Dashboard 获取相同 re
 - 一致性：根读取后插入新成功 run，详情仍返回旧 revision；
 - 事务：count 与 items 同一快照，任一查询失败不返回部分响应；
 - 前端：hook 请求形状、过期响应丢弃、日期 clamp、分页、空/错/刷新状态；
+- 契约：OpenAPI 语法、生命周期标记、生成物 stale check、后端真实 route 响应和合同一致性；
 - 退役：R2 Dashboard schema 明确拒绝四个旧数组，旧消费者 import 搜索为 0。
 
 ### 12.2 性能基线
@@ -618,6 +651,7 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 - 资源化顺手改口径：新资源直接复用现役聚合语义，指标变化另立需求；
 - 详情资源放大上游调用：服务层禁止 Provider/refresh 依赖，并用调用次数测试证明只读；
 - 与 007/005 冲突：不并行；006 只交付稳定资源与 summary，007 修正数据行为，005 最后做等价重构。
+- 契约工具扩大范围：只为四个广告读取 operation 建一份 OpenAPI，不建门户、不触碰百度上游或全项目 API。
 
 ## 15. 关键技术决策
 
@@ -630,6 +664,7 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 - KTD-007：R1 additive、R2 hard cut。理由：允许逐页验证，同时避免长期双合同和 fallback。
 - KTD-008：默认 `006 → 007 → 005`。理由：先固定内部消费者需要的 API，再修正数据行为，最后以正确行为做 provider 纯等价重构。
 - KTD-009：003 与 006 只有发布窗口互斥，没有代码级前置依赖。理由：006 不读写凭据或改变上游合同，等待 003 关闭只会制造无关阻塞。
+- KTD-010：GoodieAI 广告读取 API 使用一份 OpenAPI 3.1 作为 wire contract，前端类型生成、后端响应合同测试。理由：避免路由、手写 TypeScript 类型和文档三处漂移，同时不建设全量 API 平台。
 
 ## 16. 假设与开放问题
 

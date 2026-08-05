@@ -27,6 +27,8 @@ scope: product
 
 本目录是广告页面读 API 最小化的唯一需求归属。不再并行设计 `dashboard?view=...`、逐页 BFF 或另一组同义资源；百度统计流量和官网表单继续使用各自现役接口，不被合并进一个全成全败的市场首页接口。
 
+GoodieAI 自有广告读取接口只保留一份 OpenAPI 3.1 机器合同。它覆盖轻量 Dashboard 和三个详情资源，明确请求、响应、空值、错误、缓存、数据源和上游调用行为。前端 wire type 从该合同生成，后端用合同测试验证实际响应；`docs/API.md` 只保留现役路由和业务语义摘要，不复制字段表。百度上游合同不进入该 OpenAPI，继续由现有版本化 manifest 独立管理。
+
 ```text
 GET /api/marketing/projects/:projectId/dashboard
   → revision、状态、绑定、coverage、filter、summary、trend、counts、刷新状态
@@ -70,6 +72,8 @@ GET /api/marketing/projects/:projectId/search-terms
 - 前端按搜索词、关键词、广告表现、市场总览顺序迁移；
 - 两次发布完成 additive 迁移和旧 Dashboard 大数组硬退役；
 - 建立接口合同、消费者、响应体积、数据库查询和浏览器验收证据。
+- 在拆接口前冻结 006 所有广告读取路由的唯一 OpenAPI 3.1 合同，并随 R1/R2 阶段更新现役状态；
+- 由 OpenAPI 生成前端 wire type，并以后端合同测试阻止路由响应和文档漂移；
 
 ### Out of scope
 
@@ -84,6 +88,8 @@ GET /api/marketing/projects/:projectId/search-terms
 - 建设独立 composition root 整理；
 - 支持多百度账号、多统计用户名或跨账号站点；
 - 建设百度合同漂移监测；
+- 为百度上游 API 建 OpenAPI、复制整套官方文档或改写现有 manifest；
+- 为全项目建 Swagger 门户、API 网关或全量文档生成平台；
 - 接入 53KF、线索池、订单或成交金额。
 
 ### Later
@@ -101,7 +107,18 @@ GET /api/marketing/projects/:projectId/search-terms
 
 验收顺序固定为：口径正确 → 不重复调用上游 → 页面最小返回体。资源化不得顺手改变指标语义；详情读取不得新增上游调用；只有前两项有证据后才以字节数和分页预算判断最小返回体。
 
-### 2. 轻量 Dashboard
+### 2. API 合同真值
+
+006 只定义 GoodieAI 自有的广告读取接口。唯一机器合同固定为 `docs/openapi/marketing-ad-read.openapi.yaml`：
+
+- Issue 001 先交付分阶段合同：现役完整 Dashboard 标为 `LIVE_R0`，三个未上线详情 operation 标为 `PLANNED_R1`，轻量 Dashboard 候选 schema 标为 `PLANNED_R2`；
+- R1 将三个 additive 详情资源标为现役，同时保留旧 Dashboard 响应；
+- R2 在同一文件硬切轻量 Dashboard，删除旧大响应字段；
+- `docs/API.md` 只摘要现役路由和业务语义，不建第二套字段真值。
+
+每个 operation 必须标记数据源和上游行为。Dashboard 允许经现役单一协调路径触发合并刷新；`ad-hierarchy`、`keywords`、`search-terms` 必须标为只读数据库、零 Provider 调用。
+
+### 3. 轻量 Dashboard
 
 最终 Dashboard 继续承担“当前广告快照根”的职责，返回：
 
@@ -114,7 +131,7 @@ GET /api/marketing/projects/:projectId/search-terms
 
 最终不再返回四个明细数组。Dashboard 无快照时继续诚实返回现役空状态，不能把缺失表示为零数据快照。
 
-### 3. 广告层级
+### 4. 广告层级
 
 广告层级是服务广告表现页的快照读模型，不是新的数据库事实。它在一个响应中返回计划、单元和关键词，保留：
 
@@ -126,7 +143,7 @@ GET /api/marketing/projects/:projectId/search-terms
 
 该接口不返回搜索词。若未来层级本身超过预算，再根据真实页面交互单独设计懒加载，不在首版提前拆成大量请求。
 
-### 4. 关键词与搜索词资源
+### 5. 关键词与搜索词资源
 
 关键词和搜索词资源支持：
 
@@ -143,7 +160,7 @@ GET /api/marketing/projects/:projectId/search-terms
 
 广告层级和关键词 summary 与明细使用同一 revision、filter 和事务。精确计数与金额保持十进制字符串，缺失保持缺失，不由前端下载全部分页或当前可见页重新计算。006 只建立这一合同；广告表现和关键词上期比较由 007 实施。
 
-### 5. Revision 一致性
+### 6. Revision 一致性
 
 页面先读取轻量 Dashboard 获得某个日期范围的 `revision`，再用该 revision 请求详情。服务端必须：
 
@@ -155,7 +172,7 @@ GET /api/marketing/projects/:projectId/search-terms
 
 刷新在两个请求之间完成时，详情仍读取旧 revision，不自动跳到新快照。页面需要新数据时重新获取 Dashboard revision，不在前端拼接新旧资源。
 
-### 6. 兼容迁移
+### 7. 兼容迁移
 
 发布 R1：
 
@@ -175,7 +192,7 @@ GET /api/marketing/projects/:projectId/search-terms
 
 R1、R2 都是完整 Git Bundle 发布。出现阻断回归时使用后代 revert revision 快进恢复，不建立运行时 fallback。
 
-### 7. 错误与空状态
+### 8. 错误与空状态
 
 至少区分：
 
@@ -205,6 +222,9 @@ R1、R2 都是完整 Git Bundle 发布。出现阻断回归时使用后代 rever
 - AC-011：市场总览、广告表现、关键词和搜索词页面只请求各自需要的资源，并正确展示加载、空、错误和刷新状态。
 - AC-012：不增加 URL API 版本、provider 重构、多账号或独立 composition root 项目。
 - AC-013：从 `https://insight.guangtuo.com` 验证新资源、revision 一致性和全部营销页面后，R2 才可成为正式默认。
+- AC-014：Issue 001 在任何新路由实现前交付唯一 OpenAPI 3.1 合同，并且路由、字段、空值、错误、缓存、数据源和上游行为均可执行校验。
+- AC-015：前端 wire type 由 OpenAPI 生成且有漂移检查；后端实际响应通过同一合同测试，不再手工维护第二套 wire type。
+- AC-016：GoodieAI OpenAPI 不包含百度上游接口，`docs/API.md` 不复制字段表，006 不新建 Swagger 门户或全项目 API 平台。
 
 ## Metrics / Success
 
@@ -217,11 +237,13 @@ R1、R2 都是完整 Git Bundle 发布。出现阻断回归时使用后代 rever
 - 页面或详情资源直接调用百度的次数为 0；同一项目请求突发只允许现役唯一刷新协调路径触发一次四报表刷新；
 - 四报表、指标、来源和空值语义回归数量为 0；
 - R1 前后记录 Dashboard 响应字节、DB 读取耗时和页面请求基线，用于验证资源化实际收益。
+- OpenAPI 与后端响应、前端生成类型的漂移检查通过率为 100%，手写的重复 wire type 数量为 0。
 
 ## Constraints
 
 - 正式入口固定为 `https://insight.guangtuo.com`；
 - 当前只有仓库内 Next.js 消费者，不建设外部 API 版本治理；
+- OpenAPI 只覆盖 006 负责的广告读取路由，不扩大到百度上游、百度统计流量、官网数据或全项目 API；
 - API 路径和响应都是可观察合同，必须通过两阶段迁移退役；
 - revision 必须来自完整成功快照，不允许调用方传任意 run ID 读取部分事实；
 - page size、排序和过滤字段必须使用服务端允许列表；

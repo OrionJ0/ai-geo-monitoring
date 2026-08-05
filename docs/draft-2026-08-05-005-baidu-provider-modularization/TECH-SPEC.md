@@ -38,6 +38,7 @@ facade 只构造和委托；产品客户端互不依赖；所有网络调用只�
 - 抽取 OAuth/账户、搜索推广和百度统计三个客户端；
 - 保持现有 facade 路径、导出和测试注入；
 - 保持 manifest、预算、限流、双读、parser 和错误语义；
+- 审计唯一 manifest 与实际出站调用、官方来源、验证日期/状态、预算和脱敏 fixture 的可追溯性；
 - 增加脱敏 request trace、依赖方向和实例共享测试；
 - 删除旧单体产品逻辑并完成生产硬切验收。
 
@@ -49,7 +50,8 @@ facade 只构造和委托；产品客户端互不依赖；所有网络调用只�
 - 不修改数据库、缓存和快照事务；
 - 不引入 SDK、registry、任务系统、feature flag 或 fallback；
 - 不建立独立 composition root 整理；
-- 不支持多账号或合同漂移监测。
+- 不支持多账号或实时/定时合同漂移监测平台；
+- 不为百度上游 API 建 OpenAPI、完整官方文档镜像或第二套手写端点清单。
 
 ### 2.3 执行顺序
 
@@ -100,6 +102,10 @@ facade 只构造和委托；产品客户端互不依赖；所有网络调用只�
 - 页面报告保持分页、去重、总量和整轮时间预算；
 - 上游响应严格解析，合法无数据不等于错误。
 
+### 3.5 上游合同现状
+
+`backend/modules/marketing/contracts/baidu/` 已经以版本化 manifest 记录实际使用的 OAuth、账户、搜索推广和百度统计端点，并关联官方来源、证据日期、能力状态和脱敏 fixture。这已是上游机器合同的正确基础，005 只做完整性审计与拆分后可追溯保持，不新建并行文档体系。
+
 ## 4. 需求、约束与规则
 
 - REQ-001：保留 `BaiduMarketingClient` 构造、导出和现役方法行为。
@@ -112,17 +118,21 @@ facade 只构造和委托；产品客户端互不依赖；所有网络调用只�
 - REQ-007A：007 的来源分区完整性、INVALID 错误和同路径消歧合同在拆分前后不变。
 - REQ-008：拆分前后使用相同黑盒特征测试。
 - REQ-009：正式切换后删除旧单体实现。
+- REQ-010：每个实际出站调用必须可追溯到唯一 manifest 中的方法/地址、报告编号或统计 method、字段、官方来源、验证日期/状态和预算。
+- REQ-011：manifest 条目必须与脱敏 fixture、严格 parser 和黑盒 request trace 通过合同测试建立对应关系。
 
 - CON-001：003、006 或 007 任一未关闭时禁止开始 005。
 - CON-002：生产凭据不得进入本地、fixture、日志、文档或 Git。
 - CON-003：共享内核不得提供关闭 allowlist、无限 timeout 或原始请求日志选项。
 - CON-004：不新增迁移、配置、公开 API 或第二套 transport。
 - CON-005：任何可观察行为变化必须另立需求，不能更新 golden 规避失败。
+- CON-006：不新建百度上游 OpenAPI、官方文档镜像、第二套手写端点清单或在线漂移平台。
 
 - PAT-001：保持 CommonJS、现有 manifest 和 Node 测试模式。
 - PAT-002：第三方响应只在产品边界解析和校验。
 - PAT-003：service 继续依赖 provider 能力，不直接 new 产品客户端。
 - PAT-004：测试 transport、时钟和 wait 继续可注入。
+- PAT-005：官方文档只在 manifest `sources` 中留链接和支持范围；开发文档只指向 manifest，不复制可漂移字段表。
 
 ## 5. 模块与接口合同
 
@@ -194,6 +204,12 @@ HTTP 失败、Content-Length 超限或流式读取超限时继续取消 body，�
 
 唯一共享错误模块定义 `BaiduMarketingError` 和 `BaiduContractBlockedError`，旧 facade 文件 re-export 同一 class identity。`decimalNumberToScaledText` 可由搜索客户端拥有，但继续从旧路径导出。
 
+### 5.7 Manifest 所有权
+
+产品客户端只从同一个已加载 manifest 取得端点、报告编号/统计 method、字段、能力开关和预算。运行代码不得在新模块中重复一份同义常量表；无法由 manifest 追溯的官方调用不得通过拆分门禁。
+
+manifest 只记录已实际消费的最小合同。官方文档冲突、缺少响应证据或未经真实账号确认时，保持未验证/fail-closed，不扩充推测字段。
+
 ## 6. 关键技术决策
 
 - KTD-001：保留兼容 facade。理由：最小化消费者迁移和回归面。
@@ -204,6 +220,7 @@ HTTP 失败、Content-Length 超限或流式读取超限时继续取消 body，�
 - KTD-006：使用旧实现上的黑盒特征测试，不保留旧 runtime differential。理由：等价证明不应制造第二条生产路径。
 - KTD-007：不整理公开 API、数据正确性或 composition root。理由：它们分别属于 006、007 和现役装配边界。
 - KTD-008：一次生产硬切，无 feature flag。理由：避免双路径扩大安全和运维状态。
+- KTD-009：上游只维护一份版本化 manifest，用 fixture、parser 和 trace 合同测试证明。理由：百度文档不是我方可生成接口，复制官方说明只会增加漂移面。
 
 ## 7. 目标结构
 
@@ -242,7 +259,7 @@ service → facade → product client → HTTP kernel → shared errors
 - 现有百度脱敏 fixtures；
 - 新增 request trace 测试 helper。
 
-**方案：** 冻结方法表面、请求序列、脱敏 body、timeout、响应字节、等待、取消、输出、错误四元组和原子快照；百度统计 golden 必须包含 007 的 COMPLETE/PARTIAL/INVALID 与同路径记录形状。
+**方案：** 冻结方法表面、请求序列、脱敏 body、timeout、响应字节、等待、取消、输出、错误四元组和原子快照；审计每个实际出站调用的 manifest 可追溯性，并固定 manifest↔fixture↔parser↔trace 关系；百度统计 golden 必须包含 007 的 COMPLETE/PARTIAL/INVALID 与同路径记录形状。
 
 **测试场景：** OAuth、账户分页、四报表、预算、统计报告、allowlist、HTTP、超时、超大响应、非 JSON、class identity 和 Secret 扫描。
 
@@ -316,6 +333,8 @@ service → facade → product client → HTTP kernel → shared errors
 - AC-008：Given 正式模块，When 构造，Then 只有一个 facade、一个内核和每类一个客户端。
 - AC-009：Given 正式入口，When 验证营销页面，Then API、数据、日期、来源和状态不变。
 - AC-010：Given 全仓，When 搜索旧实现和 fallback，Then 生产引用为 0。
+- AC-011：Given 现役百度出站调用，When 审计合同，Then 每个调用可追溯到唯一 manifest 条目、官方来源、验证日期/状态、预算和脱敏 fixture。
+- AC-012：Given 仓库文档与运行常量，When 搜索重复真值，Then 不存在上游 OpenAPI、官方文档镜像、第二套端点清单或产品客户端重复合同常量。
 
 ## 10. 测试与验证计划
 
@@ -324,6 +343,7 @@ service → facade → product client → HTTP kernel → shared errors
 - 集成：授权、连接、刷新、Dashboard、统计缓存、快照原子性；
 - 数据库：SQLite/PostgreSQL 无 schema diff，migration audit 保持原状态；
 - 安全：allowlist、响应预算、凭据与日志扫描；
+- 上游合同：manifest 完整性、官方来源/验证状态、fixture/parser/trace 可追溯性和重复常量搜索；
 - 生产：公开 revision、真实四报表、统计站点/趋势/页面和全部营销页面。
 
 生产数据可能被百度回补，因此生产验收比较合同、来源、完整性和预算，不盲目要求重构前后所有数值字节相等；确定性等价由 fixture 和 trace 证明。
@@ -343,6 +363,7 @@ service → facade → product client → HTTP kernel → shared errors
 - 只测返回漏掉请求变化：trace 同时断言 method、path、body、timeout、bytes、wait 和 cancel；
 - facade 留下重复逻辑：依赖边界测试限制其只构造和委托；
 - 隐藏消费者：实现前重新盘点仓库、部署脚本和诊断工具。
+- manifest 只剩文档作用：产品客户端的端点、报告编号/方法、字段、能力和预算必须从 manifest 取值，用依赖/常量搜索防止拆分后复制。
 
 ## 13. 假设与开放问题
 
