@@ -173,12 +173,13 @@ test('advertising search-term page is a read-only nested dashboard consumer', ()
   assert.match(pageSource, /广告搜索词数/);
   assert.match(pageSource, /<MarketingPageFilters/);
   assert.match(pageSource, /availableDevices=\{\['all'\]\}/);
-  assert.match(hookSource, /\/dashboard/);
   assert.match(hookSource, /assertMarketingDashboardResponse/);
   assert.match(hookSource, /readMarketingDashboard/);
+  assert.match(hookSource, /\/search-terms/);
+  assert.match(hookSource, /revision:\s*currentResult\.data\.revision/);
+  assert.match(hookSource, /assertMarketingSearchTermResourceResponse/);
   assert.match(hookSource, /marketingSnapshotWarning/);
   assert.match(hookSource, /assertMarketingDashboardResponse\([^,]+, projectId\)/);
-  assert.match(hookSource, /sameMarketingDashboardRevision/);
   assert.match(hookSource, /dashboardFilterMatchesRange/);
   assert.match(hookSource, /timeout: 10_000/);
   assert.ok(
@@ -186,6 +187,10 @@ test('advertising search-term page is a read-only nested dashboard consumer', ()
       < hookSource.indexOf('const previousResult = await')
   );
   assert.match(hookSource, /onDateRangeAdjusted/);
+  assert.doesNotMatch(
+    hookSource,
+    /axios\.get<MarketingDashboardResponse>\(endpoint/
+  );
   assert.doesNotMatch(hookSource, /axios\.(?:post|put|patch|delete)\(/);
   assert.doesNotMatch(pageSource, /自然搜索词|网站流量/);
 });

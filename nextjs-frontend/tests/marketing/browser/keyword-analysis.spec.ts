@@ -239,6 +239,53 @@ function alignDashboardFilterToRequest<
   return body;
 }
 
+function searchTermResourceFixture(requestUrl: string) {
+  const request = new URL(requestUrl);
+  const dashboard = dashboardFixture();
+  const from = request.searchParams.get('from') || dashboard.coverage.from;
+  const to = request.searchParams.get('to') || dashboard.coverage.to;
+  const exactFilters = [
+    ['accountId', 'accountId'],
+    ['campaignId', 'campaignId'],
+    ['adGroupId', 'adGroupId'],
+    ['keywordName', 'keywordName'],
+    ['queryStatus', 'queryStatus'],
+    ['matchType', 'matchType']
+  ] as const;
+  let items = dashboard.searchTerms.filter((item) => exactFilters.every(
+    ([parameter, field]) => !request.searchParams.has(parameter)
+      || item[field] === request.searchParams.get(parameter)
+  ));
+  const query = request.searchParams.get('query');
+  if (query) items = items.filter((item) => item.searchTerm.includes(query));
+  const summary = items.reduce((total, item) => ({
+    impressions: (BigInt(total.impressions) + BigInt(item.impressions)).toString(),
+    clicks: (BigInt(total.clicks) + BigInt(item.clicks)).toString(),
+    costAmountScaled: (
+      BigInt(total.costAmountScaled) + BigInt(item.costAmountScaled)
+    ).toString()
+  }), { impressions: '0', clicks: '0', costAmountScaled: '0' });
+  const page = Number(request.searchParams.get('page') || 1);
+  const pageSize = Number(request.searchParams.get('pageSize') || 50);
+  const totalItems = items.length;
+  items = items.slice((page - 1) * pageSize, page * pageSize);
+  return {
+    schemaVersion: 'marketing_search_terms_v1',
+    projectId: dashboard.projectId,
+    revision: request.searchParams.get('revision'),
+    coverage: dashboard.coverage,
+    filter: { from, to },
+    summary,
+    items,
+    pagination: {
+      page,
+      pageSize,
+      totalItems,
+      totalPages: totalItems ? Math.ceil(totalItems / pageSize) : 0
+    }
+  };
+}
+
 async function installRoutes(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('agd_token', 'playwright.keyword-analysis.signature');
@@ -283,6 +330,10 @@ async function installRoutes(page: Page) {
       dashboardFixture(),
       route.request().url()
     ))
+  }));
+  await page.route('**/api/marketing/projects/11/search-terms**', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(searchTermResourceFixture(route.request().url()))
   }));
 }
 
@@ -428,17 +479,35 @@ test('keyword evidence opens scoped real search terms and invalid scope never ex
   ))).toEqual([]);
 });
 
-test('search-term comparison refuses dashboard responses from different revisions', async ({ page }) => {
-  let dashboardRequestCount = 0;
-  await page.unroute('**/api/marketing/projects/11/dashboard**');
-  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
-    const body = alignDashboardFilterToRequest(
-      dashboardFixture(),
-      route.request().url()
-    );
-    dashboardRequestCount += 1;
-    if (dashboardRequestCount === 2) {
-      body.revision = 'keyword-analysis-previous-revision';
+test('search-term comparison refuses a resource from another revision', async ({ page }) => {
+  let resourceRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/search-terms**');
+  await page.route('**/api/marketing/projects/11/search-terms**', (route) => {
+    const body = searchTermResourceFixture(route.request().url());
+    resourceRequestCount += 1;
+    if (resourceRequestCount === 2) body.revision = 'another-revision';
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis/search-terms?view=all');
+  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
+  const previous = page.getByLabel('广告搜索词数上期：暂无数据');
+  await previous.hover();
+  await expect(page.getByRole('tooltip'))
+    .toContainText('上一周期广告搜索词响应无效');
+});
+
+test('search-term comparison refuses a same-revision response for the wrong period', async ({ page }) => {
+  let resourceRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/search-terms**');
+  await page.route('**/api/marketing/projects/11/search-terms**', (route) => {
+    const body = searchTermResourceFixture(route.request().url());
+    resourceRequestCount += 1;
+    if (resourceRequestCount === 2) {
+      body.filter = { from: '2026-07-05', to: '2026-08-03' };
     }
     return route.fulfill({
       contentType: 'application/json',
@@ -448,33 +517,11 @@ test('search-term comparison refuses dashboard responses from different revision
 
   await page.goto('/geo/keyword-analysis/search-terms?view=all');
   await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
+  await expect.poll(() => resourceRequestCount).toBe(2);
   const previous = page.getByLabel('广告搜索词数上期：暂无数据');
   await previous.hover();
   await expect(page.getByRole('tooltip'))
-    .toContainText('本期与上期广告快照版本不一致，无法进行周期比较');
-});
-
-test('search-term comparison refuses a same-revision response for the wrong period', async ({ page }) => {
-  let dashboardRequestCount = 0;
-  await page.unroute('**/api/marketing/projects/11/dashboard**');
-  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
-    dashboardRequestCount += 1;
-    const body = dashboardRequestCount === 1
-      ? alignDashboardFilterToRequest(dashboardFixture(), route.request().url())
-      : dashboardFixture();
-    return route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(body)
-    });
-  });
-
-  await page.goto('/geo/keyword-analysis/search-terms?view=all');
-  await expect(page.getByText('电子围栏厂家报价', { exact: true })).toBeVisible();
-  await expect.poll(() => dashboardRequestCount).toBe(2);
-  const previous = page.getByLabel('广告搜索词数上期：暂无数据');
-  await previous.hover();
-  await expect(page.getByRole('tooltip'))
-    .toContainText('上一周期广告搜索词响应范围与请求不一致');
+    .toContainText('上一周期广告搜索词响应无效');
 });
 
 test('search-term page rejects a current response for a different requested period', async ({ page }) => {
@@ -496,15 +543,12 @@ test('search-term page rejects a current response for a different requested peri
 
 test('current search-term data renders while previous-period comparison is pending', async ({ page }) => {
   let releasePrevious: (() => void) | undefined;
-  let dashboardRequestCount = 0;
-  await page.unroute('**/api/marketing/projects/11/dashboard**');
-  await page.route('**/api/marketing/projects/11/dashboard**', async (route) => {
-    const body = alignDashboardFilterToRequest(
-      dashboardFixture(),
-      route.request().url()
-    );
-    dashboardRequestCount += 1;
-    if (dashboardRequestCount === 2) {
+  let resourceRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/search-terms**');
+  await page.route('**/api/marketing/projects/11/search-terms**', async (route) => {
+    const body = searchTermResourceFixture(route.request().url());
+    resourceRequestCount += 1;
+    if (resourceRequestCount === 2) {
       await new Promise<void>((resolve) => {
         releasePrevious = resolve;
       });
@@ -522,26 +566,14 @@ test('current search-term data renders while previous-period comparison is pendi
   releasePrevious?.();
 });
 
-test('scoped comparison resolves each revision by keyword ID before name evidence', async ({ page }) => {
-  let dashboardRequestCount = 0;
-  await page.unroute('**/api/marketing/projects/11/dashboard**');
-  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
-    const body = alignDashboardFilterToRequest(
-      dashboardFixture(),
-      route.request().url()
-    );
-    dashboardRequestCount += 1;
-    if (dashboardRequestCount === 3) {
-      body.keywords = body.keywords.map((keyword) => keyword.keywordName === '电子围栏厂家'
-        ? { ...keyword, keywordName: '电子围栏厂家旧称' }
-        : keyword);
-      body.searchTerms = body.searchTerms.map((term) => term.keywordName === '电子围栏厂家'
-        ? { ...term, keywordName: '电子围栏厂家旧称' }
-        : term);
-    }
+test('scoped comparison pins both periods to one revision and keyword identity', async ({ page }) => {
+  const resourceRequests: URL[] = [];
+  await page.unroute('**/api/marketing/projects/11/search-terms**');
+  await page.route('**/api/marketing/projects/11/search-terms**', (route) => {
+    resourceRequests.push(new URL(route.request().url()));
     return route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(body)
+      body: JSON.stringify(searchTermResourceFixture(route.request().url()))
     });
   });
 
@@ -554,7 +586,90 @@ test('scoped comparison resolves each revision by keyword ID before name evidenc
   const countCard = page.getByRole('heading', { name: /广告搜索词数/u })
     .locator('xpath=ancestor::div[contains(@class,"ant-card")][1]');
   await expect(countCard).toContainText(/本期\s*2\s*上期\s*2/u);
-  await expect(page.getByText('电子围栏厂家旧称', { exact: true })).toHaveCount(0);
+  await expect.poll(() => resourceRequests.length).toBe(2);
+  expect(resourceRequests.map((request) => request.searchParams.get('revision')))
+    .toEqual([
+      'keyword-analysis-fixture-revision',
+      'keyword-analysis-fixture-revision'
+    ]);
+  expect(resourceRequests.map((request) => request.searchParams.get('keywordName')))
+    .toEqual(['电子围栏厂家', '电子围栏厂家']);
+});
+
+test('search-term table sends pagination, query, and sort to the resource', async ({ page }) => {
+  const requests: URL[] = [];
+  let dashboardRequests = 0;
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    dashboardRequests += 1;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(alignDashboardFilterToRequest(
+        dashboardFixture(),
+        route.request().url()
+      ))
+    });
+  });
+  await page.unroute('**/api/marketing/projects/11/search-terms**');
+  await page.route('**/api/marketing/projects/11/search-terms**', (route) => {
+    const request = new URL(route.request().url());
+    requests.push(request);
+    const base = searchTermResourceFixture(route.request().url());
+    const allItems = Array.from({ length: 25 }, (_, index) => ({
+      ...dashboardFixture().searchTerms[0],
+      searchTerm: `分页搜索词 ${String(index + 1).padStart(2, '0')}`,
+      impressions: String(100 - index)
+    })).filter((item) => (
+      !request.searchParams.get('query')
+      || item.searchTerm.includes(request.searchParams.get('query') || '')
+    ));
+    const requestedPage = Number(request.searchParams.get('page') || 1);
+    const requestedPageSize = Number(request.searchParams.get('pageSize') || 20);
+    base.items = allItems.slice(
+      (requestedPage - 1) * requestedPageSize,
+      requestedPage * requestedPageSize
+    );
+    base.pagination = {
+      page: requestedPage,
+      pageSize: requestedPageSize,
+      totalItems: allItems.length,
+      totalPages: allItems.length ? Math.ceil(allItems.length / requestedPageSize) : 0
+    };
+    base.summary = allItems.reduce((total, item) => ({
+      impressions: (BigInt(total.impressions) + BigInt(item.impressions)).toString(),
+      clicks: (BigInt(total.clicks) + BigInt(item.clicks)).toString(),
+      costAmountScaled: (
+        BigInt(total.costAmountScaled) + BigInt(item.costAmountScaled)
+      ).toString()
+    }), { impressions: '0', clicks: '0', costAmountScaled: '0' });
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(base)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis/search-terms?view=all');
+  await expect(page.getByText('分页搜索词 01', { exact: true })).toBeVisible();
+  await page.getByRole('listitem', { name: '2' }).click();
+  await expect(page.getByText('分页搜索词 21', { exact: true })).toBeVisible();
+  await expect.poll(() => requests.some((request) => (
+    request.searchParams.get('page') === '2'
+    && request.searchParams.get('pageSize') === '20'
+  ))).toBe(true);
+
+  await page.getByLabel('搜索广告搜索词').fill('分页搜索词 25');
+  await expect(page.getByText('分页搜索词 25', { exact: true })).toBeVisible();
+  await expect.poll(() => requests.some((request) => (
+    request.searchParams.get('query') === '分页搜索词 25'
+  ))).toBe(true);
+
+  await page.getByRole('columnheader', { name: '展现' }).click();
+  await expect.poll(() => requests.some((request) => (
+    request.searchParams.get('sortBy') === 'impressions'
+  ))).toBe(true);
+  expect(dashboardRequests).toBe(1);
+  expect(new Set(requests.map((request) => request.searchParams.get('revision'))))
+    .toEqual(new Set(['keyword-analysis-fixture-revision']));
 });
 
 test('keyword analysis keeps page width stable at 1280px', async ({ page }) => {

@@ -17,6 +17,7 @@ function sendError(res, error) {
 
 function createMarketingDashboardRouter({
   dashboardService,
+  adResourceService = null,
   refreshService,
   tongjiService = null,
   enqueue = (runId) => {
@@ -44,6 +45,39 @@ function createMarketingDashboardRouter({
       return sendError(res, error);
     }
   });
+
+  if (adResourceService) router.get(
+    '/projects/:projectId/search-terms',
+    async (req, res) => {
+      try {
+        await dashboardService.assertAccess({
+          projectId: req.params.projectId,
+          user: req.user
+        });
+        const result = await adResourceService.readSearchTerms({
+          projectId: req.params.projectId,
+          revision: req.query.revision,
+          from: req.query.from,
+          to: req.query.to,
+          page: req.query.page,
+          pageSize: req.query.pageSize,
+          sortBy: req.query.sortBy,
+          sortOrder: req.query.sortOrder,
+          query: req.query.query,
+          accountId: req.query.accountId,
+          campaignId: req.query.campaignId,
+          adGroupId: req.query.adGroupId,
+          keywordName: req.query.keywordName,
+          queryStatus: req.query.queryStatus,
+          matchType: req.query.matchType
+        });
+        res.set('Cache-Control', 'private, max-age=60');
+        return res.json(result);
+      } catch (error) {
+        return sendError(res, error);
+      }
+    }
+  );
 
   if (tongjiService) router.get(
     '/projects/:projectId/website-traffic-overview',
