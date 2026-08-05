@@ -156,5 +156,5 @@ scope: product
 ## Handoff
 
 - PRD path: `docs/active-2026-08-05-005-baidu-provider-modularization/prd.md`
-- Current state: active；Issue 001 已关闭，现役单体 Provider 的公开 surface、脱敏 trace、预算、稳定错误和 007 正确性行为已有可执行黑盒基线。
-- Recommended next step: 按 issues/001–005 严格顺序实施；当前进入 Issue 002，只抽取唯一安全 HTTP 内核与 OAuth 客户端，不发布中间状态。
+- Current state: active；Issues 001–002 已关闭，候选实现已有唯一安全 HTTP 内核与独立 OAuth 客户端，且中间态未发布。
+- Recommended next step: 严格进入 Issue 003，只抽取搜索推广客户端并保持四报表、预算、双读和原子快照等价。
