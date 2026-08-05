@@ -4,7 +4,7 @@ const { createSourceMap, SOURCE_MAP_VERSION } = require('./AIAnalysisSourceMapSe
 const { buildEntityCatalog } = require('./AIEntityCatalogService');
 const { ENTITY_PROMPT_REVISION } = require('./AIResponseEntityExtractionService');
 const { SEMANTIC_PROMPT_REVISION } = require('./AIResponseSemanticJudgmentService');
-const { CURRENT_METRIC_SEMANTICS } = require('./GeoMetricSemanticsService');
+const { SCOPED_METRIC_SEMANTICS } = require('./GeoMetricSemanticsService');
 const {
   buildRegistrySnapshot,
   withRegistryMatches
@@ -106,7 +106,14 @@ function targetRank({ sourceMap, targetEntity, semantic, targetEntityId }) {
   return null;
 }
 
-function calculate({ sourceMap, catalog, semantic, diagnostics, registrySnapshot = null }) {
+function calculate({
+  sourceMap,
+  catalog,
+  semantic,
+  diagnostics,
+  registrySnapshot = null,
+  quarantinedItems = []
+}) {
   const entityById = new Map(catalog.entities.map((entity) => [entity.entity_id, entity]));
   const targetEntity = catalog.target_entity_id
     ? entityById.get(catalog.target_entity_id) || null
@@ -139,10 +146,17 @@ function calculate({ sourceMap, catalog, semantic, diagnostics, registrySnapshot
   const targetMentions = Array.isArray(catalog.target_mentions)
     ? catalog.target_mentions.length
     : mentionCount(targetEntity);
+  // 目标是否出现由确定性 target_mentions 扫描决定，不依赖开放实体召回
+  const brandMentioned = Array.isArray(catalog.target_mentions)
+    ? catalog.target_mentions.length > 0
+    : Boolean(targetEntity);
   const competitorMentions = competitionEntities
     .filter((entity) => entity.relation === 'competitor')
     .reduce((total, entity) => total + entity.mentions, 0);
   const denominator = targetMentions + competitorMentions;
+  const sovValue = denominator > 0
+    ? Number(((targetMentions / denominator) * 100).toFixed(2))
+    : null;
   const calculatedTargetRank = targetRank({
     sourceMap,
     targetEntity,
@@ -158,6 +172,101 @@ function calculate({ sourceMap, catalog, semantic, diagnostics, registrySnapshot
   const sentimentLabel = semantic.sentiment.status === 'assessed'
     ? semantic.sentiment.label
     : 'neutral';
+
+  // ---- 三轨字段级状态派生 ----
+  const semanticAvailable = !semantic?.degraded;
+  const targetAppears = brandMentioned;
+  const recommendationField = targetAppears
+    ? (semanticAvailable
+      ? { status: 'assessed', value: targetRecommended }
+      : { status: 'unresolved', value: null })
+    : { status: 'not_applicable', value: null };
+  const rankField = targetAppears
+    ? (semanticAvailable
+      ? { status: 'assessed', value: calculatedTargetRank }
+      : { status: 'unresolved', value: null })
+    : { status: 'not_applicable', value: null };
+  const sentimentField = targetAppears
+    ? (semanticAvailable
+      ? (semantic.sentiment.status === 'assessed'
+        ? { status: 'assessed', value: semantic.sentiment.label }
+        : { status: 'unresolved', value: null })
+      : { status: 'unresolved', value: null })
+    : { status: 'not_applicable', value: null };
+  const semanticsFieldStatuses = [
+    recommendationField.status,
+    rankField.status,
+    sentimentField.status
+  ];
+  const targetSemanticsStatus = !targetAppears
+    ? 'complete'
+    : (semanticsFieldStatuses.every((status) => (
+      status === 'assessed' || status === 'not_applicable'
+    ))
+      ? 'complete'
+      : 'partial');
+  const competitionStatus = !semanticAvailable
+    ? 'unavailable'
+    : (unresolvedEntityIds.length || quarantinedItems.length ? 'partial' : 'complete');
+  const relationEvidenceSourceIds = (Array.isArray(semantic.competitor_relations)
+    ? semantic.competitor_relations
+    : []).flatMap((relation) => relation.evidence_source_ids || []);
+  const relationEntities = (Array.isArray(semantic.competitor_relations)
+    ? semantic.competitor_relations
+    : []).map((relation) => relation.entity_id);
+
+  const targetFact = {
+    status: 'complete',
+    brand_mentioned: brandMentioned,
+    brand_mentions: targetMentions,
+    mentions: catalog.target_mentions || []
+  };
+  const targetSemantics = {
+    status: targetSemanticsStatus,
+    recommendation: {
+      status: recommendationField.status,
+      value: recommendationField.value,
+      evidence_source_ids: targetRecommended && targetRecommendation
+        ? targetRecommendation.evidence_source_ids
+        : []
+    },
+    rank: {
+      status: rankField.status,
+      value: rankField.value,
+      evidence_source_ids: calculatedTargetRank !== null
+        ? (() => {
+          const group = (semantic.candidate_groups || []).find((item) => (
+            item.entries?.includes(catalog.target_entity_id)
+          ));
+          return group ? group.evidence_source_ids : [];
+        })()
+        : []
+    },
+    sentiment: {
+      status: sentimentField.status,
+      value: sentimentField.value,
+      evidence_source_ids: semantic.sentiment?.evidence_source_ids || []
+    }
+  };
+  const competitionAnalysis = {
+    status: competitionStatus,
+    scope: 'open_discovery',
+    completeness: 'not_proven',
+    entities: catalog.entities.map((entity) => entity.entity_id),
+    relations: relationEntities,
+    relation_evidence_source_ids: relationEvidenceSourceIds,
+    unresolved_entity_ids: unresolvedEntityIds,
+    quarantined_items: quarantinedItems
+  };
+  const sov = {
+    status: 'observed_only',
+    scope: 'open_discovery',
+    completeness: 'not_proven',
+    numerator: targetMentions,
+    denominator,
+    value: sovValue
+  };
+
   const stages = diagnostics.filter(Boolean);
   const snapshotMeta = registrySnapshot
     ? {
@@ -172,6 +281,10 @@ function calculate({ sourceMap, catalog, semantic, diagnostics, registrySnapshot
     source_map_version: SOURCE_MAP_VERSION,
     answer_sha256: sourceMap.answer_sha256,
     competitor_registry_snapshot: snapshotMeta,
+    target_fact: targetFact,
+    target_semantics: targetSemantics,
+    competition_analysis: competitionAnalysis,
+    sov,
     entities: catalog.entities.map((entity) => ({
       entity_id: entity.entity_id,
       name: entity.name,
@@ -187,7 +300,7 @@ function calculate({ sourceMap, catalog, semantic, diagnostics, registrySnapshot
     target_entity_id: catalog.target_entity_id,
     competition_scope: 'open_discovery',
     competition_completeness: 'not_proven',
-    competition_analysis_status: unresolvedEntityIds.length ? 'partial' : 'complete_observed',
+    competition_analysis_status: competitionStatus,
     unresolved_entity_ids: unresolvedEntityIds,
     competitor_relations: semantic.competitor_relations,
     candidate_groups: semantic.candidate_groups,
@@ -208,26 +321,63 @@ function calculate({ sourceMap, catalog, semantic, diagnostics, registrySnapshot
   };
 
   return {
-    metric_semantics_version: CURRENT_METRIC_SEMANTICS,
-    brand_mentioned: Boolean(targetEntity),
+    metric_semantics_version: SCOPED_METRIC_SEMANTICS,
+    brand_mentioned: brandMentioned,
     brand_mentions: targetMentions,
     brand_position: calculatedTargetRank,
     brand_rank: calculatedTargetRank,
     brand_recommended: targetRecommended,
     visibility_score: targetMentions,
-    answer_competitor_share: denominator > 0
-      ? Number(((targetMentions / denominator) * 100).toFixed(2))
-      : null,
+    answer_competitor_share: sovValue,
     sov_numerator: targetMentions,
     sov_denominator: denominator,
+    sov_status: 'observed_only',
+    sov_scope: 'open_discovery',
+    sov_completeness: 'not_proven',
     competition_entities: competitionEntities,
     competition_scope: 'open_discovery',
     competition_completeness: 'not_proven',
-    competition_analysis_status: unresolvedEntityIds.length ? 'partial' : 'complete_observed',
+    competition_analysis_status: competitionStatus,
     sentiment: sentimentLabel,
     sentiment_reason: semantic.sentiment.reason || null,
     sentiment_risk_terms: semantic.sentiment.risk_terms || [],
     analysis_structure: analysisStructure
+  };
+}
+
+function buildDegradedSemantic(catalog, error) {
+  const targetAppears = Boolean(catalog?.target_entity_id);
+  const nonTargetIds = (Array.isArray(catalog?.entities) ? catalog.entities : [])
+    .map((entity) => entity.entity_id)
+    .filter((entityId) => entityId !== catalog.target_entity_id);
+  return {
+    structured: {
+      degraded: true,
+      semantic_error: {
+        code: String(error?.code || 'analysis_semantic_output_invalid'),
+        message: String(error?.message || '语义判断不可用').slice(0, 200)
+      },
+      competitor_relations: [],
+      unresolved_entity_ids: nonTargetIds,
+      candidate_groups: [],
+      recommendations: [],
+      sentiment: {
+        status: targetAppears ? 'unresolved' : 'not_applicable',
+        label: null,
+        reason: targetAppears ? '目标语义判断不可用' : '目标未出现',
+        evidence_source_ids: [],
+        evidence: [],
+        risk_terms: []
+      }
+    },
+    diagnostics: {
+      stage: 'semantic_judge',
+      attempt_count: Number(error?.details?.attempt_count) || 2,
+      platform: String(error?.details?.platform || 'deepseek'),
+      model: String(error?.details?.model || 'deepseek-v4-flash'),
+      degraded: true,
+      error_code: String(error?.code || 'analysis_semantic_output_invalid')
+    }
   };
 }
 
@@ -273,19 +423,26 @@ class AIResponseAnalysisV5Service {
         targetBrand
       });
       const registryCatalog = withRegistryMatches(catalog, registrySnapshot);
-      semanticResult = await this.semanticJudgmentService.judge({
-        question: normalizedQuestion,
-        sourceMap,
-        // 阶段 2 使用匹配前的 grounded 投影；buildSemanticPrompt 只取
-        // entity_id/name/type/surface_forms/source_ids，不含注册表身份
-        catalog: registryCatalog
-      });
+      try {
+        semanticResult = await this.semanticJudgmentService.judge({
+          question: normalizedQuestion,
+          sourceMap,
+          // 阶段 2 使用匹配前的 grounded 投影；buildSemanticPrompt 只取
+          // entity_id/name/type/surface_forms/source_ids，不含注册表身份
+          catalog: registryCatalog
+        });
+      } catch (semanticError) {
+        // 阶段 2 达到上限后按字段降级：目标事实不被清空，
+        // 已发现竞品进入 unresolved，不回退 v4 或 Pro。
+        semanticResult = buildDegradedSemantic(registryCatalog, semanticError);
+      }
       const calculated = calculate({
         sourceMap,
         catalog: registryCatalog,
         semantic: semanticResult.structured,
         diagnostics: [extracted.diagnostics, semanticResult.diagnostics],
-        registrySnapshot
+        registrySnapshot,
+        quarantinedItems: extracted.diagnostics?.quarantined_items || []
       });
       const model = extracted.diagnostics?.model
         || semanticResult.diagnostics?.model

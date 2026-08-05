@@ -322,6 +322,10 @@ class AIResponseEntityExtractionService {
             diagnostics: {
               ...diagnostics,
               quarantined_mentions: quarantined.length,
+              quarantined_items: quarantined.map((item) => ({
+                source_id: String(item?.source_id || ''),
+                surface_form: String(item?.surface_form || '')
+              })),
               filtered_generic_mentions: filtered.dropped
             }
           };
