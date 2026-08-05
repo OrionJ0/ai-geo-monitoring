@@ -60,7 +60,9 @@ function cacheIdentityFor(arm) {
 const {
   entityQualityStats,
   fieldStatusDistribution,
-  semanticTruthCoverage
+  relationQualityStats,
+  semanticTruthCoverage,
+  validateTruthEntry
 } = require('../services/GeoFlashStructuredBenchmarkService');
 const SUPPORTED_ARMS = new Set(['v4-current', 'v4-temperature-zero', 'v5-json']);
 const DEFAULT_BASELINE_DIR = path.resolve(__dirname, '../../work/geo-baseline-2026-07-28');
@@ -114,24 +116,50 @@ function parseArgs(argv = process.argv.slice(2)) {
 }
 
 /**
- * issue 013：加载实体级人工真值 truth.jsonl（按样本、带 review_status）。
- * 真值缺失或未复核时 benchmark 必须输出 NOT_EVALUABLE，不得冒充 PASS。
+ * issue 013 P1 修复：truth.jsonl 严格加载（fail-closed）。
+ * 校验 schema、唯一 sample_id、answer_sha256 与冻结回答一致、span 可定位、
+ * relation 引用有效、confirmed 必须带复核元数据；任一错误都终止评测，
+ * 不允许坏记录静默进入评分。
  */
 function loadTruth(options) {
   const truthPath = path.join(options.baselineDir, 'truth.jsonl');
-  if (!fs.existsSync(truthPath)) return new Map();
-  const truthBySample = new Map();
+  if (!fs.existsSync(truthPath)) return { map: new Map(), errors: [] };
+  const samples = JSON.parse(fs.readFileSync(path.join(options.baselineDir, 'samples.json'), 'utf8'));
+  const sampleById = new Map(samples.map((sample) => [sample.sample_id, sample]));
+  const entries = [];
   fs.readFileSync(truthPath, 'utf8')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .forEach((line) => {
+    .forEach((line, index) => {
       try {
-        const entry = JSON.parse(line);
-        if (entry.sample_id) truthBySample.set(entry.sample_id, entry);
-      } catch (_) { /* 忽略坏行，避免单个坏行破坏整份真值 */ }
+        entries.push({ line: index + 1, entry: JSON.parse(line) });
+      } catch (_) {
+        entries.push({ line: index + 1, entry: null, parse_error: true });
+      }
     });
-  return truthBySample;
+  const errors = [];
+  const truthBySample = new Map();
+  entries.forEach(({ line, entry, parse_error }) => {
+    if (parse_error) {
+      errors.push(`truth.jsonl 第 ${line} 行不是合法 JSON`);
+      return;
+    }
+    if (!entry?.sample_id) {
+      errors.push(`truth.jsonl 第 ${line} 行缺少 sample_id`);
+      return;
+    }
+    if (truthBySample.has(entry.sample_id)) {
+      errors.push(`truth.jsonl 重复 sample_id: ${entry.sample_id}`);
+      return;
+    }
+    const entryErrors = validateTruthEntry(entry, sampleById);
+    if (entryErrors.length) {
+      errors.push(`truth.jsonl ${entry.sample_id}: ${entryErrors.join('; ')}`);
+    }
+    truthBySample.set(entry.sample_id, entry);
+  });
+  return { map: truthBySample, errors };
 }
 
 function loadCorpus(options) {
@@ -144,6 +172,12 @@ function loadCorpus(options) {
     throw new Error('现有真实语料尚未完成人工确认');
   }
   const labels = new Map(parsedLabels.labels);
+  // issue 013 P0-1 修复：LABELING.md 的全局 human_review_confirmed 只覆盖旧主语料。
+  // 补充样本（supplement: true）的标签必须由 truth.jsonl 的 confirmed 记录提供，
+  // 在 main 中合并；这里先删除 LABELING 解析出的补充样本标签，防止泄漏进目标评分。
+  samples.filter((sample) => sample.supplement).forEach((sample) => {
+    labels.delete(sample.sample_id);
+  });
   const hashes = new Set(samples.map((sample) => sample.response_text));
   if (fs.existsSync(options.challengeArtifact)) {
     const artifact = JSON.parse(fs.readFileSync(options.challengeArtifact, 'utf8'));
@@ -440,11 +474,18 @@ function buildReport({ options, samples, labels, entries, summaries, truthBySamp
   const coverage = semanticTruthCoverage(truthBySample);
   lines.push(`- 已复核实例：推荐 ${coverage.recommendation.count}、排名 ${coverage.rank.count}、情绪 ${coverage.sentiment.count}、已输出竞品关系 ${coverage.relations.count}（各维度 ≥20 才算可评估）。`);
   options.arms.forEach((arm) => {
-    const quality = entityQualityStats(entries.filter((entry) => entry.arm === arm), truthBySample);
+    const armEntries = entries.filter((entry) => entry.arm === arm);
+    const quality = entityQualityStats(armEntries, truthBySample);
     if (quality.status === 'EVALUATED') {
       lines.push(`- ${arm}：实体 precision=${percentage(quality.precision)}，recall=${percentage(quality.recall)}，micro-F1=${percentage(quality.micro_f1)}，canonicalization=${percentage(quality.canonicalization_accuracy)}；组合实体=${quality.merged_entity_count}，无依据拆分=${quality.split_entity_count}`);
     } else {
-      lines.push(`- ${arm}：${quality.status} — ${quality.reason}`);
+      lines.push(`- ${arm}：实体 ${quality.status} — ${quality.reason}`);
+    }
+    const relation = relationQualityStats(armEntries, truthBySample);
+    if (relation.status === 'EVALUATED') {
+      lines.push(`- ${arm}：已输出关系 precision=${percentage(relation.precision)}，recall=${percentage(relation.recall)}，micro-F1=${percentage(relation.micro_f1)}（TP=${relation.tp}，FP=${relation.fp}，FN=${relation.fn}）`);
+    } else {
+      lines.push(`- ${arm}：已输出关系 ${relation.status} — ${relation.reason}`);
     }
   });
   lines.push('', '## 门禁说明', '');
@@ -454,10 +495,19 @@ function buildReport({ options, samples, labels, entries, summaries, truthBySamp
     const targetPass = v5.target_false_positives === 0 && v5.target_presence_accuracy === 1;
     const stabilityPass = v5.stability_rate !== null && v5.stability_rate >= 0.99;
     const coveragePass = Object.values(coverage).every((item) => item.pass);
+    const v5Relation = relationQualityStats(
+      entries.filter((entry) => entry.arm === 'v5-json'),
+      truthBySample
+    );
+    const relationGatePass = coverage.relations.pass
+      && v5Relation.status === 'EVALUATED'
+      && v5Relation.precision !== null
+      && v5Relation.precision >= 0.95;
     lines.push(`- 完成率门槛：${completionPass ? 'PASS' : 'FAIL'}。`);
     lines.push(`- 目标品牌事实门槛：${targetPass ? 'PASS' : 'FAIL'}。`);
     lines.push(`- 目标核心稳定门槛：${stabilityPass ? 'PASS' : 'FAIL'}。`);
     lines.push(`- 语义真值覆盖（推荐/排名/情绪/已输出关系各 ≥20 已复核实例）：${coveragePass ? 'PASS' : 'NOT EVALUABLE'}。`);
+    lines.push(`- 已输出关系 precision≥0.95：${relationGatePass ? 'PASS' : (coverage.relations.pass ? 'FAIL' : 'NOT EVALUABLE')}（覆盖 ${coverage.relations.count}，precision ${percentage(v5Relation.precision)}）。`);
     lines.push('- 开放式竞品发现允许遗漏；竞品集合 Jaccard 作为诊断指标，不作为整条完成门槛。');
     lines.push('- 实体 precision/recall/canonicalization 只按已复核真值报告；真值不足时 NOT EVALUABLE，不得用 grounding 100% 或 assessed 幸存样本宣布语义门禁通过。');
   }
@@ -505,18 +555,35 @@ async function main() {
       console.log(`[${completed}/${total}] ${entry.arm} ${entry.sample_id} r${entry.repeat}: ${entry.ok ? 'ok' : entry.error?.code}${entry.from_cache ? ' cache' : ''}`);
     }
   );
+  const { map: truthBySample, errors: truthErrors } = loadTruth(options);
+  if (truthErrors.length) {
+    // issue 013 P1：truth.jsonl 存在但内容不满足 schema/哈希/引用校验 -> fail-closed
+    throw new Error(`truth.jsonl 校验失败（${truthErrors.length} 处）：\n- ${truthErrors.join('\n- ')}`);
+  }
+  // 合并 confirmed 真值标签：truth.jsonl 的 confirmed 记录覆盖 LABELING 标签，
+  // 补充样本只有 confirmed 才进入目标评分
+  const labels = new Map(corpus.labels);
+  truthBySample.forEach((truth, sampleId) => {
+    if (truth.review_status !== 'confirmed') return;
+    labels.set(sampleId, {
+      mentioned: Boolean(truth.mentioned),
+      mentions: Number(truth.mentions) || 0,
+      recommended: Boolean(truth.recommendation),
+      rank: truth.rank == null || truth.rank === 'none' ? null : Number(truth.rank),
+      sentiment: truth.sentiment && truth.sentiment !== 'none' ? truth.sentiment : null
+    });
+  });
   const summaries = Object.fromEntries(options.arms.map((arm) => [
     arm,
-    summarizeArm(entries.filter((entry) => entry.arm === arm), corpus.labels)
+    summarizeArm(entries.filter((entry) => entry.arm === arm), labels)
   ]));
-  const truthBySample = loadTruth(options);
   fs.writeFileSync(
     path.join(options.outputDir, 'summary.json'),
     JSON.stringify({ generated_at: new Date().toISOString(), summaries }, null, 2)
   );
   fs.writeFileSync(
     path.join(options.outputDir, 'COMPARISON-REPORT.md'),
-    buildReport({ options, samples, labels: corpus.labels, entries, summaries, truthBySample })
+    buildReport({ options, samples, labels, entries, summaries, truthBySample })
   );
   console.log(JSON.stringify({ output: options.outputDir, summaries }, null, 2));
   await require('../config/database').close();

@@ -180,27 +180,52 @@ function fieldStatusDistribution(entries) {
 }
 
 /**
- * 实体质量（issue 013）：在已复核真值上评估实体 precision/recall/micro-F1 与
- * canonicalization。逐字可定位但把多个品牌合成一个实体、或无依据拆分的实体
- * 必须计错，grounding 不能替代实体正确性。真值缺失或未复核时 NOT_EVALUABLE。
+ * 实体质量（issue 013 span-based）：先按原文 mention span 对齐预测实体与
+ * truth 实体，再计分。逐字可定位但把多个品牌合成一个实体（merged）或无依据
+ * 拆分（split）必须计错；canonicalization 只对 span 对齐正确的实体评估
+ * 名称归一是否正确，不再因“仅名称精确匹配才进分母”而近似恒为 100%。
+ * 真值缺失或未复核时 NOT_EVALUABLE。
  */
 function extractPredictedEntities(result = {}) {
   const structure = result.analysis_structure;
-  if (!Array.isArray(structure?.entities)) return [];
+  if (!structure || !Array.isArray(structure.entities)) return [];
+  const mentionsByEntity = new Map();
+  (Array.isArray(structure.mentions) ? structure.mentions : []).forEach((mention) => {
+    if (!mention || !mention.entity_id) return;
+    if (!mentionsByEntity.has(mention.entity_id)) mentionsByEntity.set(mention.entity_id, []);
+    mentionsByEntity.get(mention.entity_id).push({
+      start: Number(mention.start),
+      end: Number(mention.end),
+      surface_form: String(mention.surface_form || '')
+    });
+  });
   return structure.entities.map((entity) => ({
     name: String(entity?.name || '').trim(),
     surface_forms: (Array.isArray(entity?.surface_forms) ? entity.surface_forms : [])
       .map((value) => String(value || '').trim())
-      .filter(Boolean)
+      .filter(Boolean),
+    mentions: mentionsByEntity.get(entity?.entity_id) || []
   })).filter((entity) => entity.name);
 }
 
+function spansOverlap(left, right) {
+  return Number(left.start) < Number(right.end) && Number(right.start) < Number(left.end);
+}
+
+function alignedTruthEntities(predictedEntity, truthEntities) {
+  const predictedMentions = Array.isArray(predictedEntity.mentions) ? predictedEntity.mentions : [];
+  if (!predictedMentions.length) return [];
+  return truthEntities.filter((truthEntity) => (
+    (Array.isArray(truthEntity.mentions) ? truthEntity.mentions : []).some((truthMention) => (
+      predictedMentions.some((predictedMention) => spansOverlap(predictedMention, truthMention))
+    ))
+  ));
+}
+
 function entityQualityStats(entries, truthBySample = new Map()) {
-  const totals = { tp: 0, fp: 0, fn: 0, merged: 0, split: 0 };
+  const totals = { tp: 0, fp: 0, fn: 0, merged: 0, split: 0, canonical_ok: 0, canonical_evaluated: 0 };
   let evaluatedSamples = 0;
   let missingTruthSamples = 0;
-  let canonicalMatched = 0;
-  let canonicalEvaluated = 0;
   (Array.isArray(entries) ? entries : []).forEach((entry) => {
     if (!entry?.ok || !entry.result) return;
     const predicted = extractPredictedEntities(entry.result);
@@ -210,36 +235,38 @@ function entityQualityStats(entries, truthBySample = new Map()) {
       return;
     }
     evaluatedSamples += 1;
-    const expectedNames = truth.entities.map((entity) => String(entity.canonical_name || '').trim()).filter(Boolean);
-    const predictedNames = predicted.map((entity) => entity.name);
-    predictedNames.forEach((name) => {
-      if (expectedNames.includes(name)) {
-        totals.tp += 1;
-        const truthEntity = truth.entities.find((entity) => entity.canonical_name === name);
-        canonicalEvaluated += 1;
-        if (truthEntity && name === String(truthEntity.canonical_name || '').trim()) canonicalMatched += 1;
-      } else {
-        totals.fp += 1;
-      }
-    });
-    expectedNames.forEach((name) => {
-      if (!predictedNames.includes(name)) totals.fn += 1;
-    });
-    // 组合实体：一个预测实体覆盖多个真值实体（surface 词或 name 包含多个真值 canonical）
+    const truthEntities = truth.entities;
+    const matchedTruthNames = new Set();
+    const truthHitCount = new Map();
     predicted.forEach((entity) => {
-      const hits = expectedNames.filter((name) => (
-        entity.name === name
-        || entity.surface_forms.some((surface) => surface.includes(name) || name.includes(surface))
-      ));
-      if (hits.length > 1) totals.merged += 1;
+      const aligned = alignedTruthEntities(entity, truthEntities);
+      if (aligned.length === 0) {
+        totals.fp += 1;
+        return;
+      }
+      if (aligned.length > 1) {
+        // 组合实体：一个预测实体覆盖多个真值实体 -> 计 fp，被覆盖真值计 fn
+        totals.merged += 1;
+        totals.fp += 1;
+        return;
+      }
+      const truthEntity = aligned[0];
+      const truthName = String(truthEntity.canonical_name || '').trim();
+      matchedTruthNames.add(truthName);
+      const previousHits = truthHitCount.get(truthName) || 0;
+      truthHitCount.set(truthName, previousHits + 1);
+      if (previousHits > 0) {
+        // 无依据拆分：多个预测实体对齐同一 truth 实体 -> 后续预测计 fp
+        totals.split += 1;
+        totals.fp += 1;
+        return;
+      }
+      totals.tp += 1;
+      totals.canonical_evaluated += 1;
+      if (String(entity.name) === truthName) totals.canonical_ok += 1;
     });
-    // 无依据拆分：一个真值 canonical 被多个预测实体覆盖
-    expectedNames.forEach((name) => {
-      const covering = predicted.filter((entity) => (
-        entity.name === name
-        || entity.surface_forms.some((surface) => surface.includes(name) || name.includes(surface))
-      ));
-      if (covering.length > 1) totals.split += 1;
+    truthEntities.forEach((truthEntity) => {
+      if (!matchedTruthNames.has(String(truthEntity.canonical_name || '').trim())) totals.fn += 1;
     });
   });
   if (!evaluatedSamples) {
@@ -265,10 +292,172 @@ function entityQualityStats(entries, truthBySample = new Map()) {
     precision,
     recall,
     micro_f1: microF1,
-    canonicalization_accuracy: canonicalEvaluated ? canonicalMatched / canonicalEvaluated : null,
+    canonicalization_accuracy: totals.canonical_evaluated
+      ? totals.canonical_ok / totals.canonical_evaluated
+      : null,
     merged_entity_count: totals.merged,
     split_entity_count: totals.split
   };
+}
+
+/**
+ * 已输出竞品关系真实计分（issue 013 P0 修复）：预测关系（entity_id -> relation）
+ * 与 truth relations 计算 TP/FP/FN 与 micro precision/recall/F1。
+ * 覆盖样本数达标不等于关系正确；关系全错时 precision 必须为 0，不能 PASS。
+ */
+function relationQualityStats(entries, truthBySample = new Map()) {
+  const totals = { tp: 0, fp: 0, fn: 0 };
+  let evaluatedSamples = 0;
+  let missingTruthSamples = 0;
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    if (!entry?.ok || !entry.result) return;
+    const structure = entry.result.analysis_structure;
+    const truth = truthBySample.get(entry.sample_id);
+    if (!truth || truth.review_status !== 'confirmed' || !Array.isArray(truth.relations)) {
+      if (structure) missingTruthSamples += 1;
+      return;
+    }
+    if (!structure || !Array.isArray(structure.entities) || !Array.isArray(structure.competitor_relations)) {
+      return;
+    }
+    evaluatedSamples += 1;
+    const nameById = new Map(structure.entities.map((entity) => [
+      entity.entity_id,
+      String(entity?.name || '').trim()
+    ]));
+    const predicted = new Set(structure.competitor_relations
+      .map((relation) => {
+        const name = nameById.get(relation.entity_id);
+        return name ? `${name}::${relation.relation}` : null;
+      })
+      .filter(Boolean));
+    const expected = new Set((Array.isArray(truth.relations) ? truth.relations : [])
+      .map((relation) => `${String(relation.canonical_name || '').trim()}::${relation.relation}`)
+      .filter(Boolean));
+    predicted.forEach((key) => {
+      if (expected.has(key)) totals.tp += 1;
+      else totals.fp += 1;
+    });
+    expected.forEach((key) => {
+      if (!predicted.has(key)) totals.fn += 1;
+    });
+  });
+  if (!evaluatedSamples) {
+    return {
+      status: 'NOT_EVALUABLE',
+      evaluated_samples: 0,
+      reason: missingTruthSamples ? '缺少已复核关系真值' : '无成功结果'
+    };
+  }
+  const precision = totals.tp + totals.fp > 0 ? totals.tp / (totals.tp + totals.fp) : null;
+  const recall = totals.tp + totals.fn > 0 ? totals.tp / (totals.tp + totals.fn) : null;
+  const microF1 = precision !== null && recall !== null && precision + recall > 0
+    ? (2 * precision * recall) / (precision + recall)
+    : null;
+  return {
+    status: 'EVALUATED',
+    evaluated_samples: evaluatedSamples,
+    tp: totals.tp,
+    fp: totals.fp,
+    fn: totals.fn,
+    precision,
+    recall,
+    micro_f1: microF1
+  };
+}
+
+function answerSha256(text) {
+  return require('node:crypto').createHash('sha256').update(String(text || '')).digest('hex');
+}
+
+/**
+ * truth schema v3 严格校验（issue 013 P1 修复）：缺字段、哈希不匹配、
+ * 重复 canonical_name、relation 引用悬空、span 与原文不一致、
+ * 未在冻结语料中的 sample_id 均返回错误；调用方必须 fail-closed。
+ */
+function validateTruthEntry(entry, sampleById = new Map()) {
+  const errors = [];
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return ['truth 条目必须是对象'];
+  }
+  if (!String(entry.sample_id || '').trim()) errors.push('缺少 sample_id');
+  if (!['confirmed', 'pending_review'].includes(entry.review_status)) {
+    errors.push(`review_status 无效: ${String(entry.review_status)}`);
+  }
+  if (entry.review_status === 'confirmed') {
+    if (!String(entry.reviewer || '').trim()) errors.push('confirmed 必须记录 reviewer');
+    if (!String(entry.reviewed_at || '').trim()) errors.push('confirmed 必须记录 reviewed_at');
+  }
+  if (!/^[a-f0-9]{64}$/i.test(String(entry.answer_sha256 || ''))) {
+    errors.push('answer_sha256 必须是 64 位 hex');
+  }
+  const sample = entry.sample_id ? sampleById.get(entry.sample_id) : undefined;
+  if (!sample) {
+    errors.push(`sample_id 未在冻结语料中: ${entry.sample_id}`);
+  } else if (answerSha256(sample.response_text) !== String(entry.answer_sha256 || '').toLowerCase()) {
+    errors.push(`answer_sha256 与冻结回答不一致: ${entry.sample_id}`);
+  }
+  if (!Array.isArray(entry.entities)) {
+    errors.push('entities 必须是数组');
+  } else {
+    const names = new Set();
+    entry.entities.forEach((entity, index) => {
+      const field = `entities[${index}]`;
+      if (!entity || typeof entity !== 'object' || Array.isArray(entity)) {
+        errors.push(`${field} 必须是对象`);
+        return;
+      }
+      const name = String(entity.canonical_name || '').trim();
+      if (!name) errors.push(`${field}.canonical_name 缺失`);
+      else if (names.has(name)) errors.push(`${field}.canonical_name 重复: ${name}`);
+      names.add(name);
+      if (!Array.isArray(entity.surface_forms) || !entity.surface_forms.length) {
+        errors.push(`${field}.surface_forms 必须非空`);
+      }
+      if (!Array.isArray(entity.mentions)) {
+        errors.push(`${field}.mentions 必须是数组`);
+      } else {
+        entity.mentions.forEach((mention, j) => {
+          const mentionField = `${field}.mentions[${j}]`;
+          if (!mention || typeof mention !== 'object' || Array.isArray(mention)) {
+            errors.push(`${mentionField} 必须是对象`);
+            return;
+          }
+          if (!sample) return;
+          const text = String(sample.response_text || '');
+          const start = Number(mention.start);
+          const end = Number(mention.end);
+          const surface = String(mention.surface_form || '');
+          if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > text.length || end <= start) {
+            errors.push(`${mentionField} span 无效`);
+          } else if (text.slice(start, end) !== surface) {
+            errors.push(`${mentionField} span 与 surface_form 不一致`);
+          }
+        });
+      }
+    });
+  }
+  if (!Array.isArray(entry.relations)) {
+    errors.push('relations 必须是数组');
+  } else {
+    const names = new Set((Array.isArray(entry.entities) ? entry.entities : [])
+      .map((entity) => String(entity?.canonical_name || '').trim())
+      .filter(Boolean));
+    entry.relations.forEach((relation, index) => {
+      const field = `relations[${index}]`;
+      if (!relation || typeof relation !== 'object' || Array.isArray(relation)) {
+        errors.push(`${field} 必须是对象`);
+        return;
+      }
+      if (!names.has(String(relation.canonical_name || '').trim())) {
+        errors.push(`${field}.canonical_name 未在 entities 中: ${relation.canonical_name}`);
+      }
+      if (!['competitor', 'non_competitor'].includes(relation.relation)) {
+        errors.push(`${field}.relation 无效: ${relation.relation}`);
+      }
+    });
+  }
+  return errors;
 }
 
 /**
@@ -328,6 +517,7 @@ function summarizeArm(entries, labels = new Map()) {
 }
 
 module.exports = {
+  answerSha256,
   competitionJaccard,
   distribution,
   entityQualityStats,
@@ -336,6 +526,8 @@ module.exports = {
   pairwiseDiff,
   percentile,
   precisionRecallF1,
+  relationQualityStats,
   semanticTruthCoverage,
-  summarizeArm
+  summarizeArm,
+  validateTruthEntry
 };

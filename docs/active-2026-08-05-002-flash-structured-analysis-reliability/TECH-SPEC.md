@@ -850,6 +850,12 @@ work/geo-flash-structured-2026-08-05/
 
 标注人员不查看各实验臂输出；有争议样本记录裁决理由。每个进入门槛的语义指标至少有 20 个可评估真值实例，否则只报告结果、不声称通过该项门槛，并补样本后重跑。
 
+真值加载必须 fail closed。每条记录至少携带 `truth_version`、唯一 `sample_id`、`answer_sha256`、`review_status`、`reviewer`、`reviewed_at` 和 `dispute`；只有逐记录 `confirmed` 且答案哈希匹配冻结 manifest 的记录可进入评分。坏 JSON、重复 ID、缺字段、未知/缺失样本、陈旧哈希、越界 span、surface form 与 span 不一致、关系引用未知实体时必须终止评测，不得静默跳过或覆盖。
+
+实体 canonicalization 先按原文 mention span 对齐预测与真值，再判断 mention 是否归入正确 truth entity。所有可对齐 truth mention 均进入分母，错误标准名、错误合并和错误拆分必须计错。竞品关系以对齐后的 truth entity ID 比较预测与真值，报告 micro precision/recall/F1；预注册的 relation precision 门槛必须读取该真实 precision，不能用“非空关系样本数”或不同重复间 Jaccard 代替。
+
+冻结 manifest 按 `answer_sha256` 识别重复回答。历史 009 数据不回写；新的 014/015 实验修订必须预注册去重或重复簇权重规则，防止同一回答重复贡献多个独立样本权重。
+
 ### 7.4 实验臂
 
 | 实验臂 | 分析合同 | 温度 | 目的 |
@@ -943,7 +949,7 @@ assessed 幸存样本中的推荐 21/21、情绪 21/21 和排名 4/4 不能证�
 
 ## 8. 实现切片
 
-当前进度：对应 issue 001–008 的 U1–U6 和候选正式入口接线已经完成；U7/issue 009 已完成第二轮真实 A/B/C，但门槛失败。U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。U10/issue 012 `semantic_evidence_v2` 双角色证据合同已完成并关闭：`CONTRACT_REVISION=three_track_partial_v2`，S43 真实 Flash 3/3 目标语义 complete、推荐/情绪 assessed 且与真值一致。U11/issue 013 真值与评测合同审计代码完成但 blocked：benchmark 已具备字段状态/降级率、实体质量与真值覆盖 NOT_EVALUABLE 报告能力，补充样本目标级标注与已输出关系/实体级真值等待人工复核（见 TRUTH-REVIEW-QUEUE.md）。U12/issue 014–015 探针与全量门禁待 013 复核确认后执行。
+当前进度：对应 issue 001–008 的 U1–U6 和候选正式入口接线已经完成；U7/issue 009 已完成第二轮真实 A/B/C，但门槛失败。U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。U10/issue 012 `semantic_evidence_v2` 双角色证据合同已完成并关闭：`CONTRACT_REVISION=three_track_partial_v2`，S43 真实 Flash 3/3 目标语义 complete、推荐/情绪 assessed 且与真值一致。U11/issue 013 评测合同 P0/P1 返工完成但仍 blocked：全局确认泄漏、关系假门禁（真实 TP/FP/FN 计分并接入 precision≥0.95 门禁）、canonicalization 恒 100%（改为 mention span 对齐计分）、truth loader 不 fail-closed（严格 schema/唯一 ID/answer_sha256/span/引用校验）均已修复；`manifest.json`（55 条 + S18/S19/S20 重复簇）与 `truth.v3-template.jsonl`（55 条 pending_review，541 实体/504 关系/1259 span 通过严格校验）已生成。剩余阻塞是人工裁决盲审分歧并逐条签字（见 TRUTH-REVIEW-QUEUE.md）。U12/issue 014–015 必须等待 013 人工裁决和 truth preflight 全部通过。
 
 ### U1. 冻结真实语料与评测合同
 

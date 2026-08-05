@@ -289,23 +289,54 @@ S43（目标唯一命中，v1 下属 59.3% 降级样本）真实 `deepseek-v4-fl
 
 ---
 
-## 2026-08-05 issue 013：真值与评测合同审计（blocked，等待人工复核）
+## 2026-08-05 issue 013：真值与评测合同复审（blocked，技术合同与人工真值均未完成）
 
 ### 审计结论
 
-- 旧 40 条目标级标注有全局 `human_review_confirmed: yes`（v3 时代标记），只覆盖旧语料本身。
-- 补充样本 S41–S55 目标级标注标记“待复核”，无独立人工确认记录；旧全局标记不能自动扩展。
-- **已输出竞品关系真值缺失**（LABELING.md 无 relations 标注，0 个实例）。
-- **实体级真值缺失**（truth.jsonl 不存在）：实体 precision/recall/canonicalization 无法评估。
-- 排名实例 20 个（旧 8 + 补充 12），但补充部分未复核。
+- `LABELING.md` 同时存在全局 `human_review_confirmed: yes` 和 S41–S55“待复核”块；当前解析器只读取全局确认位，因此补充样本可能被错误纳入正式门禁，而不是被安全隔离。
+- 旧 40 条中有 10 条遗留 `entity_labels_json`（135 个实体标签）可迁移为待复核草案，但没有逐记录 reviewer/date/hash，不能视为新合同下的 confirmed truth；“关系真值完全为 0”的旧结论不准确。
+- `truth.jsonl` 不存在，现有 `truth.template.jsonl` 缺少答案哈希、mention span、目标命中别名、候选分组/顺序等必要字段，不能直接填写并改名启用。
+- 当前 `semanticTruthCoverage` 对 relations 只统计非空真值样本数，没有预测关系对真值的 TP/FP/FN；预注册的 relation precision ≥0.95 尚未实现。
+- 当前 canonicalization 仅在预测名称已 exact-match 真值标准名后进入分母，正常情况下近似恒为 100%，不能评价错误归并、拆分或标准名错误。
+- S18、S19、S20 回答文本完全相同；下一实验修订需按 `answer_sha256` 去重或将重复簇权重固定为 1。
 
-### 代码交付（已提交）
+### 已有代码能力与复审缺口
 
-- `GeoFlashStructuredBenchmarkService` 新增 `fieldStatusDistribution`（三轨/字段状态分布、assessed 可用率、阶段 2 降级率）、`entityQualityStats`（实体 precision/recall/micro-F1/canonicalization、组合实体与无依据拆分计错、真值不足 NOT_EVALUABLE）、`semanticTruthCoverage`（推荐/排名/情绪/已输出关系各 ≥20 已复核实例检查）。
+- `fieldStatusDistribution` 的三轨/字段状态、assessed 可用率和阶段 2 降级率报告有效，可保留。
+- `entityQualityStats` 的 exact-name precision/recall 和 NOT_EVALUABLE 基础能力可保留，但 canonicalization 计分必须改为 truth mention span 对齐。
+- `semanticTruthCoverage` 的推荐/排名/情绪覆盖检查可作为基础，但关系维度必须增加真实 precision/recall/F1，不能用覆盖计数代替质量门禁。
 - benchmark 报告新增“字段状态与阶段 2 降级率”“实体与语义真值”部分；门禁说明增加语义真值覆盖 NOT EVALUABLE 判定。
-- 新增 5 个回归测试（字段分布、实体质量 EVALUATED、组合实体计错、真值缺失 NOT_EVALUABLE、语义覆盖），全部通过。
-- `work/geo-baseline-2026-07-28/truth.template.jsonl`：55 条全部 `pending_review` 的模板（entities/relations 空），人工填写后更名 `truth.jsonl` 即可启用评估。
+- 原有 5 个回归测试通过只证明当前实现自洽，未覆盖全局确认泄漏、严格 truth loader、relation precision 和 span-based canonicalization，不能据此关闭 013。
+
+### 多 agent 逐条核对
+
+- 5 个互不重叠的盲审 agent 已覆盖 S01–S55：共 55 条、541 个实体、504 条关系；所有草案保持 `ai_reviewed_pending_human`。
+- 两个互盲 agent 独立复核 S41–S55 目标标签：10/15 完全一致，S46 推荐、S50 排名和 S53 法律实体映射需人工裁决；S47/S48 未提及目标，sentiment 必须为 `null`。
+- 现有 S41–S55 补充标注与第一份盲审有 14/15 条不一致，不能直接从“待复核”改为“已复核”。
+- 逐样本争议与 AI 草案路径见 [TRUTH-REVIEW-QUEUE.md](TRUTH-REVIEW-QUEUE.md)。
 
 ### 阻塞状态
 
-按用户约定，缺少真实人工确认不得冒充人工签字、不得关闭 013。具体复核条目（补充样本标注、已输出关系真值、实体级真值）见 [TRUTH-REVIEW-QUEUE.md](TRUTH-REVIEW-QUEUE.md)。013 保持 blocked，014 不启动，010 保持阻塞。
+013 需要先修复评测合同，再基于新 truth schema 完成人工裁决和 preflight；AI 草案不能冒充人工签字。013 保持 blocked，014/015 不启动，010 保持阻塞。
+
+---
+
+## 2026-08-05 issue 013 评测合同返工（P0/P1 修复完成）
+
+多 agent 盲审发现 5 项评测合同缺口，本次全部修复：
+
+| 缺口 | 修复 |
+| --- | --- |
+| P0 全局确认泄漏（S41–S55 被 LABELING 全局位错误带入门禁） | `loadCorpus` 删除补充样本的 LABELING 标签；目标标签只从 truth v3 `confirmed` 记录合并 |
+| P0 关系假门禁（只数覆盖样本，不计算 TP/FP/FN） | `relationQualityStats` 计算真实 precision/recall/F1，门禁要求 precision≥0.95 |
+| P1 canonicalization 近似恒 100%（只在 exact-name 匹配后进分母） | `entityQualityStats` 改为 mention span 对齐计分，组合/拆分计错 |
+| P1 loader 不 fail-closed | `validateTruthEntry` 严格校验 schema/唯一 ID/answer_sha256/span/引用/复核元数据；`loadTruth` 任一错误终止评测 |
+| P1 模板缺 answer hash/span/复核元数据 | 发布 `manifest.json`（55 条 + 重复簇 S18/S19/S20）与 `truth.v3-template.jsonl`（55 条 pending_review） |
+
+产物与验证：
+
+- `work/geo-baseline-2026-07-28/manifest.json`：55 条 `answer_sha256`，S18/S19/S20 重复簇 `dup1`。
+- `work/geo-baseline-2026-07-28/truth.v3-template.jsonl`：541 实体 / 504 关系 / 1259 span，全部 `pending_review`，**通过严格校验 0 错误**（含 emoji 回答的 UTF-16 span 一致性）。
+- 新增 7 个 benchmark 服务回归测试；全量相关测试 198 个全部通过。
+
+剩余阻塞：人工裁决 S46/S50/S53 等 5 处盲审分歧并逐条签字（AI 草案不升级为 confirmed），完成后 013 才可关闭。014/015/010 保持阻塞，正式入口仍走 v4。
