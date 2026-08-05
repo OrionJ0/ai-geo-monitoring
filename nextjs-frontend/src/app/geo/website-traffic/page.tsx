@@ -84,11 +84,14 @@ function changeTone(value: string, lowerIsBetter = false) {
 }
 
 function PageName({ row }: { row: WebsitePageRow }) {
+  const pathLabel = row.pathCollision
+    ? `${row.path} · 同路径记录 ${row.pathCollision.ordinal}/${row.pathCollision.count}`
+    : row.path;
   return (
     <div className={styles.pageNameCell}>
       <span className={styles.pageTitle}>{row.title || '—'}</span>
-      <Tooltip title={row.path} trigger={['hover']}>
-        <span className={styles.pagePath}>{row.path}</span>
+      <Tooltip title={pathLabel} trigger={['hover']}>
+        <span className={styles.pagePath}>{pathLabel}</span>
       </Tooltip>
     </div>
   );

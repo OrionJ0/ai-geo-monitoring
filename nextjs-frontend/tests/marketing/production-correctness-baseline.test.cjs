@@ -88,11 +88,17 @@ test('网站流量 decoder 将 83/82 冻结为 PARTIAL 分区证据', () => {
   );
 });
 
-test('现役页面 decoder 保留两个同路径 pageId 但尚无稳定消歧元数据', () => {
+test('现役页面 decoder 保留两个同路径 pageId 和稳定消歧元数据', () => {
   const value = fixture('tongji-page-path-collision.json');
   const traffic = loadTypeScriptModule('lib/marketing/websiteTrafficTypes.ts');
   traffic.assertWebsitePageReport(value.response, value.query);
   assert.equal(new Set(value.response.rows.map((row) => row.pageId)).size, 2);
   assert.equal(new Set(value.response.rows.map((row) => row.path)).size, 1);
-  assert.ok(value.response.rows.every((row) => row.pathCollision === undefined));
+  assert.deepEqual(
+    value.response.rows.map((row) => ({
+      pageId: row.pageId,
+      ...row.pathCollision
+    })),
+    value.expectedCollision
+  );
 });

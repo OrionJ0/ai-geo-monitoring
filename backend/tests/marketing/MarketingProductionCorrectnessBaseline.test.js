@@ -107,7 +107,13 @@ test('页面基线保留稳定 page identity 并重现分页前同路径碰撞',
   assert.deepEqual(value.response.rows.map((row) => row.pageId), ['1001', '1002']);
   assert.equal(new Set(value.response.rows.map((row) => row.key)).size, 2);
   assert.deepEqual(value.response.rows.map((row) => row.path), ['/', '/']);
-  assert.ok(value.response.rows.every((row) => !Object.hasOwn(row, 'pathCollision')));
+  assert.deepEqual(
+    value.response.rows.map((row) => ({
+      pageId: row.pageId,
+      ...row.pathCollision
+    })),
+    value.expectedCollision
+  );
   assert.deepEqual(value.expectedOrder, ['1001', '1002']);
   assert.equal(value.identityRule.numeric, 'BigInt ascending');
   assert.equal(value.identityRule.opaque, 'Unicode code-point ascending');

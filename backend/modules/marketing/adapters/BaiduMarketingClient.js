@@ -186,6 +186,10 @@ function text(value) {
   return String(value ?? '').trim();
 }
 
+function validPageIdentity(value) {
+  return /^[^\u0000-\u001f\u007f]{1,200}$/u.test(value);
+}
+
 function documentedAllowlist(manifest) {
   if (
     manifest?.status === 'VERIFIED'
@@ -956,7 +960,7 @@ function normalizeTongjiPageReportResult(
       || dimension.length !== 1
       || !item
       || typeof item !== 'object'
-      || !/^\d+$/u.test(pageId)
+      || !validPageIdentity(pageId)
       || rawUrl.length > 4096
       || seen.has(pageId)
       || !Array.isArray(metricRow)

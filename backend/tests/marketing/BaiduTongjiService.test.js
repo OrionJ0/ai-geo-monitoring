@@ -1455,6 +1455,85 @@ test('website page contract filters, sorts and paginates verified Baidu page row
   assert.deepEqual(secondPage.rows.map((row) => row.pageId), ['202']);
 });
 
+test('website page collisions are assigned before pagination with stable page identity ordering', async (t) => {
+  const { service } = await createService(t, {
+    capabilities: { qualityMetrics: false, pageReports: true },
+    provider: {
+      async readPageReport() {
+        return {
+          view: 'landing',
+          total: 7,
+          rows: [
+            {
+              pageId: '10', pageUrl: 'https://active.example.test/same',
+              visits: '8', contributionPageviews: '11', bounceRate: '40',
+              averageVisitTimeSeconds: '20', averageVisitPages: '2'
+            },
+            {
+              pageId: '2', pageUrl: 'https://active.example.test/same',
+              visits: '8', contributionPageviews: '12', bounceRate: '50',
+              averageVisitTimeSeconds: '21', averageVisitPages: '3'
+            },
+            {
+              pageId: 'opaque-b', pageUrl: 'https://active.example.test/same',
+              visits: '8', contributionPageviews: '13', bounceRate: '60',
+              averageVisitTimeSeconds: '22', averageVisitPages: '4'
+            },
+            {
+              pageId: 'opaque-a', pageUrl: 'https://active.example.test/same',
+              visits: '8', contributionPageviews: '14', bounceRate: '70',
+              averageVisitTimeSeconds: '23', averageVisitPages: '5'
+            },
+            {
+              pageId: '\uE000', pageUrl: 'https://active.example.test/same',
+              visits: '8', contributionPageviews: '15', bounceRate: '71',
+              averageVisitTimeSeconds: '24', averageVisitPages: '6'
+            },
+            {
+              pageId: '😀', pageUrl: 'https://active.example.test/same',
+              visits: '8', contributionPageviews: '16', bounceRate: '72',
+              averageVisitTimeSeconds: '25', averageVisitPages: '7'
+            },
+            {
+              pageId: '20', pageUrl: 'https://active.example.test/unique',
+              visits: '7', contributionPageviews: '10', bounceRate: '30',
+              averageVisitTimeSeconds: '19', averageVisitPages: '1'
+            }
+          ]
+        };
+      }
+    }
+  });
+  const input = {
+    device: 'all', from: '2026-07-01', to: '2026-07-30', view: 'landing',
+    pageSize: 2, sortBy: 'visits', sortOrder: 'descend', query: ''
+  };
+  const first = await service.readProjectWebsitePages('11', { ...input, page: 1 });
+  const second = await service.readProjectWebsitePages('11', { ...input, page: 2 });
+  const third = await service.readProjectWebsitePages('11', { ...input, page: 3 });
+  const fourth = await service.readProjectWebsitePages('11', { ...input, page: 4 });
+  const rows = [...first.rows, ...second.rows, ...third.rows, ...fourth.rows];
+  assert.deepEqual(rows.map((row) => row.pageId), [
+    '2', '10', 'opaque-a', 'opaque-b', '\uE000', '😀', '20'
+  ]);
+  assert.deepEqual(rows.map((row) => row.pathCollision), [
+    { ordinal: 1, count: 6 },
+    { ordinal: 2, count: 6 },
+    { ordinal: 3, count: 6 },
+    { ordinal: 4, count: 6 },
+    { ordinal: 5, count: 6 },
+    { ordinal: 6, count: 6 },
+    null
+  ]);
+  const resized = await service.readProjectWebsitePages('11', {
+    ...input, page: 1, pageSize: 4
+  });
+  assert.deepEqual(
+    resized.rows.map((row) => [row.pageId, row.pathCollision]),
+    rows.slice(0, 4).map((row) => [row.pageId, row.pathCollision])
+  );
+});
+
 test('website page report survives a process restart and falls back to the persisted snapshot', async (t) => {
   let now = Date.parse('2026-07-30T04:00:00.000Z');
   const first = await createService(t, {
