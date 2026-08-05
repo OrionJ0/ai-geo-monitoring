@@ -48,7 +48,7 @@
 - `docs/active-2026-08-05-006-marketing-api-resourceization/` 是广告页面读 API 最小化的唯一需求归属。不得另建 `dashboard?view=...`、页面 BFF 或第二套资源化需求与其竞争；市场总览、广告表现、关键词和搜索词的消费者清单以现役逐页矩阵和 006 为准。
 - 006 的 GoodieAI 广告读取接口必须以一份 OpenAPI 3.1 文件作为唯一机器可读合同；`docs/API.md` 只保留面向人的现役摘要，不复制字段表。合同必须标明请求、响应、空值、错误、缓存、数据源和上游调用行为；前端 wire type 由该合同生成，后端用合同测试校验实际响应。在 006 交付该文件前，不得声称仓库已有正式 OpenAPI 合同。
 - 百度上游 API 不写入 GoodieAI OpenAPI，也不复制整套官方文档。`backend/modules/marketing/contracts/baidu/` 的版本化 manifest 是实际消费端点、报告编号/方法、字段、官方来源、验证日期、能力状态和预算的唯一机器真值；005 只审计补漏、保持脱敏 fixture/合同测试并拆分 Provider，不建第二套手写上游文档或实时漂移平台。
-- 当前生产仍使用返回 `campaigns`、`adGroups`、`keywords`、`searchTerms` 的完整 Dashboard；006 仍是草案，未完成 R2 前不得把轻量 Dashboard 或三个详情资源描述为正式生效。
+- 当前生产已部署 006 R1 additive：市场总览仍读取返回 `campaigns`、`adGroups`、`keywords`、`searchTerms` 的完整 Dashboard，广告表现、关键词和搜索词详情页已分别使用 `/ad-hierarchy`、`/keywords`、`/search-terms` 并钉扎同一 revision。未完成 R2 前不得把轻量 Dashboard、旧数组和旧兼容实现描述为已经正式硬切或退役。
 - 页面只能调用 GoodieAI 内部 API，不得从浏览器直接调用百度。详情资源只读取已落库完整快照并钉扎同一 `revision`，不得各自触发百度上游请求；快照过期检查和刷新仍由唯一后端协调路径合并，同一项目请求突发不得按页面数重复刷新四份报告。
 - API 治理的验收顺序固定为：口径正确 → 不重复调用上游 → 页面最小返回体。接口命名或抽象整洁不能压过市场负责人看到正确、可解释数据的目标。
 - 003 统一 OAuth、006 广告读 API 资源化、007 数据正确性和 005 Provider 模块化是不同事实面。006 的代码与 003 没有强技术依赖，但生产发布/观察窗口不得重叠；007 的广告双周期依赖 006，百度统计来源分区和页面消歧不依赖 006；005 必须在正确性工作关闭后最后实施。

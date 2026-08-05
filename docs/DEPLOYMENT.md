@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-05 A2 审查加固 Git Bundle 已部署 `58469e29214ccc28e989f07d54af873d9c0ba801`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-06 营销 API 资源化 R1 修正版 Git Bundle 已部署 `d5695402d9b39c0ce04108bc36b6d4aa02daac13`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -91,6 +91,15 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 - 生产只读探针在 Token 版本 6 上再次返回搜索推广计划 32、单元 74、关键词 183、搜索词 14，以及百度统计站点 1、趋势行 1；两个产品均为 `VERIFIED/HAS_DATA`，前后业务状态为 `UNCHANGED`，未刷新 Token、重新授权、暂停绑定或写业务数据。
 - `/usr/bin/google-chrome` 从唯一正式域名验收市场总览、广告表现、关键词、搜索词、网站流量、咨询、订单和管理设置页。八个入口均为 200；管理页分别显示两个 `VERIFIED`，更新弹窗只有一个非秘密用户名文本框、零密码框和统一 OAuth 说明。截图仅保存在服务器 `output/playwright/a2-hardening-production-58469e2/`。
 - 当前正式路径已使用统一 Access Context、刷新租约与冷却、绑定验证上下文栅栏和管理页晚到请求隔离；旧统计 Token、旧路由、旧 service、fallback、feature flag 和现役双 Token 文档均不存在。003 已满足关闭条件，下一实施门禁为 006。
+
+### 2026-08-06 营销 API 资源化 R1 正式发布与验收
+
+- 初始 R1 候选 `c65f6c6e30c193a6ec978b3552a3911a4e5f5499` 发布后，生产核验发现搜索词页仍从完整 Dashboard 明细数组解析下钻身份，因此没有把该候选作为 R1 关闭版本。修正提交 `d5695402d9b39c0ce04108bc36b6d4aa02daac13` 已用独立完整 Git Bundle 正式快进发布，Bundle SHA-256 为 `a4577c12ca84996417878cacc8fff5e76d3bf3a42d19ce109b042897aa62d513`；未混入并行的 0805-002 工作，也没有直接编辑服务器源码。
+- 发布前备份为 `/opt/ai-geo-monitoring/backend/releases/database.pre-d5695402d9b39c0ce04108bc36b6d4aa02daac13.sqlite`，权限 `600`。正式部署通过后端 994 项、营销 210 项、官网 31 项、咨询 35 项、前端 104 项、lint、TypeScript/40 路由生产构建和单 worker Chrome 45 项；营销迁移 `001`–`015` 全部应用且无 pending。
+- 发布后服务器 `HEAD`、公开 `/api/health` 与 `/api/frontend-health` 均精确为 `d5695402d9b39c0ce04108bc36b6d4aa02daac13`，`/api/ready` 为 `ready`，服务器工作区干净；`ai-geo-backend.service` 和 `ai-geo-frontend.service` 各只有一个活动主进程。部署器已删除上传 Bundle。
+- `/usr/bin/google-chrome` 从唯一支持域名验收市场总览、广告表现、关键词、关键词下钻搜索词和全量搜索词。详情资源全部携带并回显同一 opaque revision，分页分别为关键词 10/10、搜索词本期 20/20、上期 1/1；截图只保存在服务器 `output/playwright/r1-production-d569540/`。市场总览中官网表单模块按既有生产配置保持 `DISABLED/503`，没有被营销 fallback 或 fixture 掩盖。
+- 当前正式路径为：市场总览继续读取完整 Dashboard 根；广告表现、关键词和搜索词先读取同一根 revision，再分别调用 `/ad-hierarchy`、`/keywords` 和本期/上期 `/search-terms`。三个详情 hook/page 已不读取 Dashboard 四个明细数组；关键词下钻通过账户、计划、单元和关键词名称事实元组稳定消歧，不向搜索词伪造 `keywordId`。
+- R1 仍按 additive 边界保留 Dashboard 四个旧数组和旧 adapter/测试，以便市场总览在 R2 前继续运行；它们不是详情页 fallback。轻量 Dashboard 硬切、旧数组与兼容代码删除必须由后续独立 R2 Bundle 完成，当前不得把 R1 描述为旧合同已退役。
 
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`
