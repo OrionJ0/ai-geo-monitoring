@@ -381,4 +381,4 @@ service → facade → product client → HTTP kernel → shared errors
 - 建议第一个 issue：在旧实现仍为正式真值时冻结脱敏黑盒合同。
 - 是否适合 TDD：适合，先让旧实现通过特征测试，再逐产品移动。
 - Tech Spec path: `docs/active-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md`
-- Recommended next step: Issue 001 黑盒等价合同已在旧单体上通过；进入 Issue 002，先抽取唯一安全 HTTP 内核与 OAuth 客户端，中间状态不发布。
+- Recommended next step: Issues 001–002 已关闭；进入 Issue 003，把四报表、QPS、整轮预算和双读完整移动到 `BaiduSearchAdsClient`，中间状态继续不发布。

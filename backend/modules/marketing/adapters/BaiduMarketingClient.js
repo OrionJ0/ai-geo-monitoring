@@ -1,7 +1,14 @@
 const crypto = require('node:crypto');
 const {
-  verifyBaiduCallbackSignature
-} = require('../domain/baiduOAuthSignature');
+  BaiduContractBlockedError,
+  BaiduMarketingError,
+  isReauthorizationCode
+} = require('./baidu/BaiduErrors');
+const {
+  BaiduHttpKernel,
+  RAW_RESPONSE_BYTES
+} = require('./baidu/BaiduHttpKernel');
+const { BaiduOAuthClient } = require('./baidu/BaiduOAuthClient');
 
 const ONE_MEBIBYTE = 1024 * 1024;
 const REPORT_RESPONSE_BUDGET = 8 * ONE_MEBIBYTE;
@@ -11,14 +18,12 @@ const SEARCH_REPORT_REQUEST_BUDGET = 512;
 const SEARCH_REPORT_ROW_BUDGET = 250_000;
 const SEARCH_REPORT_RESPONSE_BUDGET = 64 * ONE_MEBIBYTE;
 const SEARCH_REPORT_TIME_BUDGET_MS = 120_000;
-const RAW_RESPONSE_BYTES = Symbol('baiduRawResponseBytes');
 const SEARCH_REPORT_BUDGET_LIMITS = Object.freeze({
   maxRequests: SEARCH_REPORT_REQUEST_BUDGET,
   maxRows: SEARCH_REPORT_ROW_BUDGET,
   maxResponseBytes: SEARCH_REPORT_RESPONSE_BUDGET,
   maxDurationMs: SEARCH_REPORT_TIME_BUDGET_MS
 });
-const REAUTHORIZATION_CODES = new Set(['894062', '894063', '894064']);
 const TONGJI_SOURCE_FILTERS = Object.freeze({
   ALL: null,
   BAIDU_PAID: 'searchBaiduPro',
@@ -44,25 +49,6 @@ const TONGJI_SOURCE_REPORTS = Object.freeze({
     dimensionField: 'source_engine_title'
   }
 });
-
-class BaiduMarketingError extends Error {
-  constructor(message, code, status = 502, retryable = false) {
-    super(message);
-    this.code = code;
-    this.status = status;
-    this.retryable = retryable;
-  }
-}
-
-class BaiduContractBlockedError extends BaiduMarketingError {
-  constructor() {
-    super(
-      '百度营销契约尚未达到可运行状态',
-      'BAIDU_CONTRACT_NOT_RUNNABLE',
-      503
-    );
-  }
-}
 
 const SEARCH_REPORT_LEVELS = Object.freeze([
   'campaigns',
@@ -190,31 +176,6 @@ function validPageIdentity(value) {
   return /^[^\u0000-\u001f\u007f]{1,200}$/u.test(value);
 }
 
-function documentedAllowlist(manifest) {
-  if (
-    manifest?.status === 'VERIFIED'
-    && Array.isArray(manifest.productionAllowlist)
-    && manifest.productionAllowlist.length > 0
-  ) {
-    return manifest.productionAllowlist;
-  }
-  if (
-    manifest?.status === 'PILOT_VERIFIED'
-    && Array.isArray(manifest.pilotOutboundAllowlist)
-    && manifest.pilotOutboundAllowlist.length > 0
-  ) {
-    return manifest.pilotOutboundAllowlist;
-  }
-  if (
-    manifest?.status === 'DOCUMENTED_PENDING_PILOT'
-    && Array.isArray(manifest.documentedOutboundAllowlist)
-    && manifest.documentedOutboundAllowlist.length > 0
-  ) {
-    return manifest.documentedOutboundAllowlist;
-  }
-  throw new BaiduContractBlockedError();
-}
-
 function numericUserId(value, field = 'userId') {
   const normalized = typeof value === 'number'
     ? String(value)
@@ -237,207 +198,11 @@ function numericUserId(value, field = 'userId') {
   return number;
 }
 
-function positiveInteger(value, code) {
-  const number = Number(value);
-  if (!Number.isSafeInteger(number) || number <= 0) {
-    throw new BaiduMarketingError(
-      '百度令牌有效期响应无效',
-      code,
-      502
-    );
-  }
-  return number;
-}
-
 function assertString(value, code) {
   if (typeof value !== 'string' || !value) {
     throw new BaiduMarketingError('百度响应字段无效', code, 502);
   }
   return value;
-}
-
-async function readBoundedBody(response, maxResponseBytes) {
-  if (!response.body) return { source: '', totalBytes: 0 };
-  const reader = response.body.getReader();
-  const chunks = [];
-  let totalBytes = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    totalBytes += value.byteLength;
-    if (totalBytes > maxResponseBytes) {
-      try {
-        await reader.cancel();
-      } catch {
-        // The bounded-response error below remains the stable public outcome.
-      }
-      throw new BaiduMarketingError(
-        '百度接口响应超过大小预算',
-        'BAIDU_RESPONSE_TOO_LARGE',
-        502
-      );
-    }
-    chunks.push(Buffer.from(value));
-  }
-  return {
-    source: Buffer.concat(chunks, totalBytes).toString('utf8'),
-    totalBytes
-  };
-}
-
-async function cancelResponseBody(response) {
-  try {
-    await response?.body?.cancel?.();
-  } catch {
-    // The original bounded transport failure remains the stable outcome.
-  }
-}
-
-async function defaultTransport({
-  method,
-  url,
-  headers,
-  json,
-  timeoutMs,
-  maxResponseBytes
-}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: method === 'GET' ? undefined : JSON.stringify(json),
-      signal: controller.signal,
-      redirect: 'error'
-    });
-    if (!response.ok) {
-      await cancelResponseBody(response);
-      throw new BaiduMarketingError(
-        '百度接口返回 HTTP 错误',
-        'BAIDU_HTTP_ERROR',
-        502,
-        response.status === 429 || response.status >= 500
-      );
-    }
-    const contentLength = Number(response.headers.get('content-length') || 0);
-    if (contentLength > maxResponseBytes) {
-      await cancelResponseBody(response);
-      throw new BaiduMarketingError(
-        '百度接口响应超过大小预算',
-        'BAIDU_RESPONSE_TOO_LARGE',
-        502
-      );
-    }
-    const { source, totalBytes } = await readBoundedBody(
-      response,
-      maxResponseBytes
-    );
-    try {
-      const parsed = JSON.parse(source);
-      if (parsed && typeof parsed === 'object') {
-        Object.defineProperty(parsed, RAW_RESPONSE_BYTES, {
-          value: totalBytes,
-          enumerable: false
-        });
-      }
-      return parsed;
-    } catch {
-      throw new BaiduMarketingError(
-        '百度接口返回非 JSON 响应',
-        'BAIDU_RESPONSE_INVALID',
-        502
-      );
-    }
-  } catch (error) {
-    if (error instanceof BaiduMarketingError) throw error;
-    if (error?.name === 'AbortError') {
-      throw new BaiduMarketingError(
-        '百度接口请求超时',
-        'BAIDU_REQUEST_TIMEOUT',
-        504
-      );
-    }
-    throw new BaiduMarketingError(
-      '百度接口网络请求失败',
-      'BAIDU_UPSTREAM_UNAVAILABLE',
-      502,
-      true
-    );
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function oauthData(response) {
-  if (
-    !response
-    || typeof response !== 'object'
-    || Number(response.code) !== 0
-    || !response.data
-    || typeof response.data !== 'object'
-  ) {
-    const providerCode = String(response?.code ?? '');
-    throw new BaiduMarketingError(
-      '百度 OAuth 接口返回失败',
-      REAUTHORIZATION_CODES.has(providerCode)
-        ? 'BAIDU_REAUTHORIZATION_REQUIRED'
-        : 'BAIDU_OAUTH_FAILED',
-      502,
-      false
-    );
-  }
-  return response.data;
-}
-
-function normalizeTokenData(data, expectedUserId) {
-  const userId = numericUserId(data.userId);
-  if (String(userId) !== String(numericUserId(expectedUserId))) {
-    throw new BaiduMarketingError(
-      '百度令牌主体与授权回调不一致',
-      'BAIDU_TOKEN_PRINCIPAL_MISMATCH',
-      502
-    );
-  }
-  const refreshExpiresInSeconds = data.refreshExpiresIn == null
-    ? null
-    : positiveInteger(
-      data.refreshExpiresIn,
-      'BAIDU_REFRESH_EXPIRY_INVALID'
-    );
-  return {
-    principalId: String(userId),
-    principalName: null,
-    openId: assertString(data.openId, 'BAIDU_OPEN_ID_INVALID'),
-    accessToken: assertString(
-      data.accessToken,
-      'BAIDU_ACCESS_TOKEN_INVALID'
-    ),
-    refreshToken: data.refreshToken == null
-      ? null
-      : assertString(
-        data.refreshToken,
-        'BAIDU_REFRESH_TOKEN_INVALID'
-      ),
-    expiresInSeconds: positiveInteger(
-      data.expiresIn,
-      'BAIDU_ACCESS_EXPIRY_INVALID'
-    ),
-    refreshExpiresInSeconds,
-    scope: data.scope == null ? null : String(data.scope)
-  };
-}
-
-function normalizeAccount(account, idField, nameField) {
-  return {
-    accountId: String(numericUserId(account?.[idField], idField)),
-    accountName: assertString(
-      account?.[nameField],
-      'BAIDU_ACCOUNT_NAME_INVALID'
-    ),
-    product: 'SEARCH',
-    readOnly: true
-  };
 }
 
 function strictIsoDate(value) {
@@ -552,7 +317,7 @@ function normalizeReportPage(response) {
     );
     throw new BaiduMarketingError(
       '百度搜索计划报告返回失败',
-      REAUTHORIZATION_CODES.has(failureCode)
+      isReauthorizationCode(failureCode)
         ? 'BAIDU_REAUTHORIZATION_REQUIRED'
         : 'BAIDU_REPORT_FAILED',
       502,
@@ -732,7 +497,7 @@ function normalizeTongjiEnvelope(response) {
     );
     throw new BaiduMarketingError(
       '百度统计接口返回失败',
-      REAUTHORIZATION_CODES.has(failureCode)
+      isReauthorizationCode(failureCode)
         ? 'BAIDU_REAUTHORIZATION_REQUIRED'
         : 'BAIDU_TONGJI_FAILED',
       502,
@@ -1074,19 +839,26 @@ class BaiduMarketingClient {
     scope,
     redirectUri,
     timeoutMs = 10000,
-    transport = defaultTransport,
+    transport,
     monotonicClock = monotonicMilliseconds,
     wait = waitForMilliseconds,
     searchReportBudgetLimits = SEARCH_REPORT_BUDGET_LIMITS
   }) {
-    this.allowlist = new Set(documentedAllowlist(manifest));
     this.manifest = manifest;
-    this.appId = text(appId);
-    this.secretKey = String(secretKey || '');
-    this.scope = text(scope);
-    this.redirectUri = text(redirectUri);
-    this.timeoutMs = Number(timeoutMs);
-    this.transport = transport;
+    this.httpKernel = new BaiduHttpKernel({
+      manifest,
+      timeoutMs,
+      transport
+    });
+    this.oauthClient = new BaiduOAuthClient({
+      manifest,
+      appId,
+      secretKey,
+      scope,
+      redirectUri,
+      httpKernel: this.httpKernel
+    });
+    this.timeoutMs = this.httpKernel.timeoutMs;
     this.monotonicClock = monotonicClock;
     this.wait = wait;
     this.searchReportBudgetLimits = normalizeSearchReportBudgetLimits(
@@ -1094,28 +866,8 @@ class BaiduMarketingClient {
     );
     this.reportNextRequestAt = new Map();
     this.reportRateLimitChains = new Map();
-    let parsedRedirectUri = null;
-    try {
-      parsedRedirectUri = new URL(this.redirectUri);
-    } catch {
-      parsedRedirectUri = null;
-    }
     if (
-      !this.appId
-      || this.secretKey.length < 16
-      || Buffer.byteLength(this.secretKey.slice(0, 16), 'utf8') !== 16
-      || !this.scope
-      || !this.redirectUri
-      || parsedRedirectUri?.protocol !== 'https:'
-      || parsedRedirectUri.username
-      || parsedRedirectUri.password
-      || parsedRedirectUri.search
-      || parsedRedirectUri.hash
-      || !Number.isInteger(this.timeoutMs)
-      || this.timeoutMs < 100
-      || this.timeoutMs > 60000
-      || typeof this.transport !== 'function'
-      || typeof this.monotonicClock !== 'function'
+      typeof this.monotonicClock !== 'function'
       || typeof this.wait !== 'function'
       || !this.searchReportBudgetLimits
     ) {
@@ -1164,233 +916,31 @@ class BaiduMarketingClient {
   }
 
   assertAllowed(method, url) {
-    const parsed = new URL(url);
-    const key = `${method} ${parsed.origin}${parsed.pathname}`;
-    if (
-      parsed.protocol !== 'https:'
-      || parsed.username
-      || parsed.password
-      || parsed.search
-      || parsed.hash
-      || !this.allowlist.has(key)
-    ) {
-      throw new BaiduMarketingError(
-        '百度出站请求不在契约白名单内',
-        'BAIDU_OUTBOUND_NOT_ALLOWED',
-        500
-      );
-    }
+    return this.httpKernel.assertAllowed(method, url);
   }
 
-  buildAuthorizationUrl({ state }) {
-    const normalizedState = String(state || '');
-    if (
-      !normalizedState
-      || normalizedState.length > this.manifest.oauth.authorization.stateMaxLength
-    ) {
-      throw new BaiduMarketingError(
-        '百度授权 state 无效',
-        'BAIDU_AUTHORIZATION_STATE_INVALID',
-        400
-      );
-    }
-    const url = new URL(this.manifest.oauth.authorization.url);
-    this.assertAllowed('GET', url);
-    url.searchParams.set(
-      'platformId',
-      this.manifest.oauth.authorization.platformId
-    );
-    url.searchParams.set('appId', this.appId);
-    url.searchParams.set('scope', this.scope);
-    url.searchParams.set('state', normalizedState);
-    url.searchParams.set('callback', this.redirectUri);
-    return url.toString();
+  buildAuthorizationUrl(request) {
+    return this.oauthClient.buildAuthorizationUrl(request);
   }
 
   verifyCallbackSignature(parameters) {
-    return (
-      parameters?.appId === this.appId
-      && verifyBaiduCallbackSignature({
-        parameters,
-        secretKey: this.secretKey
-      })
-    );
+    return this.oauthClient.verifyCallbackSignature(parameters);
   }
 
-  async requestJson({
-    method,
-    url,
-    json,
-    maxResponseBytes = ONE_MEBIBYTE,
-    timeoutMs = this.timeoutMs
-  }) {
-    this.assertAllowed(method, url);
-    return this.transport({
-      method,
-      url,
-      headers: {
-        'Content-Type': 'application/json;charset:utf-8'
-      },
-      json,
-      timeoutMs,
-      maxResponseBytes
-    });
+  async requestJson(request) {
+    return this.httpKernel.requestJson(request);
   }
 
-  async exchangeAuthorizationCode({ appId, authCode, userId }) {
-    if (appId !== this.appId || typeof authCode !== 'string' || !authCode) {
-      throw new BaiduMarketingError(
-        '百度授权码请求无效',
-        'BAIDU_AUTHORIZATION_CODE_INVALID',
-        400
-      );
-    }
-    let response;
-    try {
-      response = await this.requestJson({
-        method: this.manifest.oauth.token.method,
-        url: this.manifest.oauth.token.url,
-        json: {
-          appId: this.appId,
-          authCode,
-          secretKey: this.secretKey,
-          grantType: this.manifest.oauth.token.grantType,
-          userId: numericUserId(userId)
-        }
-      });
-    } catch (error) {
-      if (error?.code === 'BAIDU_OUTBOUND_NOT_ALLOWED') throw error;
-      throw new BaiduMarketingError(
-        '百度授权码交换结果未知',
-        'OUTCOME_UNKNOWN',
-        502
-      );
-    }
-    return normalizeTokenData(oauthData(response), userId);
+  async exchangeAuthorizationCode(request) {
+    return this.oauthClient.exchangeAuthorizationCode(request);
   }
 
-  async refreshAccessToken({ refreshToken, userId }) {
-    const normalizedRefreshToken = assertString(
-      refreshToken,
-      'BAIDU_REFRESH_TOKEN_INVALID'
-    );
-    let response;
-    try {
-      response = await this.requestJson({
-        method: this.manifest.oauth.refresh.method,
-        url: this.manifest.oauth.refresh.url,
-        json: {
-          appId: this.appId,
-          refreshToken: normalizedRefreshToken,
-          secretKey: this.secretKey,
-          userId: numericUserId(userId)
-        }
-      });
-    } catch (error) {
-      if (error?.code === 'BAIDU_OUTBOUND_NOT_ALLOWED') throw error;
-      throw new BaiduMarketingError(
-        '百度 Token 刷新结果未知',
-        'OUTCOME_UNKNOWN',
-        502
-      );
-    }
-    return normalizeTokenData(oauthData(response), userId);
+  async refreshAccessToken(request) {
+    return this.oauthClient.refreshAccessToken(request);
   }
 
-  async listAccounts({ connection, accessToken }) {
-    const principalId = String(
-      numericUserId(connection?.authorized_principal_id)
-    );
-    const openId = assertString(
-      connection?.authorized_open_id,
-      'BAIDU_OPEN_ID_INVALID'
-    );
-    const token = assertString(
-      accessToken,
-      'BAIDU_ACCESS_TOKEN_INVALID'
-    );
-    const pagination = this.manifest.accountDirectory.pagination;
-    let cursor = pagination.firstLastPageMaxUcId;
-    let masterAccount = null;
-    const children = [];
-    const seen = new Set();
-
-    for (let page = 0; page < 100; page += 1) {
-      const response = await this.requestJson({
-        method: this.manifest.oauth.userInfo.method,
-        url: this.manifest.oauth.userInfo.url,
-        json: {
-          openId,
-          accessToken: token,
-          userId: numericUserId(principalId),
-          needSubList: true,
-          pageSize: pagination.maxPageSize,
-          lastPageMaxUcId: cursor
-        }
-      });
-      const data = oauthData(response);
-      const currentMaster = normalizeAccount(data, 'masterUid', 'masterName');
-      if (currentMaster.accountId !== principalId) {
-        throw new BaiduMarketingError(
-          '百度账户目录主体不一致',
-          'BAIDU_ACCOUNT_PRINCIPAL_MISMATCH',
-          502
-        );
-      }
-      if (!masterAccount) masterAccount = currentMaster;
-      if (
-        masterAccount.accountName !== currentMaster.accountName
-        || ![1, 2, 4].includes(Number(data.userAcctType))
-      ) {
-        throw new BaiduMarketingError(
-          '百度账户目录响应无效',
-          'BAIDU_ACCOUNT_DIRECTORY_INVALID',
-          502
-        );
-      }
-      const subUsers = data.subUserList == null ? [] : data.subUserList;
-      if (!Array.isArray(subUsers)) {
-        throw new BaiduMarketingError(
-          '百度子账户列表无效',
-          'BAIDU_ACCOUNT_DIRECTORY_INVALID',
-          502
-        );
-      }
-      let nextCursor = cursor;
-      for (const subUser of subUsers) {
-        const account = normalizeAccount(subUser, 'ucId', 'ucName');
-        if (
-          account.accountId === principalId
-          || seen.has(account.accountId)
-        ) {
-          throw new BaiduMarketingError(
-            '百度账户目录包含重复账户',
-            'BAIDU_ACCOUNT_DIRECTORY_INVALID',
-            502
-          );
-        }
-        seen.add(account.accountId);
-        children.push(account);
-        nextCursor = Math.max(
-          nextCursor,
-          numericUserId(account.accountId, 'ucId')
-        );
-      }
-      if (data.hasNext !== true) return [masterAccount, ...children];
-      if (subUsers.length === 0 || nextCursor <= cursor) {
-        throw new BaiduMarketingError(
-          '百度账户目录分页游标未推进',
-          'BAIDU_ACCOUNT_PAGINATION_INVALID',
-          502
-        );
-      }
-      cursor = nextCursor;
-    }
-    throw new BaiduMarketingError(
-      '百度账户目录超过分页预算',
-      'BAIDU_ACCOUNT_PAGE_BUDGET_EXCEEDED',
-      502
-    );
+  async listAccounts(request) {
+    return this.oauthClient.listAccounts(request);
   }
 
   async fetchConfiguredSearchReport({
