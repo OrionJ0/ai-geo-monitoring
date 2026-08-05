@@ -1,11 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import axios from '@/lib/axiosConfig';
 import {
-  adaptMarketingDashboard,
-  assertMarketingDashboardResponse,
+  adaptMarketingAdHierarchy,
+  assertMarketingAdHierarchyResponse,
+  assertMarketingDashboardRootResponse,
   marketingSnapshotWarning,
-  type AdPerformanceModel
+  type AdPerformanceModel,
+  type MarketingAdHierarchyResponse
 } from '@/lib/marketing/adPerformanceAdapter';
 import { buildAdPerformanceFixture } from '@/fixtures/adPerformance.fixture';
 import { readMarketingDashboard } from './readMarketingDashboard';
@@ -91,7 +94,7 @@ export default function useAdPerformance({
     try {
       const response = await readMarketingDashboard({ projectId, dateRange });
       if (requestId !== requestSequence.current) return;
-      assertMarketingDashboardResponse(response.data, projectId);
+      assertMarketingDashboardRootResponse(response.data, projectId);
       if (response.effectiveDateRange) {
         if (
           !dateRange
@@ -103,7 +106,35 @@ export default function useAdPerformance({
         onDateRangeAdjusted?.(response.effectiveDateRange);
       }
       setWarning(marketingSnapshotWarning(response.data));
-      setData(adaptMarketingDashboard(response.data, projectName));
+      const from = response.effectiveDateRange?.[0]
+        || response.data.filter?.from
+        || response.data.coverage?.from;
+      const to = response.effectiveDateRange?.[1]
+        || response.data.filter?.to
+        || response.data.coverage?.to;
+      const revision = response.data.revision;
+      if (!from || !to || !revision) {
+        setData(adaptMarketingAdHierarchy(response.data, null, projectName));
+        return;
+      }
+      const hierarchyResponse = await axios.get<MarketingAdHierarchyResponse>(
+        `/api/marketing/projects/${encodeURIComponent(projectId)}/ad-hierarchy`,
+        {
+          params: { revision: response.data.revision, from, to },
+          timeout: 10_000
+        }
+      );
+      if (requestId !== requestSequence.current) return;
+      assertMarketingAdHierarchyResponse(
+        hierarchyResponse.data,
+        response.data,
+        { from, to }
+      );
+      setData(adaptMarketingAdHierarchy(
+        response.data,
+        hierarchyResponse.data,
+        projectName
+      ));
     } catch (requestError: unknown) {
       if (requestId !== requestSequence.current) return;
       const response = (

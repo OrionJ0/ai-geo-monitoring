@@ -77,6 +77,87 @@ function exactSumRows(rows) {
   return total;
 }
 
+function unavailableHierarchy() {
+  return new MarketingRefreshError(
+    '指定的营销层级快照不完整',
+    MARKETING_AD_READ_CONTRACT.errors.snapshotUnavailable,
+    409
+  );
+}
+
+function aggregateHierarchyRows(rows, identityColumns, fields) {
+  const facts = new Set();
+  const items = new Map();
+  for (const row of rows) {
+    const identity = identityColumns.map((column) => row[column]).join('\u0000');
+    const factIdentity = `${identity}\u0000${row.metric_date}`;
+    if (facts.has(factIdentity)) throw unavailableHierarchy();
+    facts.add(factIdentity);
+    if (!items.has(identity)) {
+      items.set(identity, {
+        ...Object.fromEntries(fields.map(([target, source]) => [target, row[source]])),
+        impressions: '0',
+        clicks: '0',
+        costAmountScaled: '0',
+        trend: []
+      });
+    }
+    const item = items.get(identity);
+    if (fields.some(([target, source]) => item[target] !== row[source])) {
+      throw unavailableHierarchy();
+    }
+    item.impressions = addDecimalText(item.impressions, row.impressions_text);
+    item.clicks = addDecimalText(item.clicks, row.clicks_text);
+    item.costAmountScaled = addDecimalText(
+      item.costAmountScaled,
+      row.cost_amount_scaled_text
+    );
+    let point = item.trend.at(-1);
+    if (!point || point.date !== row.metric_date) {
+      point = {
+        date: row.metric_date,
+        impressions: '0',
+        clicks: '0',
+        costAmountScaled: '0'
+      };
+      item.trend.push(point);
+    }
+    point.impressions = addDecimalText(point.impressions, row.impressions_text);
+    point.clicks = addDecimalText(point.clicks, row.clicks_text);
+    point.costAmountScaled = addDecimalText(
+      point.costAmountScaled,
+      row.cost_amount_scaled_text
+    );
+  }
+  return [...items.values()];
+}
+
+function assertStrictHierarchy(campaigns, adGroups, keywords) {
+  const campaignParents = new Map(campaigns.map((row) => [
+    [row.accountId, row.campaignId].join('\u0000'),
+    row.campaignName
+  ]));
+  for (const row of adGroups) {
+    if (campaignParents.get(
+      [row.accountId, row.campaignId].join('\u0000')
+    ) !== row.campaignName) throw unavailableHierarchy();
+  }
+  const adGroupParents = new Map(adGroups.map((row) => [
+    [row.accountId, row.campaignId, row.adGroupId].join('\u0000'),
+    [row.campaignName, row.adGroupName]
+  ]));
+  for (const row of keywords) {
+    const parent = adGroupParents.get(
+      [row.accountId, row.campaignId, row.adGroupId].join('\u0000')
+    );
+    if (
+      !parent
+      || parent[0] !== row.campaignName
+      || parent[1] !== row.adGroupName
+    ) throw unavailableHierarchy();
+  }
+}
+
 function normalizeOptions(options) {
   const pagination = MARKETING_AD_READ_CONTRACT.pagination;
   const page = positiveInteger(options.page, pagination.defaultPage);
@@ -588,6 +669,108 @@ class MarketingAdResourceService {
   constructor({ sequelize, snapshotSelector }) {
     this.sequelize = sequelize;
     this.snapshotSelector = snapshotSelector;
+  }
+
+  async readAdHierarchy(input) {
+    const transactionOptions = this.sequelize.getDialect() === 'postgres'
+      ? {
+          isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ,
+          readOnly: true
+        }
+      : {};
+    return this.sequelize.transaction(transactionOptions, async (transaction) => {
+      const selected = await this.snapshotSelector.selectRevision({
+        ...input,
+        transaction
+      });
+      const replacements = {
+        projectId: input.projectId,
+        revision: selected.run.id,
+        from: selected.filter.from,
+        to: selected.filter.to
+      };
+      const readFacts = (table, orderBy) => this.sequelize.query(
+        `SELECT * FROM ${table}
+         WHERE project_id = :projectId
+           AND refresh_run_id = :revision
+           AND metric_date >= :from
+           AND metric_date <= :to
+         ORDER BY metric_date ASC, binding_id ASC, ${orderBy}`,
+        { replacements, type: QueryTypes.SELECT, transaction }
+      );
+      const [campaignFacts, adGroupFacts, keywordFacts] = await Promise.all([
+        readFacts('baidu_campaign_daily_metrics', 'campaign_id ASC'),
+        readFacts(
+          'baidu_ad_group_daily_metrics',
+          'campaign_id ASC, ad_group_id ASC'
+        ),
+        readFacts(
+          'baidu_keyword_daily_metrics',
+          'campaign_id ASC, ad_group_id ASC, keyword_id ASC'
+        )
+      ]);
+      const campaigns = aggregateHierarchyRows(
+        campaignFacts,
+        ['external_account_id', 'campaign_id'],
+        [
+          ['accountId', 'external_account_id'],
+          ['campaignId', 'campaign_id'],
+          ['campaignName', 'campaign_name']
+        ]
+      );
+      const adGroups = aggregateHierarchyRows(
+        adGroupFacts,
+        ['external_account_id', 'campaign_id', 'ad_group_id'],
+        [
+          ['accountId', 'external_account_id'],
+          ['campaignId', 'campaign_id'],
+          ['campaignName', 'campaign_name'],
+          ['adGroupId', 'ad_group_id'],
+          ['adGroupName', 'ad_group_name']
+        ]
+      );
+      const keywords = aggregateHierarchyRows(
+        keywordFacts,
+        ['external_account_id', 'campaign_id', 'ad_group_id', 'keyword_id'],
+        [
+          ['accountId', 'external_account_id'],
+          ['campaignId', 'campaign_id'],
+          ['campaignName', 'campaign_name'],
+          ['adGroupId', 'ad_group_id'],
+          ['adGroupName', 'ad_group_name'],
+          ['keywordId', 'keyword_id'],
+          ['keywordName', 'keyword_name'],
+          ['targetingType', 'targeting_type']
+        ]
+      );
+      assertStrictHierarchy(campaigns, adGroups, keywords);
+      if (
+        selected.run.snapshot_content_state === 'ZERO'
+        && (campaigns.length || adGroups.length || keywords.length)
+      ) throw unavailableHierarchy();
+      return {
+        schemaVersion: MARKETING_AD_READ_CONTRACT.resources.adHierarchy.schemaVersion,
+        projectId: String(input.projectId),
+        revision: selected.run.id,
+        coverage: {
+          from: selected.run.coverage_start,
+          to: selected.run.coverage_end,
+          lastSuccessfulAt: selected.run.finished_at,
+          currency: selected.run.currency_code,
+          costScale: Number(selected.run.cost_scale)
+        },
+        filter: selected.filter,
+        summary: exactSumRows(campaignFacts),
+        campaigns,
+        adGroups,
+        keywords,
+        hierarchyCounts: {
+          campaigns: campaigns.length,
+          adGroups: adGroups.length,
+          keywords: keywords.length
+        }
+      };
+    });
   }
 
   async readKeywords(input) {
