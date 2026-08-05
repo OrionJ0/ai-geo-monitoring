@@ -29,7 +29,8 @@ const {
   BaiduConnectionService
 } = require('./services/BaiduConnectionService');
 const {
-  BaiduBindingService
+  BaiduBindingService,
+  normalizeSearchAccounts
 } = require('./services/BaiduBindingService');
 const {
   MarketingDashboardService
@@ -47,8 +48,8 @@ const {
   BaiduTongjiService
 } = require('./services/BaiduTongjiService');
 const {
-  BaiduTongjiCredentialService
-} = require('./services/BaiduTongjiCredentialService');
+  BaiduTongjiContextService
+} = require('./services/BaiduTongjiContextService');
 
 function createDefaultMigrationAuditor(sequelize) {
   return {
@@ -233,22 +234,53 @@ function createMarketingModule({
       provider: baiduProvider,
       encryptionKey: env.CONFIG_ENCRYPTION_KEY
     });
-    const tongjiCredentialService = new BaiduTongjiCredentialService({
+    const tongjiContextService = new BaiduTongjiContextService({
       sequelize,
       provider: baiduProvider,
-      encryptionKey: env.CONFIG_ENCRYPTION_KEY
+      connectionService,
+      runTongjiRequest
     });
     const accountDirectory = {
       async listAccounts({ connection }) {
-        return baiduProvider.listAccounts({
-          connection,
-          accessToken: await connectionService.getAccessToken(connection.id)
-        });
+        const accessContext = await connectionService.getAccessContext(
+          connection.id
+        );
+        try {
+          const accounts = normalizeSearchAccounts(
+            await baiduProvider.listAccounts({
+              connection,
+              accessToken: accessContext.accessToken
+            })
+          );
+          await connectionService.recordProductAccess({
+            connectionId: connection.id,
+            product: 'marketing',
+            state: 'VERIFIED',
+            authGeneration: accessContext.authGeneration,
+            tokenVersion: accessContext.tokenVersion
+          });
+          return accounts;
+        } catch (error) {
+          const state = error?.code === 'BAIDU_REAUTHORIZATION_REQUIRED'
+            ? 'REAUTH_REQUIRED'
+            : error?.code === 'BAIDU_ACCOUNT_PRINCIPAL_MISMATCH'
+              ? 'ACCOUNT_MISMATCH'
+              : 'UPSTREAM_ERROR';
+          await connectionService.recordProductAccess({
+            connectionId: connection.id,
+            product: 'marketing',
+            state,
+            authGeneration: accessContext.authGeneration,
+            tokenVersion: accessContext.tokenVersion,
+            lastErrorCode: error?.code || 'BAIDU_ACCOUNT_DIRECTORY_FAILED'
+          });
+          throw error;
+        }
       }
     };
     const siteDirectory = {
       async listSites({ connection }) {
-        return tongjiCredentialService.listSites(connection.id);
+        return tongjiContextService.listSites(connection.id);
       }
     };
     const reportProvider = {
@@ -264,51 +296,6 @@ function createMarketingModule({
         });
       }
     };
-    const resolveTongjiSite = async (connection) => {
-      const credential = await tongjiCredentialService.getCredential(
-        connection.id
-      );
-      const sites = await runTongjiRequest(() => baiduProvider.listTongjiSites({
-        accountName: credential.accountName,
-        accessToken: credential.accessToken
-      }));
-      const site = sites.find((item) => (
-        item.siteId === connection.tongji_site_id
-      ));
-      if (!site || site.status !== 'ACTIVE') {
-        throw new BaiduMarketingError(
-          '项目绑定的百度统计站点当前不可用',
-          'BAIDU_TONGJI_SITE_NOT_AVAILABLE',
-          409
-        );
-      }
-      if (site.domain !== connection.tongji_site_domain) {
-        throw new BaiduMarketingError(
-          '项目绑定的百度统计站点域名已变化',
-          'BAIDU_TONGJI_SITE_DOMAIN_CHANGED',
-          409
-        );
-      }
-      return {
-        accountName: credential.accountName,
-        accessToken: credential.accessToken,
-        site
-      };
-    };
-    const readBoundTongjiContext = async (connection) => {
-      const credential = await tongjiCredentialService.getCredential(
-        connection.id
-      );
-      return {
-        accountName: credential.accountName,
-        accessToken: credential.accessToken,
-        site: {
-          siteId: connection.tongji_site_id,
-          domain: connection.tongji_site_domain,
-          status: 'ACTIVE'
-        }
-      };
-    };
     const tongjiProvider = {
       async readTrafficSnapshot({
         connection,
@@ -317,48 +304,54 @@ function createMarketingModule({
         includeQuality = false,
         includeSources = false
       }) {
-        const context = await resolveTongjiSite(connection);
-        const common = {
-          accountName: context.accountName,
-          accessToken: context.accessToken,
-          siteId: context.site.siteId,
-          coverage,
-          device
-        };
-        const [
-          allTrend,
-          quality,
-          sourceSummaries,
-          engineSummaries
-        ] = await Promise.all([
-          runTongjiRequest(() => baiduProvider.fetchTongjiTrend(common)),
-          includeQuality
-            && manifest.tongji?.qualityMetrics?.runtimeEnabled === true
-            ? runTongjiRequest(() => baiduProvider.fetchTongjiQualityTrend(common))
-            : Promise.resolve(null),
-          includeSources
-            && manifest.tongji?.sourceReports?.runtimeEnabled === true
-            ? runTongjiRequest(() => baiduProvider.fetchTongjiSourceSummary({
-                ...common,
-                reportKey: 'ALL'
-              }))
-            : Promise.resolve([]),
-          includeSources
-            && manifest.tongji?.sourceReports?.runtimeEnabled === true
-            ? runTongjiRequest(() => baiduProvider.fetchTongjiSourceSummary({
-                ...common,
-                reportKey: 'ENGINE'
-              }))
-            : Promise.resolve([])
-        ]);
-        return {
-          site: context.site,
-          allTrend,
-          quality,
-          sourceReportsIncluded: includeSources,
-          sourceSummaries,
-          engineSummaries
-        };
+        return tongjiContextService.withBoundContext(
+          connection,
+          async (context) => {
+            const common = {
+              accountName: context.accountName,
+              accessToken: context.accessToken,
+              siteId: context.site.siteId,
+              coverage,
+              device
+            };
+            const [
+              allTrend,
+              quality,
+              sourceSummaries,
+              engineSummaries
+            ] = await Promise.all([
+              runTongjiRequest(() => baiduProvider.fetchTongjiTrend(common)),
+              includeQuality
+                && manifest.tongji?.qualityMetrics?.runtimeEnabled === true
+                ? runTongjiRequest(() => (
+                    baiduProvider.fetchTongjiQualityTrend(common)
+                  ))
+                : Promise.resolve(null),
+              includeSources
+                && manifest.tongji?.sourceReports?.runtimeEnabled === true
+                ? runTongjiRequest(() => baiduProvider.fetchTongjiSourceSummary({
+                    ...common,
+                    reportKey: 'ALL'
+                  }))
+                : Promise.resolve([]),
+              includeSources
+                && manifest.tongji?.sourceReports?.runtimeEnabled === true
+                ? runTongjiRequest(() => baiduProvider.fetchTongjiSourceSummary({
+                    ...common,
+                    reportKey: 'ENGINE'
+                  }))
+                : Promise.resolve([])
+            ]);
+            return {
+              site: context.site,
+              allTrend,
+              quality,
+              sourceReportsIncluded: includeSources,
+              sourceSummaries,
+              engineSummaries
+            };
+          }
+        );
       },
       async readSourceTrend({
         connection,
@@ -367,127 +360,132 @@ function createMarketingModule({
         sourceKey,
         selectors
       }) {
-        const context = await readBoundTongjiContext(connection);
-        const common = {
-          accountName: context.accountName,
-          accessToken: context.accessToken,
-          siteId: context.site.siteId,
-          coverage,
-          device
-        };
-        const read = (key) => runTongjiRequest(() => baiduProvider.fetchTongjiTrend({
-          ...common,
-          sourceKey: key
-        }));
-        const dates = [];
-        const coverageEnd = Date.parse(`${coverage.to}T00:00:00.000Z`);
-        for (
-          let timestamp = Date.parse(`${coverage.from}T00:00:00.000Z`);
-          timestamp <= coverageEnd;
-          timestamp += 86_400_000
-        ) {
-          dates.push(new Date(timestamp).toISOString().slice(0, 10));
-        }
-        const sumRows = (series) => {
-          const maps = series.map((rows) => new Map(
-            rows.map((row) => [row.date, row])
-          ));
-          const sumMetric = (date, metric) => {
-            const values = maps.map((rows) => rows.get(date)?.[metric] ?? null);
-            if (values.some((value) => value == null)) return null;
-            return values.reduce(
-              (total, value) => total + BigInt(value),
-              0n
-            ).toString();
-          };
-          return dates.map((date) => ({
-            date,
-            pageviews: sumMetric(date, 'pageviews'),
-            visits: sumMetric(date, 'visits'),
-            visitors: sumMetric(date, 'visitors')
-          }));
-        };
-        const missingRows = () => dates.map((date) => ({
-          date,
-          pageviews: null,
-          visits: null,
-          visitors: null
-        }));
-        let rows;
-        if (sourceKey === 'BAIDU_PAID') {
-          rows = await read('BAIDU_PAID');
-        } else if (sourceKey === 'BAIDU_SEARCH') {
-          rows = await read('BAIDU_NATURAL');
-        } else if (sourceKey === 'DIRECT') {
-          rows = await read('DIRECT');
-        } else if (sourceKey === 'BING_SEARCH') {
-          const bingSeries = await Promise.all(
-            (selectors?.bingEngineIds || []).map((id) => read(`ENGINE:${id}`))
-          );
-          rows = bingSeries.length ? sumRows(bingSeries) : missingRows();
-        } else if (sourceKey === 'GOOGLE_SEARCH') {
-          const googleSeries = await Promise.all(
-            (selectors?.googleEngineIds || []).map((id) => read(`ENGINE:${id}`))
-          );
-          rows = googleSeries.length ? sumRows(googleSeries) : missingRows();
-        } else if (sourceKey === 'OTHER_SEARCH') {
-          const bingIds = selectors?.bingEngineIds || [];
-          const googleIds = selectors?.googleEngineIds || [];
-          const [otherSearch, ...knownEngineSeries] = await Promise.all([
-            read('OTHER_SEARCH'),
-            ...[...bingIds, ...googleIds].map((id) => read(`ENGINE:${id}`))
-          ]);
-          const knownEngines = knownEngineSeries.length
-            ? sumRows(knownEngineSeries)
-            : missingRows();
-          const otherByDate = new Map(otherSearch.map((row) => [row.date, row]));
-          const knownByDate = new Map(knownEngines.map((row) => [row.date, row]));
-          rows = dates.map((date) => {
-            const subtractKnownEngines = (metric) => {
-              const values = [
-                otherByDate.get(date)?.[metric],
-                knownByDate.get(date)?.[metric]
-              ];
-              if (values.some((value) => value == null)) return null;
-              return BigInt(values[0]) - BigInt(values[1]);
+        return tongjiContextService.withBoundContext(
+          connection,
+          async (context) => {
+            const common = {
+              accountName: context.accountName,
+              accessToken: context.accessToken,
+              siteId: context.site.siteId,
+              coverage,
+              device
             };
-            const pageviews = subtractKnownEngines('pageviews');
-            const visits = subtractKnownEngines('visits');
-            if (pageviews < 0n || visits < 0n) {
+            const read = (key) => runTongjiRequest(() => baiduProvider.fetchTongjiTrend({
+              ...common,
+              sourceKey: key
+            }));
+            const dates = [];
+            const coverageEnd = Date.parse(`${coverage.to}T00:00:00.000Z`);
+            for (
+              let timestamp = Date.parse(`${coverage.from}T00:00:00.000Z`);
+              timestamp <= coverageEnd;
+              timestamp += 86_400_000
+            ) {
+              dates.push(new Date(timestamp).toISOString().slice(0, 10));
+            }
+            const sumRows = (series) => {
+              const maps = series.map((rows) => new Map(
+                rows.map((row) => [row.date, row])
+              ));
+              const sumMetric = (date, metric) => {
+                const values = maps.map((rows) => rows.get(date)?.[metric] ?? null);
+                if (values.some((value) => value == null)) return null;
+                return values.reduce(
+                  (total, value) => total + BigInt(value),
+                  0n
+                ).toString();
+              };
+              return dates.map((date) => ({
+                date,
+                pageviews: sumMetric(date, 'pageviews'),
+                visits: sumMetric(date, 'visits'),
+                visitors: sumMetric(date, 'visitors')
+              }));
+            };
+            const missingRows = () => dates.map((date) => ({
+              date,
+              pageviews: null,
+              visits: null,
+              visitors: null
+            }));
+            let rows;
+            if (sourceKey === 'BAIDU_PAID') {
+              rows = await read('BAIDU_PAID');
+            } else if (sourceKey === 'BAIDU_SEARCH') {
+              rows = await read('BAIDU_NATURAL');
+            } else if (sourceKey === 'DIRECT') {
+              rows = await read('DIRECT');
+            } else if (sourceKey === 'BING_SEARCH') {
+              const bingSeries = await Promise.all(
+                (selectors?.bingEngineIds || []).map((id) => read(`ENGINE:${id}`))
+              );
+              rows = bingSeries.length ? sumRows(bingSeries) : missingRows();
+            } else if (sourceKey === 'GOOGLE_SEARCH') {
+              const googleSeries = await Promise.all(
+                (selectors?.googleEngineIds || []).map((id) => read(`ENGINE:${id}`))
+              );
+              rows = googleSeries.length ? sumRows(googleSeries) : missingRows();
+            } else if (sourceKey === 'OTHER_SEARCH') {
+              const bingIds = selectors?.bingEngineIds || [];
+              const googleIds = selectors?.googleEngineIds || [];
+              const [otherSearch, ...knownEngineSeries] = await Promise.all([
+                read('OTHER_SEARCH'),
+                ...[...bingIds, ...googleIds].map((id) => read(`ENGINE:${id}`))
+              ]);
+              const knownEngines = knownEngineSeries.length
+                ? sumRows(knownEngineSeries)
+                : missingRows();
+              const otherByDate = new Map(otherSearch.map((row) => [row.date, row]));
+              const knownByDate = new Map(knownEngines.map((row) => [row.date, row]));
+              rows = dates.map((date) => {
+                const subtractKnownEngines = (metric) => {
+                  const values = [
+                    otherByDate.get(date)?.[metric],
+                    knownByDate.get(date)?.[metric]
+                  ];
+                  if (values.some((value) => value == null)) return null;
+                  return BigInt(values[0]) - BigInt(values[1]);
+                };
+                const pageviews = subtractKnownEngines('pageviews');
+                const visits = subtractKnownEngines('visits');
+                if (pageviews < 0n || visits < 0n) {
+                  throw new BaiduMarketingError(
+                    '百度统计来源拆分结果无效',
+                    'BAIDU_TONGJI_RESPONSE_INVALID',
+                    502
+                  );
+                }
+                return {
+                  date,
+                  pageviews: pageviews?.toString() ?? null,
+                  visits: visits?.toString() ?? null,
+                  visitors: null
+                };
+              });
+            } else if (sourceKey === 'EXTERNAL_REFERRAL') {
+              rows = await read('EXTERNAL');
+            } else {
               throw new BaiduMarketingError(
-                '百度统计来源拆分结果无效',
-                'BAIDU_TONGJI_RESPONSE_INVALID',
-                502
+                '百度统计来源筛选无效',
+                'BAIDU_TONGJI_SOURCE_INVALID',
+                400
               );
             }
-            return {
-              date,
-              pageviews: pageviews?.toString() ?? null,
-              visits: visits?.toString() ?? null,
-              visitors: null
-            };
-          });
-        } else if (sourceKey === 'EXTERNAL_REFERRAL') {
-          rows = await read('EXTERNAL');
-        } else {
-          throw new BaiduMarketingError(
-            '百度统计来源筛选无效',
-            'BAIDU_TONGJI_SOURCE_INVALID',
-            400
-          );
-        }
-        return { site: context.site, sourceKey, rows };
+            return { site: context.site, sourceKey, rows };
+          }
+        );
       },
       async readPageReport({ connection, coverage, device, view }) {
-        const context = await readBoundTongjiContext(connection);
-        return runTongjiRequest(() => baiduProvider.fetchTongjiPageReport({
-          accountName: context.accountName,
-          accessToken: context.accessToken,
-          siteId: context.site.siteId,
-          coverage,
-          device,
-          view
-        }));
+        return tongjiContextService.withBoundContext(connection, (context) => (
+          runTongjiRequest(() => baiduProvider.fetchTongjiPageReport({
+            accountName: context.accountName,
+            accessToken: context.accessToken,
+            siteId: context.site.siteId,
+            coverage,
+            device,
+            view
+          }))
+        ));
       }
     };
     const authorizationService = new BaiduAuthorizationService({
@@ -507,7 +505,7 @@ function createMarketingModule({
     }));
     authorizationRouter.use(createBaiduBindingRouter({
       service: bindingService,
-      tongjiCredentialService,
+      tongjiContextService,
       includeBindings: false,
       accountRoute: '/connections/:connectionId/accounts',
       siteRoute: '/connections/:connectionId/accounts/:accountId/tongji-sites'

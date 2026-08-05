@@ -438,7 +438,7 @@ test('pilot data module requests advertising on dashboard access instead of a ti
   await module.shutdown();
 });
 
-test('pilot data route uses the separate Tongji token and explicitly bound site', async (t) => {
+test('pilot data route uses the unified OAuth token and explicitly bound site', async (t) => {
   const database = await createMarketingTestDatabase(
     'marketing-explicit-tongji-site-'
   );
@@ -459,18 +459,15 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
   await database.sequelize.query(
     `UPDATE baidu_marketing_connections
      SET access_token_ciphertext = :ciphertext,
-         tongji_account_name = 'shb-广拓信息',
-         tongji_access_token_ciphertext = :tongjiCiphertext,
-         tongji_credential_updated_at = CURRENT_TIMESTAMP,
+         tongji_user_name = 'shb-广拓信息',
+         tongji_user_name_verified_at = '2099-01-01T00:00:00.000Z',
+         tongji_account_name = 'legacy-account-canary',
+         tongji_access_token_ciphertext = 'not-a-valid-legacy-ciphertext',
          access_token_expires_at = '2099-01-01T00:00:00.000Z'
      WHERE id = 'connection-1'`,
     {
       replacements: {
-        ciphertext: encryptSecret('search-token-test', env.CONFIG_ENCRYPTION_KEY),
-        tongjiCiphertext: encryptSecret(
-          'tongji-token-test',
-          env.CONFIG_ENCRYPTION_KEY
-        )
+        ciphertext: encryptSecret('unified-oauth-token-test', env.CONFIG_ENCRYPTION_KEY)
       }
     }
   );
@@ -565,13 +562,26 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
   assert.deepEqual(tongjiCredentials, [
     {
       accountName: 'shb-广拓信息',
-      accessToken: 'tongji-token-test'
+      accessToken: 'unified-oauth-token-test'
     },
     {
       accountName: 'shb-广拓信息',
-      accessToken: 'tongji-token-test'
+      accessToken: 'unified-oauth-token-test'
     }
   ]);
+});
+
+test('marketing runtime has no legacy Tongji credential service or resolver', () => {
+  const moduleSource = fs.readFileSync(
+    path.resolve(__dirname, '../../modules/marketing/index.js'),
+    'utf8'
+  );
+  assert.doesNotMatch(moduleSource, /BaiduTongjiCredentialService/u);
+  assert.doesNotMatch(moduleSource, /tongjiCredentialService/u);
+  assert.doesNotMatch(moduleSource, /getCredential/u);
+  assert.doesNotMatch(moduleSource, /tongji_access_token_ciphertext/u);
+  assert.doesNotMatch(moduleSource, /resolveBoundContext/u);
+  assert.equal((moduleSource.match(/withBoundContext/gu) || []).length, 3);
 });
 
 test('the application mounts marketing through its facade without changing global readiness inputs', () => {
