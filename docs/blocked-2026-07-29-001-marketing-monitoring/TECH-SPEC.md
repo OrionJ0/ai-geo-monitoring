@@ -9,6 +9,8 @@
 
 > 2026-08-04 生产状态：正式代码调用计划 `2290316`、单元 `2284618`、关键词 `2602783` 和搜索词 `2307838` 四份官方报告，按最近 30 个上海完整日双读一致后，在同一刷新事务中写入四张事实表并由 Dashboard 分组返回。严格层级到关键词为止，搜索词保持独立事实。Git Bundle workflow `30876793311` 已部署 `f265bd3`，正式关键词、广告表现与百度统计页面均已返回真实数据。
 
+> 2026-08-05 继任说明：本方案保留第一期实现与历史验收，不再作为新增工作的执行入口。剩余 OAuth/`READY` 契约由 `../draft-2026-08-05-003-baidu-unified-oauth-api-architecture/` 承接，页面广告读 API 由 `../draft-2026-08-05-006-marketing-api-resourceization/` 唯一承接，数据正确性由 `../draft-2026-08-05-007-marketing-production-data-correctness/` 承接，Provider 拆分由 `../draft-2026-08-05-005-baidu-provider-modularization/` 承接。旧 issue 编号与新需求编号无继承关系，不得按同号重复实施。
+
 ## 1. 目标与边界
 
 第一期在现有 Express + Sequelize + Next.js 应用中增加一个轻量、只读的百度搜索推广监控模块。模块读取百度广告数据，保存当前项目最近 30 个已结束自然日的本地快照，并提供项目汇总、按日趋势和按推广计划明细。

@@ -2,8 +2,7 @@
 title: "交付百度统计来源分区完整性"
 status: open
 type: AFK
-blocked_by:
-  - "001-freeze-contract-and-sanitized-baseline.md"
+blocked_by: []
 ---
 
 # 交付百度统计来源分区完整性
@@ -26,6 +25,7 @@ blocked_by:
 
 ## Acceptance criteria
 
+- [ ] 先冻结现役 `website-traffic-overview` 的脱敏响应形状和 `83/82` 样本；不等待 003、006，不复制生产 Token、原始来源明细或站点身份。
 - [ ] 总量和全部来源均为精确非负数且合计相等时，返回 `COMPLETE`、差额 `"0"` 和空原因码。
 - [ ] 任一必需来源为空或已分类合计小于总量时，返回 `PARTIAL`、可证明的 total/classified/residual 和稳定原因码。
 - [ ] `83/82` 脱敏样本返回 `PARTIAL`、total `"83"`、classified `"82"`、residual `"1"`。
@@ -33,9 +33,9 @@ blocked_by:
 - [ ] 任一来源为空时不再跳过全部校验，也不能声称分区完整。
 - [ ] residual 不进入来源 rows、不创建 `UNCLASSIFIED`/`OTHER` 等来源键、不参与份额归一或跨系统归因。
 - [ ] 前端显示总量、已分类量和覆盖状态；`PARTIAL` 下可见来源份额不被重新归一到 100%。
-- [ ] 新元数据以 Issue 001 冻结的最小 additive 位置交付，现役来源行、日期、设备、权限和空状态合同不回归。
+- [ ] 新元数据以本 issue 冻结的现役响应形状选择最小 additive 位置，现役来源行、日期、设备、权限和空状态合同不回归。
 - [ ] 后端合同、API、adapter 和页面测试覆盖 COMPLETE、null PARTIAL、83/82 PARTIAL、INVALID、零值和总量不可用。
 
 ## Blocked by
 
-- [Issue 001：冻结 006 后合同并建立脱敏回归基线](001-freeze-contract-and-sanitized-baseline.md)。
+None - can start immediately. 生产发布和观察窗口不得与 003、006 重叠。

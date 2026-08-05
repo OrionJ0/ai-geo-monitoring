@@ -19,13 +19,12 @@ scope: deep
 
 006 将广告读 API 收敛为轻量 Dashboard + revision 钉扎的资源接口。007 不修补即将退役的 Dashboard 大数组，而是在 006 R2 最终合同上完成双周期消费；同时为现役百度统计接口增加向后兼容的完整性和路径消歧元数据。
 
-目标执行链：
+目标执行链按真实依赖拆分：
 
 ```text
-003 closed
-  → 006 R2 closed
-  → 007 correctness closed
-  → 005 provider equivalence freeze / implementation
+Tongji source partition / page disambiguation ─────┐
+006 R2 closed → ad/keyword period comparison ──────┼→ 007 production close
+                                                    → 005 provider equivalence
 ```
 
 005 必须最后执行。否则 005 的 golden 会把“跳过来源对账”和“重复路径无消歧”固化为应保持的行为。
@@ -54,10 +53,11 @@ scope: deep
 
 ### 2.3 门禁
 
-- CON-001：003 A2 和正式入口验收未关闭时不开始 007。
-- CON-002：006 R2 未关闭、旧 Dashboard 明细仍是正式路径时不开始 007。
+- CON-001：百度统计来源分区和页面消歧基于现役统计合同，可以在 003、006 未关闭时实施。
+- CON-002：006 R2 未关闭、旧 Dashboard 明细仍是正式路径时，不开始广告表现和关键词双周期切片。
 - CON-003：007 未关闭时不开始 005 的黑盒等价冻结。
 - CON-004：006 必须先提供广告层级和关键词的全筛选范围 `summary`。
+- CON-005：003、006、007 的生产发布和观察窗口不得重叠；代码级独立切片不互相制造假前置。
 
 ## 3. 当前系统与目标数据流
 
@@ -182,7 +182,7 @@ type PeriodComparison<T> = {
 }
 ```
 
-若现役 `sourceComparison` 是数组，则采用最小 additive 方案：保留数组字段不变，在同级增加 `sourcePartition`；不得为了增加元数据无必要破坏现役数组消费者。实现前以 006 关闭后的真实合同为准冻结最终字段位置。
+若现役 `sourceComparison` 是数组，则采用最小 additive 方案：保留数组字段不变，在同级增加 `sourcePartition`；不得为了增加元数据无必要破坏现役数组消费者。实现前以当前正式 `website-traffic-overview` 合同冻结最终字段位置，不等待 006，因为 006 不修改百度统计接口。
 
 状态规则：
 
@@ -274,11 +274,11 @@ PARTIAL 是成功响应中的数据质量状态，不是 5xx。合法零值是�
 
 ## 7. 实现切片
 
-### U1：冻结 006 后合同与脱敏基线
+### U1：冻结 006 后广告双周期合同与脱敏基线
 
-**依赖：** 003、006 已关闭。
+**依赖：** 006 R2 已关闭。
 
-冻结轻量 Dashboard、广告层级、关键词、来源比较和页面报告的现役响应；建立五类脱敏 fixture。先让新测试在未修复代码上准确暴露双周期、83/82 和同路径缺口。
+冻结轻量 Dashboard、广告层级和关键词的现役响应；建立双周期就绪、上期不可用及 null/零/十进制字符串脱敏 fixture。来源 `83/82` 与同路径 fixture 由各自独立切片基于现役统计合同建立。
 
 ### U2：广告与关键词双周期
 
@@ -286,9 +286,13 @@ PARTIAL 是成功响应中的数据质量状态，不是 5xx。合法零值是�
 
 ### U3：来源分区完整性
 
+**依赖：** 无；先冻结当前 `website-traffic-overview` 脱敏响应形状。
+
 修改 `BaiduTongjiService` 和流量 presenter，在第三方边界严格解析，在 service 计算 partition，在页面展示完整性状态。删除“任一 null 就完全跳过对账”的静默行为。
 
 ### U4：页面路径消歧
+
+**依赖：** 无；先冻结当前 `website-traffic-pages` 稳定身份和脱敏碰撞形状。
 
 在页面事实规范化和分页边界增加稳定碰撞元数据，前端按需展示消歧。保持上游 page identity，不合并指标。
 
@@ -350,7 +354,7 @@ PARTIAL 是成功响应中的数据质量状态，不是 5xx。合法零值是�
 
 ## 11. 关键技术决策
 
-- KTD-001：顺序固定为 `003 → 006 → 007 → 005`。理由：先稳定边界，再修行为，最后冻结正确行为。
+- KTD-001：只把广告/关键词双周期放在 006 R2 之后；百度统计来源分区和页面消歧独立实施，007 全部关闭后才进入 005。理由：按真实合同依赖排序，避免凭据和广告 API 改造无谓阻塞统计正确性。
 - KTD-002：双周期复用 006 资源和 revision，不新增 compare RPC。理由：避免第二套读模型。
 - KTD-003：summary 在服务端按完整筛选范围计算。理由：分页明细不能承担 KPI 汇总。
 - KTD-004：来源差额只表达覆盖，不成为业务来源。理由：差值不能证明渠道身份。
@@ -372,6 +376,6 @@ PARTIAL 是成功响应中的数据质量状态，不是 5xx。合法零值是�
 - PRD: `docs/draft-2026-08-05-007-marketing-production-data-correctness/prd.md`
 - Tech Spec: `docs/draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md`
 - Status: `draft`；只完成方案，不改变当前接口或页面。
-- First implementation gate: 003 和 006 均已从正式入口验收并关闭。
+- First implementation gate: Issue 004、005 可立即建立现役统计基线；Issue 001–003 等待 006 R2 从正式入口验收并关闭。
 - Suggested issue split: U1–U5；本次尚未创建 issues。
 - Completion condition: 正式入口双周期、来源对账、路径消歧和未接入状态全部验收通过，随后解除 005 门禁。

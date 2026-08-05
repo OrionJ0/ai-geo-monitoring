@@ -894,4 +894,4 @@ A2 至少保存：
 - Status: `draft`；已收敛为最小统一凭据方案，尚未实施。
 - First issue: U1 tooling-only 探针发布与生产无状态只读验证。
 - Completion condition: U1–U5 通过、A2 正式入口验收完成、旧实现与旧文档删除。
-- Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件；默认顺序为 003 → 006 → 007 → 005。
+- Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件。003 与 006 可独立实现但生产发布/观察窗口互斥；007 的统计正确性切片可独立、广告双周期等待 006；003、006、007 全部关闭后才进入 005。

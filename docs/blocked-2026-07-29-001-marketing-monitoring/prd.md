@@ -11,6 +11,8 @@
 
 > 2026-08-05 代码真值：现役 manifest 仍为 `PILOT_VERIFIED`，模块状态为 `PILOT_DATA_READY`，`productionAllowlist` 为空且 `formalNavigation=false`。正式 `READY` 仍被金额/币种精度、报表时区与延迟、Refresh Token 轮换/响应丢失重放、供应商侧撤权四项契约证据阻塞。因此本目录改为 `blocked`；已部署的白名单试点能力继续有效，但不能描述为全面正式放开。
 
+> 2026-08-05 继任关系：本目录只保留百度第一期历史总需求、已交付证据和四项 `READY` 门禁，不再新增同类实施 issue。统一 OAuth 与剩余凭据/契约生命周期由 [003](../draft-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) 承接；页面广告读 API 资源化由 [006](../draft-2026-08-05-006-marketing-api-resourceization/prd.md) 唯一承接；生产数据正确性由 [007](../draft-2026-08-05-007-marketing-production-data-correctness/prd.md) 承接；Provider 物理拆分由 [005](../draft-2026-08-05-005-baidu-provider-modularization/prd.md) 最后承接。旧 issues 的未勾选项是历史验收记录，不得与继任目录重复排期。
+
 ## Problem Statement
 
 市场负责人目前需要分别进入百度营销、官网落地页系统和内部销售系统查看数据。三个系统彼此独立，也没有统一业务 ID，无法在一个项目视角下持续观察广告投入、原始咨询和订单签订结果。
@@ -253,7 +255,7 @@
 ## Handoff
 
 - PRD：`docs/blocked-2026-07-29-001-marketing-monitoring/prd.md`
-- 下一步：保持现有白名单真实数据路径，补齐上述四项正式契约证据和生产准入，达到 `VERIFIED` / `READY` 后再启用正式导航；不得以重新启用旧 provider 或 fallback 绕过门禁。
+- 下一步：保持现有白名单真实数据路径；上述四项正式契约证据和生产准入统一从 003 执行并关闭。页面 API、数据正确性和 Provider 重构分别从 006、007、005 执行，不在本目录重复开工；不得以重新启用旧 provider 或 fallback 绕过门禁。
 
 ## 2026-07-30 真实数据试点进展
 

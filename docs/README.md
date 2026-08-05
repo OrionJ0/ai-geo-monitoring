@@ -12,6 +12,7 @@
 | 查看正式入口、当前部署证据和运维流程 | [部署与运维](DEPLOYMENT.md) |
 | 查接口、配置和安全边界 | [接口文档](API.md)、[环境变量](ENVIRONMENT.md)、[安全说明](SECURITY.md) |
 | 查营销漏斗数据源与指标口径 | [ADR 0001](adr/0001-marketing-funnel-data-source-of-truth.md) |
+| 查百度统计推广层级公共 API 的真实能力 | [2026-08-05 只读验证](solutions/2026-08-05-baidu-tongji-promotion-api-capability.md) |
 | 查全局 UI、组件和可访问性标准 | [视觉设计规范](visual-design-spec.md) |
 | 查未完成事项或待修 Bug | [MARK_LATER](../MARK_LATER.md)、[Fix Bug](fixbug.md) |
 
@@ -70,8 +71,8 @@
 | --- | --- |
 | [百度统一 OAuth 凭据与营销 API 架构](draft-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) | 拟在真实双产品验证后统一凭据并硬切退役旧统计凭据；当前仍执行两套凭据和独立产品边界 |
 | [百度 Provider 模块化重构](draft-2026-08-05-005-baidu-provider-modularization/prd.md) | 003、006、007 关闭后拆分 OAuth、搜索推广和百度统计客户端，共用唯一安全 HTTP 内核并证明修正后行为等价 |
-| [营销广告快照 API 资源化](draft-2026-08-05-006-marketing-api-resourceization/prd.md) | 003 关闭后实施轻量 Dashboard、广告层级、关键词和搜索词资源；先 additive 迁移，再硬切删除旧大响应并为 007 提供汇总合同 |
-| [营销生产数据正确性与双周期回归](draft-2026-08-05-007-marketing-production-data-correctness/prd.md) | 003、006 关闭后修复广告/关键词上期、百度统计来源对账和同路径页面消歧，再解除 005 的等价重构门禁 |
+| [营销广告快照 API 资源化](draft-2026-08-05-006-marketing-api-resourceization/prd.md) | 页面读 API 最小化的唯一需求归属；基线和代码不以 003 关闭为技术前置，先 additive 迁移，再硬切删除旧大响应；003/006 生产发布和观察窗口不得重叠 |
+| [营销生产数据正确性与双周期回归](draft-2026-08-05-007-marketing-production-data-correctness/prd.md) | 广告/关键词双周期等待 006 R2；百度统计来源对账和同路径页面消歧可独立开始；全部正确性关闭后才解除 005 门禁 |
 
 ## 阻塞需求
 
@@ -81,7 +82,7 @@
 | [市场部虚拟机 Web 队列](blocked-2026-07-27-001-market-team-vm-web-queue/prd.md) | 目标虚拟机多浏览器发布与资源验收 |
 | [豆包 Web 可信监测](blocked-2026-07-27-002-doubao-web-monitoring/prd.md) | 代码和本地真实采集已完成；等待目标虚拟机全流程验收与管理员正式启用 |
 | [GEO 实体份额指标](blocked-2026-07-28-001-geo-entity-share-metrics/prd.md) | 真实入口硬切验收 |
-| [营销监控系统](blocked-2026-07-29-001-marketing-monitoring/prd.md) | 白名单试点可用；正式 `READY` 仍缺四项百度契约证据和生产准入 |
+| [营销监控系统](blocked-2026-07-29-001-marketing-monitoring/prd.md) | 历史百度第一期总需求；白名单试点可用，剩余 `READY` 凭据/契约门禁由 003 继承，页面 API、正确性和 Provider 后续分别由 006、007、005 承接；不得继续在旧目录新增同类 issue |
 | [AI 语义分析质量](blocked-2026-07-29-002-ai-semantic-analysis-quality/prd.md) | v4 仍是正式路径；等待 v5 硬切并退役 v4 运行时 |
 
 ## 已关闭需求
@@ -118,6 +119,7 @@
 - [SEO 技术健康度 v4](solutions/2026-07-23-seo-technical-health-v4.md)
 - [生产进程、代理与域名切换记录](solutions/2026-07-30-ai-geo-production-deployment.md)
 - [百度搜索推广完整层级接入](solutions/2026-08-03-baidu-search-hierarchy.md)
+- [百度统计推广层级公共 API 能力验证](solutions/2026-08-05-baidu-tongji-promotion-api-capability.md)
 
 ## 历史材料与台账
 

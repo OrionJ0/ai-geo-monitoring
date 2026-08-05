@@ -38,4 +38,4 @@ blocked_by:
 
 ## Blocked by
 
-- [Issue 001：冻结 006 后合同并建立脱敏回归基线](001-freeze-contract-and-sanitized-baseline.md)。
+- [Issue 001：冻结 006 后广告双周期合同与脱敏基线](001-freeze-contract-and-sanitized-baseline.md)。

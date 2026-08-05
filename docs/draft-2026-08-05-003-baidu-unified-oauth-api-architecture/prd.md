@@ -87,8 +87,8 @@ scope: product
 ### Later
 
 - [005 百度 Provider 模块化重构](../draft-2026-08-05-005-baidu-provider-modularization/prd.md)：在 003、006、007 关闭后拆分 OAuth、搜索推广和百度统计客户端；
-- [007 营销生产数据正确性与双周期回归](../draft-2026-08-05-007-marketing-production-data-correctness/prd.md)：在 006 最终资源合同上修正双周期、来源对账和页面消歧；
-- [006 营销广告快照 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/prd.md)：在 003 关闭后实施轻量 Dashboard、广告层级、关键词和搜索词资源，不增加 URL 版本；
+- [007 营销生产数据正确性与双周期回归](../draft-2026-08-05-007-marketing-production-data-correctness/prd.md)：广告/关键词双周期在 006 最终资源合同上实施；百度统计来源对账和页面消歧可独立进行；
+- [006 营销广告快照 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/prd.md)：独立实施轻量 Dashboard、广告层级、关键词和搜索词资源，不增加 URL 版本；006 与 003 的生产发布/观察窗口不得重叠；
 - 有真实需求后再建设持久化异步能力验证任务；
 - 53KF、销售系统和可信跨系统归因。
 
@@ -256,4 +256,4 @@ A1 和 A2 必须是两个不同 Git Bundle 发布。A1 迁移命令必须声明�
 - PRD path: `docs/draft-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
 - Tech Spec path: `docs/draft-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
 - Current state: 已按第一性原理收敛产品范围，尚未执行生产预检、代码修改或生产切换。
-- Recommended next step: 先以 U1 tooling-only 探针完成生产无状态只读验证；后续顺序为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。
+- Recommended next step: 先以 U1 tooling-only 探针完成生产无状态只读验证；006 可独立实施但生产发布/观察窗口不得与 003 重叠，007 按自身真实依赖执行，003、006、007 全部关闭后才进入 005。三者均不属于 003 的实施或关闭条件。

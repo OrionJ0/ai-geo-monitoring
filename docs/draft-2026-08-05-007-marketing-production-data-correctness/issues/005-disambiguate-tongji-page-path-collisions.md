@@ -2,8 +2,7 @@
 title: "交付百度统计同路径页面消歧"
 status: open
 type: AFK
-blocked_by:
-  - "001-freeze-contract-and-sanitized-baseline.md"
+blocked_by: []
 ---
 
 # 交付百度统计同路径页面消歧
@@ -26,6 +25,7 @@ blocked_by:
 
 ## Acceptance criteria
 
+- [ ] 先冻结现役 `website-traffic-pages` 的稳定 page identity、脱敏同路径碰撞样本和当前分页/排序合同；不等待 003、006。
 - [ ] 无路径碰撞时 `pathCollision` 为 null，API 和页面保持现役简洁展示。
 - [ ] 同一路径多条事实保留各自稳定 key/pageId，并返回稳定 ordinal 和完整 count。
 - [ ] 碰撞 count 和 ordinal 在分页前按完整过滤结果计算，跨页、改变 page size 或重复请求后保持稳定。
@@ -38,4 +38,4 @@ blocked_by:
 
 ## Blocked by
 
-- [Issue 001：冻结 006 后合同并建立脱敏回归基线](001-freeze-contract-and-sanitized-baseline.md)。
+None - can start immediately. 生产发布和观察窗口不得与 003、006 重叠。

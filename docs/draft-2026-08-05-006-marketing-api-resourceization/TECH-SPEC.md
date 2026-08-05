@@ -34,6 +34,7 @@ scope: deep
 - 详情端点强制要求并回显 `revision`；
 - 在数据库执行关键词和搜索词的聚合、筛选、排序与分页；
 - 为广告层级和关键词资源提供与分页无关的全筛选范围 summary；
+- 保证详情资源只读取已落库 revision，不调用百度、不触发独立刷新；
 - 分 R1、R2 两次发布迁移仓库内消费者；
 - R2 硬切后删除 Dashboard 四个旧明细数组及其 adapter、测试和现役说明；
 - 从真实 API 和浏览器证明页面没有混用不同快照。
@@ -51,11 +52,15 @@ scope: deep
 
 ### 2.3 开始门禁
 
-文档可在 003 实施前评审，但代码只能在 003 完成 A2、生产正式入口验证并关闭后开始。005 和 006 不并行，默认顺序为：
+006 只消费已落库完整广告快照，不修改 003 的 OAuth、统计上下文或迁移，因此基线和代码实施不以 003 关闭为技术前置。生产发布和观察窗口仍必须串行：
 
 ```text
-003 closed → 006 implementation/observation/closed → 007 correctness/closed → 005 implementation
+003 or 006 implementation may proceed independently
+  → only one of 003/006 may release or observe in production at a time
+  → 006 R2 closed → 007 ad-period comparison closed → 005 implementation
 ```
+
+百度统计来源分区与页面消歧属于 007 的独立切片，不等待 006；005 仍必须在全部正确性切片关闭后开始。
 
 ## 3. 当前系统认知
 
@@ -117,6 +122,8 @@ R1 必须逐个迁移后三类详细消费者；R2 才能改变 `readMarketingDa
 - REQ-008：搜索词继续没有伪造的 `keywordId`。
 - REQ-009：R1 保持旧 Dashboard 合同；R2 完成唯一正式路径硬切并删除旧实现。
 - REQ-010：无快照、无效 revision、越界日期和合法空页必须可区分。
+- REQ-011：三个详情资源只读取数据库事实，不调用百度 Provider、不创建 refresh run，也不执行 stale/background refresh。
+- REQ-012：本目录是广告页面读 API 资源化的唯一实现归属，不增加并行的 `view`、页面 BFF 或同义资源合同。
 
 - CON-001：不修改事实表和已应用迁移。
 - CON-002：不改变四报表刷新事务或 `refresh_run_id` 语义。
@@ -129,6 +136,7 @@ R1 必须逐个迁移后三类详细消费者；R2 才能改变 `readMarketingDa
 - PAT-002：读取使用只读 `REPEATABLE READ` 事务。
 - PAT-003：当前根资源使用 `private, no-store`；显式 revision 详情使用短时私有缓存。
 - PAT-004：前端先取根 revision，再并发读取页面需要的详情资源。
+- PAT-005：只有现役根读取/刷新协调路径可以判断快照过期并合并项目级刷新；详情请求不得按页面数放大四报表上游调用。
 
 ## 5. 公共响应元数据
 
@@ -525,7 +533,7 @@ R1 期间轻量根尚未正式硬切，前端可从旧 Dashboard 获取相同 re
 
 ## 11. 验收标准
 
-- AC-001：Given 003 未关闭，When 检查门禁，Then 006 不修改代码或生产 API。
+- AC-001：Given 003 未关闭但没有进行中的生产发布/观察窗口，When 006 实施或验证本地合同，Then 可以继续；When 任一需求进入生产发布/观察，Then 另一需求不得并行发布，并在自身发布前重新取得正式基线。
 - AC-002：Given R1 发布，When 调用 Dashboard，Then 旧响应合同保持不变，三个新资源 additive 可用。
 - AC-003：Given 详情请求缺少 revision，When 调用任一新资源，Then 返回 400 且不选择最新快照代替。
 - AC-004：Given revision 属于其他项目，When 已授权用户请求当前项目，Then 不返回该 revision 的存在或数据。
@@ -540,6 +548,7 @@ R1 期间轻量根尚未正式硬切，前端可从旧 Dashboard 获取相同 re
 - AC-012：Given R2 正式合同，When 调用 Dashboard，Then 不返回 campaigns、adGroups、keywords 或 searchTerms。
 - AC-013：Given 正式域名登录用户，When 查看市场总览、广告表现、关键词和搜索词，Then 来源、日期、状态、指标和 revision 一致性正确。
 - AC-014：Given 全仓搜索，When R2 完成，Then 旧大 Dashboard adapter、fallback 和当前文档引用为 0。
+- AC-015：Given 任一详情资源请求，When 读取 revision，Then 百度 Provider 调用、refresh run 创建和后台刷新触发次数均为 0。
 
 ## 12. 测试与验证计划
 
@@ -561,6 +570,7 @@ R1 前记录：
 - Dashboard 压缩前/后响应字节；
 - Dashboard DB 总耗时和各事实查询耗时；
 - 搜索词页本期/上期请求数和传输字节；
+- 页面请求突发期间的 Dashboard、详情资源、refresh run 和百度四报表调用次数；
 - 关键词、搜索词最大观测行数；
 - 新分页 SQL 的 `EXPLAIN (ANALYZE, BUFFERS)`。
 
@@ -606,6 +616,7 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 - 广告层级仍偏大：首版按真实页面保留一个层级资源，超过预算后再设计懒加载；
 - R1 兼容永久化：R2 有零消费者和生产调用的明确门禁，完成时硬删除；
 - 资源化顺手改口径：新资源直接复用现役聚合语义，指标变化另立需求；
+- 详情资源放大上游调用：服务层禁止 Provider/refresh 依赖，并用调用次数测试证明只读；
 - 与 007/005 冲突：不并行；006 只交付稳定资源与 summary，007 修正数据行为，005 最后做等价重构。
 
 ## 15. 关键技术决策
@@ -618,6 +629,7 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 - KTD-006：广告层级首版保持一个响应。理由：现役树形页面需要三层一致读模型，当前没有进一步拆分证据。
 - KTD-007：R1 additive、R2 hard cut。理由：允许逐页验证，同时避免长期双合同和 fallback。
 - KTD-008：默认 `006 → 007 → 005`。理由：先固定内部消费者需要的 API，再修正数据行为，最后以正确行为做 provider 纯等价重构。
+- KTD-009：003 与 006 只有发布窗口互斥，没有代码级前置依赖。理由：006 不读写凭据或改变上游合同，等待 003 关闭只会制造无关阻塞。
 
 ## 16. 假设与开放问题
 
@@ -632,7 +644,7 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 - PRD: `docs/draft-2026-08-05-006-marketing-api-resourceization/prd.md`
 - Tech Spec: `docs/draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md`
 - Status: `draft`；只完成方案，不改变当前 API 或页面。
-- First implementation gate: 003 完成 A2、正式入口验收并关闭。
+- First implementation gate: Issue 001 的现役消费者、响应预算、上游调用次数和生产基线完成；003/006 当前没有重叠生产发布或观察窗口。
 - Suggested first issue: U1 基线、消费者盘点与 `MarketingSnapshotSelector`。
 - Suggested issue split: U1–U6；R1 完成 U1–U5，R2 完成 U6。
 - Completion condition: R2 正式入口验证通过，轻量 Dashboard 成为唯一默认合同，旧大响应及其兼容代码和文档已删除；随后移交 007，不直接进入 005。
