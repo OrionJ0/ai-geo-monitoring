@@ -1,6 +1,6 @@
 ---
 title: "用生产只读探针证明统一 OAuth 前提"
-status: open
+status: blocked
 type: HITL
 blocked_by: []
 ---
@@ -37,4 +37,12 @@ blocked_by: []
 
 ## Blocked by
 
-None - can start immediately.
+### 2026-08-05 17:24 CST 生产执行阻塞证据
+
+- tooling-only 探针候选提交为 `528b92d`；聚焦合同与客户端回归 39/39 通过，没有迁移、模块装配或正式运行路径改动。
+- GitHub 生产部署 workflow 当前没有运行中任务；公开后端、前端 revision 均为 `ba0b1eb`，`/api/ready` 为 `ready`。
+- GitHub `origin/main` 为 `98467f0`；原 0805-002 工作区位于 `41a1f9b` 且仍有未提交修改。当前营销文档基线 `3897e30` 已包含尚未发布的 0805-002 提交链，不能直接作为生产 tooling bundle 快进服务器仓库。
+- 当前机器连接生产 SSH 返回 `Permission denied (publickey,password)`，无法只读确认服务器 `HEAD`、工作区、deployment lock 和 migration audit，也不能在服务器内运行必须读取数据库密文的探针。
+- 没有复制 Token、数据库、`.env`、Cookie 或百度原始响应；没有调用 Token 刷新、重新授权、绑定写入或业务数据写入。
+
+解除条件：用户提供受控的临时 SSH 运维会话。恢复后先只读确认服务器真值和 0805-002 未在生产发布/观察，再从服务器真实 HEAD 构造只包含探针的 fast-forward tooling commit，执行同一 Token 双产品只读验证。
