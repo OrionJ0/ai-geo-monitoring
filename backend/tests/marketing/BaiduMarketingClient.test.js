@@ -828,7 +828,7 @@ test('Tongji landing-page parser returns a strict paginated page contract', asyn
                 'avg_visit_pages'
               ],
               items: [
-                [[{ name: 'https://gato.com.cn/', pageId: '101' }]],
+                [[{ name: 'https://gato.com.cn/', pageId: 'opaque-page-101' }]],
                 [['12', '35', '42.60', '98.0', '2.500']],
                 [],
                 []
@@ -855,7 +855,7 @@ test('Tongji landing-page parser returns a strict paginated page contract', asyn
     view: 'landing',
     total: 1,
     rows: [{
-      pageId: '101',
+      pageId: 'opaque-page-101',
       pageUrl: 'https://gato.com.cn/',
       visits: '12',
       contributionPageviews: '35',

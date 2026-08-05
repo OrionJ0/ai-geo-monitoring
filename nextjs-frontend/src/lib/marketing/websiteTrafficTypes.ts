@@ -123,6 +123,7 @@ export type WebsitePageRow = {
   pageId: string;
   title: string | null;
   path: string;
+  pathCollision: { ordinal: number; count: number } | null;
   visits?: string | null;
   contributionPageviews?: string | null;
   bounceRate?: string | null;
@@ -458,12 +459,22 @@ function exactPageRow(value: unknown, view: WebsitePageView): boolean {
   if (!record(value)) return false;
   const required = view === 'landing' ? LANDING_FIELDS : VISITED_FIELDS;
   const forbidden = view === 'landing' ? VISITED_FIELDS : LANDING_FIELDS;
+  const collision = value.pathCollision;
   return typeof value.pageId === 'string'
-    && /^\d+$/u.test(value.pageId)
+    && /^[^\u0000-\u001f\u007f]{1,200}$/u.test(value.pageId)
     && value.key === `baidu-page:${value.pageId}`
     && value.title === null
     && typeof value.path === 'string'
     && /^\/(?!\/)[^\r\n]{0,2047}$/u.test(value.path)
+    && Object.prototype.hasOwnProperty.call(value, 'pathCollision')
+    && (collision === null || (
+      record(collision)
+      && Number.isSafeInteger(collision.ordinal)
+      && Number(collision.ordinal) >= 1
+      && Number.isSafeInteger(collision.count)
+      && Number(collision.count) >= 2
+      && Number(collision.ordinal) <= Number(collision.count)
+    ))
     && [...required].every((field) => (
       Object.prototype.hasOwnProperty.call(value, field) && metric(value[field])
     ))
@@ -540,6 +551,31 @@ export function assertWebsitePageReport(
     || (value.dataState === 'DATA' && totalItems === 0)
     || (value.dataState === 'NO_DATA' && totalItems !== 0)
   ) invalidWebsiteTraffic();
+  const pageRows = value.rows as WebsitePageRow[];
+  const identities = new Set<string>();
+  const visiblePathGroups = new Map<string, WebsitePageRow[]>();
+  for (const row of pageRows) {
+    if (identities.has(row.pageId)) invalidWebsiteTraffic();
+    identities.add(row.pageId);
+    const group = visiblePathGroups.get(row.path) || [];
+    group.push(row);
+    visiblePathGroups.set(row.path, group);
+    if (
+      row.pathCollision
+      && totalItems !== null
+      && row.pathCollision.count > totalItems
+    ) invalidWebsiteTraffic();
+  }
+  for (const rows of visiblePathGroups.values()) {
+    if (rows.length < 2) continue;
+    const collisions = rows.map((row) => row.pathCollision);
+    if (
+      collisions.some((collision) => collision === null)
+      || new Set(collisions.map((collision) => collision?.count)).size !== 1
+      || new Set(collisions.map((collision) => collision?.ordinal)).size
+        !== collisions.length
+    ) invalidWebsiteTraffic();
+  }
   if (
     responseCapabilities.pageReports === false
     && (

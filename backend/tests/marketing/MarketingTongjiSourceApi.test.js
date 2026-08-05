@@ -109,7 +109,16 @@ test('website traffic APIs authorize the project and retired Tongji routes stay 
       },
       async readProjectWebsitePages(projectId, options) {
         calls.push(['pages', projectId, options]);
-        return { projectId, view: options.view };
+        return {
+          projectId,
+          view: options.view,
+          rows: [{
+            key: 'baidu-page:2',
+            pageId: '2',
+            path: '/',
+            pathCollision: { ordinal: 1, count: 2 }
+          }]
+        };
       }
     }
   }));
@@ -151,7 +160,13 @@ test('website traffic APIs authorize the project and retired Tongji routes stay 
   assert.equal(pagesResponse.status, 200);
   assert.deepEqual(await pagesResponse.json(), {
     projectId: '11',
-    view: 'landing'
+    view: 'landing',
+    rows: [{
+      key: 'baidu-page:2',
+      pageId: '2',
+      path: '/',
+      pathCollision: { ordinal: 1, count: 2 }
+    }]
   });
   assert.equal(pagesResponse.headers.get('cache-control'), 'private, max-age=60');
   assert.deepEqual(calls, [

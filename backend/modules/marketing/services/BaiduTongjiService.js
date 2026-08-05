@@ -993,6 +993,60 @@ function comparePageMetrics(left, right) {
   return leftValue === rightValue ? 0 : leftValue > rightValue ? 1 : -1;
 }
 
+function validPageIdentity(value) {
+  return typeof value === 'string'
+    && /^[^\u0000-\u001f\u007f]{1,200}$/u.test(value);
+}
+
+function compareCodePoints(left, right) {
+  const leftPoints = Array.from(left, (value) => value.codePointAt(0));
+  const rightPoints = Array.from(right, (value) => value.codePointAt(0));
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftPoints[index] !== rightPoints[index]) {
+      return leftPoints[index] < rightPoints[index] ? -1 : 1;
+    }
+  }
+  return leftPoints.length === rightPoints.length
+    ? 0
+    : leftPoints.length < rightPoints.length ? -1 : 1;
+}
+
+function comparePageIdentity(left, right) {
+  const leftNumeric = /^\d+$/u.test(left);
+  const rightNumeric = /^\d+$/u.test(right);
+  if (leftNumeric && rightNumeric) {
+    const leftValue = BigInt(left);
+    const rightValue = BigInt(right);
+    if (leftValue !== rightValue) return leftValue < rightValue ? -1 : 1;
+  } else if (leftNumeric !== rightNumeric) {
+    return leftNumeric ? -1 : 1;
+  }
+  return compareCodePoints(left, right);
+}
+
+function addPathCollisionMetadata(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!groups.has(row.path)) groups.set(row.path, []);
+    groups.get(row.path).push(row.pageId);
+  }
+  const collisions = new Map();
+  for (const identities of groups.values()) {
+    if (identities.length < 2) continue;
+    identities.sort(comparePageIdentity).forEach((pageId, index) => {
+      collisions.set(pageId, {
+        ordinal: index + 1,
+        count: identities.length
+      });
+    });
+  }
+  return rows.map((row) => ({
+    ...row,
+    pathCollision: collisions.get(row.pageId) || null
+  }));
+}
+
 function normalizePageReport(result, view, siteDomain) {
   if (
     !result
@@ -1023,7 +1077,7 @@ function normalizePageReport(result, view, siteDomain) {
       || !['http:', 'https:'].includes(parsed.protocol)
       || parsed.username
       || parsed.password
-      || !/^\d+$/u.test(pageId)
+      || !validPageIdentity(pageId)
       || seen.has(pageId)
     ) {
       throw new BaiduTongjiError(
@@ -2374,13 +2428,16 @@ class BaiduTongjiService {
           || row.path.toLocaleLowerCase('zh-CN').includes(needle)
         ))
       : normalized;
-    filtered.sort((left, right) => {
+    const disambiguated = addPathCollisionMetadata(filtered);
+    disambiguated.sort((left, right) => {
       const compared = comparePageMetrics(left[sortBy], right[sortBy]);
       if (compared !== 0) return sortOrder === 'ascend' ? compared : -compared;
-      return left.path.localeCompare(right.path, 'zh-CN');
+      const pathCompared = compareCodePoints(left.path, right.path);
+      if (pathCompared !== 0) return pathCompared;
+      return comparePageIdentity(left.pageId, right.pageId);
     });
     const offset = (page - 1) * pageSize;
-    const totalItems = filtered.length;
+    const totalItems = disambiguated.length;
     return {
       projectId: String(projectId),
       source: 'BAIDU_TONGJI',
@@ -2388,7 +2445,7 @@ class BaiduTongjiService {
       coverage: { from: coverage.from, to: coverage.to },
       view,
       dataState: totalItems > 0 ? 'DATA' : 'NO_DATA',
-      rows: filtered.slice(offset, offset + pageSize),
+      rows: disambiguated.slice(offset, offset + pageSize),
       pagination: {
         page,
         pageSize,

@@ -1,6 +1,6 @@
 ---
 title: "交付百度统计同路径页面消歧"
-status: open
+status: closed
 type: AFK
 blocked_by:
   - "001-freeze-contract-and-sanitized-baseline.md"
@@ -26,15 +26,24 @@ blocked_by:
 
 ## Acceptance criteria
 
-- [ ] 无路径碰撞时 `pathCollision` 为 null，API 和页面保持现役简洁展示。
-- [ ] 同一路径多条事实保留各自稳定 key/pageId，并返回稳定 ordinal 和完整 count。
-- [ ] 碰撞 count 和 ordinal 在分页前按完整过滤结果计算，跨页、改变 page size 或重复请求后保持稳定。
-- [ ] 数字 page ID 按数值排序，不透明字符串按冻结规则排序；主排序相同时以 page identity 稳定兜底。
-- [ ] 页面显示“原路径 · 同路径记录 ordinal/count”，桌面、移动端和分页场景均可读。
-- [ ] 不使用数组下标作为身份，不静默去重，不隐藏 page identity 差异。
-- [ ] 不合并浏览量和任何比率/平均值，不新增无法证明的页面聚合事实。
-- [ ] API 采用 additive 字段，现役过滤、排序、分页、精确指标、权限和空状态不回归。
-- [ ] 后端、API、adapter 和页面测试覆盖单行、同路径多行、跨页碰撞、稳定排序和无碰撞场景。
+- [x] 无路径碰撞时 `pathCollision` 为 null，API 和页面保持现役简洁展示。
+- [x] 同一路径多条事实保留各自稳定 key/pageId，并返回稳定 ordinal 和完整 count。
+- [x] 碰撞 count 和 ordinal 在分页前按完整过滤结果计算，跨页、改变 page size 或重复请求后保持稳定。
+- [x] 数字 page ID 按数值排序，不透明字符串按冻结规则排序；主排序相同时以 page identity 稳定兜底。
+- [x] 页面显示“原路径 · 同路径记录 ordinal/count”，桌面、移动端和分页场景均可读。
+- [x] 不使用数组下标作为身份，不静默去重，不隐藏 page identity 差异。
+- [x] 不合并浏览量和任何比率/平均值，不新增无法证明的页面聚合事实。
+- [x] API 采用 additive 字段，现役过滤、排序、分页、精确指标、权限和空状态不回归。
+- [x] 后端、API、adapter 和页面测试覆盖单行、同路径多行、跨页碰撞、稳定排序和无碰撞场景。
+
+## Verification
+
+- 后端：`npm run test:marketing` 228 项通过；最终聚焦 provider parser、service、API 与脱敏基线 57 项通过。
+- 前端：`npm test` 119 项通过；`npm run lint`、`npx tsc --noEmit`、`npm run build` 通过，生产构建生成 40 个路由。
+- 真实浏览器：生产构建下运行网站流量 Chrome 用例 8 项通过；同一路径三条事实在桌面第一页显示 `1/3`、`2/3`，第二页及 390px 视口显示 `3/3`。
+- 身份与排序：数字 ID 使用 `BigInt` 数值升序；不透明 ID 使用 Unicode code-point 升序，并覆盖会与 UTF-16 code-unit 顺序不同的字符样本。
+- 数据边界：只增加 `pathCollision`，未合并、去重或重算任何浏览量、比率与平均值；无碰撞明确返回 `null`。
+- 正式路径：仍由 `/api/marketing/projects/:projectId/website-traffic-pages` 服务网站流量页；本 issue 尚未发布，生产仍运行上一正式 revision。
 
 ## Blocked by
 

@@ -35,6 +35,8 @@ const landingRows = Array.from({ length: 23 }, (_, index) => ({
   title: null,
   path: index === 0
     ? '/solutions/intelligent-perimeter-security/industrial-very-long-path-for-tooltip-verification'
+    : index >= 8 && index <= 10
+      ? '/solutions/shared-entry'
     : `/solutions/page-${index + 1}`,
   visits: String(5640 - (index * 137)),
   contributionPageviews: String(12900 - (index * 211)),
@@ -198,7 +200,7 @@ async function installRoutes(page: Page) {
     const pageSize = Number(url.searchParams.get('pageSize') || 10);
     const sortBy = url.searchParams.get('sortBy') || (view === 'landing' ? 'visits' : 'pageviews');
     const sortOrder = url.searchParams.get('sortOrder') || 'descend';
-    const source: Array<Record<string, string | null>> = view === 'landing'
+    const source: Array<Record<string, unknown>> = view === 'landing'
       ? landingRows
       : visitedRows;
     const filtered = source.filter((row) => (
@@ -206,9 +208,26 @@ async function installRoutes(page: Page) {
       || String(row.title || '').toLowerCase().includes(query)
       || String(row.path || '').toLowerCase().includes(query)
     ));
-    const sorted = [...filtered].sort((left, right) => {
+    const pathCounts = new Map<string, number>();
+    for (const row of filtered) {
+      const path = String(row.path);
+      pathCounts.set(path, (pathCounts.get(path) || 0) + 1);
+    }
+    const pathOrdinals = new Map<string, number>();
+    const disambiguated = [...filtered]
+      .sort((left, right) => Number(left.pageId) - Number(right.pageId))
+      .map((row): Record<string, unknown> => {
+        const path = String(row.path);
+        const count = pathCounts.get(path) || 0;
+        if (count < 2) return { ...row, pathCollision: null };
+        const ordinal = (pathOrdinals.get(path) || 0) + 1;
+        pathOrdinals.set(path, ordinal);
+        return { ...row, pathCollision: { ordinal, count } };
+      });
+    const sorted = disambiguated.sort((left, right) => {
       const difference = Number(left[sortBy] || 0) - Number(right[sortBy] || 0);
-      return sortOrder === 'ascend' ? difference : -difference;
+      if (difference !== 0) return sortOrder === 'ascend' ? difference : -difference;
+      return Number(left.pageId) - Number(right.pageId);
     });
     const offset = (pageNumber - 1) * pageSize;
     route.fulfill({
@@ -477,6 +496,19 @@ test('switches page contracts, searches, sorts and paginates', async ({ page }) 
   ).toHaveText('2');
 });
 
+test('keeps same-path page facts disambiguated across desktop, mobile and pagination', async ({ page }) => {
+  await page.goto('/geo/website-traffic');
+  await expect(page.getByText('/solutions/shared-entry · 同路径记录 1/3')).toBeVisible();
+  await expect(page.getByText('/solutions/shared-entry · 同路径记录 2/3')).toBeVisible();
+
+  await page.getByTitle('下一页').click();
+  await expect(page.getByText('/solutions/shared-entry · 同路径记录 3/3')).toBeVisible();
+  await expect(page.getByText('共 23 条')).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByText('/solutions/shared-entry · 同路径记录 3/3')).toBeVisible();
+});
+
 test('keeps tables internally scrollable at narrow width and 400 percent zoom', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/geo/website-traffic');
@@ -574,6 +606,7 @@ test('rejects page rows that pretend Baidu supplied titles or custom keys', asyn
           pageId: '1',
           title: '伪造页面标题',
           path: '/',
+          pathCollision: null,
           visits: '1',
           contributionPageviews: '1',
           bounceRate: null,
