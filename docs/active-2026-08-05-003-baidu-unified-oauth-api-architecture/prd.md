@@ -1,7 +1,7 @@
 ---
 title: 百度统一 OAuth 凭据与营销 API 边界整理 PRD
 date: 2026-08-05
-status: draft
+status: active
 source: 2026-08-05 用户确认的统一凭据要求与 Claude CLI 对抗式评审
 scope: product
 ---
@@ -253,7 +253,7 @@ A1 和 A2 必须是两个不同 Git Bundle 发布。A1 迁移命令必须声明�
 
 ## Handoff
 
-- PRD path: `docs/draft-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
-- Tech Spec path: `docs/draft-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Current state: 已按第一性原理收敛产品范围，尚未执行生产预检、代码修改或生产切换。
-- Recommended next step: 先以 U1 tooling-only 探针完成生产无状态只读验证；006 可独立实施但生产发布/观察窗口不得与 003 重叠，007 按自身真实依赖执行，003、006、007 全部关闭后才进入 005。三者均不属于 003 的实施或关闭条件。
+- PRD path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
+- Tech Spec path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
+- Current state: 已进入 Issue 001 实施；只读探针正在本地验证，尚未执行生产预检、运行路径切换或数据库迁移。
+- Recommended next step: 先以 U1 tooling-only 探针完成生产无状态只读验证；后续顺序为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。
