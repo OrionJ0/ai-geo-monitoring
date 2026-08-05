@@ -52,6 +52,13 @@ class MarketingSnapshotSelector {
         409
       );
     }
+    if (![true, 1, '1'].includes(run.snapshot_facts_retained)) {
+      throw new MarketingRefreshError(
+        '指定的营销快照事实已不可用',
+        'MARKETING_SNAPSHOT_UNAVAILABLE',
+        409
+      );
+    }
     const requestedFrom = from ?? run.coverage_start;
     const requestedTo = to ?? run.coverage_end;
     if (

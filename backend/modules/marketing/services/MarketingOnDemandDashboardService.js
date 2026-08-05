@@ -83,50 +83,67 @@ class MarketingOnDemandDashboardService {
   }
 
   async read(input) {
-    const current = await this.dashboardService.read({
-      projectId: input.projectId
-    });
-    if (!this.shouldRefresh(current)) {
-      if (input.from === undefined && input.to === undefined) return current;
-      return this.dashboardService.read(input);
+    let current;
+    let deferredFilterError = null;
+    try {
+      current = await this.dashboardService.read(input);
+    } catch (error) {
+      const hasDateFilter = input.from !== undefined || input.to !== undefined;
+      if (
+        !hasDateFilter
+        || ![
+          'DASHBOARD_DATE_OUT_OF_RANGE',
+          'DASHBOARD_FILTER_WITHOUT_SNAPSHOT'
+        ].includes(error?.code)
+      ) {
+        throw error;
+      }
+      deferredFilterError = error;
+      current = await this.dashboardService.read({
+        projectId: input.projectId
+      });
+      if (!this.shouldRefresh(current)) throw error;
     }
+    if (!this.shouldRefresh(current)) return current;
     const key = String(input.projectId);
     const lastFailureAt = this.failedRefreshes.get(key);
     const coolingDown = Number.isFinite(lastFailureAt)
       && this.clock() - lastFailureAt < this.failedRefreshCooldownMs;
+    if (coolingDown) {
+      if (deferredFilterError) throw deferredFilterError;
+      return current;
+    }
     const defaultWindow = input.from === undefined && input.to === undefined;
-    if (!coolingDown) {
-      if (current.revision && defaultWindow) {
-        // 默认窗口且有旧快照：后台刷新，立即返回旧快照，避免首页白等百度；
-        // 本次响应携带刚创建的 activeRun 供前端轮询刷新结果。
-        try {
-          const run = await this.refreshService.createRun({
-            projectId: input.projectId,
-            triggerType: 'ON_DEMAND',
-            userId: null
-          });
-          this.enqueueBackgroundRefresh(run.runId, key);
-          this.failedRefreshes.delete(key);
-          return {
-            ...current,
-            activeRun: {
-              runId: run.runId,
-              status: run.status,
-              coverage: run.coverage
-            }
-          };
-        } catch (error) {
-          this.failedRefreshes.set(key, this.clock());
-        }
-      } else {
-        // 无快照（首载）或带筛选读取：同步刷新，保证结果一致。
-        try {
-          await this.refresh(input.projectId);
-          this.failedRefreshes.delete(key);
-        } catch (error) {
-          this.failedRefreshes.set(key, this.clock());
-          if (!current.revision) throw error;
-        }
+    if (current.revision && defaultWindow) {
+      // 默认窗口且有旧快照：后台刷新，立即返回旧快照，避免首页白等百度；
+      // 本次响应携带刚创建的 activeRun 供前端轮询刷新结果。
+      try {
+        const run = await this.refreshService.createRun({
+          projectId: input.projectId,
+          triggerType: 'ON_DEMAND',
+          userId: null
+        });
+        this.enqueueBackgroundRefresh(run.runId, key);
+        this.failedRefreshes.delete(key);
+        return {
+          ...current,
+          activeRun: {
+            runId: run.runId,
+            status: run.status,
+            coverage: run.coverage
+          }
+        };
+      } catch (error) {
+        this.failedRefreshes.set(key, this.clock());
+      }
+    } else {
+      // 无快照（首载）或带筛选读取：同步刷新，保证结果一致。
+      try {
+        await this.refresh(input.projectId);
+        this.failedRefreshes.delete(key);
+      } catch (error) {
+        this.failedRefreshes.set(key, this.clock());
+        if (!current.revision) throw error;
       }
     }
     return this.dashboardService.read(input);

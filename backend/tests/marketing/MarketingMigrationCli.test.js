@@ -27,7 +27,7 @@ function runMigration(args, environment) {
   });
 }
 
-function seedThrough014(databasePath) {
+function seedThrough015(databasePath) {
   const script = `
     const sequelize = require('./config/database');
     const { createMarketingMigrationRunner } = require('./modules/marketing/migrations/MarketingMigrationRunner');
@@ -35,7 +35,7 @@ function seedThrough014(databasePath) {
     (async () => {
       await createMarketingMigrationRunner({
         sequelize,
-        migrations: loadMarketingMigrations().slice(0, 14)
+        migrations: loadMarketingMigrations().slice(0, 15)
       }).apply();
     })().catch((error) => {
       console.error(error);
@@ -80,11 +80,11 @@ test('marketing migration CLI applies and audits all immutable migrations', () =
   const databasePath = path.join(directory, 'marketing.sqlite');
 
   try {
-    const seed = seedThrough014(databasePath);
+    const seed = seedThrough015(databasePath);
     assert.equal(seed.status, 0, seed.stderr);
     const apply = runMigration([
       '--apply',
-      '--expected-latest=015-drop-legacy-tongji-credentials'
+      '--expected-latest=016-revisioned-ad-snapshot-facts'
     ], {
       DB_STORAGE: databasePath,
       MARKETING_MONITORING_ENABLED: 'false'
@@ -117,7 +117,8 @@ test('marketing migration CLI applies and audits all immutable migrations', () =
         '012-tongji-snapshot-capabilities',
         '013-tongji-page-report-snapshots',
         '014-unified-oauth-context',
-        '015-drop-legacy-tongji-credentials'
+        '015-drop-legacy-tongji-credentials',
+        '016-revisioned-ad-snapshot-facts'
       ],
       pendingVersions: []
     });
@@ -148,14 +149,14 @@ test('marketing migration CLI rejects a repository boundary mismatch before appl
   }
 });
 
-test('marketing migration CLI rejects unexpected pending history at an A2 gate', () => {
+test('marketing migration CLI rejects unexpected pending history at the R2 gate', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-pending-gate-'));
   const databasePath = path.join(directory, 'marketing.sqlite');
 
   try {
     const execution = runMigration([
       '--apply',
-      '--expected-latest=015-drop-legacy-tongji-credentials'
+      '--expected-latest=016-revisioned-ad-snapshot-facts'
     ], {
       DB_STORAGE: databasePath,
       MARKETING_MONITORING_ENABLED: 'false'

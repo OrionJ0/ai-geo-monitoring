@@ -14,6 +14,9 @@ const {
 const {
   loadMarketingMigrations
 } = require('../../modules/marketing/migrations');
+const {
+  MarketingSnapshotSelector
+} = require('../../modules/marketing/services/MarketingSnapshotSelector');
 
 function createDatabase(storage) {
   return new Sequelize({
@@ -148,7 +151,8 @@ test('marketing ships immutable domain migrations in order', () => {
       '012-tongji-snapshot-capabilities',
       '013-tongji-page-report-snapshots',
       '014-unified-oauth-context',
-      '015-drop-legacy-tongji-credentials'
+      '015-drop-legacy-tongji-credentials',
+      '016-revisioned-ad-snapshot-facts'
     ]
   );
 });
@@ -231,7 +235,8 @@ test('marketing migration audit is read-only and applies its source tables idemp
       '012-tongji-snapshot-capabilities',
       '013-tongji-page-report-snapshots',
       '014-unified-oauth-context',
-      '015-drop-legacy-tongji-credentials'
+      '015-drop-legacy-tongji-credentials',
+      '016-revisioned-ad-snapshot-facts'
     ]
   });
   assert.deepEqual(await database.getQueryInterface().showAllTables(), []);
@@ -470,7 +475,10 @@ test('015 rejects every unsafe unified OAuth contract and preserves legacy colum
       await database.query(contractCase.mutate);
 
       await assert.rejects(
-        createMarketingMigrationRunner({ sequelize: database }).apply(),
+        createMarketingMigrationRunner({
+          sequelize: database,
+          migrations: loadMarketingMigrations().slice(0, 15)
+        }).apply(),
         (error) => error.code === 'MARKETING_LEGACY_TONGJI_CONTRACT_UNSAFE'
       );
       const columns = await database.getQueryInterface().describeTable(
@@ -512,7 +520,10 @@ test('015 rejects an in-flight reauthorization and rolls back intact', async (t)
   `);
 
   await assert.rejects(
-    createMarketingMigrationRunner({ sequelize: database }).apply(),
+    createMarketingMigrationRunner({
+      sequelize: database,
+      migrations: loadMarketingMigrations().slice(0, 15)
+    }).apply(),
     (error) => error.code === 'MARKETING_LEGACY_TONGJI_CONTRACT_UNSAFE'
   );
   const columns = await database.getQueryInterface().describeTable(
@@ -530,7 +541,10 @@ test('015 removes only legacy Tongji credentials and is idempotently auditable',
   });
   await prepareUnifiedOAuthContractDatabase(database);
 
-  const runner = createMarketingMigrationRunner({ sequelize: database });
+  const runner = createMarketingMigrationRunner({
+    sequelize: database,
+    migrations: loadMarketingMigrations().slice(0, 15)
+  });
   const first = await runner.apply({
     expectedLatest: '015-drop-legacy-tongji-credentials'
   });
@@ -567,6 +581,128 @@ test('015 removes only legacy Tongji credentials and is idempotently auditable',
     marketing_access_state: 'VERIFIED',
     tongji_access_state: 'VERIFIED'
   });
+});
+
+test('016 preserves existing facts, trusts only the R1 current revision and permits repeated facts', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-016-revisions-'));
+  const database = createDatabase(path.join(directory, 'migration.sqlite'));
+  t.after(async () => {
+    await database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  await prepareUnifiedOAuthContractDatabase(database);
+  await createMarketingMigrationRunner({
+    sequelize: database,
+    migrations: loadMarketingMigrations().slice(0, 15)
+  }).apply({ expectedLatest: '015-drop-legacy-tongji-credentials' });
+
+  for (const sequence of [1, 2, 3]) {
+    await database.query(
+      `INSERT INTO baidu_marketing_refresh_runs (
+        id, project_id, project_run_sequence, trigger_type, status,
+        active_project_key, execution_token, binding_fingerprint,
+        coverage_start, coverage_end, contract_version, currency_code,
+        cost_scale, snapshot_content_state, started_at, finished_at,
+        next_retry_at, failure_code, created_by_user_id, created_at, updated_at
+      ) VALUES (
+        :runId, 1, :sequence, 'MANUAL', 'SUCCEEDED',
+        NULL, :executionToken, :fingerprint,
+        '2026-07-01', '2026-07-31', 'fixture-v1', 'CNY',
+        2, 'DATA', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+        NULL, NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )`,
+      {
+        replacements: {
+          runId: `revision-${sequence}`,
+          sequence,
+          executionToken: `execution-${sequence}`,
+          fingerprint: String(sequence).repeat(64)
+        }
+      }
+    );
+    if (sequence === 3) {
+      await database.query(
+        `INSERT INTO baidu_campaign_daily_metrics (
+          id, project_id, binding_id, refresh_run_id, metric_date,
+          external_account_id, campaign_id, campaign_name,
+          impressions_text, clicks_text, cost_amount_scaled_text, created_at
+        ) VALUES (
+          'fact-3', 1, 'binding-015', 'revision-3', '2026-07-01',
+          'account-015', 'campaign-3', '迁移计划',
+          '1', '1', '1', CURRENT_TIMESTAMP
+        )`
+      );
+    }
+  }
+
+  await createMarketingMigrationRunner({ sequelize: database }).apply({
+    expectedLatest: '016-revisioned-ad-snapshot-facts'
+  });
+  const [retention] = await database.query(
+    `SELECT id, snapshot_facts_retained
+     FROM baidu_marketing_refresh_runs
+     ORDER BY project_run_sequence`
+  );
+  assert.deepEqual(retention.map((row) => ({
+    id: row.id,
+    retained: Boolean(row.snapshot_facts_retained)
+  })), [
+    { id: 'revision-1', retained: false },
+    { id: 'revision-2', retained: false },
+    { id: 'revision-3', retained: true }
+  ]);
+  const [preserved] = await database.query(
+    'SELECT id FROM baidu_campaign_daily_metrics ORDER BY id'
+  );
+  assert.deepEqual(preserved.map((row) => row.id), ['fact-3']);
+  await assert.rejects(
+    new MarketingSnapshotSelector({ sequelize: database }).selectRevision({
+      projectId: 1,
+      revision: 'revision-2'
+    }),
+    { code: 'MARKETING_SNAPSHOT_UNAVAILABLE', status: 409 }
+  );
+
+  await database.query(
+    `INSERT INTO baidu_marketing_refresh_runs (
+      id, project_id, project_run_sequence, trigger_type, status,
+      active_project_key, execution_token, binding_fingerprint,
+      coverage_start, coverage_end, contract_version, currency_code,
+      cost_scale, snapshot_content_state, started_at, finished_at,
+      next_retry_at, failure_code, created_by_user_id, created_at, updated_at
+    ) VALUES (
+      'revision-4', 1, 4, 'MANUAL', 'SUCCEEDED',
+      NULL, 'execution-4', :fingerprint,
+      '2026-07-01', '2026-07-31', 'fixture-v1', 'CNY',
+      2, 'DATA', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+      NULL, NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    )`,
+    { replacements: { fingerprint: '4'.repeat(64) } }
+  );
+  await database.query(
+    `INSERT INTO baidu_campaign_daily_metrics (
+      id, project_id, binding_id, refresh_run_id, metric_date,
+      external_account_id, campaign_id, campaign_name,
+      impressions_text, clicks_text, cost_amount_scaled_text, created_at
+    ) VALUES (
+      'fact-4', 1, 'binding-015', 'revision-4', '2026-07-01',
+      'account-015', 'campaign-3', '迁移计划',
+      '1', '1', '1', CURRENT_TIMESTAMP
+    )`
+  );
+  const indexes = await database.getQueryInterface().showIndex(
+    'baidu_campaign_daily_metrics'
+  );
+  const unique = indexes.find(
+    (index) => index.unique
+      && index.fields.map((field) => field.attribute).includes('campaign_id')
+  );
+  assert.deepEqual(unique.fields.map((field) => field.attribute), [
+    'refresh_run_id',
+    'binding_id',
+    'campaign_id',
+    'metric_date'
+  ]);
 });
 
 test('015 DDL failure rolls back every legacy column and its ledger entry', async (t) => {
@@ -622,7 +758,10 @@ test('A2 backup restoration is auditable by the 014 recovery revision', async ()
     fs.copyFileSync(databasePath, backupPath, fs.constants.COPYFILE_EXCL);
 
     database = createDatabase(databasePath);
-    await createMarketingMigrationRunner({ sequelize: database }).apply({
+    await createMarketingMigrationRunner({
+      sequelize: database,
+      migrations: loadMarketingMigrations().slice(0, 15)
+    }).apply({
       expectedLatest: '015-drop-legacy-tongji-credentials'
     });
     await database.close();

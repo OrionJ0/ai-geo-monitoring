@@ -201,6 +201,7 @@ test('ad hierarchy HTTP endpoint authorizes before resolving the pinned revision
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'private, max-age=60');
+  assert.equal(response.headers.get('vary'), 'Authorization');
   assert.deepEqual(calls, [
     ['access', {
       projectId: '11',

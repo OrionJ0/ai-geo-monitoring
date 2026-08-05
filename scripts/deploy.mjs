@@ -36,7 +36,7 @@ const marketingMigrationScript = path.join(
   'scripts',
   'migrateMarketing.js'
 );
-const marketingExpectedLatest = '015-drop-legacy-tongji-credentials';
+const marketingExpectedLatest = '016-revisioned-ad-snapshot-facts';
 const websiteDataMigrationScript = path.join(
   backendDirectory,
   'scripts',

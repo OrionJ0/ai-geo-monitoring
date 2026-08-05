@@ -160,6 +160,7 @@ function assertStrictHierarchy(campaigns, adGroups, keywords) {
 
 function normalizeOptions(options) {
   const pagination = MARKETING_AD_READ_CONTRACT.pagination;
+  const lengths = MARKETING_AD_READ_CONTRACT.filterMaximumLengths;
   const page = positiveInteger(options.page, pagination.defaultPage);
   const pageSize = positiveInteger(
     options.pageSize,
@@ -178,21 +179,22 @@ function normalizeOptions(options) {
     sortBy,
     sortOrder,
     query: optionalText(options.query, pagination.maximumQueryLength),
-    accountId: optionalText(options.accountId, 512),
-    campaignId: optionalText(options.campaignId, 512),
-    adGroupId: optionalText(options.adGroupId, 512),
-    keywordName: optionalText(options.keywordName, 512),
+    accountId: optionalText(options.accountId, lengths.accountId),
+    campaignId: optionalText(options.campaignId, lengths.campaignId),
+    adGroupId: optionalText(options.adGroupId, lengths.adGroupId),
+    keywordName: optionalText(options.keywordName, lengths.keywordName),
     queryStatus: optionalText(
       options.queryStatus,
-      24,
+      lengths.queryStatus,
       new Set(['ADDED', 'NOT_ADDED', 'NOT_ADDABLE'])
     ),
-    matchType: optionalText(options.matchType, 40)
+    matchType: optionalText(options.matchType, lengths.matchType)
   };
 }
 
 function normalizeKeywordOptions(options) {
   const pagination = MARKETING_AD_READ_CONTRACT.pagination;
+  const lengths = MARKETING_AD_READ_CONTRACT.filterMaximumLengths;
   const page = positiveInteger(options.page, pagination.defaultPage);
   const pageSize = positiveInteger(
     options.pageSize,
@@ -211,8 +213,8 @@ function normalizeKeywordOptions(options) {
     sortBy,
     sortOrder,
     query: optionalText(options.query, pagination.maximumQueryLength),
-    campaignId: optionalText(options.campaignId, 512),
-    adGroupId: optionalText(options.adGroupId, 512)
+    campaignId: optionalText(options.campaignId, lengths.campaignId),
+    adGroupId: optionalText(options.adGroupId, lengths.adGroupId)
   };
 }
 
