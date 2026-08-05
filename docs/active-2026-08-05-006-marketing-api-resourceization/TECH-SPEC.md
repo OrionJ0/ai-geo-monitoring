@@ -1,8 +1,8 @@
 ---
 title: 营销广告快照 API 资源化技术方案
 date: 2026-08-05
-status: draft
-source: docs/draft-2026-08-05-006-marketing-api-resourceization/prd.md
+status: active
+source: docs/active-2026-08-05-006-marketing-api-resourceization/prd.md
 scope: deep
 ---
 
@@ -240,8 +240,7 @@ GET /api/marketing/projects/:projectId/ad-hierarchy
   "summary": {
     "impressions": "0",
     "clicks": "0",
-    "costAmountScaled": "0",
-    "conversions": null
+    "costAmountScaled": "0"
   },
   "campaigns": [],
   "adGroups": [],
@@ -284,8 +283,7 @@ GET /api/marketing/projects/:projectId/keywords
   "summary": {
     "impressions": "0",
     "clicks": "0",
-    "costAmountScaled": "0",
-    "conversions": null
+    "costAmountScaled": "0"
   },
   "items": [],
   "pagination": {
@@ -297,7 +295,7 @@ GET /api/marketing/projects/:projectId/keywords
 }
 ```
 
-允许的 `sortBy`：`impressions`、`clicks`、`costAmountScaled`、`keywordName`；允许的 `sortOrder`：`ascend`、`descend`。`query` 对规范化后的关键词名称做包含匹配，最大 200 字符。`campaignId`、`adGroupId` 按事实字段精确匹配。
+允许的 `sortBy`：`keywordName`、`impressions`、`clicks`、`costAmountScaled`、`ctr`、`averageCpc`；允许的 `sortOrder`：`ascend`、`descend`。`query` 对规范化后的关键词名称做包含匹配，最大 200 字符。`campaignId`、`adGroupId` 按事实字段精确匹配。CTR/CPC 排序使用精确分子分母比较，不转换为 JavaScript 浮点。
 
 `page` 默认 1，`pageSize` 默认 50、最大 200。实施前可以根据生产测量下调默认值或最大值，但变更必须先更新本合同和测试，不能由客户端任意放大。
 
@@ -315,13 +313,19 @@ GET /api/marketing/projects/:projectId/search-terms
   &sortBy=impressions
   &sortOrder=descend
   &query=<text>
+  &accountId=<id>
   &campaignId=<id>
   &adGroupId=<id>
+  &keywordName=<text>
+  &queryStatus=<ADDED|NOT_ADDED|NOT_ADDABLE>
+  &matchType=<text>
 ```
 
-响应信封与关键词一致，`schemaVersion` 为 `marketing_search_terms_v1`。允许的 `sortBy`：`impressions`、`clicks`、`costAmountScaled`、`searchTerm`、`keywordName`。
+响应信封与关键词一致，`schemaVersion` 为 `marketing_search_terms_v1`。允许的 `sortBy`：`searchTerm`、`keywordName`、`impressions`、`clicks`、`costAmountScaled`、`ctr`、`averageCpc`。
 
-每项保留现役字段：账户、计划、单元、关键词名称、搜索词、query status、match type、精确指标和 trend。搜索词不返回 `keywordId`；`keywordName` 只是上游证据，不建立不可证明的关键词 ID 关系。
+过滤允许 `query`、`accountId`、`campaignId`、`adGroupId`、`keywordName`、`queryStatus` 和 `matchType`。其中 `accountId + campaignId + adGroupId + keywordName` 用于保持现役关键词下钻的事实身份；`queryStatus` 与 `matchType` 对应正式页面已有筛选。所有 ID、枚举和文本都使用绑定参数与长度限制。
+
+每项保留现役字段：账户、计划、单元、关键词名称、搜索词、query status、match type、精确指标和 trend。搜索词不返回 `keywordId`；`keywordName` 只是上游证据，不建立不可证明的关键词 ID 关系。CTR/CPC 排序与关键词资源相同，只按可靠分子分母做精确比较。
 
 ### 6.5 分页与排序确定性
 
@@ -479,75 +483,78 @@ R1 期间轻量根尚未正式硬切，前端可从旧 Dashboard 获取相同 re
 
 ## 10. 实现切片
 
-### U1：基线、选择器与合同测试
+### U1：生产基线与合同冻结
 
-**目标：** 冻结现役 Dashboard 和消费者合同，先交付唯一 OpenAPI 3.1 契约及生成/漂移门禁，再建立唯一 selector。
+**目标：** 只读测量现役 Dashboard 和逐页消费者，冻结后续资源共用的机器合同，不改变生产 API。
+
+**涉及文件：**
+
+- `backend/modules/marketing/contracts/MarketingAdReadContract.js`；
+- `backend/tests/marketing/MarketingAdReadContract.test.js`；
+- `production-baseline.md`；
+- PRD、Tech Spec 和 Issue 001。
+
+**验收：** 压缩/未压缩字节、P95、消费者和真实行数有脱敏生产证据；分页、筛选、排序、summary、schema、revision、缓存和错误合同由测试固定；现役 Dashboard JSON、路由、数据库和刷新行为不变。
+
+### U2：搜索词资源纵向切片
+
+**目标：** 建立唯一 selector 和第一个 additive 搜索词资源，并迁移搜索词页面。
 
 **涉及文件：**
 
 - `backend/modules/marketing/services/MarketingSnapshotSelector.js`；
-- `backend/modules/marketing/services/MarketingDashboardService.js`；
-- `backend/tests/marketing/MarketingSnapshotSelector.test.js`；
-- `backend/tests/marketing/MarketingDashboardReader.test.js`；
-- `backend/tests/marketing/MarketingDashboardApi.test.js`。
-- `docs/openapi/marketing-ad-read.openapi.yaml`；
-- OpenAPI 合同校验与前端 wire type 生成脚本；
-- `nextjs-frontend/src/lib/marketing/marketingAdReadApi.generated.ts`。
-
-**验收：** R1 的 Dashboard JSON、错误和缓存合同无变化；current 与 explicit revision 选择均有竞争和 coverage 测试；OpenAPI 标明真实发布阶段，生成物和后端响应漂移门禁均可执行。
-
-### U2：R1 additive 后端资源
-
-**目标：** 增加三个只读资源，不改变现役消费者。
-
-**涉及文件：**
-
 - `backend/modules/marketing/services/MarketingAdResourceService.js`；
 - `backend/modules/marketing/routes/marketingAdResourceRoutes.js`；
 - `backend/modules/marketing/index.js`；
-- `backend/tests/marketing/MarketingAdResourceApi.test.js`。
-
-**验收：** revision、权限、分页、排序、过滤、精确值、空页、缓存和错误合同通过；旧 Dashboard 保持完整响应。
-
-### U3：搜索词消费者迁移
-
-**目标：** 搜索词页不再为本期和上期各下载完整 Dashboard。
-
-**涉及文件：**
-
+- `backend/tests/marketing/MarketingSnapshotSelector.test.js`；
+- `backend/tests/marketing/MarketingAdResourceApi.test.js`；
 - `nextjs-frontend/src/lib/marketing/useAdSearchTerms.ts`；
 - `nextjs-frontend/src/lib/marketing/adSearchTermAdapter.ts`；
 - 对应类型和测试。
 
-**验收：** 页面只用根 revision 加 `/search-terms`，周期比较、空页、筛选和错误状态保持正确。
+**验收：** 搜索词 revision、权限、分页、筛选、排序、精确值、空页、缓存和错误合同通过；页面本期与上期使用同一 revision，不再下载两份完整 Dashboard；其他消费者与旧 Dashboard 保持不变。
 
-### U4：关键词消费者迁移
+### U3：关键词资源纵向切片
 
-**目标：** 关键词页使用后端分页、筛选和排序。
+**目标：** 增加关键词资源并把关键词页迁移到服务端分页、筛选和排序。
 
 **涉及文件：**
 
+- `backend/modules/marketing/services/MarketingAdResourceService.js`；
+- `backend/tests/marketing/MarketingAdResourceApi.test.js`；
 - `nextjs-frontend/src/lib/marketing/useKeywordAnalysis.ts`；
 - `nextjs-frontend/src/lib/marketing/keywordAnalysisAdapter.ts`；
 - 对应类型和测试。
 
-**验收：** 浏览器请求行数有界，列表总数、筛选、排序和本期 summary 与现役合同一致；上期双周期消费由 007 实施。
+**验收：** 浏览器请求行数有界，列表总数、筛选、排序、合法空页和完整筛选范围 summary 与同 revision 事实一致；页面不再解析 campaigns、adGroups 或 searchTerms。
 
-### U5：广告层级迁移与 R1 生产观察
+### U4：广告层级资源纵向切片
 
-**目标：** 广告表现页使用 `/ad-hierarchy`，并证明旧 Dashboard 明细已经没有消费者。
+**目标：** 增加同 revision 的计划、单元、关键词层级资源并迁移广告表现页。
 
 **涉及文件：**
 
+- `backend/modules/marketing/services/MarketingAdResourceService.js`；
+- `backend/tests/marketing/MarketingAdResourceApi.test.js`；
 - `nextjs-frontend/src/lib/marketing/useAdPerformance.ts`；
 - `nextjs-frontend/src/lib/marketing/adPerformanceAdapter.ts`；
+- 对应类型、测试和浏览器证据。
+
+**验收：** 广告树、精确指标、trend、全范围 summary 和父子事实正确；响应不读取搜索词，页面不再从 Dashboard 读取三层明细。
+
+### U5：R1 发布与零详细消费者观察
+
+**目标：** additive 发布三个资源和已迁移详细页面，证明旧 Dashboard 明细没有现役消费者。
+
+**涉及文件：**
+
 - R1 生产验收记录。
 
-**验收：** 广告树、指标和全范围 summary 正确；代码搜索、前端网络记录和后端访问证据表明详细页面只调用新资源。上期双周期消费由 007 实施。
+**验收：** 独立 R1 Git Bundle、正式 API、真实 Chrome、Network、日志和响应预算通过；详细页面只调用新资源，市场总览仍使用完整 Dashboard，需求继续 `active`。
 
-### U6：R2 轻量 Dashboard 硬切与清理
+### U6：轻量 Dashboard 硬切与本地清理
 
-**目标：** 让轻量 Dashboard 成为唯一正式合同，删除旧大响应。
+**目标：** 把 Dashboard 改为唯一轻量合同，切换市场总览并删除旧大响应代码和兼容依赖。
 
 **涉及文件：**
 
@@ -558,7 +565,19 @@ R1 期间轻量根尚未正式硬切，前端可从旧 Dashboard 获取相同 re
 - `nextjs-frontend/src/lib/marketing/readMarketingDashboard.ts`；
 - 市场总览 hook、类型、adapter、文档和验收记录。
 
-**验收：** Dashboard 不返回四个明细数组；旧 adapter、fixture 合同、兼容分支和现役说明删除；全部营销页面从正式域名通过。
+**验收：** 本地 Dashboard 不返回四个明细数组；市场总览只消费轻量根；旧 adapter、fixture 合同、兼容分支、测试和现役说明删除。此时尚未完成 R2 生产发布，不提前关闭需求。
+
+### U7：R2 发布、退役验收与关闭
+
+**目标：** 用独立 R2 Git Bundle 正式发布硬切版本，证明旧大响应生产调用为零并关闭 006。
+
+**涉及文件：**
+
+- R2 Bundle、部署与生产验收记录；
+- 006 PRD、Tech Spec、Issue 007 和目录状态；
+- `docs/README.md` 与 `docs/DEPLOYMENT.md`。
+
+**验收：** 正式 Dashboard 只有轻量合同，三个详情资源全部钉扎 revision；正式 Chrome 四页与 Network 通过，旧数组、adapter、fallback、测试和现役文档为零；目录改为 `closed` 并移交 007。
 
 ## 11. 验收标准
 
@@ -668,18 +687,18 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 
 ## 16. 假设与开放问题
 
-- 当前只有仓库内 Next.js 消费者；实现前仍需重新搜索 CLI、脚本和外部网关日志；
+- Issue 001 已确认仓库内只有 Next.js 消费者；后端 CLI、诊断脚本和当前 Nginx 留存窗口未发现额外明细消费者，R1/R2 前仍须重新搜索与观察；
 - refresh run 对应事实保留期足够支持页面所用 revision；若有清理策略，必须先固定可读取窗口和错误语义；
-- 默认 page size 50、最大 200 是初始合同，需用生产数据和交互验证；
-- 现役 UI 的排序/筛选字段需在 U1 盘点后冻结，不能为未来假想场景扩大允许列表；
+- 默认 page size 50、最大 200 已用生产 898 个关键词和 350 个搜索词基线验证并冻结；
+- 现役 UI 的排序/筛选字段已在 Issue 001 冻结，机器合同位于 `backend/modules/marketing/contracts/MarketingAdReadContract.js`，后续不能为假想场景扩大允许列表；
 - 若真实 SQL 计划证明必须增加索引，另增迁移并重新评审发布范围。
 
 ## 17. Handoff
 
-- PRD: `docs/draft-2026-08-05-006-marketing-api-resourceization/prd.md`
-- Tech Spec: `docs/draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md`
-- Status: `draft`；只完成方案，不改变当前 API 或页面。
-- First implementation gate: Issue 001 的现役消费者、响应预算、上游调用次数和生产基线完成；003/006 当前没有重叠生产发布或观察窗口。
-- Suggested first issue: U1 基线、消费者盘点与 `MarketingSnapshotSelector`。
-- Suggested issue split: U1–U6；R1 完成 U1–U5，R2 完成 U6。
+- PRD: `docs/active-2026-08-05-006-marketing-api-resourceization/prd.md`
+- Tech Spec: `docs/active-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md`
+- Status: `active`；003 已完成正式关闭，Issue 001 已取得只读生产基线并冻结机器合同，现役 API、页面、数据库和刷新行为未改变。
+- First implementation gate: 已通过；003 closed revision 与生产证据见 `docs/DEPLOYMENT.md`。
+- Suggested first issue: Issue 002 交付 revision 钉扎的搜索词资源；selector 与第一个 additive 资源在同一纵向切片实现。
+- Suggested issue split: U1–U7；R1 完成 U1–U5，R2 完成 U6–U7。
 - Completion condition: R2 正式入口验证通过，轻量 Dashboard 成为唯一默认合同，旧大响应及其兼容代码和文档已删除；随后移交 007，不直接进入 005。

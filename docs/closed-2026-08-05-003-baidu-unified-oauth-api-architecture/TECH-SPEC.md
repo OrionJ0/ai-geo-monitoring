@@ -67,7 +67,7 @@ BaiduConnectionService
 ### 2.3 延后事项
 
 - [005 百度 Provider 模块化重构](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)；
-- [006 营销广告快照 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)，不增加 URL 版本；
+- [006 营销广告快照 API 资源化](../active-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)，不增加 URL 版本；
 - 异步能力验证；
 - OAuth scope 的真实响应建模。
 
@@ -894,4 +894,4 @@ A2 至少保存：
 - Status: `closed`；A1、A2 和发布桥接均保持独立 revision/Bundle。审查加固 revision `58469e29214ccc28e989f07d54af873d9c0ba801` 已由桥接后的 launcher 正式发布，生产双产品只读探针、迁移 `001`–`015`、旧列清零、systemd 单实例、公开精确 revision 与正式 Chrome 八入口全部通过。
 - First issue: 006 Issue 001；在独立资源路由上建立 additive 合同，003 正式入口与统一 Access Context 保持不变。
 - Completion condition: U1–U5 通过、A2 正式入口验收完成、旧实现与旧文档删除。
-- Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件。003 与 006 可独立实现但生产发布/观察窗口互斥；007 的统计正确性切片可独立、广告双周期等待 006；003、006、007 全部关闭后才进入 005。
+- Deferred architecture work: [006 营销 API 资源化](../active-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件；默认顺序为 003 → 006 → 007 → 005。

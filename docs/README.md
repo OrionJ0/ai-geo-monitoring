@@ -62,6 +62,7 @@
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
 | [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 001–008 已完成；009 不批准硬切；011–012 已关闭；013 评测合同两轮返工完成（严格 truth schema、关系 span 对齐计分、type enum、阶段 1 失败降级、编号列表不推导排名、竞品 occurrence 计数）且 AI 内容裁决已应用为 pending_review，唯一剩余阻塞是数据所有者确认签字（见 TRUTH-REVIEW-QUEUE.md、AI-TRUTH-ADJUDICATION.md）。014/015 未启动，010 保持阻塞。正式入口仍走 v4，当前 DeepSeek 默认分析配置为 Pro；v5 显式候选固定 Flash。 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
+| [营销广告快照 API 资源化](active-2026-08-05-006-marketing-api-resourceization/prd.md) | 003 已关闭；当前执行 Issue 001，只读冻结 Dashboard 生产基线、消费者、分页与资源合同，尚未改变现役响应或页面路径 |
 
 ## 草案需求
 
@@ -70,8 +71,7 @@
 | 需求 | 当前主题 |
 | --- | --- |
 | [百度 Provider 模块化重构](draft-2026-08-05-005-baidu-provider-modularization/prd.md) | 003、006、007 关闭后拆分 OAuth、搜索推广和百度统计客户端，共用唯一安全 HTTP 内核并证明修正后行为等价 |
-| [营销广告快照 API 资源化](draft-2026-08-05-006-marketing-api-resourceization/prd.md) | 页面读 API 最小化的唯一需求归属；基线和代码不以 003 关闭为技术前置，先 additive 迁移，再硬切删除旧大响应；003/006 生产发布和观察窗口不得重叠 |
-| [营销生产数据正确性与双周期回归](draft-2026-08-05-007-marketing-production-data-correctness/prd.md) | 广告/关键词双周期等待 006 R2；百度统计来源对账和同路径页面消歧可独立开始；全部正确性关闭后才解除 005 门禁 |
+| [营销生产数据正确性与双周期回归](draft-2026-08-05-007-marketing-production-data-correctness/prd.md) | 003、006 关闭后修复广告/关键词上期、百度统计来源对账和同路径页面消歧，再解除 005 的等价重构门禁 |
 
 ## 阻塞需求
 
