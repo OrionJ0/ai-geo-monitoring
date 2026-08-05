@@ -36,6 +36,7 @@ const marketingMigrationScript = path.join(
   'scripts',
   'migrateMarketing.js'
 );
+const marketingExpectedLatest = '014-unified-oauth-context';
 const websiteDataMigrationScript = path.join(
   backendDirectory,
   'scripts',
@@ -419,12 +420,19 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     });
 
     console.log('9/12 应用并复审营销模块迁移');
-    await run(process.execPath, [marketingMigrationScript, '--apply'], {
+    await run(process.execPath, [
+      marketingMigrationScript,
+      '--apply',
+      `--expected-latest=${marketingExpectedLatest}`,
+    ], {
       cwd: backendDirectory,
       env: migrationEnvironment,
       label: '营销模块迁移',
     });
-    await run(process.execPath, [marketingMigrationScript], {
+    await run(process.execPath, [
+      marketingMigrationScript,
+      `--expected-latest=${marketingExpectedLatest}`,
+    ], {
       cwd: backendDirectory,
       env: migrationEnvironment,
       label: '营销模块迁移复审',
