@@ -381,4 +381,4 @@ service → facade → product client → HTTP kernel → shared errors
 - 建议第一个 issue：在旧实现仍为正式真值时冻结脱敏黑盒合同。
 - 是否适合 TDD：适合，先让旧实现通过特征测试，再逐产品移动。
 - Tech Spec path: `docs/active-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md`
-- Recommended next step: Issues 001–003 已关闭；进入 Issue 004，把站点、趋势、来源、质量、页面 parser 与分页预算完整移动到 `BaiduTongjiClient`，并删除 facade 内最后的产品实现。
+- Recommended next step: Issues 001–004 已关闭；进入 Issue 005，审查唯一 facade/内核/产品客户端结构，完成全量等价和秘密扫描后执行一次正式 Git Bundle 硬切与公开入口验收。
