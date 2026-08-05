@@ -11,9 +11,11 @@ type Connection = {
   principalId: string;
   principalName?: string | null;
   accessTokenExpiresAt?: string | null;
-  tongjiAccountName?: string | null;
-  tongjiCredentialConfigured: boolean;
-  tongjiCredentialUpdatedAt?: string | null;
+  tongjiUserName?: string | null;
+  products: {
+    marketing: { state: string; checkedAt?: string | null };
+    tongji: { state: string; checkedAt?: string | null };
+  };
   lastErrorCode?: string | null;
 };
 
@@ -63,10 +65,9 @@ export default function BaiduMarketingSettings() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [disconnecting, setDisconnecting] = useState<Connection | null>(null);
-  const [tongjiCredentialConnection, setTongjiCredentialConnection]
+  const [tongjiContextConnection, setTongjiContextConnection]
     = useState<Connection | null>(null);
-  const [tongjiAccountName, setTongjiAccountName] = useState('');
-  const [tongjiAccessToken, setTongjiAccessToken] = useState('');
+  const [tongjiUserName, setTongjiUserName] = useState('');
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
   const load = useCallback(async () => {
@@ -176,7 +177,7 @@ export default function BaiduMarketingSettings() {
     const connection = connections.find(
       (item) => item.id === bindingConnectionId
     );
-    if (!connection?.tongjiCredentialConfigured) {
+    if (!connection?.tongjiUserName) {
       setTongjiSites([]);
       setBindingTongjiSiteId('');
       return;
@@ -237,45 +238,39 @@ export default function BaiduMarketingSettings() {
     }
   };
 
-  const openTongjiCredential = (
+  const openTongjiContext = (
     event: React.MouseEvent<HTMLElement>,
     connection: Connection
   ) => {
     returnFocusRef.current = event.currentTarget;
-    setTongjiCredentialConnection(connection);
-    setTongjiAccountName(connection.tongjiAccountName || '');
-    setTongjiAccessToken('');
+    setTongjiContextConnection(connection);
+    setTongjiUserName(connection.tongjiUserName || '');
   };
 
-  const closeTongjiCredential = () => {
-    setTongjiCredentialConnection(null);
-    setTongjiAccessToken('');
+  const closeTongjiContext = () => {
+    setTongjiContextConnection(null);
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   };
 
-  const saveTongjiCredential = async () => {
+  const saveTongjiContext = async () => {
     if (
-      !tongjiCredentialConnection
-      || !tongjiAccountName.trim()
-      || !tongjiAccessToken.trim()
+      !tongjiContextConnection
+      || !tongjiUserName.trim()
     ) return;
     setBusy(true);
     setError('');
     try {
       await axios.put(
         '/api/admin/marketing/baidu/connections/'
-        + `${encodeURIComponent(tongjiCredentialConnection.id)}/tongji-credential`,
-        {
-          accountName: tongjiAccountName,
-          accessToken: tongjiAccessToken,
-        }
+        + `${encodeURIComponent(tongjiContextConnection.id)}/tongji-context`,
+        { userName: tongjiUserName }
       );
-      closeTongjiCredential();
+      closeTongjiContext();
       await load();
     } catch (requestError) {
       setError(getApiErrorMessage(
         requestError,
-        '无法验证或保存百度统计 Data API Token'
+        '无法验证或保存百度统计用户名'
       ));
     } finally {
       setBusy(false);
@@ -476,14 +471,27 @@ export default function BaiduMarketingSettings() {
               ),
             },
             {
-              title: '百度统计 Data API',
-              key: 'tongjiCredential',
-              render: (_, row) => row.tongjiCredentialConfigured ? (
-                <span>
-                  <Tag color="green">已配置</Tag>
-                  {row.tongjiAccountName || '未命名统计账户'}
-                </span>
-              ) : <Tag color="orange">未配置</Tag>,
+              title: '产品能力',
+              key: 'tongjiContext',
+              render: (_, row) => (
+                <Space orientation="vertical" size={2}>
+                  <span>
+                    搜索推广
+                    {' '}
+                    <Tag color={row.products.marketing.state === 'VERIFIED' ? 'green' : 'orange'}>
+                      {row.products.marketing.state}
+                    </Tag>
+                  </span>
+                  <span>
+                    百度统计
+                    {' '}
+                    <Tag color={row.products.tongji.state === 'VERIFIED' ? 'green' : 'orange'}>
+                      {row.products.tongji.state}
+                    </Tag>
+                  </span>
+                  <span>{row.tongjiUserName || '待填写用户名'}</span>
+                </Space>
+              ),
             },
             {
               title: '操作',
@@ -491,12 +499,12 @@ export default function BaiduMarketingSettings() {
               render: (_, row) => (
                 <Space wrap>
                   <Button
-                    onClick={(event) => openTongjiCredential(event, row)}
+                    onClick={(event) => openTongjiContext(event, row)}
                     disabled={row.status !== 'CONNECTED'}
                   >
-                    {row.tongjiCredentialConfigured
-                      ? '更新统计 Token'
-                      : '配置统计 Token'}
+                    {row.tongjiUserName
+                      ? '更新统计用户名'
+                      : '配置统计用户名'}
                   </Button>
                   <Button
                     onClick={(event) => openAccountDirectory(event, row.id)}
@@ -648,14 +656,14 @@ export default function BaiduMarketingSettings() {
         ) : null}
       </Space>
       <Modal
-        title="配置百度统计 Data API"
-        open={Boolean(tongjiCredentialConnection)}
-        onOk={saveTongjiCredential}
-        onCancel={closeTongjiCredential}
-        okText="验证并加密保存"
+        title="配置百度统计用户名"
+        open={Boolean(tongjiContextConnection)}
+        onOk={saveTongjiContext}
+        onCancel={closeTongjiContext}
+        okText="验证并保存用户名"
         cancelText="取消"
         okButtonProps={{
-          disabled: !tongjiAccountName.trim() || !tongjiAccessToken.trim(),
+          disabled: !tongjiUserName.trim(),
         }}
         confirmLoading={busy}
         destroyOnHidden
@@ -664,29 +672,18 @@ export default function BaiduMarketingSettings() {
           <Alert
             type="info"
             showIcon
-            title="百度统计与搜索推广使用不同的 Token"
-            description="请填写百度统计“数据 API”页面提供的账户名和 Token。系统会先实时读取站点目录，验证成功后才加密保存；页面和接口不会回显 Token。"
+            title="百度统计与搜索推广共用统一 OAuth Token"
+            description="这里只填写百度统计用户名。系统使用服务器中的当前 OAuth Access Context 实时读取站点目录；浏览器不会接收或提交 Token。"
           />
           <label htmlFor="baidu-tongji-account-name">
             百度统计账户名
           </label>
           <Input
             id="baidu-tongji-account-name"
-            value={tongjiAccountName}
-            onChange={(event) => setTongjiAccountName(event.target.value)}
+            value={tongjiUserName}
+            onChange={(event) => setTongjiUserName(event.target.value)}
             disabled={busy}
             autoComplete="username"
-          />
-          <label htmlFor="baidu-tongji-access-token">
-            Data API Token
-          </label>
-          <Input.Password
-            id="baidu-tongji-access-token"
-            value={tongjiAccessToken}
-            onChange={(event) => setTongjiAccessToken(event.target.value)}
-            disabled={busy}
-            autoComplete="new-password"
-            visibilityToggle={false}
           />
         </Space>
       </Modal>
@@ -793,9 +790,9 @@ export default function BaiduMarketingSettings() {
               showIcon
               title={connections.find(
                 (connection) => connection.id === bindingConnectionId
-              )?.tongjiCredentialConfigured
-                ? '当前百度统计凭据没有可绑定的活动站点'
-                : '请先为当前连接配置百度统计 Data API Token'}
+              )?.tongjiUserName
+                ? '当前百度统计上下文没有可绑定的活动站点'
+                : '请先为当前连接配置百度统计用户名'}
             />
           ) : null}
         </Space>
