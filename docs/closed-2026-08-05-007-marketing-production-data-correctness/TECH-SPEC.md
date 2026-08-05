@@ -1,8 +1,8 @@
 ---
 title: 营销生产数据正确性与双周期回归技术方案
 date: 2026-08-05
-status: active
-source: docs/active-2026-08-05-007-marketing-production-data-correctness/prd.md
+status: closed
+source: docs/closed-2026-08-05-007-marketing-production-data-correctness/prd.md
 scope: deep
 ---
 
@@ -372,9 +372,9 @@ Issue 001 已用只读规范化生产响应确认：来源差额并非 83/82 单
 
 ## 13. Handoff
 
-- PRD: `docs/active-2026-08-05-007-marketing-production-data-correctness/prd.md`
-- Tech Spec: `docs/active-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md`
-- Status: `active`；003 与 006 已关闭，当前按 issue 执行。
+- PRD: `docs/closed-2026-08-05-007-marketing-production-data-correctness/prd.md`
+- Tech Spec: `docs/closed-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md`
+- Status: `closed`；Issue 001–006 已完成并随生产 revision `17214184f9c0ec2c9508080cb571f6b8b45923c4` 验收。
 - First implementation gate: 003 和 006 均已从正式入口验收并关闭。
-- Suggested issue split: U1–U5；本次尚未创建 issues。
+- Delivered issues: 001 脱敏基线、002 广告双周期、003 关键词双周期、004 来源分区、005 页面消歧、006 正式发布与关闭。
 - Completion condition: 正式入口双周期、来源对账、路径消歧和未接入状态全部验收通过，随后解除 005 门禁。

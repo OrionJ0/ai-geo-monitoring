@@ -41,7 +41,7 @@ blocked_by: []
 - 前端：`npm test`，117 项通过；`npm run lint`、`npx tsc --noEmit`、`npm run build` 通过，生产构建生成 40 个路由。
 - 真实浏览器：生产构建下运行网站流量与市场总览 Chrome 用例，19 项通过；验证 `61843/61842` 为 `PARTIAL`、可见来源份额保持 `30.1%`，且页面不创建差额来源。
 - 合同：`sourceComparison.partition` 为 additive 元数据；原 `sourceComparison.state` 继续表示来源趋势可用性，避免改变现役含义。
-- 正式路径：代码仍通过 `/api/marketing/projects/:projectId/website-traffic-overview` 和两个现役页面消费；本 issue 尚未发布，生产仍运行上一正式 revision。
+- 正式路径：`/api/marketing/projects/:projectId/website-traffic-overview` 的分区合同已随 007 revision 正式发布；生产在总访问分母不可用时返回 `PARTIAL / SOURCE_TOTAL_UNAVAILABLE`，没有把已分类合计或 residual 伪造成业务事实。
 
 ## Blocked by
 

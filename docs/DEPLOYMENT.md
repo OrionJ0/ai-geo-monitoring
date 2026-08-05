@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-06 营销 API 资源化 R2 Git Bundle 已部署 `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-06 营销生产数据正确性 Git Bundle 已部署 `17214184f9c0ec2c9508080cb571f6b8b45923c4`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -111,6 +111,15 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 - `/usr/bin/google-chrome` 从 `https://insight.guangtuo.com` 打开市场总览、广告表现、广告关键词和全量广告搜索词；四页正式根节点与表格均可见，营销请求均为 200。Network 分别使用 Dashboard、`ad-hierarchy`、`keywords`、`search-terms`，没有 `view/includeDetails` 兼容查询，也没有浏览器直连百度。
 - 生产观察窗记录 140 次结构化广告读取成功、0 次失败、0 个秘密标记、0 个服务错误；Nginx 记录 Dashboard 39、层级 33、关键词 33、搜索词 37 次请求，旧兼容查询为 0。当前正式默认路径已经硬切轻量 Dashboard + 三个 revision 钉扎资源；旧四数组、adapter、fallback、测试和现役文档已经删除，不存在长期 API 双版本。
 - 预验证后代恢复 revision 为 `c167453568cf9dd27fda442529b424f2a5fc5963`，Bundle SHA-256 为 `63eff4e357802d97309efe4a1b6fa734fa0da3d60b66e8ceb35e3ff8dab1e42e`。该版本永久保留迁移 016、checksum 与部署最高迁移，只恢复完整 R1 运行合同；仅在 R2 阻断失败时允许继续快进，恢复后不得关闭 006，必须修复 R2 并重复正式 Network、响应预算、日志和浏览器门禁。本次 R2 验收未触发恢复。
+
+### 2026-08-06 营销生产数据正确性正式发布与验收
+
+- Git Bundle 将服务器从 R2 `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22` 快进到 `17214184f9c0ec2c9508080cb571f6b8b45923c4`，SHA-256 为 `37ccf67d5aff553c9030dc23a2e72d26ea1a6c2e2c436b0209eb5c6b37366ef7`；远端 `refs/heads/feature/marketing-003-006-007-005` 精确包含该 revision。发布树未包含并行 0805-002 工作；正式部署入口停服、备份、快进、验证、迁移、构建、启动并删除上传 Bundle，没有直接编辑服务器源码。
+- 部署通过后端 994 项、营销 231 项、官网 31 项、咨询 35 项、前端 123 项、lint、TypeScript、40 路由生产构建和真实 Chrome 56 项；营销迁移 `001`–`016` 全部 applied 且无 pending。发布后服务器 `main/HEAD`、公开 `/api/health` 与 `/api/frontend-health` 都为目标 revision，工作区干净，`/api/ready` 为 ready；两个正式 systemd 单元各一个 MainPID，warning 日志为空。
+- 正式 Chrome 打开市场总览、广告表现、关键词、全量搜索词和网站流量。广告层级、关键词、搜索词的 current/previous 请求均为 200，本期 `2026-07-30` 至 `2026-08-05`、上期 `2026-07-23` 至 `2026-07-29`，三组都等长相邻且分别共用同一快照 revision、`CNY` 与 `costScale=2`。
+- 网站流量在生产当次缺少可靠全站访问分母时返回 `PARTIAL / SOURCE_TOTAL_UNAVAILABLE`，总访问与 residual 保持 `null`，页面没有把已分类合计伪造成总量或渠道。入口页同路径组在刷新、切换升序、分页和 `390×844` 响应式操作中保持合法稳定 ordinal；历史 `83/82 → PARTIAL` 由脱敏生产形状合同与 Chrome 回归覆盖，不通过修改生产范围或猜测来源制造该样本。
+- 浏览器中的营销响应全部成功；唯一 503 是既有 `DISABLED` 官网区间/逐日接口。咨询页继续显示官网模块不可用和 53KF 未完成，订单页继续显示销售系统未接入，线索/成交依赖指标保持缺失；营销 AI 正式页明确未启用且不会读取来源数据。营销正确性路径没有新增旧 Dashboard fallback、第二套 API 或隐藏 feature flag。
+- 验收使用仅存在于服务器进程和浏览器内存的短期应用 JWT，未输出、落盘或复制 Cookie/Token；它验证正式前端、API、鉴权和生产数据，但不把密码登录流程描述为本次验收范围。完整证据见[007 Issue 006](closed-2026-08-05-007-marketing-production-data-correctness/issues/006-release-and-verify-production-correctness.md)。
 
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`

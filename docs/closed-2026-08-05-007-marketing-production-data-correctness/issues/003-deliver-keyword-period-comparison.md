@@ -49,4 +49,4 @@ blocked_by:
 - 前端聚焦合同 14/14、前端全量营销 115/115、后端聚焦合同 11/11、后端营销 224/224 通过；ESLint、TypeScript 与 Next.js 生产构建通过，共生成 40 条路由。
 - 正式 Chrome 的本地生产构建回归 26/26 通过；网络断言证明两期同 revision、等长相邻日期、previous 最小分页、页码/page size 不改变 summary、query 与 adGroupId 同时应用于两期，并覆盖真实零、422 不可用、503 错误及迟到 generation。
 - diff、旧占位和秘密扫描确认：未读取已退役 Dashboard 明细，未新增 compare RPC、全量下载、双版本、feature flag、fallback、百度上游调用、Token/Cookie/.env/原始响应或 0805-002 文件。
-- 本 issue 尚未发布；当前生产仍运行 `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22` 的 006 R2 路径，本地关键词双周期与筛选回显要到 007 正式发布 issue 后才在 `https://insight.guangtuo.com` 生效。
+- 本 issue 的实现已随 007 revision `17214184f9c0ec2c9508080cb571f6b8b45923c4` 正式发布；生产关键词页已实际请求等长相邻本期/上期，并使用完整筛选范围 summary 和同一快照合同。

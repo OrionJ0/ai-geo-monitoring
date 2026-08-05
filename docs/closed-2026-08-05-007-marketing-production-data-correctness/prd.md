@@ -1,7 +1,7 @@
 ---
 title: 营销生产数据正确性与双周期回归 PRD
 date: 2026-08-05
-status: active
+status: closed
 source: 2026-08-05 营销数据审计与用户确认
 scope: product
 ---
@@ -210,7 +210,7 @@ fixture 不得包含 Token、Secret、统计用户名、真实关键词、真实
 
 ## Handoff
 
-- PRD path: `docs/active-2026-08-05-007-marketing-production-data-correctness/prd.md`
-- Current state: active；003 与 006 已关闭，按 issues 顺序实施。
+- PRD path: `docs/closed-2026-08-05-007-marketing-production-data-correctness/prd.md`
+- Current state: closed；Issue 001–006 已完成，生产 revision `17214184f9c0ec2c9508080cb571f6b8b45923c4` 已验证广告/关键词/搜索词真实双周期、来源分区和同路径消歧。
 - Execution order: `003 → 006 → 007 → 005`。
-- Recommended next step: Issues 001–002 已关闭，按顺序实施 Issue 003 关键词双周期。
+- Recommended next step: 解除 005 门禁，以本需求修正后的生产行为作为 Provider 等价基线。
