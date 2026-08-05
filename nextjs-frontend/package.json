@@ -40,7 +40,7 @@
     "typescript": "^5"
   },
   "overrides": {
-    "brace-expansion": "5.0.8",
+    "brace-expansion": "5.0.9",
     "@axe-core/playwright": {
       "playwright-core": "1.55.1"
     },
