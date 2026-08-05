@@ -22,6 +22,13 @@ export type MarketingDateFilter = {
   from: string;
   to: string;
 };
+export type MarketingKeywordFilter = {
+  from: string;
+  to: string;
+  query?: string;
+  campaignId?: string;
+  adGroupId?: string;
+};
 export type MarketingDashboardStates = {
   moduleState: string;
   projectState: "ACTIVE" | "ARCHIVED";
@@ -146,7 +153,7 @@ export type MarketingKeywordResponse = {
   projectId: string;
   revision: string;
   coverage: MarketingCoverage;
-  filter: MarketingDateFilter;
+  filter: MarketingKeywordFilter;
   summary: MarketingExactMetrics;
   items: Array<MarketingAdKeyword>;
   pagination: MarketingPagination;

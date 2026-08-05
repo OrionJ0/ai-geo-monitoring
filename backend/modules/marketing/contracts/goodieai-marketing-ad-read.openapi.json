@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "GoodieAI 营销广告快照读取 API",
-    "version": "2026-08-05-r2",
+    "version": "2026-08-05-007-keyword-filter-echo",
     "description": "GoodieAI 浏览器到服务端的现役广告快照读取合同。Dashboard 是唯一可在无快照或过期时协调百度四报表刷新的入口；三个详情资源严格只读取服务器数据库中的完整成功快照。"
   },
   "security": [
@@ -346,6 +346,18 @@
           "to": { "type": "string", "format": "date" }
         }
       },
+      "MarketingKeywordFilter": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "string", "format": "date" },
+          "to": { "type": "string", "format": "date" },
+          "query": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "campaignId": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "adGroupId": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      },
       "MarketingDashboardStates": {
         "type": "object",
         "additionalProperties": false,
@@ -539,7 +551,7 @@
           "projectId": { "type": "string" },
           "revision": { "type": "string" },
           "coverage": { "$ref": "#/components/schemas/MarketingCoverage" },
-          "filter": { "$ref": "#/components/schemas/MarketingDateFilter" },
+          "filter": { "$ref": "#/components/schemas/MarketingKeywordFilter" },
           "summary": { "$ref": "#/components/schemas/MarketingExactMetrics" },
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingAdKeyword" } },
           "pagination": { "$ref": "#/components/schemas/MarketingPagination" }

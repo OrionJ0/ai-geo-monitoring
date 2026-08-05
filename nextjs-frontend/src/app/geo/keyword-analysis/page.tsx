@@ -130,6 +130,36 @@ function formatMoney(
   return `${symbol}${groupDigits(whole.toString())}${fraction}`;
 }
 
+function roundedDivision(numerator: bigint, denominator: bigint): bigint {
+  if (denominator === BigInt(0)) throw new RangeError('分母不能为零');
+  const absolute = numerator < BigInt(0) ? -numerator : numerator;
+  const rounded = ((absolute * BigInt(2)) + denominator)
+    / (denominator * BigInt(2));
+  return numerator < BigInt(0) ? -rounded : rounded;
+}
+
+function formatExactChange(current: string, previous: string): string | null {
+  const previousValue = BigInt(previous);
+  if (previousValue === BigInt(0)) return null;
+  const tenths = roundedDivision(
+    (BigInt(current) - previousValue) * BigInt(1000),
+    previousValue
+  );
+  const sign = tenths > BigInt(0) ? '+' : '';
+  const absolute = tenths < BigInt(0) ? -tenths : tenths;
+  return `${tenths < BigInt(0) ? '-' : sign}${absolute / BigInt(10)}.${absolute % BigInt(10)}%`;
+}
+
+function changeTone(
+  change: string | null,
+  lowerIsBetter = false
+): 'good' | 'bad' | 'neutral' {
+  if (!change || change.startsWith('0')) return 'neutral';
+  const rising = change.startsWith('+');
+  if (lowerIsBetter) return rising ? 'bad' : 'good';
+  return rising ? 'good' : 'bad';
+}
+
 function formatPercent(value: number | null, digits = 2): string {
   return value == null || !Number.isFinite(value)
     ? '—'
@@ -621,6 +651,15 @@ export default function KeywordAnalysisPage() {
         />
       ) : null}
 
+      {!pageError && model?.previousState === 'ERROR' ? (
+        <Alert
+          type="warning"
+          showIcon
+          title={`上一周期关键词比较读取失败：${model.previousUnavailableReason}`}
+          action={<Button size="small" onClick={() => void analysis.reload()}>重试</Button>}
+        />
+      ) : null}
+
       {pageError ? (
         <div className={styles.moduleStack}>
           <Alert
@@ -643,29 +682,71 @@ export default function KeywordAnalysisPage() {
             <MarketingMetricCard
               title="广告关键词数"
               current={String(model.pagination.totalItems)}
-              previous={null}
-              change={null}
+              previous={model.previousTotalItems == null
+                ? null
+                : String(model.previousTotalItems)}
+              change={model.previousTotalItems == null
+                ? null
+                : formatExactChange(
+                    String(model.pagination.totalItems),
+                    String(model.previousTotalItems)
+                  )}
+              tone={changeTone(model.previousTotalItems == null
+                ? null
+                : formatExactChange(
+                    String(model.pagination.totalItems),
+                    String(model.previousTotalItems)
+                  ))}
               info="当前服务端完整筛选范围内的广告关键词数，不受当前页大小影响。"
-              previousMissingReason="上一周期比较由 007 交付。"
-              changeMissingReason="上一周期比较由 007 交付。"
+              previousMissingReason={model.previousUnavailableReason}
+              changeMissingReason={model.previousUnavailableReason
+                || '上一周期为 0，无法计算变化率。'}
             />
             <MarketingMetricCard
               title="展现"
               current={groupDigits(model.summary.impressions)}
-              previous={null}
-              change={null}
+              previous={model.previousSummary
+                ? groupDigits(model.previousSummary.impressions)
+                : null}
+              change={model.previousSummary
+                ? formatExactChange(
+                    model.summary.impressions,
+                    model.previousSummary.impressions
+                  )
+                : null}
+              tone={changeTone(model.previousSummary
+                ? formatExactChange(
+                    model.summary.impressions,
+                    model.previousSummary.impressions
+                  )
+                : null)}
               info="当前服务端完整筛选范围内的关键词展现总量。"
-              previousMissingReason="上一周期比较由 007 交付。"
-              changeMissingReason="上一周期比较由 007 交付。"
+              previousMissingReason={model.previousUnavailableReason}
+              changeMissingReason={model.previousUnavailableReason
+                || '上一周期为 0，无法计算变化率。'}
             />
             <MarketingMetricCard
               title="点击"
               current={groupDigits(model.summary.clicks)}
-              previous={null}
-              change={null}
+              previous={model.previousSummary
+                ? groupDigits(model.previousSummary.clicks)
+                : null}
+              change={model.previousSummary
+                ? formatExactChange(
+                    model.summary.clicks,
+                    model.previousSummary.clicks
+                  )
+                : null}
+              tone={changeTone(model.previousSummary
+                ? formatExactChange(
+                    model.summary.clicks,
+                    model.previousSummary.clicks
+                  )
+                : null)}
               info="当前服务端完整筛选范围内的关键词点击总量。"
-              previousMissingReason="上一周期比较由 007 交付。"
-              changeMissingReason="上一周期比较由 007 交付。"
+              previousMissingReason={model.previousUnavailableReason}
+              changeMissingReason={model.previousUnavailableReason
+                || '上一周期为 0，无法计算变化率。'}
             />
             <MarketingMetricCard
               title="消费"
@@ -675,11 +756,30 @@ export default function KeywordAnalysisPage() {
                 0,
                 model.currency
               )}
-              previous={null}
-              change={null}
+              previous={model.previousSummary
+                ? formatMoney(
+                    model.previousSummary.costAmountScaled,
+                    model.costScale,
+                    0,
+                    model.currency
+                  )
+                : null}
+              change={model.previousSummary
+                ? formatExactChange(
+                    model.summary.costAmountScaled,
+                    model.previousSummary.costAmountScaled
+                  )
+                : null}
+              tone={changeTone(model.previousSummary
+                ? formatExactChange(
+                    model.summary.costAmountScaled,
+                    model.previousSummary.costAmountScaled
+                  )
+                : null, true)}
               info="当前服务端完整筛选范围内的关键词消费总额。"
-              previousMissingReason="上一周期比较由 007 交付。"
-              changeMissingReason="上一周期比较由 007 交付。"
+              previousMissingReason={model.previousUnavailableReason}
+              changeMissingReason={model.previousUnavailableReason
+                || '上一周期为 0，无法计算变化率。'}
             />
           </MarketingMetricGrid>
 

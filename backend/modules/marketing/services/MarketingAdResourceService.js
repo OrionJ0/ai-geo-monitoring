@@ -281,6 +281,15 @@ function buildKeywordWhere(options, selected) {
   return { sql: clauses.join('\n AND '), replacements };
 }
 
+function keywordResponseFilter(options, selected) {
+  return {
+    ...selected.filter,
+    ...(options.query === undefined ? {} : { query: options.query }),
+    ...(options.campaignId === undefined ? {} : { campaignId: options.campaignId }),
+    ...(options.adGroupId === undefined ? {} : { adGroupId: options.adGroupId })
+  };
+}
+
 function buildPageIdentityWhere(items, columns) {
   const replacements = {};
   const clauses = items.map((item, itemIndex) => `(${columns.map((column) => {
@@ -897,7 +906,7 @@ class MarketingAdResourceService {
           currency: selected.run.currency_code,
           costScale: Number(selected.run.cost_scale)
         },
-        filter: selected.filter,
+        filter: keywordResponseFilter(options, selected),
         summary: exactSumRows(summaryRows),
         items: items.map((item) => {
           const key = KEYWORD_COLUMNS.map((column) => item[column]).join('\u0000');

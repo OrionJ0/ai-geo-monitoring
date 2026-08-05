@@ -263,7 +263,15 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   );
   assert.match(hookSource, /assertMarketingDashboardRootResponse\(response\.data, projectId\)/);
   assert.match(hookSource, /\/keywords/);
-  assert.match(hookSource, /revision:\s*response\.data\.revision/);
+  assert.match(hookSource, /const revision = response\.data\.revision/);
+  assert.match(hookSource, /Promise\.allSettled/);
+  assert.match(hookSource, /from:\s*period\.previousFrom/);
+  assert.match(hookSource, /to:\s*period\.previousTo/);
+  assert.match(hookSource, /page:\s*resourceQuery\.page/);
+  assert.match(hookSource, /pageSize:\s*resourceQuery\.pageSize/);
+  assert.match(hookSource, /page:\s*1/);
+  assert.match(hookSource, /pageSize:\s*1/);
+  assert.match(hookSource, /requestId !== requestSequence\.current/);
   assert.match(hookSource, /assertMarketingKeywordResourceResponse/);
   assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);
   assert.match(pageSource, /analysis\.warning/);
@@ -290,6 +298,11 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(pageSource, /model\.summary\.impressions/);
   assert.match(pageSource, /model\.summary\.clicks/);
   assert.match(pageSource, /model\.summary\.costAmountScaled/);
+  assert.match(pageSource, /model\.previousSummary/);
+  assert.match(pageSource, /model\.previousTotalItems/);
+  assert.match(pageSource, /model\?\.previousState === 'ERROR'/);
+  assert.doesNotMatch(pageSource, /previous=\{null\}/);
+  assert.doesNotMatch(pageSource, /上一周期比较由 007 交付/);
   assert.match(pageSource, /完整筛选范围/);
   assert.match(pageSource, /仅筛选当前页/);
   assert.match(pageSource, /推广单元/);
