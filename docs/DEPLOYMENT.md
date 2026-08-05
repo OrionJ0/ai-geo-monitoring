@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-06 营销 API 资源化 R1 修正版 Git Bundle 已部署 `d5695402d9b39c0ce04108bc36b6d4aa02daac13`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-06 营销 API 资源化 R2 Git Bundle 已部署 `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -86,6 +86,17 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 - `/usr/bin/google-chrome` 从唯一支持域名验收市场总览、广告表现、关键词、关键词下钻搜索词和全量搜索词。详情资源全部携带并回显同一 opaque revision，分页分别为关键词 10/10、搜索词本期 20/20、上期 1/1；截图只保存在服务器 `output/playwright/r1-production-d569540/`。市场总览中官网表单模块按既有生产配置保持 `DISABLED/503`，没有被营销 fallback 或 fixture 掩盖。
 - 当前正式路径为：市场总览继续读取完整 Dashboard 根；广告表现、关键词和搜索词先读取同一根 revision，再分别调用 `/ad-hierarchy`、`/keywords` 和本期/上期 `/search-terms`。三个详情 hook/page 已不读取 Dashboard 四个明细数组；关键词下钻通过账户、计划、单元和关键词名称事实元组稳定消歧，不向搜索词伪造 `keywordId`。
 - R1 仍按 additive 边界保留 Dashboard 四个旧数组和旧 adapter/测试，以便市场总览在 R2 前继续运行；它们不是详情页 fallback。轻量 Dashboard 硬切、旧数组与兼容代码删除必须由后续独立 R2 Bundle 完成，当前不得把 R1 描述为旧合同已退役。
+
+### 2026-08-06 营销 API 资源化 R2 正式发布与验收
+
+- 独立 R2 Git Bundle 将服务器从 R1 `d5695402d9b39c0ce04108bc36b6d4aa02daac13` 快进到 `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22`，Bundle SHA-256 为 `be6bee67cc62fb4d17c27de5742ea3a88a23808aaf12b94f53fa28f690aca1b4`。发布树不含并行 0805-002 工作；正式部署器先确认两个 systemd 服务停止，再创建 `/opt/ai-geo-monitoring/backend/releases/database.pre-d9b0688e28ba9b3a33fcfb061fe7d7235388ec22.sqlite`、快进、验证、迁移、构建和重启，最后删除上传 Bundle。
+- 迁移 `016-revisioned-ad-snapshot-facts` 已应用并复审无 pending；四张广告事实表以 `refresh_run_id` 区分 revision，当前与上一成功 revision 保留事实，生产账本观测到两个 `SUCCEEDED/retained` revision。关键词和搜索词查询计划均命中各自 `refresh_run_id` 索引。
+- 正式部署通过后端完整回归 994 项、营销 219 项、官网 31 项、咨询 35 项、前端 104 项、lint、TypeScript/40 路由生产构建和真实 Chrome 45 项。发布后服务器 `HEAD`、公开 `/api/health` 与 `/api/frontend-health` 均为 R2 revision，`/api/ready` 为 `ready`，工作区干净；两个 systemd 单元各只有一个活动主进程。
+- 正式 Dashboard 解码响应为 2,869 B，schema 为 `marketing_dashboard_v2`，不再含 `campaigns`、`adGroups`、`keywords`、`searchTerms`。三个详情资源与 Dashboard 回显相同 revision、日期与来源；层级响应 889,563 B，关键词第一页 50/921、67,692 B，搜索词第一页 50/345、39,271 B，分页均未超过 page size，详情响应均包含 `Vary: Authorization`。
+- 30 次正式 HTTPS 采样 P95：Dashboard 47.61 ms、广告层级 181.04 ms、关键词 140.26 ms、搜索词 54.05 ms。相比 R1 完整 Dashboard 的 1,061,845 B，市场总览根响应降低到 2,869 B；各详情页只组合轻量根与自己的资源，不再传输完整四数组。
+- `/usr/bin/google-chrome` 从 `https://insight.guangtuo.com` 打开市场总览、广告表现、广告关键词和全量广告搜索词；四页正式根节点与表格均可见，营销请求均为 200。Network 分别使用 Dashboard、`ad-hierarchy`、`keywords`、`search-terms`，没有 `view/includeDetails` 兼容查询，也没有浏览器直连百度。
+- 生产观察窗记录 140 次结构化广告读取成功、0 次失败、0 个秘密标记、0 个服务错误；Nginx 记录 Dashboard 39、层级 33、关键词 33、搜索词 37 次请求，旧兼容查询为 0。当前正式默认路径已经硬切轻量 Dashboard + 三个 revision 钉扎资源；旧四数组、adapter、fallback、测试和现役文档已经删除，不存在长期 API 双版本。
+- 预验证后代恢复 revision 为 `c167453568cf9dd27fda442529b424f2a5fc5963`，Bundle SHA-256 为 `63eff4e357802d97309efe4a1b6fa734fa0da3d60b66e8ceb35e3ff8dab1e42e`。该版本永久保留迁移 016、checksum 与部署最高迁移，只恢复完整 R1 运行合同；仅在 R2 阻断失败时允许继续快进，恢复后不得关闭 006，必须修复 R2 并重复正式 Network、响应预算、日志和浏览器门禁。本次 R2 验收未触发恢复。
 
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`

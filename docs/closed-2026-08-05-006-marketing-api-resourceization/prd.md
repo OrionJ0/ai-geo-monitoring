@@ -1,7 +1,7 @@
 ---
 title: 营销广告快照 API 资源化 PRD
 date: 2026-08-05
-status: active
+status: closed
 source: 2026-08-05 用户确认与 Claude CLI 两轮独立评估
 scope: product
 ---
@@ -233,6 +233,6 @@ Issue 001 已用当前生产快照测量并固定：
 
 ## Handoff
 
-- PRD path: `docs/active-2026-08-05-006-marketing-api-resourceization/prd.md`
+- PRD path: `docs/closed-2026-08-05-006-marketing-api-resourceization/prd.md`
 - Current state: `active`；003 已关闭，Issue 001 已完成只读生产基线与合同冻结，Dashboard、页面和生产接口未改变。
 - Recommended next step: Issue 001 验收并提交后进入 Issue 002；006 关闭后进入 007，007 关闭后再进入 005。

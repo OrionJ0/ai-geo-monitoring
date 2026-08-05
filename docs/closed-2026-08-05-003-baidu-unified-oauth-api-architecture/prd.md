@@ -88,7 +88,7 @@ scope: product
 
 - [005 百度 Provider 模块化重构](../draft-2026-08-05-005-baidu-provider-modularization/prd.md)：在 003、006、007 关闭后拆分 OAuth、搜索推广和百度统计客户端；
 - [007 营销生产数据正确性与双周期回归](../draft-2026-08-05-007-marketing-production-data-correctness/prd.md)：在 006 最终资源合同上修正双周期、来源对账和页面消歧；
-- [006 营销广告快照 API 资源化](../active-2026-08-05-006-marketing-api-resourceization/prd.md)：在 003 关闭后实施轻量 Dashboard、广告层级、关键词和搜索词资源，不增加 URL 版本；
+- [006 营销广告快照 API 资源化](../closed-2026-08-05-006-marketing-api-resourceization/prd.md)：在 003 关闭后实施轻量 Dashboard、广告层级、关键词和搜索词资源，不增加 URL 版本；
 - 有真实需求后再建设持久化异步能力验证任务；
 - 53KF、销售系统和可信跨系统归因。
 
