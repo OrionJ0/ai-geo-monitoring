@@ -102,6 +102,32 @@ function competitionStability(entries) {
   return distribution(pairScores);
 }
 
+function precisionRecallF1({ tp = 0, fp = 0, fn = 0 } = {}) {
+  const precision = tp + fp > 0 ? tp / (tp + fp) : null;
+  const recall = tp + fn > 0 ? tp / (tp + fn) : null;
+  const f1 = precision !== null && recall !== null && precision + recall > 0
+    ? (2 * precision * recall) / (precision + recall)
+    : null;
+  return { precision, recall, f1 };
+}
+
+function pairwiseDiff(left = [], right = []) {
+  const pairs = Math.min(left.length, right.length);
+  const diffs = [];
+  for (let index = 0; index < pairs; index += 1) {
+    const a = Number(left[index]);
+    const b = Number(right[index]);
+    if (Number.isFinite(a) && Number.isFinite(b)) diffs.push(b - a);
+  }
+  return {
+    paired_pairs: pairs,
+    diffs,
+    mean_diff: diffs.length
+      ? diffs.reduce((sum, value) => sum + value, 0) / diffs.length
+      : null
+  };
+}
+
 function summarizeArm(entries, labels = new Map()) {
   const normalizedEntries = Array.isArray(entries) ? entries : [];
   const completedEntries = normalizedEntries.filter((entry) => entry?.ok && entry.result);
@@ -143,6 +169,8 @@ module.exports = {
   competitionJaccard,
   distribution,
   metricSignature,
+  pairwiseDiff,
   percentile,
+  precisionRecallF1,
   summarizeArm
 };

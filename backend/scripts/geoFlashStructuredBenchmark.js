@@ -29,7 +29,32 @@ const {
   parseLabels,
   wilsonInterval
 } = require('./geoBaselineEvaluate');
+const { buildCacheKey } = require('./geoFlashStructuredCorpus');
 const { summarizeArm } = require('../services/GeoFlashStructuredBenchmarkService');
+const { ENTITY_PROMPT_REVISION } = require('../services/AIResponseEntityExtractionService');
+const { SEMANTIC_PROMPT_REVISION } = require('../services/AIResponseSemanticJudgmentService');
+
+const EXPERIMENT_REVISION = 'three_track_partial_v1';
+
+function cacheIdentityFor(arm) {
+  if (arm === 'v5-json') {
+    return {
+      promptRevision: `${ENTITY_PROMPT_REVISION}+${SEMANTIC_PROMPT_REVISION}`,
+      model: 'deepseek-v4-flash',
+      requestPolicy: { temperature: 0, thinking: 'disabled', response_format: 'json_object' },
+      experimentRevision: EXPERIMENT_REVISION
+    };
+  }
+  const definition = AIResponseAnalysisService.getPromptDefinition();
+  return {
+    promptRevision: definition.prompt_revision,
+    model: 'deepseek-v4-flash',
+    requestPolicy: arm === 'v4-temperature-zero'
+      ? { temperature: 0 }
+      : { temperature: 'default' },
+    experimentRevision: EXPERIMENT_REVISION
+  };
+}
 
 const SUPPORTED_ARMS = new Set(['v4-current', 'v4-temperature-zero', 'v5-json']);
 const DEFAULT_BASELINE_DIR = path.resolve(__dirname, '../../work/geo-baseline-2026-07-28');
@@ -235,9 +260,15 @@ function recalculateCachedV5Entry(entry, sample) {
 
 async function runEntry({ sample, arm, repeat, basePlatform, options }) {
   const filePath = resultPath(options, arm, repeat, sample.sample_id);
+  const cacheKey = buildCacheKey({ sample, arm, repeat, ...cacheIdentityFor(arm) });
   if (!options.refresh) {
     const cached = readCachedResult(filePath);
-    if (cached?.sample_id === sample.sample_id && cached?.arm === arm && cached?.repeat === repeat) {
+    if (
+      cached?.sample_id === sample.sample_id
+      && cached?.arm === arm
+      && cached?.repeat === repeat
+      && cached?.cache_key === cacheKey
+    ) {
       const normalized = options.recalculateCached && arm === 'v5-json'
         ? recalculateCachedV5Entry(cached, sample)
         : cached;
@@ -261,6 +292,7 @@ async function runEntry({ sample, arm, repeat, basePlatform, options }) {
       sample_id: sample.sample_id,
       arm,
       repeat,
+      cache_key: cacheKey,
       started_at: startedAt,
       finished_at: new Date().toISOString(),
       duration_ms: Date.now() - startedMs,
@@ -277,6 +309,7 @@ async function runEntry({ sample, arm, repeat, basePlatform, options }) {
       sample_id: sample.sample_id,
       arm,
       repeat,
+      cache_key: cacheKey,
       started_at: startedAt,
       finished_at: new Date().toISOString(),
       duration_ms: Date.now() - startedMs,
@@ -451,6 +484,7 @@ if (require.main === module) {
 
 module.exports = {
   buildReport,
+  cacheIdentityFor,
   loadCorpus,
   parseArgs,
   recalculateCachedV5Entry,
