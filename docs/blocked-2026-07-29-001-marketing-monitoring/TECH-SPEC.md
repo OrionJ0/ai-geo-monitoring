@@ -144,7 +144,13 @@ backend/
 │   ├── index.js
 │   ├── config.js
 │   ├── adapters/
-│   │   └── BaiduMarketingClient.js
+│   │   ├── BaiduMarketingClient.js
+│   │   └── baidu/
+│   │       ├── BaiduErrors.js
+│   │       ├── BaiduHttpKernel.js
+│   │       ├── BaiduOAuthClient.js
+│   │       ├── BaiduSearchAdsClient.js
+│   │       └── BaiduTongjiClient.js
 │   ├── contracts/baidu/<version>/
 │   ├── domain/
 │   │   ├── baiduOAuthSignature.js

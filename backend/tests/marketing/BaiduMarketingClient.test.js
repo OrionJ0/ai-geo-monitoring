@@ -10,6 +10,9 @@ const {
   BaiduMarketingClient
 } = require('../../modules/marketing/adapters/BaiduMarketingClient');
 const {
+  BaiduHttpKernel
+} = require('../../modules/marketing/adapters/baidu/BaiduHttpKernel');
+const {
   createBaiduCallbackSignature
 } = require('../../modules/marketing/domain/baiduOAuthSignature');
 
@@ -1104,6 +1107,60 @@ test('client rejects endpoints outside the versioned outbound allowlist', async 
       { code: 'BAIDU_OUTBOUND_NOT_ALLOWED' }
     );
   }
+});
+
+test('HTTP kernel security policy cannot be relaxed by callers', async () => {
+  const calls = [];
+  const kernel = new BaiduHttpKernel({
+    manifest,
+    timeoutMs: 10000,
+    transport: async (request) => {
+      calls.push(request);
+      return {};
+    }
+  });
+  kernel.allowlist = new Set(['POST https://outside.example.test/write']);
+  kernel.timeoutMs = 60000;
+
+  await assert.rejects(
+    kernel.requestJson({
+      method: 'POST',
+      url: 'https://outside.example.test/write',
+      json: {}
+    }),
+    { code: 'BAIDU_OUTBOUND_NOT_ALLOWED', status: 500 }
+  );
+
+  for (const request of [
+    { timeoutMs: Infinity },
+    { timeoutMs: 10001 },
+    { timeoutMs: 0 },
+    { timeoutMs: 1.5 },
+    { maxResponseBytes: Infinity },
+    { maxResponseBytes: (8 * 1024 * 1024) + 1 },
+    { maxResponseBytes: 0 },
+    { maxResponseBytes: 1.5 }
+  ]) {
+    await assert.rejects(
+      kernel.requestJson({
+        method: manifest.oauth.token.method,
+        url: manifest.oauth.token.url,
+        json: {},
+        ...request
+      }),
+      { code: 'BAIDU_CLIENT_CONFIG_INVALID', status: 500 }
+    );
+  }
+  assert.equal(calls.length, 0);
+
+  await kernel.requestJson({
+    method: manifest.oauth.token.method,
+    url: manifest.oauth.token.url,
+    json: {},
+    timeoutMs: 10000,
+    maxResponseBytes: 8 * 1024 * 1024
+  });
+  assert.equal(calls.length, 1);
 });
 
 test('authorization-code transport uncertainty is not downgraded to a safe failure', async () => {

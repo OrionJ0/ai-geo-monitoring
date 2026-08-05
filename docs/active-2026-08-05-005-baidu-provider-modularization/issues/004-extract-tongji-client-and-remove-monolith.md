@@ -40,7 +40,7 @@ blocked_by:
 
 - TDD 红灯先让模块边界测试因缺少 `BaiduTongjiClient` 以 `MODULE_NOT_FOUND` 失败；实现后 facade/模块边界与等价合同聚焦 72/72 通过。
 - `BaiduTongjiClient.js` 独占站点目录、趋势、质量、来源与页面报告的日期/设备校验、来源能力开关、2 MiB 单响应预算、页面报告 30 秒整轮预算、分页去重和严格 parser。它只持有 manifest 与共享 HTTP 内核，不持有 Secret，也不实现 Token 获取、刷新、密文持久化或备用凭据。
-- facade 现为 139 行兼容组合层，只构造一个 HTTP 内核、一个 OAuth 客户端、一个搜索推广客户端和一个百度统计客户端，并保留原四个 CommonJS 导出及 21 个 prototype 方法；百度统计五个公开方法仅委托唯一统计客户端。
+- facade 已收敛为兼容组合层，只构造一个 HTTP 内核、一个 OAuth 客户端、一个搜索推广客户端和一个百度统计客户端，并保留原四个 CommonJS 导出及 21 个 prototype 方法；百度统计五个公开方法仅委托唯一统计客户端。
 - 管理/绑定、统一 Access Context、统一 OAuth 只读探针、网站流量、来源趋势与页面报告集成回归 70/70 通过；统一 Token 失败继续返回统一上下文错误，不调用替代凭据或旧统计实现。
 - 007 的来源 `COMPLETE/PARTIAL/INVALID`、83/82 PARTIAL、缺失与真实零，以及相同页面路径稳定消歧继续由等价基线覆盖；没有修改统计缓存、公开 API、数据库、页面或指标合同。
 - 依赖与源码扫描确认搜索推广和百度统计客户端互不 require；唯一 `defaultTransport`、allowlist、fetch/AbortController 仍只在 `BaiduHttpKernel`。facade 内不再存在产品常量、request body、parser、分页循环、feature flag 或 runtime fallback。

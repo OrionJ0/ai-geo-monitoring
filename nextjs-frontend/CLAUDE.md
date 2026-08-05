@@ -106,7 +106,7 @@ npm start        # Start production
 - Keep Baidu advertising and Tongji endpoints under `/api/marketing`. Keep attributable website form aggregates under the independent `/api/website-data` module and contract. Do not share source clients, response fields, module status, or migration ledgers between them.
 - Name the website value “官网表单咨询”; it covers attributable successful submission sessions only. Never relabel it as total customer-service consultations, 53KF conversations, all form records, leads, or orders. When the upstream aggregate cannot prove total form records, keep total, unattributed count, and attribution rate unavailable.
 - `src/app/geo/market-overview/page.tsx` implements the approved V2 visual and interaction contract. Unsupported downstream data and metrics remain missing by design; report UI completion, data-contract completion, commit, deployment, and production verification as separate stages with direct evidence.
-- Keep Baidu contract parsing inside `backend/modules/marketing/adapters/BaiduMarketingClient.js`.
+- Keep `backend/modules/marketing/adapters/BaiduMarketingClient.js` as the compatibility facade only. Put OAuth, SEARCH advertising, and Tongji request/parsing logic in their respective clients under `backend/modules/marketing/adapters/baidu/`, and route every outbound request through the single `BaiduHttpKernel`.
 
 ### Error Handling
 - API errors are caught and displayed using Ant Design's `message` component
