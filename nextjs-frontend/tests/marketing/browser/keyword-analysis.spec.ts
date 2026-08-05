@@ -329,7 +329,8 @@ test('confirmed keyword analysis visual keeps selection, donut, task filters, an
   await expect(keywordMetric(page, '有点击关键词')).toContainText('51');
   await expect(keywordMetric(page, '点击覆盖率')).toContainText('16.89%');
   await expect(keywordMetric(page, '未获点击')).toContainText('251');
-  await expect(page.getByText('百度推广 · 真实数据 · 数据截至 2026-08-03')).toBeVisible();
+  const selectedEndDate = await page.getByRole('textbox', { name: '结束日期' }).inputValue();
+  await expect(page.getByText(`百度推广 · 真实数据 · 数据截至 ${selectedEndDate}`)).toBeVisible();
   await expect(page.getByText('当前选中关键词')).toBeVisible();
   await expect(page.getByText('优化标签分布')).toBeVisible();
   await expect(page.getByText('振动光纤价格').first()).toBeVisible();
