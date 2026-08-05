@@ -43,6 +43,6 @@ test('connection directory exposes only sanitized versioned product status', () 
   assert.match(service, /tongjiUserName/u);
   assert.match(service, /products/u);
   assert.match(service, /publicProductState/u);
-  assert.doesNotMatch(service, /tongji_access_token_ciphertext/iu);
-  assert.doesNotMatch(service, /tongji_account_name/iu);
+  assert.doesNotMatch(service, /tongji_.*ciphertext/iu);
+  assert.doesNotMatch(service, /tongji_.*account_name/iu);
 });

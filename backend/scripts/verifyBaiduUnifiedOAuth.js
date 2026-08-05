@@ -297,7 +297,7 @@ async function verifyTongji({
   accessToken,
   coverage
 }) {
-  const accountName = String(connection.tongji_account_name || '').trim();
+  const accountName = String(connection.tongji_user_name || '').trim();
   if (!accountName) {
     throw new UnifiedOAuthPreflightError(
       '连接缺少已确认的百度统计用户名',

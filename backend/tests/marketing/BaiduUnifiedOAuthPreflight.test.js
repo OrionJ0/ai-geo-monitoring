@@ -26,7 +26,7 @@ function createProbeHarness({
     token_version: 2,
     refresh_claim_token: null,
     refresh_claim_until: null,
-    tongji_account_name: 'tongji-user',
+    tongji_user_name: 'tongji-user',
     ...connectionOverrides
   };
   const binding = {
@@ -92,7 +92,7 @@ test('统一 OAuth 探针只读并以同一当前 Token 验证双产品', async 
     token_version: 7,
     refresh_claim_token: null,
     refresh_claim_until: null,
-    tongji_account_name: 'tongji-user-sensitive'
+    tongji_user_name: 'tongji-user-sensitive'
   };
   const binding = {
     id: 'binding-sensitive-id',
@@ -145,7 +145,7 @@ test('统一 OAuth 探针只读并以同一当前 Token 验证双产品', async 
     async listTongjiSites(request) {
       calls.push({ kind: 'sites', request });
       assert.equal(request.accessToken, token);
-      assert.equal(request.accountName, connection.tongji_account_name);
+      assert.equal(request.accountName, connection.tongji_user_name);
       return [{
         siteId: binding.tongji_site_id,
         domain: binding.tongji_site_domain,
@@ -202,7 +202,7 @@ test('统一 OAuth 探针只读并以同一当前 Token 验证双产品', async 
     binding.id,
     binding.external_account_id,
     binding.external_account_name,
-    connection.tongji_account_name,
+    connection.tongji_user_name,
     binding.tongji_site_id,
     binding.tongji_site_domain,
     'campaign-sensitive-id',
@@ -224,7 +224,7 @@ test('统计权限失败不会抹掉已经通过的搜索推广证据', async ()
     auth_generation: 1,
     token_version: 2,
     refresh_claim_token: null,
-    tongji_account_name: 'tongji-user'
+    tongji_user_name: 'tongji-user'
   };
   const binding = {
     id: 'binding-1',
@@ -295,7 +295,7 @@ test('缺少统计用户名时仍独立验证搜索推广', async () => {
     auth_generation: 1,
     token_version: 2,
     refresh_claim_token: null,
-    tongji_account_name: null
+    tongji_user_name: null
   };
   const binding = {
     id: 'binding-2',

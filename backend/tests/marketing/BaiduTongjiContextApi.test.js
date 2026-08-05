@@ -38,14 +38,11 @@ async function seedOAuthContext(sequelize, {
      SET access_token_ciphertext = :oauthCiphertext,
          access_token_expires_at = '2026-08-05T11:00:00.000Z',
          tongji_user_name = :userName,
-         tongji_user_name_verified_at = :verifiedAt,
-         tongji_account_name = 'legacy-account-canary',
-         tongji_access_token_ciphertext = :legacyCiphertext
+         tongji_user_name_verified_at = :verifiedAt
      WHERE id = 'connection-1'`,
     {
       replacements: {
         oauthCiphertext: encryptSecret('oauth-access-token', ENCRYPTION_KEY),
-        legacyCiphertext: encryptSecret('legacy-tongji-token', ENCRYPTION_KEY),
         userName,
         verifiedAt
       }
@@ -79,7 +76,7 @@ async function listen(app) {
   return server;
 }
 
-test('admin saves only a verified userName and the legacy credential route is 404', async (t) => {
+test('admin saves only a verified userName in the unified context', async (t) => {
   const database = await createMarketingTestDatabase('tongji-context-api-');
   t.after(database.close);
   await seedOAuthContext(database.sequelize);
@@ -161,24 +158,10 @@ test('admin saves only a verified userName and the legacy credential route is 40
     accessToken: 'oauth-access-token'
   }]);
 
-  const retired = await fetch(
-    `${baseUrl}/api/admin/marketing/baidu/connections/connection-1/tongji-credential`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        accountName: 'legacy',
-        accessToken: 'legacy'
-      })
-    }
-  );
-  assert.equal(retired.status, 404);
-
   const rows = await database.sequelize.query(
     `SELECT tongji_user_name, tongji_user_name_verified_at,
             tongji_access_state, tongji_observed_auth_generation,
-            tongji_observed_token_version,
-            tongji_account_name, tongji_access_token_ciphertext
+            tongji_observed_token_version
      FROM baidu_marketing_connections
      WHERE id = 'connection-1'`,
     { type: QueryTypes.SELECT }
@@ -191,8 +174,6 @@ test('admin saves only a verified userName and the legacy credential route is 40
   assert.equal(rows[0].tongji_access_state, 'VERIFIED');
   assert.equal(rows[0].tongji_observed_auth_generation, 0);
   assert.equal(rows[0].tongji_observed_token_version, 1);
-  assert.equal(rows[0].tongji_account_name, 'legacy-account-canary');
-  assert.ok(rows[0].tongji_access_token_ciphertext);
   const [bindings] = await database.sequelize.query(
     `SELECT status, paused_reason, binding_version
      FROM baidu_project_bindings
@@ -283,8 +264,8 @@ test('bound context refreshes stale ownership once and rejects a changed domain'
   assert.equal(directoryCalls, 3);
 });
 
-test('OAuth failure never falls back to the legacy Tongji ciphertext', async (t) => {
-  const database = await createMarketingTestDatabase('tongji-no-fallback-');
+test('OAuth failure returns the unified context error without alternate credentials', async (t) => {
+  const database = await createMarketingTestDatabase('tongji-unified-error-');
   t.after(database.close);
   await seedOAuthContext(database.sequelize);
   await database.sequelize.query(

@@ -27,6 +27,35 @@ function runMigration(args, environment) {
   });
 }
 
+function seedThrough014(databasePath) {
+  const script = `
+    const sequelize = require('./config/database');
+    const { createMarketingMigrationRunner } = require('./modules/marketing/migrations/MarketingMigrationRunner');
+    const { loadMarketingMigrations } = require('./modules/marketing/migrations');
+    (async () => {
+      await createMarketingMigrationRunner({
+        sequelize,
+        migrations: loadMarketingMigrations().slice(0, 14)
+      }).apply();
+    })().catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    }).finally(async () => sequelize.close());
+  `;
+  return spawnSync(process.execPath, ['-e', script], {
+    cwd: backendDirectory,
+    env: {
+      ...process.env,
+      DB_LOGGING: 'false',
+      DATABASE_URL: '',
+      DB_STORAGE: databasePath,
+      MARKETING_MONITORING_ENABLED: 'false',
+      MARKETING_MONITORING_PILOT_MODE: 'false'
+    },
+    encoding: 'utf8'
+  });
+}
+
 test('backend package exposes real marketing test, migration and audit commands', () => {
   const packageJson = JSON.parse(
     fs.readFileSync(path.join(backendDirectory, 'package.json'), 'utf8')
@@ -51,9 +80,11 @@ test('marketing migration CLI applies and audits all immutable migrations', () =
   const databasePath = path.join(directory, 'marketing.sqlite');
 
   try {
+    const seed = seedThrough014(databasePath);
+    assert.equal(seed.status, 0, seed.stderr);
     const apply = runMigration([
       '--apply',
-      '--expected-latest=014-unified-oauth-context'
+      '--expected-latest=015-drop-legacy-tongji-credentials'
     ], {
       DB_STORAGE: databasePath,
       MARKETING_MONITORING_ENABLED: 'false'
@@ -85,7 +116,8 @@ test('marketing migration CLI applies and audits all immutable migrations', () =
         '011-tongji-cache-pruning-indexes',
         '012-tongji-snapshot-capabilities',
         '013-tongji-page-report-snapshots',
-        '014-unified-oauth-context'
+        '014-unified-oauth-context',
+        '015-drop-legacy-tongji-credentials'
       ],
       pendingVersions: []
     });
@@ -101,7 +133,7 @@ test('marketing migration CLI rejects a repository boundary mismatch before appl
   try {
     const execution = runMigration([
       '--apply',
-      '--expected-latest=013-tongji-page-report-snapshots'
+      '--expected-latest=014-unified-oauth-context'
     ], {
       DB_STORAGE: databasePath,
       MARKETING_MONITORING_ENABLED: 'false'
@@ -110,6 +142,28 @@ test('marketing migration CLI rejects a repository boundary mismatch before appl
     assert.equal(
       JSON.parse(execution.stderr).errorCode,
       'MARKETING_MIGRATION_EXPECTED_LATEST_MISMATCH'
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('marketing migration CLI rejects unexpected pending history at an A2 gate', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-pending-gate-'));
+  const databasePath = path.join(directory, 'marketing.sqlite');
+
+  try {
+    const execution = runMigration([
+      '--apply',
+      '--expected-latest=015-drop-legacy-tongji-credentials'
+    ], {
+      DB_STORAGE: databasePath,
+      MARKETING_MONITORING_ENABLED: 'false'
+    });
+    assert.notEqual(execution.status, 0);
+    assert.equal(
+      JSON.parse(execution.stderr).errorCode,
+      'MARKETING_MIGRATION_UNEXPECTED_PENDING'
     );
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

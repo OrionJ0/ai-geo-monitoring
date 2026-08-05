@@ -78,16 +78,14 @@ async function run() {
   try {
     await admin.authenticate();
     await admin.query(`CREATE SCHEMA "${schema}"`);
-    database = new Sequelize(connectionUrl, {
+    const scopedUrl = new URL(connectionUrl);
+    scopedUrl.searchParams.set('options', `-c search_path=${schema}`);
+    database = new Sequelize(scopedUrl.toString(), {
       logging: false,
+      schema,
       pool: {
         min: 0,
-        max: 1,
-        afterCreate(connection, done) {
-          connection.query(`SET search_path TO "${schema}"`, (error) => {
-            done(error, connection);
-          });
-        }
+        max: 1
       },
       define: { schema }
     });
@@ -107,19 +105,11 @@ async function run() {
         status TEXT NOT NULL
       )
     `);
-    const result = await createMarketingMigrationRunner({
-      sequelize: database
+    const migrations = loadMarketingMigrations();
+    await createMarketingMigrationRunner({
+      sequelize: database,
+      migrations: migrations.slice(0, 14)
     }).apply();
-    const expectedVersions = loadMarketingMigrations().map(({ version }) => version);
-    if (
-      !result.ready
-      || JSON.stringify(result.appliedVersions) !== JSON.stringify(expectedVersions)
-    ) {
-      throw postgresSafetyError(
-        'PostgreSQL 营销迁移验收失败',
-        'MARKETING_POSTGRES_MIGRATION_FAILED'
-      );
-    }
     await database.query(
       `INSERT INTO users (id, role, status)
        VALUES (1, 'admin', 'active'), (2, 'user', 'active')`
@@ -134,11 +124,23 @@ async function run() {
         access_token_ciphertext, refresh_token_ciphertext,
         access_token_expires_at, auth_generation, token_version,
         refresh_claim_token, refresh_claim_until, created_by_user_id,
+        tongji_account_name, tongji_access_token_ciphertext,
+        tongji_credential_updated_at, tongji_user_name,
+        tongji_user_name_verified_at,
+        marketing_access_state, marketing_observed_auth_generation,
+        marketing_observed_token_version, marketing_checked_at,
+        tongji_access_state, tongji_observed_auth_generation,
+        tongji_observed_token_version, tongji_checked_at,
         last_error_code, created_at, updated_at
       ) VALUES (
         'pg-connection-1', 'CONNECTED', 'pg-principal-1', '脱敏主体',
         'fixture-ciphertext', NULL, NULL, 0, 1,
-        NULL, NULL, 1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        NULL, NULL, 1,
+        'legacy-user', 'legacy-ciphertext', CURRENT_TIMESTAMP,
+        'verified-user', CURRENT_TIMESTAMP,
+        'VERIFIED', 0, 1, CURRENT_TIMESTAMP,
+        'VERIFIED', 0, 1, CURRENT_TIMESTAMP,
+        NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )`
     );
     await database.query(
@@ -152,6 +154,27 @@ async function run() {
         'ACTIVE', 0, NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )`
     );
+    const result = await createMarketingMigrationRunner({
+      sequelize: database
+    }).apply({
+      expectedLatest: '015-drop-legacy-tongji-credentials'
+    });
+    const expectedVersions = migrations.map(({ version }) => version);
+    const connectionColumns = await database.getQueryInterface().describeTable(
+      'baidu_marketing_connections'
+    );
+    if (
+      !result.ready
+      || JSON.stringify(result.appliedVersions) !== JSON.stringify(expectedVersions)
+      || connectionColumns.tongji_account_name
+      || connectionColumns.tongji_access_token_ciphertext
+      || connectionColumns.tongji_credential_updated_at
+    ) {
+      throw postgresSafetyError(
+        'PostgreSQL 营销迁移验收失败',
+        'MARKETING_POSTGRES_MIGRATION_FAILED'
+      );
+    }
     const clock = () => Date.parse('2026-07-29T04:00:00.000Z');
     const refresh = new MarketingRefreshService({
       sequelize: database,
@@ -162,7 +185,7 @@ async function run() {
               accountId: '0009007199254740993123',
               campaignId: 'campaign-0009007199254740993123',
               campaignName: 'PostgreSQL 验收计划',
-              metricDate: '2026-07-29',
+              metricDate: '2026-07-28',
               impressions: '900719925474099312345',
               clicks: '7',
               costAmountScaled: '3000003'

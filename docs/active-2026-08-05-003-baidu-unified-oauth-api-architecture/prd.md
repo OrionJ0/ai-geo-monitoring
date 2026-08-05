@@ -255,5 +255,5 @@ A1 和 A2 必须是两个不同 Git Bundle 发布。A1 迁移命令必须声明�
 
 - PRD path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
 - Tech Spec path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Current state: Issue 001–004 已完成。A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41` 已通过独立 Git Bundle 正式发布，迁移 014 已应用；正式搜索推广和百度统计都使用版本化统一 Access Context。现役连接已完成一次真实 OAuth 刷新，刷新后两个产品均以当前 Token 版本复验为 `VERIFIED`，五个营销页面和管理页已从正式域名用真实 Chrome 验收。
-- Recommended next step: 执行 Issue 005，新增迁移 015 并在 A1 已验证事实基础上删除三个旧统计凭据列；父需求继续为 `active`，不得在 A2 正式发布前宣称旧字段已退役。后续顺序仍为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。
+- Current state: Issue 001–005 已完成。A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41` 已正式运行并完成真实 OAuth 刷新和当前版本双产品复验；独立 A2 候选已新增带强门禁的迁移 015、SQLite/PostgreSQL contract 与恢复测试，并删除运行测试和探针对旧列的依赖。生产尚未发布 A2，三个旧列仍在生产数据库中但运行时零读写。
+- Recommended next step: 执行 Issue 006：停服前再次即时复验当前 Token 版本，停止正式 backend、创建 A2 专用数据库备份，以独立 Git Bundle 快进并用最高版本 015 应用迁移，再启动和验收正式入口。父需求继续为 `active`，不得在 A2 完成前宣称旧字段已生产退役。后续顺序仍为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。
