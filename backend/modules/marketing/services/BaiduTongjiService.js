@@ -1213,6 +1213,7 @@ class BaiduTongjiService {
     const connections = await this.sequelize.query(
       `SELECT DISTINCT
          b.id AS binding_id,
+         b.binding_version,
          b.external_account_id,
          b.tongji_site_id,
          b.tongji_site_domain,

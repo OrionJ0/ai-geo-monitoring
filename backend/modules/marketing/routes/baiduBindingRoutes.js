@@ -4,6 +4,9 @@ const {
 } = require('../../../middleware/auth');
 
 function sendError(res, error) {
+  if (Number.isSafeInteger(error?.retryAfterSeconds)) {
+    res.set('Retry-After', String(error.retryAfterSeconds));
+  }
   return res.status(error?.status || 500).json({
     error: {
       code: error?.code || 'MARKETING_BINDING_FAILED',
@@ -26,7 +29,7 @@ function exactBody(body, keys) {
 
 function createBaiduBindingRouter({
   service,
-  tongjiCredentialService = null,
+  tongjiContextService = null,
   adminRequired = defaultAdminRequired,
   includeAccounts = true,
   includeBindings = true,
@@ -35,23 +38,22 @@ function createBaiduBindingRouter({
 }) {
   const router = express.Router();
 
-  if (tongjiCredentialService) router.put(
-    '/connections/:connectionId/tongji-credential',
+  if (tongjiContextService) router.put(
+    '/connections/:connectionId/tongji-context',
     adminRequired,
     async (req, res) => {
-      if (!exactBody(req.body, ['accountName', 'accessToken'])) {
+      if (!exactBody(req.body, ['userName'])) {
         return sendError(res, {
           status: 400,
-          code: 'TONGJI_CREDENTIAL_REQUEST_INVALID',
-          message: '百度统计凭据请求字段无效'
+          code: 'TONGJI_CONTEXT_REQUEST_INVALID',
+          message: '百度统计用户名请求字段无效'
         });
       }
       try {
         res.set('Cache-Control', 'no-store');
-        return res.json(await tongjiCredentialService.configure({
+        return res.json(await tongjiContextService.configure({
           connectionId: req.params.connectionId,
-          accountName: req.body.accountName,
-          accessToken: req.body.accessToken
+          userName: req.body.userName
         }));
       } catch (error) {
         return sendError(res, error);

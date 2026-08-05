@@ -62,7 +62,7 @@
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
 | [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 001–008 已完成；009 不批准硬切；011–012 已关闭；013 评测合同两轮返工完成（严格 truth schema、关系 span 对齐计分、type enum、阶段 1 失败降级、编号列表不推导排名、竞品 occurrence 计数）且 AI 内容裁决已应用为 pending_review，唯一剩余阻塞是数据所有者确认签字（见 TRUTH-REVIEW-QUEUE.md、AI-TRUTH-ADJUDICATION.md）。014/015 未启动，010 保持阻塞。正式入口仍走 v4，当前 DeepSeek 默认分析配置为 Pro；v5 显式候选固定 Flash。 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
-| [百度统一 OAuth 凭据与营销 API 架构](active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) | Issue 001 生产双产品探针已通过，Issue 002 已交付迁移 014、版本化 Access Context、产品状态 CAS 和迁移门禁；014 尚未生产应用，正式运行时仍为双凭据，下一步硬切百度统计统一 OAuth 上下文 |
+| [百度统一 OAuth 凭据与营销 API 架构](active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) | Issue 001–003 已完成：生产双产品探针通过，本地已交付迁移 014、版本化 Access Context、统一统计上下文硬切与旧运行时/UI 退役；尚未生产发布，正式运行时仍为 A1 前双凭据，下一步需 HITL 批准 A1 发布与真实入口验证 |
 
 ## 草案需求
 
