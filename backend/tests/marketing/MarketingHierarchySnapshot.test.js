@@ -102,68 +102,10 @@ test('one refresh commits campaign, ad group, keyword and search-term facts atom
     keywords: 1,
     searchTerms: 1
   });
-  assert.deepEqual(dashboard.adGroups, [{
-    accountId: '1234',
-    campaignId: '101',
-    campaignName: '计划甲',
-    adGroupId: '201',
-    adGroupName: '单元甲',
-    impressions: '10',
-    clicks: '2',
-    costAmountScaled: '350',
-    trend: [{
-      date: '2026-07-29',
-      impressions: '10',
-      clicks: '2',
-      costAmountScaled: '350'
-    }]
-  }]);
-  assert.deepEqual(dashboard.keywords, [{
-    accountId: '1234',
-    campaignId: '101',
-    campaignName: '计划甲',
-    adGroupId: '201',
-    adGroupName: '单元甲',
-    keywordId: '301',
-    keywordName: '周界报警系统',
-    targetingType: 'KEYWORD',
-    impressions: '10',
-    clicks: '2',
-    costAmountScaled: '350',
-    trend: [{
-      date: '2026-07-29',
-      impressions: '10',
-      clicks: '2',
-      costAmountScaled: '350'
-    }]
-  }]);
-  assert.deepEqual(dashboard.searchTerms, [{
-    accountId: '1234',
-    campaignId: '101',
-    campaignName: '计划甲',
-    adGroupId: '201',
-    adGroupName: '单元甲',
-    keywordName: '周界报警系统',
-    searchTerm: '周界报警系统厂家',
-    queryStatus: 'NOT_ADDED',
-    matchType: 'PHRASE',
-    impressions: '10',
-    clicks: '2',
-    costAmountScaled: '350',
-    trend: [{
-      date: '2026-07-29',
-      impressions: '10',
-      clicks: '2',
-      costAmountScaled: '350'
-    }]
-  }]);
-  assert.deepEqual(dashboard.campaigns[0].trend, [{
-    date: '2026-07-29',
-    impressions: '10',
-    clicks: '2',
-    costAmountScaled: '350'
-  }]);
-  assert.equal('keywordId' in dashboard.searchTerms[0], false);
+  assert.equal(dashboard.schemaVersion, 'marketing_dashboard_v2');
+  for (const field of ['campaigns', 'adGroups', 'keywords', 'searchTerms']) {
+    assert.equal(field in dashboard, false, `dashboard must omit ${field}`);
+  }
 });
 
 test('an unstable verification read fails the run and preserves the complete active revision', async (t) => {

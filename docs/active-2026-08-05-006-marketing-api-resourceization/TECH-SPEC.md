@@ -690,15 +690,15 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 - Issue 001 已确认仓库内只有 Next.js 消费者；后端 CLI、诊断脚本和当前 Nginx 留存窗口未发现额外明细消费者，R1/R2 前仍须重新搜索与观察；
 - refresh run 对应事实保留期足够支持页面所用 revision；若有清理策略，必须先固定可读取窗口和错误语义；
 - 默认 page size 50、最大 200 已用生产 898 个关键词和 350 个搜索词基线验证并冻结；
-- 现役 UI 的排序/筛选字段已在 Issue 001 冻结，机器合同位于 `backend/modules/marketing/contracts/MarketingAdReadContract.js`，后续不能为假想场景扩大允许列表；
+- 现役 UI 的排序/筛选字段已在 Issue 001 冻结，唯一机器合同位于 `backend/modules/marketing/contracts/goodieai-marketing-ad-read.openapi.json`；后端运行时合同和前端生成类型都由它派生，后续不能为假想场景扩大允许列表；
 - 若真实 SQL 计划证明必须增加索引，另增迁移并重新评审发布范围。
 
 ## 17. Handoff
 
 - PRD: `docs/active-2026-08-05-006-marketing-api-resourceization/prd.md`
 - Tech Spec: `docs/active-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md`
-- Status: `active`；003 已完成正式关闭，Issue 001 已取得只读生产基线并冻结机器合同，现役 API、页面、数据库和刷新行为未改变。
-- First implementation gate: 已通过；003 closed revision 与生产证据见 `docs/DEPLOYMENT.md`。
-- Suggested first issue: Issue 002 交付 revision 钉扎的搜索词资源；selector 与第一个 additive 资源在同一纵向切片实现。
+- Status: `active`；003 已完成正式关闭，006 Issue 001–005 与 R1 已完成；Issue 006 已在本地硬切轻量 Dashboard 并清除旧四数组合同，等待 Issue 007 独立 R2 正式发布与关闭。
+- First implementation gate: 已通过；003 closed revision、006 R1 revision 与生产证据见 `docs/DEPLOYMENT.md`。
+- Next gate: Issue 007 先完成对抗式审查和发布前实时核对，再以独立 Git Bundle 发布 R2；正式入口验证通过前不得把本地轻量合同描述为生产默认。
 - Suggested issue split: U1–U7；R1 完成 U1–U5，R2 完成 U6–U7。
 - Completion condition: R2 正式入口验证通过，轻量 Dashboard 成为唯一默认合同，旧大响应及其兼容代码和文档已删除；随后移交 007，不直接进入 005。

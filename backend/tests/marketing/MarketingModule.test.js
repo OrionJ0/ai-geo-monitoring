@@ -519,11 +519,17 @@ test('pilot data module requests advertising on dashboard access instead of a ti
   );
   assert.equal(first.status, 200);
   const firstBody = await first.json();
+  assert.equal(firstBody.schemaVersion, 'marketing_dashboard_v2');
   assert.equal(firstBody.summary.impressions, '10');
-  assert.equal(firstBody.adGroups[0].adGroupId, 'on-demand-ad-group');
-  assert.equal(firstBody.keywords[0].keywordId, 'on-demand-keyword');
-  assert.equal(firstBody.searchTerms[0].searchTerm, '周界报警厂家');
-  assert.equal('keywordId' in firstBody.searchTerms[0], false);
+  assert.deepEqual(firstBody.hierarchyCounts, {
+    campaigns: 1,
+    adGroups: 1,
+    keywords: 1,
+    searchTerms: 1
+  });
+  for (const field of ['campaigns', 'adGroups', 'keywords', 'searchTerms']) {
+    assert.equal(field in firstBody, false, `dashboard must omit ${field}`);
+  }
   assert.equal(reportCalls, 1);
 
   const cached = await fetch(

@@ -1,0 +1,524 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GoodieAI 营销广告快照读取 API",
+    "version": "2026-08-05-r2",
+    "description": "GoodieAI 浏览器到服务端的现役广告快照读取合同。数据只来自服务器数据库中的完整成功快照；这些读取接口不调用百度上游。"
+  },
+  "security": [
+    { "BearerAuth": [] }
+  ],
+  "x-runtime-contract": {
+    "schemaVersions": {
+      "dashboard": "marketing_dashboard_v2",
+      "adHierarchy": "marketing_ad_hierarchy_v1",
+      "keywords": "marketing_keywords_v1",
+      "searchTerms": "marketing_search_terms_v1"
+    },
+    "pagination": {
+      "defaultPage": 1,
+      "defaultPageSize": 50,
+      "maximumPageSize": 200,
+      "maximumQueryLength": 200
+    },
+    "sortOrders": ["ascend", "descend"],
+    "summaryFields": ["impressions", "clicks", "costAmountScaled"],
+    "exactValueType": "unsigned-decimal-string",
+    "missingValue": null,
+    "resources": {
+      "adHierarchy": {
+        "schemaVersion": "marketing_ad_hierarchy_v1",
+        "filters": []
+      },
+      "keywords": {
+        "schemaVersion": "marketing_keywords_v1",
+        "filters": ["query", "campaignId", "adGroupId"],
+        "sortBy": ["keywordName", "impressions", "clicks", "costAmountScaled", "ctr", "averageCpc"]
+      },
+      "searchTerms": {
+        "schemaVersion": "marketing_search_terms_v1",
+        "filters": ["query", "accountId", "campaignId", "adGroupId", "keywordName", "queryStatus", "matchType"],
+        "sortBy": ["searchTerm", "keywordName", "impressions", "clicks", "costAmountScaled", "ctr", "averageCpc"]
+      }
+    },
+    "revision": {
+      "requiredForDetails": true,
+      "source": "complete-succeeded-refresh-run",
+      "projectScoped": true,
+      "coverageBound": true
+    },
+    "cacheControl": {
+      "dashboard": "private, no-store",
+      "details": "private, max-age=60"
+    },
+    "errors": {
+      "revisionRequired": "MARKETING_REVISION_REQUIRED",
+      "queryInvalid": "MARKETING_AD_RESOURCE_QUERY_INVALID",
+      "revisionNotFound": "MARKETING_REVISION_NOT_FOUND",
+      "snapshotUnavailable": "MARKETING_SNAPSHOT_UNAVAILABLE",
+      "dateOutOfRange": "DASHBOARD_DATE_OUT_OF_RANGE",
+      "internalFailure": "MARKETING_AD_RESOURCE_FAILED"
+    }
+  },
+  "paths": {
+    "/api/marketing/projects/{projectId}/dashboard": {
+      "get": {
+        "operationId": "readMarketingDashboard",
+        "summary": "读取当前轻量广告快照根",
+        "description": "返回当前完整快照的状态、覆盖范围、汇总、趋势和四类事实计数。无快照时 revision、coverage、filter 为 null，summary 为精确零，但 states.snapshotContentState 为 NONE，不能解释成真实零数据快照。",
+        "x-data-source": "local-complete-ad-snapshot",
+        "x-upstream-calls": "none",
+        "parameters": [
+          { "$ref": "#/components/parameters/ProjectId" },
+          { "$ref": "#/components/parameters/OptionalFrom" },
+          { "$ref": "#/components/parameters/OptionalTo" }
+        ],
+        "responses": {
+          "200": {
+            "description": "轻量快照根；不包含 campaigns、adGroups、keywords、searchTerms 明细数组。",
+            "headers": {
+              "Cache-Control": { "schema": { "type": "string", "const": "private, no-store" } }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MarketingDashboardResponse" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ErrorResponse" },
+          "403": { "$ref": "#/components/responses/ErrorResponse" },
+          "404": { "$ref": "#/components/responses/ErrorResponse" },
+          "409": { "$ref": "#/components/responses/ErrorResponse" },
+          "422": { "$ref": "#/components/responses/ErrorResponse" },
+          "500": { "$ref": "#/components/responses/ErrorResponse" }
+        }
+      }
+    },
+    "/api/marketing/projects/{projectId}/ad-hierarchy": {
+      "get": {
+        "operationId": "readMarketingAdHierarchy",
+        "summary": "读取同 revision 的广告层级",
+        "description": "从本地完整快照读取账户、计划、单元、关键词三层事实和完整筛选范围 summary；不读取或返回搜索词。",
+        "x-data-source": "local-complete-ad-snapshot",
+        "x-upstream-calls": "none",
+        "parameters": [
+          { "$ref": "#/components/parameters/ProjectId" },
+          { "$ref": "#/components/parameters/Revision" },
+          { "$ref": "#/components/parameters/From" },
+          { "$ref": "#/components/parameters/To" }
+        ],
+        "responses": {
+          "200": {
+            "description": "同一 revision 的完整广告层级。",
+            "headers": {
+              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MarketingAdHierarchyResponse" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ErrorResponse" },
+          "403": { "$ref": "#/components/responses/ErrorResponse" },
+          "404": { "$ref": "#/components/responses/ErrorResponse" },
+          "409": { "$ref": "#/components/responses/ErrorResponse" },
+          "422": { "$ref": "#/components/responses/ErrorResponse" },
+          "500": { "$ref": "#/components/responses/ErrorResponse" }
+        }
+      }
+    },
+    "/api/marketing/projects/{projectId}/keywords": {
+      "get": {
+        "operationId": "readMarketingKeywords",
+        "summary": "分页读取同 revision 的关键词",
+        "description": "服务端完成筛选、精确排序和分页；summary 覆盖完整筛选结果，不随页码变化。合法空页返回 200 和空 items。",
+        "x-data-source": "local-complete-ad-snapshot",
+        "x-upstream-calls": "none",
+        "parameters": [
+          { "$ref": "#/components/parameters/ProjectId" },
+          { "$ref": "#/components/parameters/Revision" },
+          { "$ref": "#/components/parameters/From" },
+          { "$ref": "#/components/parameters/To" },
+          { "$ref": "#/components/parameters/Page" },
+          { "$ref": "#/components/parameters/PageSize" },
+          { "name": "sortBy", "in": "query", "schema": { "type": "string", "enum": ["keywordName", "impressions", "clicks", "costAmountScaled", "ctr", "averageCpc"], "default": "impressions" } },
+          { "$ref": "#/components/parameters/SortOrder" },
+          { "$ref": "#/components/parameters/Query" },
+          { "$ref": "#/components/parameters/CampaignId" },
+          { "$ref": "#/components/parameters/AdGroupId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "有界关键词页及完整筛选范围 summary。",
+            "headers": {
+              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MarketingKeywordResponse" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ErrorResponse" },
+          "403": { "$ref": "#/components/responses/ErrorResponse" },
+          "404": { "$ref": "#/components/responses/ErrorResponse" },
+          "409": { "$ref": "#/components/responses/ErrorResponse" },
+          "422": { "$ref": "#/components/responses/ErrorResponse" },
+          "500": { "$ref": "#/components/responses/ErrorResponse" }
+        }
+      }
+    },
+    "/api/marketing/projects/{projectId}/search-terms": {
+      "get": {
+        "operationId": "readMarketingSearchTerms",
+        "summary": "分页读取同 revision 的搜索词",
+        "description": "服务端完成筛选、精确排序和分页；搜索词只保留账户、计划、单元与关键词名称证据，不返回或伪造 keywordId。合法空页返回 200 和空 items。",
+        "x-data-source": "local-complete-ad-snapshot",
+        "x-upstream-calls": "none",
+        "parameters": [
+          { "$ref": "#/components/parameters/ProjectId" },
+          { "$ref": "#/components/parameters/Revision" },
+          { "$ref": "#/components/parameters/From" },
+          { "$ref": "#/components/parameters/To" },
+          { "$ref": "#/components/parameters/Page" },
+          { "$ref": "#/components/parameters/PageSize" },
+          { "name": "sortBy", "in": "query", "schema": { "type": "string", "enum": ["searchTerm", "keywordName", "impressions", "clicks", "costAmountScaled", "ctr", "averageCpc"], "default": "impressions" } },
+          { "$ref": "#/components/parameters/SortOrder" },
+          { "$ref": "#/components/parameters/Query" },
+          { "$ref": "#/components/parameters/AccountId" },
+          { "$ref": "#/components/parameters/CampaignId" },
+          { "$ref": "#/components/parameters/AdGroupId" },
+          { "$ref": "#/components/parameters/KeywordName" },
+          { "$ref": "#/components/parameters/QueryStatus" },
+          { "$ref": "#/components/parameters/MatchType" }
+        ],
+        "responses": {
+          "200": {
+            "description": "有界搜索词页；items 中没有 keywordId。",
+            "headers": {
+              "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MarketingSearchTermResponse" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ErrorResponse" },
+          "403": { "$ref": "#/components/responses/ErrorResponse" },
+          "404": { "$ref": "#/components/responses/ErrorResponse" },
+          "409": { "$ref": "#/components/responses/ErrorResponse" },
+          "422": { "$ref": "#/components/responses/ErrorResponse" },
+          "500": { "$ref": "#/components/responses/ErrorResponse" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "只允许 Authorization 请求头；不得通过 URL、Cookie 或响应传递令牌。"
+      }
+    },
+    "parameters": {
+      "ProjectId": { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
+      "Revision": { "name": "revision", "in": "query", "required": true, "description": "当前项目一次完整 SUCCEEDED refresh run 的不透明 revision。", "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
+      "From": { "name": "from", "in": "query", "required": true, "schema": { "type": "string", "format": "date" } },
+      "To": { "name": "to", "in": "query", "required": true, "schema": { "type": "string", "format": "date" } },
+      "OptionalFrom": { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } },
+      "OptionalTo": { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } },
+      "Page": { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1, "default": 1 } },
+      "PageSize": { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
+      "SortOrder": { "name": "sortOrder", "in": "query", "schema": { "type": "string", "enum": ["ascend", "descend"], "default": "descend" } },
+      "Query": { "name": "query", "in": "query", "schema": { "type": "string", "maxLength": 200 } },
+      "AccountId": { "name": "accountId", "in": "query", "schema": { "type": "string", "maxLength": 128 } },
+      "CampaignId": { "name": "campaignId", "in": "query", "schema": { "type": "string", "maxLength": 128 } },
+      "AdGroupId": { "name": "adGroupId", "in": "query", "schema": { "type": "string", "maxLength": 128 } },
+      "KeywordName": { "name": "keywordName", "in": "query", "schema": { "type": "string", "maxLength": 200 } },
+      "QueryStatus": { "name": "queryStatus", "in": "query", "schema": { "type": "string", "enum": ["ADDED", "NOT_ADDED", "NOT_ADDABLE"] } },
+      "MatchType": { "name": "matchType", "in": "query", "schema": { "type": "string", "maxLength": 64 } }
+    },
+    "responses": {
+      "ErrorResponse": {
+        "description": "稳定错误信封。权限检查先于 revision 查找；不会泄漏 SQL、Token、内部凭据或百度原始响应。",
+        "headers": {
+          "Cache-Control": { "schema": { "type": "string", "const": "private, no-store" } }
+        },
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/MarketingErrorResponse" } }
+        }
+      }
+    },
+    "schemas": {
+      "MarketingExactMetrics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["impressions", "clicks", "costAmountScaled"],
+        "properties": {
+          "impressions": { "type": "string", "pattern": "^[0-9]+$" },
+          "clicks": { "type": "string", "pattern": "^[0-9]+$" },
+          "costAmountScaled": { "type": "string", "pattern": "^[0-9]+$" }
+        }
+      },
+      "MarketingDailyMetrics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["date", "impressions", "clicks", "costAmountScaled"],
+        "properties": {
+          "date": { "type": "string", "format": "date" },
+          "impressions": { "type": "string", "pattern": "^[0-9]+$" },
+          "clicks": { "type": "string", "pattern": "^[0-9]+$" },
+          "costAmountScaled": { "type": "string", "pattern": "^[0-9]+$" }
+        }
+      },
+      "MarketingCoverage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "lastSuccessfulAt", "currency", "costScale"],
+        "properties": {
+          "from": { "type": "string", "format": "date" },
+          "to": { "type": "string", "format": "date" },
+          "lastSuccessfulAt": { "type": "string", "format": "date-time" },
+          "currency": { "type": "string", "minLength": 1, "maxLength": 16 },
+          "costScale": { "type": "integer", "minimum": 0, "maximum": 12 }
+        }
+      },
+      "MarketingDateFilter": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "string", "format": "date" },
+          "to": { "type": "string", "format": "date" }
+        }
+      },
+      "MarketingDashboardStates": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["moduleState", "projectState", "sourceSummaryState", "bindingSummaryState", "snapshotContentState", "snapshotFreshnessState", "refreshState"],
+        "properties": {
+          "moduleState": { "type": "string" },
+          "projectState": { "type": "string", "enum": ["ACTIVE", "ARCHIVED"] },
+          "sourceSummaryState": { "type": "string", "enum": ["NOT_CONNECTED", "ACTION_REQUIRED", "DISCONNECTED", "CONNECTED"] },
+          "bindingSummaryState": { "type": "string", "enum": ["NONE", "BLOCKED", "ACTIVE"] },
+          "snapshotContentState": { "type": "string", "enum": ["NONE", "ZERO", "DATA"] },
+          "snapshotFreshnessState": { "type": "string", "enum": ["NA", "FRESH", "STALE"] },
+          "refreshState": { "type": "string" }
+        }
+      },
+      "MarketingBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bindingId", "accountId", "accountName", "sourceState", "bindingState", "blockingCode"],
+        "properties": {
+          "bindingId": { "type": "string" },
+          "accountId": { "type": "string" },
+          "accountName": { "type": "string" },
+          "sourceState": { "type": "string" },
+          "bindingState": { "type": "string" },
+          "blockingCode": { "type": ["string", "null"] }
+        }
+      },
+      "MarketingHierarchyCounts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["campaigns", "adGroups", "keywords", "searchTerms"],
+        "properties": {
+          "campaigns": { "type": "integer", "minimum": 0 },
+          "adGroups": { "type": "integer", "minimum": 0 },
+          "keywords": { "type": "integer", "minimum": 0 },
+          "searchTerms": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "MarketingActiveRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runId", "status"],
+        "properties": {
+          "runId": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      },
+      "MarketingLastRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runId", "status", "failureCode"],
+        "properties": {
+          "runId": { "type": "string" },
+          "status": { "type": "string" },
+          "failureCode": { "type": ["string", "null"] }
+        }
+      },
+      "MarketingDashboardResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "projectId", "projectName", "revision", "states", "bindings", "coverage", "filter", "summary", "trend", "hierarchyCounts", "activeRun", "lastRun"],
+        "properties": {
+          "schemaVersion": { "type": "string", "const": "marketing_dashboard_v2" },
+          "projectId": { "type": "string" },
+          "projectName": { "type": "string" },
+          "revision": { "type": ["string", "null"] },
+          "states": { "$ref": "#/components/schemas/MarketingDashboardStates" },
+          "bindings": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingBinding" } },
+          "coverage": { "oneOf": [{ "$ref": "#/components/schemas/MarketingCoverage" }, { "type": "null" }] },
+          "filter": { "oneOf": [{ "$ref": "#/components/schemas/MarketingDateFilter" }, { "type": "null" }] },
+          "summary": { "$ref": "#/components/schemas/MarketingExactMetrics" },
+          "trend": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingDailyMetrics" } },
+          "hierarchyCounts": { "$ref": "#/components/schemas/MarketingHierarchyCounts" },
+          "activeRun": { "oneOf": [{ "$ref": "#/components/schemas/MarketingActiveRun" }, { "type": "null" }] },
+          "lastRun": { "oneOf": [{ "$ref": "#/components/schemas/MarketingLastRun" }, { "type": "null" }] }
+        }
+      },
+      "MarketingAdCampaign": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accountId", "campaignId", "campaignName", "impressions", "clicks", "costAmountScaled", "trend"],
+        "properties": {
+          "accountId": { "type": "string" },
+          "campaignId": { "type": "string" },
+          "campaignName": { "type": "string" },
+          "impressions": { "type": "string", "pattern": "^[0-9]+$" },
+          "clicks": { "type": "string", "pattern": "^[0-9]+$" },
+          "costAmountScaled": { "type": "string", "pattern": "^[0-9]+$" },
+          "trend": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingDailyMetrics" } }
+        }
+      },
+      "MarketingAdGroup": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accountId", "campaignId", "campaignName", "adGroupId", "adGroupName", "impressions", "clicks", "costAmountScaled", "trend"],
+        "properties": {
+          "accountId": { "type": "string" },
+          "campaignId": { "type": "string" },
+          "campaignName": { "type": "string" },
+          "adGroupId": { "type": "string" },
+          "adGroupName": { "type": "string" },
+          "impressions": { "type": "string", "pattern": "^[0-9]+$" },
+          "clicks": { "type": "string", "pattern": "^[0-9]+$" },
+          "costAmountScaled": { "type": "string", "pattern": "^[0-9]+$" },
+          "trend": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingDailyMetrics" } }
+        }
+      },
+      "MarketingAdKeyword": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accountId", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keywordName", "targetingType", "impressions", "clicks", "costAmountScaled", "trend"],
+        "properties": {
+          "accountId": { "type": "string" },
+          "campaignId": { "type": "string" },
+          "campaignName": { "type": "string" },
+          "adGroupId": { "type": "string" },
+          "adGroupName": { "type": "string" },
+          "keywordId": { "type": "string" },
+          "keywordName": { "type": "string" },
+          "targetingType": { "type": "string", "enum": ["KEYWORD", "WORD_PACKAGE", "AUTO_EXPANSION"] },
+          "impressions": { "type": "string", "pattern": "^[0-9]+$" },
+          "clicks": { "type": "string", "pattern": "^[0-9]+$" },
+          "costAmountScaled": { "type": "string", "pattern": "^[0-9]+$" },
+          "trend": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingDailyMetrics" } }
+        }
+      },
+      "MarketingAdSearchTerm": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accountId", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordName", "searchTerm", "queryStatus", "matchType", "impressions", "clicks", "costAmountScaled", "trend"],
+        "properties": {
+          "accountId": { "type": "string" },
+          "campaignId": { "type": "string" },
+          "campaignName": { "type": "string" },
+          "adGroupId": { "type": "string" },
+          "adGroupName": { "type": "string" },
+          "keywordName": { "type": "string" },
+          "searchTerm": { "type": "string" },
+          "queryStatus": { "type": "string", "enum": ["ADDED", "NOT_ADDED", "NOT_ADDABLE"] },
+          "matchType": { "type": "string" },
+          "impressions": { "type": "string", "pattern": "^[0-9]+$" },
+          "clicks": { "type": "string", "pattern": "^[0-9]+$" },
+          "costAmountScaled": { "type": "string", "pattern": "^[0-9]+$" },
+          "trend": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingDailyMetrics" } }
+        }
+      },
+      "MarketingAdHierarchyCounts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["campaigns", "adGroups", "keywords"],
+        "properties": {
+          "campaigns": { "type": "integer", "minimum": 0 },
+          "adGroups": { "type": "integer", "minimum": 0 },
+          "keywords": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "MarketingAdHierarchyResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "projectId", "revision", "coverage", "filter", "summary", "campaigns", "adGroups", "keywords", "hierarchyCounts"],
+        "properties": {
+          "schemaVersion": { "type": "string", "const": "marketing_ad_hierarchy_v1" },
+          "projectId": { "type": "string" },
+          "revision": { "type": "string" },
+          "coverage": { "$ref": "#/components/schemas/MarketingCoverage" },
+          "filter": { "$ref": "#/components/schemas/MarketingDateFilter" },
+          "summary": { "$ref": "#/components/schemas/MarketingExactMetrics" },
+          "campaigns": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingAdCampaign" } },
+          "adGroups": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingAdGroup" } },
+          "keywords": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingAdKeyword" } },
+          "hierarchyCounts": { "$ref": "#/components/schemas/MarketingAdHierarchyCounts" }
+        }
+      },
+      "MarketingPagination": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["page", "pageSize", "totalItems", "totalPages"],
+        "properties": {
+          "page": { "type": "integer", "minimum": 1 },
+          "pageSize": { "type": "integer", "minimum": 1, "maximum": 200 },
+          "totalItems": { "type": "integer", "minimum": 0 },
+          "totalPages": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "MarketingKeywordResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "projectId", "revision", "coverage", "filter", "summary", "items", "pagination"],
+        "properties": {
+          "schemaVersion": { "type": "string", "const": "marketing_keywords_v1" },
+          "projectId": { "type": "string" },
+          "revision": { "type": "string" },
+          "coverage": { "$ref": "#/components/schemas/MarketingCoverage" },
+          "filter": { "$ref": "#/components/schemas/MarketingDateFilter" },
+          "summary": { "$ref": "#/components/schemas/MarketingExactMetrics" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingAdKeyword" } },
+          "pagination": { "$ref": "#/components/schemas/MarketingPagination" }
+        }
+      },
+      "MarketingSearchTermResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "projectId", "revision", "coverage", "filter", "summary", "items", "pagination"],
+        "properties": {
+          "schemaVersion": { "type": "string", "const": "marketing_search_terms_v1" },
+          "projectId": { "type": "string" },
+          "revision": { "type": "string" },
+          "coverage": { "$ref": "#/components/schemas/MarketingCoverage" },
+          "filter": { "$ref": "#/components/schemas/MarketingDateFilter" },
+          "summary": { "$ref": "#/components/schemas/MarketingExactMetrics" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingAdSearchTerm" } },
+          "pagination": { "$ref": "#/components/schemas/MarketingPagination" }
+        }
+      },
+      "MarketingError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "enum": ["MARKETING_REVISION_REQUIRED", "MARKETING_AD_RESOURCE_QUERY_INVALID", "MARKETING_PROJECT_NOT_ALLOWED", "PROJECT_FORBIDDEN", "PROJECT_NOT_FOUND", "MARKETING_REVISION_NOT_FOUND", "MARKETING_SNAPSHOT_UNAVAILABLE", "DASHBOARD_DATE_OUT_OF_RANGE", "MARKETING_AD_RESOURCE_FAILED", "MARKETING_DASHBOARD_FAILED"] },
+          "message": { "type": "string" }
+        }
+      },
+      "MarketingErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["error"],
+        "properties": {
+          "error": { "$ref": "#/components/schemas/MarketingError" }
+        }
+      }
+    }
+  }
+}

@@ -1,8 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 import path from 'node:path';
 import keywordFixtureModule from '../../../src/fixtures/keywordAnalysis.fixture.cjs';
+import type {
+  MarketingDashboardResponse
+} from '../../../src/lib/marketing/generated/marketingAdReadApi';
 
 const artifactDirectory = path.resolve(
   process.cwd(),
@@ -46,12 +49,16 @@ function metricStrings(metrics: MetricRollup) {
   };
 }
 
-function dashboardFixture(stale = false) {
+function marketingFixture(stale = false) {
   const fixture = buildKeywordFixture(false);
   const facts = fixture.facts as FixtureFact[];
   const bindings = [...new Map(facts.map((fact) => [fact.accountId, {
+    bindingId: `fixture-binding-${fact.accountId}`,
     accountId: fact.accountId,
-    accountName: fact.accountName
+    accountName: fact.accountName,
+    sourceState: 'CONNECTED',
+    bindingState: 'ACTIVE',
+    blockingCode: null
   }])).values()];
   const campaignRollups = new Map<string, MetricRollup & {
     accountId: string;
@@ -187,14 +194,19 @@ function dashboardFixture(stale = false) {
     date,
     ...metricStrings(metrics)
   }));
-  return {
+  const dashboard: MarketingDashboardResponse = {
+    schemaVersion: 'marketing_dashboard_v2',
     projectId: '11',
     projectName: fixture.projectName,
     revision: 'keyword-analysis-fixture-revision',
     states: {
+      moduleState: 'READY',
       projectState: 'ACTIVE',
+      sourceSummaryState: 'CONNECTED',
+      bindingSummaryState: 'ACTIVE',
       snapshotContentState: 'DATA',
-      snapshotFreshnessState: stale ? 'STALE' : 'FRESH'
+      snapshotFreshnessState: stale ? 'STALE' : 'FRESH',
+      refreshState: stale ? 'FAILED' : 'SUCCEEDED'
     },
     coverage: {
       from: fixture.availableFrom,
@@ -211,22 +223,24 @@ function dashboardFixture(stale = false) {
     },
     trend,
     bindings,
-    campaigns,
-    adGroups,
-    keywords,
-    searchTerms,
     hierarchyCounts: {
       campaigns: campaigns.length,
       adGroups: adGroups.length,
       keywords: keywords.length,
       searchTerms: searchTerms.length
     },
+    activeRun: null,
     lastRun: {
       runId: stale ? 'failed-refresh-run' : 'successful-refresh-run',
       status: stale ? 'FAILED' : 'SUCCEEDED',
       failureCode: stale ? 'BAIDU_REPORT_SNAPSHOT_UNSTABLE' : null
     }
   };
+  return { dashboard, campaigns, adGroups, keywords, searchTerms };
+}
+
+function dashboardFixture(stale = false): MarketingDashboardResponse {
+  return marketingFixture(stale).dashboard;
 }
 
 function alignDashboardFilterToRequest<
@@ -239,11 +253,43 @@ function alignDashboardFilterToRequest<
   return body;
 }
 
+function fulfillDashboardFixture(route: Route) {
+  const body = dashboardFixture();
+  const request = new URL(route.request().url());
+  const from = request.searchParams.get('from');
+  const to = request.searchParams.get('to');
+  if (
+    from
+    && to
+    && body.coverage
+    && (from < body.coverage.from || to > body.coverage.to)
+  ) {
+    return route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'DASHBOARD_DATE_OUT_OF_RANGE',
+          message: '请求日期超出当前快照覆盖范围'
+        }
+      })
+    });
+  }
+  return route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(alignDashboardFilterToRequest(
+      body,
+      route.request().url()
+    ))
+  });
+}
+
 function searchTermResourceFixture(requestUrl: string) {
   const request = new URL(requestUrl);
-  const dashboard = dashboardFixture();
-  const from = request.searchParams.get('from') || dashboard.coverage.from;
-  const to = request.searchParams.get('to') || dashboard.coverage.to;
+  const fixture = marketingFixture();
+  const dashboard = fixture.dashboard;
+  const from = request.searchParams.get('from') || dashboard.coverage!.from;
+  const to = request.searchParams.get('to') || dashboard.coverage!.to;
   const exactFilters = [
     ['accountId', 'accountId'],
     ['campaignId', 'campaignId'],
@@ -252,7 +298,7 @@ function searchTermResourceFixture(requestUrl: string) {
     ['queryStatus', 'queryStatus'],
     ['matchType', 'matchType']
   ] as const;
-  let items = dashboard.searchTerms.filter((item) => exactFilters.every(
+  let items = fixture.searchTerms.filter((item) => exactFilters.every(
     ([parameter, field]) => !request.searchParams.has(parameter)
       || item[field] === request.searchParams.get(parameter)
   ));
@@ -296,10 +342,11 @@ function searchTermResourceFixture(requestUrl: string) {
 
 function keywordResourceFixture(requestUrl: string) {
   const request = new URL(requestUrl);
-  const dashboard = dashboardFixture();
-  const from = request.searchParams.get('from') || dashboard.coverage.from;
-  const to = request.searchParams.get('to') || dashboard.coverage.to;
-  let items = dashboard.keywords.filter((item) => (
+  const fixture = marketingFixture();
+  const dashboard = fixture.dashboard;
+  const from = request.searchParams.get('from') || dashboard.coverage!.from;
+  const to = request.searchParams.get('to') || dashboard.coverage!.to;
+  let items = fixture.keywords.filter((item) => (
     (!request.searchParams.has('campaignId')
       || item.campaignId === request.searchParams.get('campaignId'))
     && (!request.searchParams.has('adGroupId')
@@ -326,8 +373,10 @@ function keywordResourceFixture(requestUrl: string) {
       return direction * left.keywordName.localeCompare(right.keywordName, 'zh-CN');
     }
     const difference = BigInt(left[metric]) - BigInt(right[metric]);
-    if (difference === 0n) return left.keywordId.localeCompare(right.keywordId);
-    return difference > 0n ? direction : -direction;
+    if (difference === BigInt(0)) {
+      return left.keywordId.localeCompare(right.keywordId);
+    }
+    return difference > BigInt(0) ? direction : -direction;
   });
   const page = Number(request.searchParams.get('page') || 1);
   const pageSize = Number(request.searchParams.get('pageSize') || 50);
@@ -360,9 +409,10 @@ function keywordResourceFixture(requestUrl: string) {
 
 function adHierarchyResourceFixture(requestUrl: string) {
   const request = new URL(requestUrl);
-  const dashboard = dashboardFixture();
-  const from = request.searchParams.get('from') || dashboard.coverage.from;
-  const to = request.searchParams.get('to') || dashboard.coverage.to;
+  const fixture = marketingFixture();
+  const dashboard = fixture.dashboard;
+  const from = request.searchParams.get('from') || dashboard.coverage!.from;
+  const to = request.searchParams.get('to') || dashboard.coverage!.to;
   const withTrend = <T extends {
     impressions: string;
     clicks: string;
@@ -383,13 +433,13 @@ function adHierarchyResourceFixture(requestUrl: string) {
     coverage: dashboard.coverage,
     filter: { from, to },
     summary: dashboard.summary,
-    campaigns: dashboard.campaigns.map(withTrend),
-    adGroups: dashboard.adGroups.map(withTrend),
-    keywords: dashboard.keywords.map(withTrend),
+    campaigns: fixture.campaigns.map(withTrend),
+    adGroups: fixture.adGroups.map(withTrend),
+    keywords: fixture.keywords.map(withTrend),
     hierarchyCounts: {
-      campaigns: dashboard.campaigns.length,
-      adGroups: dashboard.adGroups.length,
-      keywords: dashboard.keywords.length
+      campaigns: fixture.campaigns.length,
+      adGroups: fixture.adGroups.length,
+      keywords: fixture.keywords.length
     }
   };
 }
@@ -432,13 +482,10 @@ async function installRoutes(page: Page) {
       }
     })
   }));
-  await page.route('**/api/marketing/projects/11/dashboard**', (route) => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify(alignDashboardFilterToRequest(
-      dashboardFixture(),
-      route.request().url()
-    ))
-  }));
+  await page.route(
+    '**/api/marketing/projects/11/dashboard**',
+    fulfillDashboardFixture
+  );
   await page.route('**/api/marketing/projects/11/search-terms**', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify(searchTermResourceFixture(route.request().url()))
@@ -525,13 +572,7 @@ test('keyword table pins one root revision and sends paging, query, and sort to 
   await page.unroute('**/api/marketing/projects/11/dashboard**');
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
     dashboardRequests += 1;
-    return route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(alignDashboardFilterToRequest(
-        dashboardFixture(),
-        route.request().url()
-      ))
-    });
+    return fulfillDashboardFixture(route);
   });
   await page.unroute('**/api/marketing/projects/11/keywords**');
   await page.route('**/api/marketing/projects/11/keywords**', (route) => {
@@ -561,7 +602,7 @@ test('keyword table pins one root revision and sends paging, query, and sort to 
   await expect.poll(() => keywordRequests.some((request) => (
     request.searchParams.get('sortBy') === 'impressions'
   ))).toBe(true);
-  expect(dashboardRequests).toBe(1);
+  expect(dashboardRequests).toBe(3);
   expect(new Set(keywordRequests.map((request) => request.searchParams.get('revision'))))
     .toEqual(new Set(['keyword-analysis-fixture-revision']));
 });
@@ -736,13 +777,7 @@ test('search-term table sends pagination, query, and sort to the resource', asyn
   await page.unroute('**/api/marketing/projects/11/dashboard**');
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
     dashboardRequests += 1;
-    return route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(alignDashboardFilterToRequest(
-        dashboardFixture(),
-        route.request().url()
-      ))
-    });
+    return fulfillDashboardFixture(route);
   });
   await page.unroute('**/api/marketing/projects/11/search-terms**');
   await page.route('**/api/marketing/projects/11/search-terms**', (route) => {
@@ -750,7 +785,7 @@ test('search-term table sends pagination, query, and sort to the resource', asyn
     requests.push(request);
     const base = searchTermResourceFixture(route.request().url());
     const allItems = Array.from({ length: 25 }, (_, index) => ({
-      ...dashboardFixture().searchTerms[0],
+      ...marketingFixture().searchTerms[0],
       searchTerm: `分页搜索词 ${String(index + 1).padStart(2, '0')}`,
       impressions: String(100 - index)
     })).filter((item) => (
@@ -801,7 +836,7 @@ test('search-term table sends pagination, query, and sort to the resource', asyn
   await expect.poll(() => requests.some((request) => (
     request.searchParams.get('sortBy') === 'impressions'
   ))).toBe(true);
-  expect(dashboardRequests).toBe(1);
+  expect(dashboardRequests).toBe(3);
   expect(new Set(requests.map((request) => request.searchParams.get('revision'))))
     .toEqual(new Set(['keyword-analysis-fixture-revision']));
 });
@@ -856,10 +891,10 @@ test('advertising hierarchy pins the dashboard revision without reading legacy d
 
   await page.goto('/geo/ad-performance');
   await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
-  expect(dashboardRequests).toHaveLength(1);
+  expect(dashboardRequests).toHaveLength(3);
   expect(hierarchyRequests).toHaveLength(1);
   const hierarchyUrl = new URL(hierarchyRequests[0]);
-  const dashboardUrl = new URL(dashboardRequests[0]);
+  const dashboardUrl = new URL(dashboardRequests.at(-1)!);
   expect(hierarchyUrl.searchParams.get('revision'))
     .toBe('keyword-analysis-fixture-revision');
   expect(hierarchyUrl.searchParams.get('from'))
@@ -868,22 +903,12 @@ test('advertising hierarchy pins the dashboard revision without reading legacy d
     .toBe(dashboardUrl.searchParams.get('to'));
 });
 
-test('migrated detail pages ignore malformed legacy dashboard arrays', async ({ page }) => {
+test('migrated detail pages use the lightweight dashboard root', async ({ page }) => {
   await page.unroute('**/api/marketing/projects/11/dashboard**');
-  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
-    const invalid = alignDashboardFilterToRequest(
-      dashboardFixture(),
-      route.request().url()
-    );
-    delete invalid.campaigns;
-    delete invalid.adGroups;
-    delete invalid.keywords;
-    delete invalid.searchTerms;
-    return route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(invalid)
-    });
-  });
+  await page.route(
+    '**/api/marketing/projects/11/dashboard**',
+    fulfillDashboardFixture
+  );
   await page.goto('/geo/keyword-analysis');
   await expect(page.getByText('振动光纤价格').first()).toBeVisible();
 

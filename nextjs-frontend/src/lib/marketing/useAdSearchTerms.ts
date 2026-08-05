@@ -20,9 +20,11 @@ import type {
 import {
   assertMarketingDashboardRootResponse,
   buildAdPeriod,
-  marketingSnapshotWarning,
-  type DashboardSearchTerm
+  marketingSnapshotWarning
 } from '@/lib/marketing/adPerformanceAdapter';
+import type {
+  MarketingAdSearchTerm
+} from '@/lib/marketing/generated/marketingAdReadApi';
 import type { KeywordAnalysisPayload } from '@/lib/marketing/keywordAnalysisAdapter';
 import { KEYWORD_ANALYSIS_FIXTURE_ENABLED } from '@/lib/marketing/useKeywordAnalysis';
 import { readMarketingDashboard } from '@/lib/marketing/readMarketingDashboard';
@@ -158,7 +160,7 @@ export default function useAdSearchTerms({
           availableFrom: fixture.availableFrom,
           availableTo: fixture.availableTo,
           keywords: fixtureKeywords(fixture),
-          searchTerms: (fixture.searchTerms || []) as DashboardSearchTerm[]
+          searchTerms: (fixture.searchTerms || []) as MarketingAdSearchTerm[]
         }, { from, to });
         const fixturePeriod = buildAdPeriod(from, to);
         const previousRange = {

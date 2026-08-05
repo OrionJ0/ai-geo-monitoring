@@ -5,17 +5,17 @@ import type {
   AdSearchTermSummary
 } from '@/lib/marketing/adSearchTermTypes';
 import type {
-  DashboardKeyword,
-  DashboardSearchTerm,
+  MarketingAdKeyword,
+  MarketingAdSearchTerm,
   MarketingDashboardResponse
-} from '@/lib/marketing/adPerformanceAdapter';
+} from '@/lib/marketing/generated/marketingAdReadApi';
 
 export function keywordEvidenceKey(
-  row: Pick<DashboardSearchTerm, 'accountId' | 'campaignId' | 'adGroupId' | 'keywordName'>
+  row: Pick<MarketingAdSearchTerm, 'accountId' | 'campaignId' | 'adGroupId' | 'keywordName'>
 ): string;
 export function searchTermEntityKey(
   row: Pick<
-    DashboardSearchTerm,
+    MarketingAdSearchTerm,
     | 'accountId'
     | 'campaignId'
     | 'adGroupId'
@@ -26,7 +26,7 @@ export function searchTermEntityKey(
   >
 ): string;
 export function buildAdSearchTermRows(
-  searchTerms: DashboardSearchTerm[],
+  searchTerms: MarketingAdSearchTerm[],
   costScale?: number
 ): AdSearchTermRow[];
 export function buildAdSearchTermSummary(
@@ -45,10 +45,10 @@ export function filterAdSearchTermRows(
   filters?: Partial<AdSearchTermFilter>
 ): AdSearchTermRow[];
 export function resolveAdKeywordScope(
-  keywords: Array<DashboardKeyword | AdKeywordScope>,
+  keywords: Array<MarketingAdKeyword | AdKeywordScope>,
   accountId: string | null,
   keywordId: string | null
-): DashboardKeyword | AdKeywordScope | null;
+): MarketingAdKeyword | AdKeywordScope | null;
 export function sameMarketingDashboardRevision(
   currentRevision: string | null,
   previousRevision: string | null

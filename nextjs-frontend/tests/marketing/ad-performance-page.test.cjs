@@ -118,9 +118,10 @@ test('detail popover is viewport-aware, hover-only, and escape-closeable', () =>
 
 test('real adapter builds the complete strict advertising hierarchy and fixture stays isolated', () => {
   assert.match(adapterSource, /source: 'dashboard'/);
-  assert.match(adapterSource, /dashboard\.campaigns/);
-  assert.match(adapterSource, /dashboard\.adGroups/);
-  assert.match(adapterSource, /dashboard\.keywords/);
+  assert.match(adapterSource, /hierarchy\?\.campaigns/);
+  assert.match(adapterSource, /hierarchy\?\.adGroups/);
+  assert.match(adapterSource, /hierarchy\?\.keywords/);
+  assert.doesNotMatch(adapterSource, /dashboard\.(?:campaigns|adGroups|keywords|searchTerms)/);
   assert.match(adapterSource, /level: 'scheme'/);
   assert.match(adapterSource, /level: 'unit'/);
   assert.match(adapterSource, /level: 'keyword'/);

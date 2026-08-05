@@ -4,10 +4,10 @@ import type {
   AdSearchTermSummary
 } from '@/lib/marketing/adSearchTermTypes';
 import type {
-  DashboardKeyword,
-  DashboardSearchTerm,
-  MarketingDashboardResponse
-} from '@/lib/marketing/adPerformanceAdapter';
+  MarketingAdSearchTerm,
+  MarketingDashboardResponse,
+  MarketingSearchTermResponse
+} from '@/lib/marketing/generated/marketingAdReadApi';
 import {
   buildAdSearchTermRows,
   buildAdSearchTermSummary
@@ -24,34 +24,10 @@ export type AdSearchTermPayload = {
   availableFrom: string;
   availableTo: string;
   keywords: AdKeywordScope[];
-  searchTerms: DashboardSearchTerm[];
+  searchTerms: MarketingAdSearchTerm[];
 };
 
-export type MarketingSearchTermResourceResponse = {
-  schemaVersion: 'marketing_search_terms_v1';
-  projectId: string;
-  revision: string;
-  coverage: {
-    from: string;
-    to: string;
-    lastSuccessfulAt?: string;
-    currency: string;
-    costScale: number;
-  };
-  filter: { from: string; to: string };
-  summary: {
-    impressions: string;
-    clicks: string;
-    costAmountScaled: string;
-  };
-  items: DashboardSearchTerm[];
-  pagination: {
-    page: number;
-    pageSize: number;
-    totalItems: number;
-    totalPages: number;
-  };
-};
+export type MarketingSearchTermResourceResponse = MarketingSearchTermResponse;
 
 function invalidResource(): never {
   const error = new TypeError('广告搜索词资源响应合同无效');
@@ -81,7 +57,7 @@ function text(value: unknown, maximum = 1024): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= maximum;
 }
 
-function resourceItem(value: unknown): value is DashboardSearchTerm {
+function resourceItem(value: unknown): value is MarketingAdSearchTerm {
   if (!record(value) || Object.hasOwn(value, 'keywordId')) return false;
   return text(value.accountId, 512)
     && text(value.campaignId, 512)
@@ -142,18 +118,6 @@ export function assertMarketingSearchTermResourceResponse(
   ) invalidResource();
 }
 
-function keywordScope(keyword: DashboardKeyword): AdKeywordScope {
-  return {
-    accountId: keyword.accountId,
-    campaignId: keyword.campaignId,
-    campaignName: keyword.campaignName,
-    adGroupId: keyword.adGroupId,
-    adGroupName: keyword.adGroupName,
-    keywordId: keyword.keywordId,
-    keywordName: keyword.keywordName
-  };
-}
-
 export function adaptAdSearchTermPayload(
   payload: AdSearchTermPayload,
   range: { from: string; to: string }
@@ -212,36 +176,4 @@ export function adaptMarketingSearchTermResource(
     summary,
     pagination: resource.pagination
   };
-}
-
-export function adaptMarketingDashboardSearchTerms(
-  dashboard: MarketingDashboardResponse,
-  fallbackProjectName = '默认监控项目',
-  requestedRange?: { from: string; to: string }
-): AdSearchTermRangeModel {
-  const today = new Date().toISOString().slice(0, 10);
-  const coverage = dashboard.coverage;
-  const range = {
-    from: dashboard.filter?.from
-      || requestedRange?.from
-      || coverage?.from
-      || today,
-    to: dashboard.filter?.to
-      || requestedRange?.to
-      || coverage?.to
-      || today
-  };
-  return adaptAdSearchTermPayload({
-    source: 'dashboard',
-    dataState: (dashboard.searchTerms || []).length ? 'ready' : 'empty',
-    projectId: String(dashboard.projectId),
-    projectName: dashboard.projectName || fallbackProjectName,
-    currency: coverage?.currency || 'CNY',
-    costScale: coverage?.costScale ?? 2,
-    updatedAt: coverage?.lastSuccessfulAt,
-    availableFrom: coverage?.from || range.from,
-    availableTo: coverage?.to || range.to,
-    keywords: (dashboard.keywords || []).map(keywordScope),
-    searchTerms: dashboard.searchTerms || []
-  }, range);
 }

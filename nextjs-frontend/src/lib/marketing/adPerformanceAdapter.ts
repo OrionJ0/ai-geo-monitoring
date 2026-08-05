@@ -1,16 +1,25 @@
+import type {
+  MarketingAdCampaign,
+  MarketingAdGroup,
+  MarketingAdHierarchyResponse,
+  MarketingAdKeyword,
+  MarketingDailyMetrics,
+  MarketingDashboardResponse,
+  MarketingExactMetrics
+} from './generated/marketingAdReadApi';
+
+export type {
+  MarketingAdHierarchyResponse,
+  MarketingDashboardResponse
+} from './generated/marketingAdReadApi';
+
 export type AdHierarchyLevel = 'project' | 'scheme' | 'unit' | 'keyword';
 
 export type AdDeliveryStatus = 'active' | 'paused' | 'unknown';
 
-export type AdExactMetrics = {
-  costAmountScaled: string;
-  impressions: string;
-  clicks: string;
-};
+export type AdExactMetrics = MarketingExactMetrics;
 
-export type AdDailyMetrics = AdExactMetrics & {
-  date: string;
-};
+export type AdDailyMetrics = MarketingDailyMetrics;
 
 export type AdDetailItem = {
   label: string;
@@ -54,99 +63,6 @@ export type AdPerformanceModel = {
   currentTrend: AdDailyMetrics[];
   previousTrend: AdDailyMetrics[];
   structure: AdHierarchyNode[];
-};
-
-export type DashboardCampaign = AdExactMetrics & {
-  accountId: string;
-  campaignId: string;
-  campaignName: string;
-  trend?: Array<Partial<AdDailyMetrics> & { date: string }>;
-};
-
-export type DashboardAdGroup = DashboardCampaign & {
-  adGroupId: string;
-  adGroupName: string;
-};
-
-export type DashboardKeyword = DashboardAdGroup & {
-  keywordId: string;
-  keywordName: string;
-  targetingType: 'KEYWORD' | 'WORD_PACKAGE' | 'AUTO_EXPANSION';
-};
-
-export type DashboardSearchTerm = DashboardAdGroup & {
-  keywordName: string;
-  searchTerm: string;
-  queryStatus: 'ADDED' | 'NOT_ADDED' | 'NOT_ADDABLE';
-  matchType: string;
-};
-
-export type MarketingDashboardResponse = {
-  projectId: string;
-  projectName?: string;
-  revision: string | null;
-  states?: {
-    projectState?: string;
-    snapshotContentState?: string;
-    snapshotFreshnessState?: 'NA' | 'FRESH' | 'STALE';
-  };
-  coverage: {
-    from: string;
-    to: string;
-    currency: string;
-    costScale: number;
-    lastSuccessfulAt?: string;
-  } | null;
-  filter?: {
-    from: string;
-    to: string;
-  } | null;
-  summary?: Partial<AdExactMetrics>;
-  trend?: Array<Partial<AdDailyMetrics> & { date: string }>;
-  bindings?: Array<{
-    accountId: string;
-    accountName: string;
-  }>;
-  campaigns?: DashboardCampaign[];
-  adGroups?: DashboardAdGroup[];
-  keywords?: DashboardKeyword[];
-  searchTerms?: DashboardSearchTerm[];
-  hierarchyCounts?: {
-    campaigns: number;
-    adGroups: number;
-    keywords: number;
-    searchTerms: number;
-  };
-  lastRun?: {
-    runId: string;
-    status: string;
-    failureCode: string | null;
-  } | null;
-  activeRun?: {
-    runId: string;
-    status: string;
-    coverage?: {
-      from: string;
-      to: string;
-    };
-  } | null;
-};
-
-export type MarketingAdHierarchyResponse = {
-  schemaVersion: 'marketing_ad_hierarchy_v1';
-  projectId: string;
-  revision: string;
-  coverage: NonNullable<MarketingDashboardResponse['coverage']>;
-  filter: NonNullable<MarketingDashboardResponse['filter']>;
-  summary: AdExactMetrics;
-  campaigns: DashboardCampaign[];
-  adGroups: DashboardAdGroup[];
-  keywords: DashboardKeyword[];
-  hierarchyCounts: {
-    campaigns: number;
-    adGroups: number;
-    keywords: number;
-  };
 };
 
 const EMPTY_METRICS: AdExactMetrics = Object.freeze({
@@ -202,7 +118,7 @@ function exactTrend(value: unknown): boolean {
   ));
 }
 
-function dashboardCampaign(value: unknown): value is DashboardCampaign {
+function dashboardCampaign(value: unknown): value is MarketingAdCampaign {
   if (!objectRecord(value)) return false;
   const row = value as Record<string, unknown>;
   const metricsValid = exactMetrics(row);
@@ -214,28 +130,19 @@ function dashboardCampaign(value: unknown): value is DashboardCampaign {
     && trendValid;
 }
 
-function dashboardAdGroup(value: unknown): value is DashboardAdGroup {
+function dashboardAdGroup(value: unknown): value is MarketingAdGroup {
   return dashboardCampaign(value)
     && text((value as unknown as Record<string, unknown>).adGroupId, 128)
     && text((value as unknown as Record<string, unknown>).adGroupName);
 }
 
-function dashboardKeyword(value: unknown): value is DashboardKeyword {
+function dashboardKeyword(value: unknown): value is MarketingAdKeyword {
   if (!dashboardAdGroup(value)) return false;
   const row = value as unknown as Record<string, unknown>;
   return text(row.keywordId, 128)
     && text(row.keywordName, 1024)
     && ['KEYWORD', 'WORD_PACKAGE', 'AUTO_EXPANSION']
       .includes(String(row.targetingType));
-}
-
-function dashboardSearchTerm(value: unknown): value is DashboardSearchTerm {
-  if (!dashboardAdGroup(value)) return false;
-  const row = value as unknown as Record<string, unknown>;
-  return text(row.keywordName, 1024)
-    && text(row.searchTerm, 1024)
-    && ['ADDED', 'NOT_ADDED', 'NOT_ADDABLE'].includes(String(row.queryStatus))
-    && text(row.matchType, 64);
 }
 
 function identity(...parts: unknown[]): string {
@@ -271,66 +178,8 @@ function sumMetrics(rows: AdExactMetrics[]): AdExactMetrics {
   }), { ...EMPTY_METRICS });
 }
 
-function dashboardSemanticsValid(value: MarketingDashboardResponse): boolean {
-  const bindings = value.bindings || [];
-  const campaigns = value.campaigns || [];
-  const adGroups = value.adGroups || [];
-  const keywords = value.keywords || [];
-  const searchTerms = value.searchTerms || [];
-  const bindingMap = uniqueMap(bindings, (row) => row.accountId);
-  const campaignMap = uniqueMap(
-    campaigns,
-    (row) => identity(row.accountId, row.campaignId)
-  );
-  const adGroupMap = uniqueMap(
-    adGroups,
-    (row) => identity(row.accountId, row.campaignId, row.adGroupId)
-  );
-  const keywordMap = uniqueMap(
-    keywords,
-    (row) => identity(row.accountId, row.keywordId)
-  );
-  if (!bindingMap || !campaignMap || !adGroupMap || !keywordMap) return false;
-
-  const campaignMatches = (row: DashboardCampaign) => {
-    const parent = campaignMap.get(identity(row.accountId, row.campaignId));
-    return bindingMap.has(row.accountId)
-      && Boolean(parent)
-      && parent?.campaignName === row.campaignName;
-  };
-  const adGroupMatches = (row: DashboardAdGroup) => {
-    const parent = adGroupMap.get(identity(
-      row.accountId,
-      row.campaignId,
-      row.adGroupId
-    ));
-    return campaignMatches(row)
-      && Boolean(parent)
-      && parent?.campaignName === row.campaignName
-      && parent?.adGroupName === row.adGroupName;
-  };
-  if (!campaigns.every((row) => bindingMap.has(row.accountId))) return false;
-  if (!adGroups.every(adGroupMatches)) return false;
-  if (!keywords.every(adGroupMatches)) return false;
-  if (!searchTerms.every(adGroupMatches)) return false;
-
-  const summary = value.summary as AdExactMetrics;
-  const trend = value.trend as AdDailyMetrics[];
-  if (!metricsEqual(sumMetrics(campaigns), summary)) return false;
-  if (!metricsEqual(sumMetrics(trend), summary)) return false;
-  if (value.states?.snapshotContentState === 'NONE') {
-    return campaigns.length === 0
-      && adGroups.length === 0
-      && keywords.length === 0
-      && searchTerms.length === 0
-      && trend.length === 0
-      && metricsEqual(summary, EMPTY_METRICS);
-  }
-  return true;
-}
-
 function hierarchyItemTrendValid(
-  row: DashboardCampaign,
+  row: MarketingAdCampaign,
   range: { from: string; to: string }
 ): boolean {
   if (!Array.isArray(row.trend) || !exactTrend(row.trend)) return false;
@@ -379,9 +228,9 @@ export function assertMarketingAdHierarchyResponse(
     || counts.adGroups !== adGroups.length
     || counts.keywords !== keywords.length
   ) invalidDashboard();
-  const verifiedCampaigns = campaigns as DashboardCampaign[];
-  const verifiedAdGroups = adGroups as DashboardAdGroup[];
-  const verifiedKeywords = keywords as DashboardKeyword[];
+  const verifiedCampaigns = campaigns as MarketingAdCampaign[];
+  const verifiedAdGroups = adGroups as MarketingAdGroup[];
+  const verifiedKeywords = keywords as MarketingAdKeyword[];
   if (
     ![...verifiedCampaigns, ...verifiedAdGroups, ...verifiedKeywords]
       .every((row) => hierarchyItemTrendValid(row, expectedRange))
@@ -428,123 +277,32 @@ export function assertMarketingAdHierarchyResponse(
   }
 }
 
-export function assertMarketingDashboardResponse(
-  value: unknown,
-  expectedProjectId: string
-): asserts value is MarketingDashboardResponse {
-  if (
-    !objectRecord(value)
-    || !text(value.projectId, 128)
-    || value.projectId !== expectedProjectId
-  ) {
-    invalidDashboard();
-  }
-  const states = value.states;
-  const snapshotState = objectRecord(states)
-    ? states.snapshotContentState
-    : null;
-  const freshnessState = objectRecord(states)
-    ? states.snapshotFreshnessState
-    : null;
-  if (!['NONE', 'ZERO', 'DATA'].includes(String(snapshotState))) {
-    invalidDashboard();
-  }
-  if (!['NA', 'FRESH', 'STALE'].includes(String(freshnessState))) {
-    invalidDashboard();
-  }
-  const coverage = value.coverage;
-  if (snapshotState === 'NONE') {
-    if (
-      coverage !== null
-      || value.revision !== null
-      || freshnessState !== 'NA'
-    ) invalidDashboard();
-  } else if (
-    !text(value.revision, 128)
-    || !['FRESH', 'STALE'].includes(String(freshnessState))
-    || !objectRecord(coverage)
-    || !dateText(coverage.from)
-    || !dateText(coverage.to)
-    || coverage.from > coverage.to
-    || !text(coverage.currency, 16)
-    || (
-      coverage.lastSuccessfulAt !== undefined
-      && (
-        !text(coverage.lastSuccessfulAt, 64)
-        || !Number.isFinite(Date.parse(coverage.lastSuccessfulAt))
-      )
-    )
-    || !Number.isSafeInteger(coverage.costScale)
-    || Number(coverage.costScale) < 0
-    || Number(coverage.costScale) > 12
-  ) invalidDashboard();
-  if (!exactMetrics(value.summary) || !exactTrend(value.trend)) {
-    invalidDashboard();
-  }
-  const verifiedTrend = value.trend as AdDailyMetrics[];
-  if (
-    snapshotState !== 'NONE'
-    && objectRecord(coverage)
-    && (
-      new Set(verifiedTrend.map((row) => row.date)).size !== verifiedTrend.length
-      || verifiedTrend.some((row) => (
-        row.date < String(coverage.from) || row.date > String(coverage.to)
-      ))
-    )
-  ) invalidDashboard();
-  const bindings = value.bindings;
-  const campaigns = value.campaigns;
-  const adGroups = value.adGroups;
-  const keywords = value.keywords;
-  const searchTerms = value.searchTerms;
-  const lastRun = value.lastRun;
-  if (
-    !Array.isArray(bindings)
-    || !bindings.every((row) => objectRecord(row)
-      && text(row.accountId, 128) && text(row.accountName))
-    || !Array.isArray(campaigns) || !campaigns.every(dashboardCampaign)
-    || !Array.isArray(adGroups) || !adGroups.every(dashboardAdGroup)
-    || !Array.isArray(keywords) || !keywords.every(dashboardKeyword)
-    || !Array.isArray(searchTerms) || !searchTerms.every(dashboardSearchTerm)
-    || !objectRecord(value.hierarchyCounts)
-    || value.hierarchyCounts.campaigns !== campaigns.length
-    || value.hierarchyCounts.adGroups !== adGroups.length
-    || value.hierarchyCounts.keywords !== keywords.length
-    || value.hierarchyCounts.searchTerms !== searchTerms.length
-    || (
-      lastRun !== undefined
-      && lastRun !== null
-      && (
-        !objectRecord(lastRun)
-        || !text(lastRun.runId, 128)
-        || !text(lastRun.status, 32)
-        || (
-          lastRun.failureCode !== null
-          && !text(lastRun.failureCode, 128)
-        )
-      )
-    )
-  ) invalidDashboard();
-  if (!dashboardSemanticsValid(value as MarketingDashboardResponse)) {
-    invalidDashboard();
-  }
-}
-
 export function assertMarketingDashboardRootResponse(
   value: unknown,
   expectedProjectId: string
 ): asserts value is MarketingDashboardResponse {
   if (
     !objectRecord(value)
+    || value.schemaVersion !== 'marketing_dashboard_v2'
     || !text(value.projectId, 128)
     || value.projectId !== expectedProjectId
+    || !text(value.projectName)
     || !objectRecord(value.states)
+    || ['campaigns', 'adGroups', 'keywords', 'searchTerms']
+      .some((field) => Object.hasOwn(value, field))
   ) invalidDashboard();
   const snapshotState = value.states.snapshotContentState;
   const freshnessState = value.states.snapshotFreshnessState;
   if (
-    !['NONE', 'ZERO', 'DATA'].includes(String(snapshotState))
+    !text(value.states.moduleState, 64)
+    || !['ACTIVE', 'ARCHIVED'].includes(String(value.states.projectState))
+    || !['NOT_CONNECTED', 'ACTION_REQUIRED', 'DISCONNECTED', 'CONNECTED']
+      .includes(String(value.states.sourceSummaryState))
+    || !['NONE', 'BLOCKED', 'ACTIVE']
+      .includes(String(value.states.bindingSummaryState))
+    || !['NONE', 'ZERO', 'DATA'].includes(String(snapshotState))
     || !['NA', 'FRESH', 'STALE'].includes(String(freshnessState))
+    || !text(value.states.refreshState, 32)
   ) invalidDashboard();
   const coverage = value.coverage;
   if (snapshotState === 'NONE') {
@@ -558,36 +316,49 @@ export function assertMarketingDashboardRootResponse(
     || !dateText(coverage.to)
     || coverage.from > coverage.to
     || !text(coverage.currency, 16)
-    || (
-      coverage.lastSuccessfulAt !== undefined
-      && (
-        !text(coverage.lastSuccessfulAt, 64)
-        || !Number.isFinite(Date.parse(coverage.lastSuccessfulAt))
-      )
-    )
+    || !text(coverage.lastSuccessfulAt, 64)
+    || !Number.isFinite(Date.parse(coverage.lastSuccessfulAt))
     || !Number.isSafeInteger(coverage.costScale)
     || Number(coverage.costScale) < 0
     || Number(coverage.costScale) > 12
     || !['FRESH', 'STALE'].includes(String(freshnessState))
   ) invalidDashboard();
-  if (
-    value.filter !== null
-    && value.filter !== undefined
-    && (
-      !objectRecord(value.filter)
-      || !dateText(value.filter.from)
-      || !dateText(value.filter.to)
-      || value.filter.from > value.filter.to
-    )
+  const filter = value.filter;
+  if (snapshotState === 'NONE') {
+    if (filter !== null) invalidDashboard();
+  } else if (
+    !objectRecord(filter)
+    || !dateText(filter.from)
+    || !dateText(filter.to)
+    || filter.from > filter.to
+    || filter.from < String((coverage as Record<string, unknown>).from)
+    || filter.to > String((coverage as Record<string, unknown>).to)
   ) invalidDashboard();
   if (
     !exactMetrics(value.summary)
     || !exactTrend(value.trend)
     || !Array.isArray(value.bindings)
     || !value.bindings.every((row) => objectRecord(row)
-      && text(row.accountId, 128) && text(row.accountName))
+      && text(row.bindingId, 128)
+      && text(row.accountId, 128)
+      && text(row.accountName)
+      && text(row.sourceState, 64)
+      && text(row.bindingState, 64)
+      && (row.blockingCode === null || text(row.blockingCode, 128)))
   ) invalidDashboard();
-  if (!metricsEqual(sumMetrics(value.trend as AdDailyMetrics[]), value.summary)) {
+  const verifiedTrend = value.trend as AdDailyMetrics[];
+  if (
+    !metricsEqual(sumMetrics(verifiedTrend), value.summary as AdExactMetrics)
+    || (
+      objectRecord(coverage)
+      && (
+        new Set(verifiedTrend.map((row) => row.date)).size !== verifiedTrend.length
+        || verifiedTrend.some((row) => (
+          row.date < String(coverage.from) || row.date > String(coverage.to)
+        ))
+      )
+    )
+  ) {
     invalidDashboard();
   }
   const hierarchyCounts = value.hierarchyCounts;
@@ -597,6 +368,32 @@ export function assertMarketingDashboardRootResponse(
       Number.isSafeInteger(hierarchyCounts[field])
       && Number(hierarchyCounts[field]) >= 0
     ))
+  ) invalidDashboard();
+  const activeRun = value.activeRun;
+  const lastRun = value.lastRun;
+  if (
+    !(
+      activeRun === null
+      || (objectRecord(activeRun)
+        && text(activeRun.runId, 128)
+        && text(activeRun.status, 32))
+    )
+    || !(
+      lastRun === null
+      || (objectRecord(lastRun)
+        && text(lastRun.runId, 128)
+        && text(lastRun.status, 32)
+        && (lastRun.failureCode === null || text(lastRun.failureCode, 128)))
+    )
+  ) invalidDashboard();
+  if (
+    ['NONE', 'ZERO'].includes(String(snapshotState))
+    && (
+      verifiedTrend.length !== 0
+      || !metricsEqual(value.summary as AdExactMetrics, EMPTY_METRICS)
+      || ['campaigns', 'adGroups', 'keywords', 'searchTerms']
+        .some((field) => Number(hierarchyCounts[field]) !== 0)
+    )
   ) invalidDashboard();
 }
 
@@ -666,7 +463,7 @@ function appendGrouped<T>(map: Map<string, T[]>, key: string, row: T): void {
   else map.set(key, [row]);
 }
 
-function targetingTypeLabel(value: DashboardKeyword['targetingType']): string {
+function targetingTypeLabel(value: MarketingAdKeyword['targetingType']): string {
   if (value === 'WORD_PACKAGE') return '词包';
   if (value === 'AUTO_EXPANSION') return '自动扩量';
   return '关键词';
@@ -710,8 +507,9 @@ function emptyModel(
   };
 }
 
-export function adaptMarketingDashboard(
+export function adaptMarketingAdHierarchy(
   dashboard: MarketingDashboardResponse,
+  hierarchy: MarketingAdHierarchyResponse | null,
   fallbackProjectName = '默认监控项目'
 ): AdPerformanceModel {
   const projectName = dashboard.projectName || fallbackProjectName;
@@ -730,11 +528,11 @@ export function adaptMarketingDashboard(
   }
 
   const currentTrend = normalizeTrend(dashboard.trend);
-  const campaigns = dashboard.campaigns || [];
-  const adGroups = dashboard.adGroups || [];
-  const keywords = dashboard.keywords || [];
-  const adGroupsByCampaign = new Map<string, DashboardAdGroup[]>();
-  const keywordsByAdGroup = new Map<string, DashboardKeyword[]>();
+  const campaigns = hierarchy?.campaigns || [];
+  const adGroups = hierarchy?.adGroups || [];
+  const keywords = hierarchy?.keywords || [];
+  const adGroupsByCampaign = new Map<string, MarketingAdGroup[]>();
+  const keywordsByAdGroup = new Map<string, MarketingAdKeyword[]>();
   for (const adGroup of adGroups) {
     appendGrouped(
       adGroupsByCampaign,
@@ -834,7 +632,7 @@ export function adaptMarketingDashboard(
       children: unitNodes
     };
   });
-  const summary = normalizeMetrics(dashboard.summary);
+  const summary = normalizeMetrics(hierarchy?.summary || dashboard.summary);
   const projectNode: AdHierarchyNode = {
     key: `project:${dashboard.projectId}`,
     id: String(dashboard.projectId),
@@ -879,19 +677,4 @@ export function adaptMarketingDashboard(
     previousTrend: [],
     structure: [projectNode]
   };
-}
-
-export function adaptMarketingAdHierarchy(
-  dashboard: MarketingDashboardResponse,
-  hierarchy: MarketingAdHierarchyResponse | null,
-  fallbackProjectName = '默认监控项目'
-): AdPerformanceModel {
-  return adaptMarketingDashboard({
-    ...dashboard,
-    summary: hierarchy?.summary || dashboard.summary,
-    campaigns: hierarchy?.campaigns || [],
-    adGroups: hierarchy?.adGroups || [],
-    keywords: hierarchy?.keywords || [],
-    searchTerms: []
-  }, fallbackProjectName);
 }

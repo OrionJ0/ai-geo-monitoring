@@ -9,6 +9,9 @@ const {
   parseProjectAllowlist,
   projectAllowed
 } = require('../domain/projectAllowlist');
+const {
+  MARKETING_AD_READ_CONTRACT
+} = require('../contracts/MarketingAdReadContract');
 
 const FRESHNESS_MS = 10 * 60 * 1000;
 
@@ -30,29 +33,6 @@ function addMetric(target, row) {
     target.costAmountScaled,
     row.cost_amount_scaled_text
   );
-}
-
-function aggregateRows(rows, keyOf, createItem) {
-  const items = new Map();
-  const dailyByItem = new WeakMap();
-  for (const row of rows) {
-    const key = keyOf(row);
-    if (!items.has(key)) {
-      const item = { ...createItem(row), trend: [] };
-      items.set(key, item);
-      dailyByItem.set(item, new Map());
-    }
-    const item = items.get(key);
-    addMetric(item, row);
-    const daily = dailyByItem.get(item);
-    if (!daily.has(row.metric_date)) {
-      const point = { date: row.metric_date, ...emptyTotals() };
-      daily.set(row.metric_date, point);
-      item.trend.push(point);
-    }
-    addMetric(daily.get(row.metric_date), row);
-  }
-  return [...items.values()];
 }
 
 function strictDate(value) {
@@ -186,9 +166,12 @@ class MarketingDashboardService {
 
         let filter = null;
         let metrics = [];
-        let adGroupMetrics = [];
-        let keywordMetrics = [];
-        let searchTermMetrics = [];
+        let hierarchyCounts = {
+          campaigns: 0,
+          adGroups: 0,
+          keywords: 0,
+          searchTerms: 0
+        };
         if (snapshotRun) {
           const requestedFrom = from ?? snapshotRun.coverage_start;
           const requestedTo = to ?? snapshotRun.coverage_end;
@@ -212,40 +195,73 @@ class MarketingDashboardService {
             from: requestedFrom,
             to: requestedTo
           };
-          const readFacts = (table, orderBy) => this.sequelize.query(
-            `SELECT *
-             FROM ${table}
+          const readCampaignFacts = () => this.sequelize.query(
+            `SELECT metric_date, impressions_text, clicks_text,
+                    cost_amount_scaled_text
+             FROM baidu_campaign_daily_metrics
              WHERE project_id = :projectId
                AND refresh_run_id = :runId
                AND metric_date >= :from
                AND metric_date <= :to
-             ORDER BY metric_date ASC, binding_id ASC, ${orderBy}`,
+             ORDER BY metric_date ASC, binding_id ASC, campaign_id ASC`,
             {
               replacements,
               type: QueryTypes.SELECT,
               transaction
             }
           );
-          [
-            metrics,
-            adGroupMetrics,
-            keywordMetrics,
-            searchTermMetrics
+          const countFacts = async (table, groupColumns) => {
+            const rows = await this.sequelize.query(
+              `SELECT COUNT(*) AS total
+               FROM (
+                 SELECT 1
+                 FROM ${table}
+                 WHERE project_id = :projectId
+                   AND refresh_run_id = :runId
+                   AND metric_date >= :from
+                   AND metric_date <= :to
+                 GROUP BY ${groupColumns.join(', ')}
+               ) grouped_facts`,
+              {
+                replacements,
+                type: QueryTypes.SELECT,
+                transaction
+              }
+            );
+            return Number(rows[0]?.total || 0);
+          };
+          const [
+            campaignFacts,
+            campaigns,
+            adGroups,
+            keywords,
+            searchTerms
           ] = await Promise.all([
-            readFacts('baidu_campaign_daily_metrics', 'campaign_id ASC'),
-            readFacts(
-              'baidu_ad_group_daily_metrics',
-              'campaign_id ASC, ad_group_id ASC'
-            ),
-            readFacts(
-              'baidu_keyword_daily_metrics',
-              'campaign_id ASC, ad_group_id ASC, keyword_id ASC'
-            ),
-            readFacts(
-              'baidu_search_term_daily_metrics',
-              'campaign_id ASC, ad_group_id ASC, search_term_key ASC'
-            )
+            readCampaignFacts(),
+            countFacts('baidu_campaign_daily_metrics', [
+              'external_account_id',
+              'campaign_id'
+            ]),
+            countFacts('baidu_ad_group_daily_metrics', [
+              'external_account_id',
+              'campaign_id',
+              'ad_group_id'
+            ]),
+            countFacts('baidu_keyword_daily_metrics', [
+              'external_account_id',
+              'campaign_id',
+              'ad_group_id',
+              'keyword_id'
+            ]),
+            countFacts('baidu_search_term_daily_metrics', [
+              'external_account_id',
+              'campaign_id',
+              'ad_group_id',
+              'search_term_key'
+            ])
           ]);
+          metrics = campaignFacts;
+          hierarchyCounts = { campaigns, adGroups, keywords, searchTerms };
         }
 
         const activeRuns = await this.sequelize.query(
@@ -278,9 +294,7 @@ class MarketingDashboardService {
           bindings,
           snapshotRun,
           metrics,
-          adGroupMetrics,
-          keywordMetrics,
-          searchTermMetrics,
+          hierarchyCounts,
           filter,
           activeRun: activeRuns[0] || null,
           lastRun: lastRuns[0] || null
@@ -294,9 +308,7 @@ class MarketingDashboardService {
     bindings,
     snapshotRun,
     metrics,
-    adGroupMetrics,
-    keywordMetrics,
-    searchTermMetrics,
+    hierarchyCounts,
     filter,
     activeRun,
     lastRun
@@ -313,76 +325,6 @@ class MarketingDashboardService {
       }
       addMetric(daily.get(row.metric_date), row);
     }
-    const campaigns = aggregateRows(
-      metrics,
-      (row) => [
-        row.external_account_id,
-        row.campaign_id
-      ].join('\u0000'),
-      (row) => ({
-          accountId: row.external_account_id,
-          campaignId: row.campaign_id,
-          campaignName: row.campaign_name,
-          ...emptyTotals()
-      })
-    );
-    const adGroups = aggregateRows(
-      adGroupMetrics,
-      (row) => [
-        row.external_account_id,
-        row.campaign_id,
-        row.ad_group_id
-      ].join('\u0000'),
-      (row) => ({
-        accountId: row.external_account_id,
-        campaignId: row.campaign_id,
-        campaignName: row.campaign_name,
-        adGroupId: row.ad_group_id,
-        adGroupName: row.ad_group_name,
-        ...emptyTotals()
-      })
-    );
-    const keywords = aggregateRows(
-      keywordMetrics,
-      (row) => [
-        row.external_account_id,
-        row.campaign_id,
-        row.ad_group_id,
-        row.keyword_id
-      ].join('\u0000'),
-      (row) => ({
-        accountId: row.external_account_id,
-        campaignId: row.campaign_id,
-        campaignName: row.campaign_name,
-        adGroupId: row.ad_group_id,
-        adGroupName: row.ad_group_name,
-        keywordId: row.keyword_id,
-        keywordName: row.keyword_name,
-        targetingType: row.targeting_type,
-        ...emptyTotals()
-      })
-    );
-    const searchTerms = aggregateRows(
-      searchTermMetrics,
-      (row) => [
-        row.external_account_id,
-        row.campaign_id,
-        row.ad_group_id,
-        row.search_term_key
-      ].join('\u0000'),
-      (row) => ({
-        accountId: row.external_account_id,
-        campaignId: row.campaign_id,
-        campaignName: row.campaign_name,
-        adGroupId: row.ad_group_id,
-        adGroupName: row.ad_group_name,
-        keywordName: row.keyword_name,
-        searchTerm: row.search_term,
-        queryStatus: row.query_status,
-        matchType: row.match_type,
-        ...emptyTotals()
-      })
-    );
     const blocked = bindings.some((binding) => (
       binding.status !== 'ACTIVE'
       || binding.connection_status !== 'CONNECTED'
@@ -405,6 +347,7 @@ class MarketingDashboardService {
     );
     const refreshState = activeRun?.status || lastRun?.status || 'IDLE';
     return {
+      schemaVersion: MARKETING_AD_READ_CONTRACT.schemaVersions.dashboard,
       projectId: String(project.id),
       projectName: project.name,
       revision: snapshotRun?.id || null,
@@ -452,16 +395,7 @@ class MarketingDashboardService {
       filter,
       summary,
       trend: [...daily.values()],
-      campaigns,
-      adGroups,
-      keywords,
-      searchTerms,
-      hierarchyCounts: {
-        campaigns: campaigns.length,
-        adGroups: adGroups.length,
-        keywords: keywords.length,
-        searchTerms: searchTerms.length
-      },
+      hierarchyCounts,
       activeRun: activeRun
         ? {
             runId: activeRun.id,
