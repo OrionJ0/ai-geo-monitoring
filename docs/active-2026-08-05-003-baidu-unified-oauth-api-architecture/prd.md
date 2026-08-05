@@ -1,7 +1,7 @@
 ---
 title: 百度统一 OAuth 凭据与营销 API 边界整理 PRD
 date: 2026-08-05
-status: blocked
+status: active
 source: 2026-08-05 用户确认的统一凭据要求与 Claude CLI 对抗式评审
 scope: product
 ---
@@ -253,7 +253,7 @@ A1 和 A2 必须是两个不同 Git Bundle 发布。A1 迁移命令必须声明�
 
 ## Handoff
 
-- PRD path: `docs/blocked-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
-- Tech Spec path: `docs/blocked-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Current state: Issue 001 tooling-only 探针与本地合同已完成；生产只读执行因缺少临时 SSH 运维会话而阻塞，且不能把包含 0805-002 未发布提交链的当前分支直接快进服务器。正式双凭据路径未改变，未执行数据库迁移。
-- Recommended next step: 先以 U1 tooling-only 探针完成生产无状态只读验证；后续顺序为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。
+- PRD path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
+- Tech Spec path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
+- Current state: Issue 001 已用生产服务器内同一现役 OAuth Token 完成搜索推广四报表与百度统计最小查询，双产品均为 `VERIFIED/HAS_DATA` 且副作用摘要不变。正式业务路径仍为双凭据，尚未执行迁移 014/015、重新授权或正式发布。
+- Recommended next step: 按顺序实施 Issue 002 的版本化产品能力状态；后续顺序为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。
