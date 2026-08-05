@@ -3,6 +3,9 @@ const CURRENT_STRUCTURE_VERSION = 'geo_metric_input_v4';
 const CURRENT_METRIC_SEMANTICS = 'contextual_competitor_mentions_sov_v1';
 const SCOPED_METRIC_SEMANTICS = 'contextual_competitor_mentions_sov_v2_scoped';
 const LEGACY_METRIC_SEMANTICS = 'configured_competitor_sov_v1';
+// v5 候选分阶段分析契约（硬切前不作为正式默认）
+const V5_ANALYSIS_CONTRACT = 'ai_structured_v5';
+const V5_STRUCTURE_VERSION = 'geo_metric_input_v5';
 
 function finiteNumberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -130,3 +133,5 @@ module.exports.CURRENT_STRUCTURE_VERSION = CURRENT_STRUCTURE_VERSION;
 module.exports.CURRENT_METRIC_SEMANTICS = CURRENT_METRIC_SEMANTICS;
 module.exports.SCOPED_METRIC_SEMANTICS = SCOPED_METRIC_SEMANTICS;
 module.exports.LEGACY_METRIC_SEMANTICS = LEGACY_METRIC_SEMANTICS;
+module.exports.V5_ANALYSIS_CONTRACT = V5_ANALYSIS_CONTRACT;
+module.exports.V5_STRUCTURE_VERSION = V5_STRUCTURE_VERSION;
