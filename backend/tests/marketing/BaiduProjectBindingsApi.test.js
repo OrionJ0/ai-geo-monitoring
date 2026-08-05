@@ -15,6 +15,9 @@ const {
 const {
   BaiduBindingService
 } = require('../../modules/marketing/services/BaiduBindingService');
+const {
+  createMarketingTestDatabase
+} = require('./helpers/createMarketingTestDatabase');
 
 let directory;
 let sequelize;
@@ -339,4 +342,225 @@ test('project allowlist rejects binding before any provider directory call', asy
     { code: 'MARKETING_PROJECT_NOT_ALLOWED', status: 403 }
   );
   assert.equal(providerCalls, 0);
+});
+
+test('binding creation rejects a Tongji context changed after directory validation', async (t) => {
+  const database = await createMarketingTestDatabase('binding-context-fence-');
+  t.after(database.close);
+  const oldVerifiedAt = '2026-08-05T12:00:00.000Z';
+  await database.sequelize.query(
+    `INSERT INTO baidu_marketing_connections (
+      id, status, authorized_principal_id,
+      access_token_ciphertext, refresh_token_ciphertext,
+      access_token_expires_at, auth_generation, token_version,
+      refresh_claim_token, refresh_claim_until, created_by_user_id,
+      tongji_user_name, tongji_user_name_verified_at,
+      marketing_access_state, marketing_observed_auth_generation,
+      marketing_observed_token_version, marketing_checked_at,
+      tongji_access_state, tongji_observed_auth_generation,
+      tongji_observed_token_version, tongji_checked_at,
+      created_at, updated_at
+    ) VALUES (
+      'fenced-connection', 'CONNECTED', 'fenced-principal',
+      'fixture-access', 'fixture-refresh',
+      '2026-08-06T00:00:00.000Z', 2, 6,
+      NULL, NULL, 1,
+      'old-user', :oldVerifiedAt,
+      'VERIFIED', 2, 6, :oldVerifiedAt,
+      'VERIFIED', 2, 6, :oldVerifiedAt,
+      :oldVerifiedAt, :oldVerifiedAt
+    )`,
+    { replacements: { oldVerifiedAt } }
+  );
+  const service = new BaiduBindingService({
+    sequelize: database.sequelize,
+    accountDirectory: {
+      async listAccounts() {
+        return {
+          accounts: [{
+            accountId: 'fenced-account',
+            accountName: '旧上下文账户',
+            product: 'SEARCH',
+            readOnly: true
+          }],
+          validationContext: {
+            authGeneration: 2,
+            tokenVersion: 6,
+            marketingVerified: true
+          }
+        };
+      }
+    },
+    siteDirectory: {
+      async listSites() {
+        await database.sequelize.query(
+          `UPDATE baidu_marketing_connections
+           SET tongji_user_name = 'new-user',
+               tongji_user_name_verified_at = '2026-08-05T12:01:00.000Z'
+           WHERE id = 'fenced-connection'`
+        );
+        return {
+          sites: [{
+            siteId: '301',
+            domain: 'old.example.test',
+            status: 'ACTIVE'
+          }],
+          validationContext: {
+            authGeneration: 2,
+            tokenVersion: 6,
+            tongjiUserName: 'old-user',
+            tongjiUserNameVerifiedAt: oldVerifiedAt,
+            tongjiVerified: true
+          }
+        };
+      }
+    }
+  });
+
+  await assert.rejects(
+    service.createBinding({
+      projectId: 11,
+      adminId: 1,
+      connectionId: 'fenced-connection',
+      externalAccountId: 'fenced-account',
+      tongjiSiteId: '301'
+    }),
+    { code: 'BINDING_VALIDATION_CONTEXT_CHANGED', status: 409 }
+  );
+  const [bindings] = await database.sequelize.query(
+    `SELECT id FROM baidu_project_bindings
+     WHERE connection_id = 'fenced-connection'`
+  );
+  assert.deepEqual(bindings, []);
+
+  await database.sequelize.query(
+    `UPDATE baidu_marketing_connections
+     SET tongji_user_name = 'old-user',
+         tongji_user_name_verified_at = :oldVerifiedAt
+     WHERE id = 'fenced-connection'`,
+    { replacements: { oldVerifiedAt } }
+  );
+  await database.sequelize.query(
+    `INSERT INTO baidu_project_bindings (
+      id, project_id, connection_id, external_account_id,
+      external_account_name, tongji_site_id, tongji_site_domain,
+      status, binding_version, paused_reason,
+      created_by_user_id, created_at, updated_at
+    ) VALUES (
+      'fenced-binding', 11, 'fenced-connection', 'fenced-account',
+      '旧上下文账户', '301', 'old.example.test',
+      'PAUSED', 1, 'ADMIN', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    )`
+  );
+  await assert.rejects(
+    service.resumeBinding({
+      projectId: 11,
+      bindingId: 'fenced-binding'
+    }),
+    { code: 'BINDING_VALIDATION_CONTEXT_CHANGED', status: 409 }
+  );
+  const [paused] = await database.sequelize.query(
+    `SELECT status, binding_version
+     FROM baidu_project_bindings
+     WHERE id = 'fenced-binding'`
+  );
+  assert.deepEqual(paused[0], { status: 'PAUSED', binding_version: 1 });
+});
+
+test('SQLite binding transaction serializes a context change after its final check', async (t) => {
+  const database = await createMarketingTestDatabase('binding-sqlite-fence-');
+  t.after(database.close);
+  await database.sequelize.query(
+    `INSERT INTO baidu_marketing_connections (
+      id, status, authorized_principal_id,
+      access_token_ciphertext, refresh_token_ciphertext,
+      access_token_expires_at, auth_generation, token_version,
+      refresh_claim_token, refresh_claim_until, created_by_user_id,
+      created_at, updated_at
+    ) VALUES (
+      'sqlite-fence', 'CONNECTED', 'sqlite-principal',
+      'fixture-access', 'fixture-refresh', NULL, 0, 1,
+      NULL, NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    )`
+  );
+  const service = new BaiduBindingService({
+    sequelize: database.sequelize,
+    accountDirectory: {
+      async listAccounts() {
+        return [{
+          accountId: 'sqlite-account',
+          accountName: 'SQLite 账户',
+          product: 'SEARCH',
+          readOnly: true
+        }];
+      }
+    },
+    siteDirectory: {
+      async listSites() {
+        return [{
+          siteId: '302',
+          domain: 'sqlite.example.test',
+          status: 'ACTIVE'
+        }];
+      }
+    }
+  });
+  const originalAssert = service.assertValidationContextCurrent.bind(service);
+  let markChecked;
+  let releaseCheck;
+  const checked = new Promise((resolve) => {
+    markChecked = resolve;
+  });
+  const checkBlocked = new Promise((resolve) => {
+    releaseCheck = resolve;
+  });
+  service.assertValidationContextCurrent = async (...args) => {
+    const result = await originalAssert(...args);
+    markChecked();
+    await checkBlocked;
+    return result;
+  };
+
+  const createPromise = service.createBinding({
+    projectId: 11,
+    adminId: 1,
+    connectionId: 'sqlite-fence',
+    externalAccountId: 'sqlite-account',
+    tongjiSiteId: '302'
+  });
+  await checked;
+  let markMutationStarted;
+  const mutationStarted = new Promise((resolve) => {
+    markMutationStarted = resolve;
+  });
+  const contextMutation = database.sequelize.transaction(async (transaction) => {
+    markMutationStarted();
+    await database.sequelize.query(
+      `UPDATE baidu_marketing_connections
+       SET auth_generation = auth_generation + 1,
+           token_version = token_version + 1
+       WHERE id = 'sqlite-fence'`,
+      { transaction }
+    );
+    await database.sequelize.query(
+      `UPDATE baidu_project_bindings
+       SET status = 'PAUSED',
+           binding_version = binding_version + 1,
+           paused_reason = 'REAUTH'
+       WHERE connection_id = 'sqlite-fence'
+         AND status = 'ACTIVE'`,
+      { transaction }
+    );
+  });
+  await mutationStarted;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  releaseCheck();
+  await createPromise;
+  await contextMutation;
+  const [rows] = await database.sequelize.query(
+    `SELECT status, paused_reason
+     FROM baidu_project_bindings
+     WHERE connection_id = 'sqlite-fence'`
+  );
+  assert.deepEqual(rows[0], { status: 'PAUSED', paused_reason: 'REAUTH' });
 });

@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { QueryTypes } = require('sequelize');
+const { QueryTypes, Transaction } = require('sequelize');
 const {
   parseProjectAllowlist,
   projectAllowed
@@ -115,6 +115,42 @@ function isUniqueConstraintError(error) {
   );
 }
 
+function connectionValidationContext(connection) {
+  return {
+    authGeneration: Number(connection.auth_generation),
+    tokenVersion: Number(connection.token_version),
+    tongjiUserName: connection.tongji_user_name || null,
+    tongjiUserNameVerifiedAt: connection.tongji_user_name_verified_at || null,
+    marketingVerified: false,
+    tongjiVerified: false
+  };
+}
+
+function normalizeDirectoryResult(result, key, fallbackContext) {
+  if (Array.isArray(result)) {
+    return { items: result, validationContext: fallbackContext };
+  }
+  if (
+    !result
+    || typeof result !== 'object'
+    || !Array.isArray(result[key])
+    || !result.validationContext
+    || typeof result.validationContext !== 'object'
+  ) {
+    return { items: result, validationContext: fallbackContext };
+  }
+  return {
+    items: result[key],
+    validationContext: result.validationContext
+  };
+}
+
+function comparableTimestamp(value) {
+  if (value == null) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : String(value);
+}
+
 class BaiduBindingService {
   constructor({
     sequelize,
@@ -126,6 +162,16 @@ class BaiduBindingService {
     this.accountDirectory = accountDirectory;
     this.siteDirectory = siteDirectory;
     this.projectAllowlist = parseProjectAllowlist(allowedProjectIds);
+  }
+
+  bindingMutationTransaction(task) {
+    if (this.sequelize.getDialect() === 'sqlite') {
+      return this.sequelize.transaction(
+        { type: Transaction.TYPES.IMMEDIATE },
+        task
+      );
+    }
+    return this.sequelize.transaction(task);
   }
 
   assertProjectAllowed(projectId) {
@@ -171,10 +217,19 @@ class BaiduBindingService {
   async getConnectedConnection(connectionId, transaction) {
     const rows = await this.sequelize.query(
       `SELECT id, status, authorized_principal_id, authorized_open_id,
-              auth_generation
+              auth_generation, token_version,
+              tongji_user_name, tongji_user_name_verified_at,
+              marketing_access_state, marketing_observed_auth_generation,
+              marketing_observed_token_version,
+              tongji_access_state, tongji_observed_auth_generation,
+              tongji_observed_token_version
        FROM baidu_marketing_connections
        WHERE id = :connectionId
-       LIMIT 1`,
+       LIMIT 1${
+         transaction && this.sequelize.getDialect() === 'postgres'
+           ? ' FOR UPDATE'
+           : ''
+       }`,
       {
         replacements: { connectionId },
         type: QueryTypes.SELECT,
@@ -200,8 +255,13 @@ class BaiduBindingService {
 
   async listAccounts(connectionId) {
     const connection = await this.getConnectedConnection(connectionId);
+    const directory = normalizeDirectoryResult(
+      await this.accountDirectory.listAccounts({ connection }),
+      'accounts',
+      connectionValidationContext(connection)
+    );
     return normalizeSearchAccounts(
-      await this.accountDirectory.listAccounts({ connection })
+      directory.items
     );
   }
 
@@ -214,9 +274,12 @@ class BaiduBindingService {
       );
     }
     const connection = await this.getConnectedConnection(connectionId);
-    const accounts = normalizeSearchAccounts(
-      await this.accountDirectory.listAccounts({ connection })
+    const directory = normalizeDirectoryResult(
+      await this.accountDirectory.listAccounts({ connection }),
+      'accounts',
+      connectionValidationContext(connection)
     );
+    const accounts = normalizeSearchAccounts(directory.items);
     const account = accounts.find((item) => item.accountId === accountId);
     if (!account) {
       throw new MarketingBindingError(
@@ -225,13 +288,22 @@ class BaiduBindingService {
         422
       );
     }
-    return { connection, account };
+    return {
+      connection,
+      account,
+      validationContext: directory.validationContext
+    };
   }
 
   async listTongjiSites(connectionId, accountId) {
     const context = await this.getAccountContext(connectionId, accountId);
+    const directory = normalizeDirectoryResult(
+      await this.siteDirectory.listSites(context),
+      'sites',
+      context.validationContext
+    );
     return normalizeTongjiSites(
-      await this.siteDirectory.listSites(context)
+      directory.items
     );
   }
 
@@ -243,9 +315,12 @@ class BaiduBindingService {
         400
       );
     }
-    const sites = normalizeTongjiSites(
-      await this.siteDirectory.listSites(context)
+    const directory = normalizeDirectoryResult(
+      await this.siteDirectory.listSites(context),
+      'sites',
+      context.validationContext
     );
+    const sites = normalizeTongjiSites(directory.items);
     const site = sites.find((item) => item.siteId === siteId);
     if (!site) {
       throw new MarketingBindingError(
@@ -254,7 +329,79 @@ class BaiduBindingService {
         422
       );
     }
-    return site;
+    const accountContext = context.validationContext;
+    const siteContext = directory.validationContext;
+    if (
+      Number(accountContext.authGeneration) !== Number(siteContext.authGeneration)
+      || Number(accountContext.tokenVersion) !== Number(siteContext.tokenVersion)
+    ) {
+      throw new MarketingBindingError(
+        '百度目录验证上下文已变化，请刷新后重试',
+        'BINDING_VALIDATION_CONTEXT_CHANGED',
+        409
+      );
+    }
+    return {
+      site,
+      validationContext: {
+        ...siteContext,
+        marketingVerified: accountContext.marketingVerified === true,
+        tongjiVerified: siteContext.tongjiVerified === true
+      }
+    };
+  }
+
+  async assertValidationContextCurrent(
+    connectionId,
+    expected,
+    transaction
+  ) {
+    const current = await this.getConnectedConnection(
+      connectionId,
+      transaction
+    );
+    const unchanged = (
+      Number(current.auth_generation) === Number(expected.authGeneration)
+      && Number(current.token_version) === Number(expected.tokenVersion)
+      && (
+        !Object.hasOwn(expected, 'tongjiUserName')
+        || (current.tongji_user_name || null)
+          === (expected.tongjiUserName || null)
+      )
+      && (
+        !Object.hasOwn(expected, 'tongjiUserNameVerifiedAt')
+        || comparableTimestamp(current.tongji_user_name_verified_at)
+          === comparableTimestamp(expected.tongjiUserNameVerifiedAt)
+      )
+      && (
+        expected.marketingVerified !== true
+        || (
+          current.marketing_access_state === 'VERIFIED'
+          && Number(current.marketing_observed_auth_generation)
+            === Number(expected.authGeneration)
+          && Number(current.marketing_observed_token_version)
+            === Number(expected.tokenVersion)
+        )
+      )
+      && (
+        expected.tongjiVerified !== true
+        || (
+          current.tongji_access_state === 'VERIFIED'
+          && Number(current.tongji_observed_auth_generation)
+            === Number(expected.authGeneration)
+          && Number(current.tongji_observed_token_version)
+            === Number(expected.tokenVersion)
+        )
+      )
+    );
+    if (!unchanged) {
+      throw new MarketingBindingError(
+        '百度目录验证上下文已变化，请刷新后重试',
+        'BINDING_VALIDATION_CONTEXT_CHANGED',
+        409
+      );
+    }
+    return current;
   }
 
   async listBindings(projectId) {
@@ -284,13 +431,21 @@ class BaiduBindingService {
       externalAccountId
     );
     const account = context.account;
-    const site = await this.validateTongjiSite(context, tongjiSiteId);
+    const validatedSite = await this.validateTongjiSite(
+      context,
+      tongjiSiteId
+    );
+    const site = validatedSite.site;
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
     try {
-      await this.sequelize.transaction(async (transaction) => {
+      await this.bindingMutationTransaction(async (transaction) => {
         await this.requireActiveProject(projectId, transaction);
-        await this.getConnectedConnection(connectionId, transaction);
+        await this.assertValidationContextCurrent(
+          connectionId,
+          validatedSite.validationContext,
+          transaction
+        );
         const conflicts = await this.sequelize.query(
           `SELECT id, project_id
            FROM baidu_project_bindings
@@ -426,14 +581,19 @@ class BaiduBindingService {
       binding.externalAccountId
     );
     const account = context.account;
-    const site = await this.validateTongjiSite(
+    const validatedSite = await this.validateTongjiSite(
       context,
       selectedSiteId
     );
+    const site = validatedSite.site;
     try {
-      return await this.sequelize.transaction(async (transaction) => {
+      return await this.bindingMutationTransaction(async (transaction) => {
         await this.requireActiveProject(projectId, transaction);
-        await this.getConnectedConnection(binding.connectionId, transaction);
+        await this.assertValidationContextCurrent(
+          binding.connectionId,
+          validatedSite.validationContext,
+          transaction
+        );
         const current = await this.findBinding(
           projectId,
           bindingId,

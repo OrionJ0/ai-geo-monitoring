@@ -40,13 +40,14 @@ flowchart LR
 
 - GEO/SEO 是现有正式工作流。
 - 百度营销已硬切为推广计划、推广单元、关键词、搜索词四份官方报告的同次原子刷新，搜索词因官方响应没有关键词 ID 而保持独立事实。生产登录后关键词页展示截至 2026-08-03 的 863 条真实关键词且不再出现“尚未开放”，广告表现和百度统计网站流量页也返回真实数据。
-- 官网聚合、最多 31 日逐日缓存和 `/api/consultations` 脱敏记录 adapter 已部署；本地独立只读凭据已完成 3 条区间记录和 20 条所选 30 日列表对账。生产尚未配置专用官网只读项目与账号凭据，因此 `/api/website-data` 保持 `DISABLED`，正式页面诚实显示不可用。两条链路均不与 `/api/marketing` 或 53KF 混用。
-- 2026-08-04 官网咨询归因与统计九键版本已合并并推送到 `main`：后台只分页读取联系人列表计算首页和咨询页统计，全部表单记录计入总数，来源缺失归 `UNKNOWN`；统计快照只保存日期、键和数量。咨询详情按需读取并保留原始来路 URL 供复核。该版本尚未部署或从正式入口验收。
+- 百度搜索推广和百度统计现共用同一连接的版本化 OAuth Access Context，只在服务器数据库密文中保留一套 Access/Refresh Token；非秘密统计用户名与两个产品的能力状态独立保存和校验，不存在第二枚统计 Token 或双 Token fallback。
+- 官网聚合、最多 31 日逐日缓存、`/api/consultations` 脱敏记录 adapter 和九键来源统计代码已随生产 revision `6894789` 部署。后台只分页读取联系人列表计算首页和咨询页统计，全部表单记录计入总数，来源缺失归 `UNKNOWN`；统计快照只保存日期、键和数量，咨询详情按需读取并保留原始来路 URL 供复核。本地独立只读凭据已对账 21 条所选区间记录及逐日合计。生产尚未配置专用官网项目与只读账号凭据，因此 `/api/website-data` 保持 `DISABLED`，正式页面仍显示不可用；代码已部署不等于官网数据已生产接通。
+- 2026-08-05 已重新核验公开前后端健康、revision 与正式 Git Bundle workflow；本次未重新操作登录后页面，也未通过 SSH 复核服务器 Git 工作区。精确证据统一见[部署与运维](docs/DEPLOYMENT.md#当前正式单机实例)。
 - 2026-08-04 已确认并实现新版首页设计和指标口径，详见[全局视觉设计规范](docs/visual-design-spec.md)。六个营销页面共用设备/日期筛选器、周期对比指标卡和统一页面标题；投放效率、来源全链路、每日趋势、响应式与无障碍已完成验收。本地新版官网表单列覆盖所选区间全部表单记录，不包含 53KF。线索/订单真实数据和依赖这些字段的指标仍未接入。
 - 2026-08-04 已从正式入口复核市场总览、广告表现、关键词分析、网站流量、咨询数据（含原始咨询记录）、订单结果及 AI/GEO/SEO 页面。百度与既有 AI/GEO 数据 live verified；官网模块、53KF 与销售数据按各自真实状态显示缺失。完整逐页状态以[文档总览中的前端页面实施状态](docs/README.md#当前前端页面实施状态)为准。
 - 系统始终只读；当前与未来的业务调整都在来源系统完成。
 
-产品需求、技术边界和实施状态见[营销监控系统 PRD](docs/active-2026-07-29-001-marketing-monitoring/prd.md)与[第一期技术方案](docs/active-2026-07-29-001-marketing-monitoring/TECH-SPEC.md)，统一术语见[项目上下文](CONTEXT.md)。营销漏斗的唯一主数据源、指标语义和官网无侵入接入红线见[ADR 0001](docs/adr/0001-marketing-funnel-data-source-of-truth.md)，未完成事项见[MARK_LATER.md](MARK_LATER.md)。
+当前需求状态与执行归属以[文档总览](docs/README.md)为准；[营销监控系统 PRD](docs/blocked-2026-07-29-001-marketing-monitoring/prd.md)与[第一期技术方案](docs/blocked-2026-07-29-001-marketing-monitoring/TECH-SPEC.md)只保留百度第一期历史总需求和未闭合 `READY` 门禁，不再承接页面 API、正确性或 Provider 新 issue。统一术语见[项目上下文](CONTEXT.md)，营销漏斗的唯一主数据源、指标语义和官网无侵入接入红线见[ADR 0001](docs/adr/0001-marketing-funnel-data-source-of-truth.md)，未完成事项见[MARK_LATER.md](MARK_LATER.md)。
 
 ## 系统演示
 
@@ -85,9 +86,9 @@ flowchart LR
 - 用户登录、权限、会员等级与额度管理
 - 管理后台：用户、任务、会员、系统配置与运行记录管理
 - 本地 SQLite 自动初始化，生产环境支持外部 Postgres 数据库
-- 百度营销真实数据试点：显式迁移、OAuth/Token、搜索账户绑定、最近 30 个上海完整日的计划/单元/关键词/搜索词原子快照、双读一致性校验、精确值看板和刷新生命周期已部署并完成正式入口验收；严格层级只到关键词，搜索词不伪造关键词 ID。`PILOT_DATA_READY` 使用百度营销 dev2 OAuth Token，百度统计另用“数据 API”Token，两套凭据分别加密保存且不得混用
-- 官网表单咨询旧版代码已部署但生产未启用；已进入 `main` 的新版独立 `websiteFormConsultations` 模块改为分页读取官网联系人列表，并由同一批记录生成区间汇总 `/api/website-data/projects/:projectId/form-consultations` 和最多 31 日逐日接口 `/api/website-data/projects/:projectId/form-consultation-days`。公开统计只返回全部表单记录的九键数量，不返回联系人明细、原始 URL、官网流量或 53KF 数据；新版尚未部署
-- 官网原始咨询代码已部署但生产未启用：独立 `consultationRecords` 模块只读调用官网联系人列表和按需详情接口，通过 `/api/consultations/projects/:projectId/records` 输出严格、服务端脱敏的浏览合同；已进入 `main` 的九键版本还会依据原始 `referrer`、UTM 和百度点击标识归因，并在审计详情中保留原始来路 URL。生产需先注入专用只读项目与账号凭据，九键版本也尚未部署。该链路不读取 53KF，也不把联系入口点击、自动问候或窗口打开计为咨询
+- 百度营销真实数据试点：显式迁移、统一 OAuth、搜索账户绑定、最近 30 个上海完整日的计划/单元/关键词/搜索词原子快照、双读一致性校验、精确值看板和刷新生命周期已部署并完成正式入口验收；严格层级只到关键词，搜索词不伪造关键词 ID。搜索推广和百度统计共用同一连接的版本化 Access Context，只保存一套加密 Access/Refresh Token；非秘密统计用户名与两个产品的能力状态独立保存和校验，不存在第二枚统计 Token 或双 Token fallback
+- 官网表单咨询代码已部署但生产未启用：独立 `websiteFormConsultations` 模块分页读取官网联系人列表，并由同一批记录生成区间汇总 `/api/website-data/projects/:projectId/form-consultations` 和最多 31 日逐日接口 `/api/website-data/projects/:projectId/form-consultation-days`。公开统计只返回全部表单记录的九键数量，不返回联系人明细、原始 URL、官网流量或 53KF 数据
+- 官网原始咨询代码已部署但生产未启用：独立 `consultationRecords` 模块只读调用官网联系人列表和按需详情接口，通过 `/api/consultations/projects/:projectId/records` 输出严格、服务端脱敏的浏览合同；九键版本依据原始 `referrer`、UTM 和百度点击标识归因，并在审计详情中保留原始来路 URL。生产仍需注入专用只读项目与账号凭据。该链路不读取 53KF，也不把联系入口点击、自动问候或窗口打开计为咨询
 
 ## 分析能力
 

@@ -1,12 +1,13 @@
 ---
 title: "全入口硬切与真实验收"
-status: open
+status: closed
 type: AFK
-blocked_by:
-  - "003-deepseek-baseline-and-prompt-calibration.md"
+blocked_by: []
 ---
 
 # 全入口硬切与真实验收
+
+> 完成（2026-08-05）：本 issue 定义的 v4 全入口硬切与无 v3 fallback 验收已经全部完成。后续 v5 替代 v4 属于独立需求，不回退本 issue 的完成状态。
 
 ## Parent
 
@@ -55,6 +56,7 @@ blocked_by:
 - 本轮报告：[`work/run_report_ai_semantic_v4_real_e2e_20260729.html`](../../../work/run_report_ai_semantic_v4_real_e2e_20260729.html)。
 - 本 issue 的全入口技术验收已经执行。首次证据定位失败说明模型稳定性仍需由 Issue 003 继续扩大样本确认，因此暂不关闭整个需求目录。
 
-## Blocked by
+## Closure
 
-- `003-deepseek-baseline-and-prompt-calibration.md`
+- v4 的历史入口硬切已完成。
+- 当前生产仍使用 v4；v5 正式切换和 v4 运行时代码退役由后继需求负责。

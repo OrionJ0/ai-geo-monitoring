@@ -891,7 +891,7 @@ A2 至少保存：
 
 - PRD: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
 - Tech Spec: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Status: `active`；U1–U4 已在生产通过，U5 / Issue 005 的 A2 候选已交付。迁移 015 具备活动绑定、统一用户名、双产品当前版本、refresh claim 和重授权门禁，并通过 SQLite/PostgreSQL、失败回滚、备份恢复和正式部署顺序测试。生产仍运行 A1，尚未停止服务或应用 015。
-- First issue: Issue 006 的 A2 正式发布与关闭；必须先即时复验当前 Token 版本，再停 backend、备份、用独立 Git Bundle 快进、以最高版本 015 迁移并完成正式入口验收。
+- Status: `active`；U1–U5 已在生产通过。独立 A2 revision `9be1d7672ee639ceca82ce1428c284e86740054d` 已应用迁移 015、删除三个旧列并完成双产品只读探针与正式 Chrome 验收；发布桥接 revision `5d11cbc69f56743f3b0a57d6436d4ec895fb0486` 也已正式上线并通过全量与 Chrome 40/40。瞬时刷新错误状态、PostgreSQL 015 并发门禁和管理页请求竞态的运行时加固仍待独立发布与复验，Issue 006 和父需求不提前关闭。
+- First issue: 发布并复验 Issue 006 审查加固 revision；确认 systemd 停机在 Git 快进之前、迁移 audit 无 pending、双产品当前版本与正式入口均通过后关闭。
 - Completion condition: U1–U5 通过、A2 正式入口验收完成、旧实现与旧文档删除。
 - Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件；默认顺序为 003 → 006 → 007 → 005。

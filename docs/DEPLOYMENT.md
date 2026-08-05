@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-05 A1 正式 Git Bundle 已部署 `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-05 A2 发布桥接 Git Bundle 已部署 `5d11cbc69f56743f3b0a57d6436d4ec895fb0486`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。该 revision 只加固发布工具，不改变应用运行时、schema 或迁移。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -46,10 +46,28 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 
 - 独立 Git Bundle 将服务器只快进到 `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41`，Bundle SHA-256 为 `3c0a3734b755c79d76915a4febc5d1d86e8387bf8ca9b5cef622767e7ded69d1`。最终源码树以原正式 revision `ba0b1eb3a76ae59847594a7647e68e35eb7bd373` 为运行基线，只叠加 003 文档和 A1，不含并行的 0805-002 Flash 工作线。
 - A1 前恢复备份为 `/opt/ai-geo-monitoring/backend/releases/database.pre-9789ee096798c9309d649c01d63b4c02b36ec524.sqlite`。营销迁移 `001`–`014` 已应用且无 pending；A1 仓库不存在 015，三个旧统计凭据列仍保留，等待 A2 独立迁移删除。
-- `ai-geo-backend.service` 与 `ai-geo-frontend.service` 由正式部署入口启动；公开 `/api/health`、`/api/ready`、`/api/frontend-health` 均成功并返回 A1 revision。服务器工作区干净，服务器的 `origin/main` 只是远端跟踪引用，不作为运行真值。
+- `ai-geo-backend.service` 与 `ai-geo-frontend.service` 由正式部署入口启动；公开 `/api/health` 与 `/api/frontend-health` 返回 A1 revision，`/api/ready` 返回 `status=ready`。服务器工作区干净，服务器的 `origin/main` 只是远端跟踪引用，不作为运行真值。
 - 现役连接服务已在服务器内存中完成一次真实 OAuth 刷新，Token 版本从 5 增至 6；刷新后搜索推广账户目录、百度统计站点目录和最小趋势请求均通过，两个产品状态均为当前版本 `VERIFIED`。Token、Cookie、数据库和原始百度响应未复制到本地或写入证据。
 - `/usr/bin/google-chrome` 从 `https://insight.guangtuo.com` 验收市场总览、广告表现、关键词、搜索词、网站流量和管理页；页面与营销 API 均为 200。管理页仅展示统一 OAuth 和必要统计用户名，旧统计凭据路由返回 404。服务器截图位于 `output/playwright/a1-production-e8de9d5/`。
 - 当前正式路径已经硬切为搜索推广和百度统计共用版本化 Access Context；不存在双 Token fallback。旧数据库列只是 A1 观察期恢复边界，不再有现役代码读写；在 A2 正式发布前不得宣称旧字段已完成不可逆退役。
+
+### 2026-08-05 百度统一 OAuth A2 正式发布与验收
+
+- 独立 A2 Git Bundle 将服务器只快进到 `9be1d7672ee639ceca82ce1428c284e86740054d`，Bundle SHA-256 为 `e3ee9cd548b740845ac772e248a91ba6bb2ea66d12eee4a38c73c045f6a1f15e`，与 A1 的 revision 和 Bundle 明确分离；发布树不含并行的 0805-002 工作。
+- 停服前当前 Token 版本 6 再次只读验证搜索推广四类报告与百度统计站点/最小趋势均成功；停服后创建 `/opt/ai-geo-monitoring/backend/releases/database.pre-9be1d7672ee639ceca82ce1428c284e86740054d.sqlite`（权限 600），再以 `--expected-latest=015-drop-legacy-tongji-credentials` 应用迁移。迁移账本 checksum 为 `284173897caac7410509e16a24178884acd6f036538252412b99a516b2b05fee`，无 pending。
+- 正式 `baidu_marketing_connections` 已删除 `tongji_account_name`、`tongji_access_token_ciphertext`、`tongji_credential_updated_at` 三列；现役代码、路由、UI 和生产工作树不存在旧统计 Token、旧 service、兼容 fallback 或双 Token 配置。A2 前备份仍保留旧列，仅用于已批准的灾难恢复边界。
+- 正式部署通过后端完整回归、营销 190 项、官网 31 项、咨询 35 项、前端 104 项、lint、TypeScript/生产构建 40 路由和 Playwright 40 项。前后端只由 `ai-geo-backend.service` 与 `ai-geo-frontend.service` 运行；公开 `/api/health` 与 `/api/frontend-health` 返回 A2 revision，`/api/ready` 返回 `status=ready`。
+- A2 后只读探针仍为 Token 版本 6；搜索推广计划 32、单元 74、关键词 183、搜索词 14，百度统计站点 1、趋势行 1，两个产品均为当前版本 `VERIFIED/HAS_DATA` 且探针前后业务状态不变。探针没有刷新 Token、重新授权、暂停绑定或写业务数据，也未复制 Token、Cookie、数据库或原始响应。
+- 生产 Chrome 从 `https://insight.guangtuo.com` 验收市场总览、广告表现、关键词、搜索词、网站流量、咨询、订单和设置页；对应正式 API 状态符合真实连接边界。管理页只有统一 OAuth 和一个非秘密统计用户名输入，零密码输入，两个产品分别显示 `VERIFIED`；截图仅保存在服务器 `output/playwright/a2-production-9be1d76/`。
+- A2 对抗式审查还发现发布器停机顺序、瞬时刷新错误状态和 PostgreSQL 迁移并发门禁需要加固；这些修复完成正式发布与复验前，003 保持 `active`，不得把本段原始 A2 成功记录误作需求关闭证据。
+
+### 2026-08-05 A2 发布桥接正式发布与验收
+
+- 独立桥接 Git Bundle 将服务器快进到 `5d11cbc69f56743f3b0a57d6436d4ec895fb0486`，Bundle SHA-256 为 `5000a653e642879a3eba1612056240a90acf5464d2923929c725167a9923af9a`。该提交只包含 Git Bundle workflow、发布器、systemd 管理器及测试，不含应用运行时、schema 或迁移变化。
+- 桥接使后续发布在生产 systemd 服务确认完全停止后才快进服务器工作树；任一服务仍活动、PID 非空、停服部分失败或返回状态畸形时，服务器 `HEAD` 保持不变并停止发布。正式域名健康、ready 与前后端精确 revision 也成为发布门禁。
+- 正式部署通过后端完整回归、营销 190 项、官网 31 项、咨询 35 项、前端 104 项、lint、TypeScript/40 路由生产构建和真实 Chrome 40 项；营销迁移 audit 为 001–015 全部应用且无 pending。
+- 发布后服务器 `HEAD` 与公开 `/api/health`、`/api/frontend-health` 均为 `5d11cbc69f56743f3b0a57d6436d4ec895fb0486`，`/api/ready` 为 `ready`；两个正式 systemd 单元各只有一个主进程。下一业务发布将首次由这套桥接后的 launcher 执行“停服确认 → 快进 → 测试/迁移 → 启动/正式域名验收”。
+- OAuth 瞬时刷新冷却、主体不一致终态、PostgreSQL 015 锁与管理页晚到请求隔离仍只在后续候选中，本桥接发布不代表这些运行时加固已上线。
 
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`
@@ -181,9 +199,9 @@ server {
 5. 用公网域名检查 `GET /api/health`、`GET /api/ready`，再确认禁用状态的 callback 空请求返回营销模块 503 而不是 404；反向代理不得记录 callback query。
 6. 新建本项目专用百度应用，把完整 HTTPS callback 登记为 `https://<域名>/api/admin/marketing/baidu/oauth/callback`，审核通过后取得 `appId`、`secretKey` 和授权链接中的只读 `scope`。
 7. 配置 `MARKETING_MONITORING_ENABLED=true`、`MARKETING_MONITORING_PILOT_MODE=true`、试点项目白名单和 `baidu-marketing-docs-2026-07-30`，启动后确认营销状态为 `PILOT_READY`，callback 空请求返回 `OAUTH_CALLBACK_INVALID`。
-8. 完成百度营销 dev2 OAuth 后，在设置中心另行填写百度统计“数据 API”页面签发的商业账号账户名与 Token；保存前系统必须用它实时读取站点目录，验证失败不得落库。两套 Token 属于不同授权体系，不得相互替代。
+8. 完成百度 dev2 OAuth 后，在设置中心只填写非秘密百度统计商业账号用户名；保存前系统必须使用同一连接的当前 OAuth Access Context 实时读取站点目录，验证失败不得落库。不得填写或保存第二枚统计 Token。
 9. 确认搜索账户和百度统计站点目录后，部署包含脱敏 fixture 的代码，再把契约切到 `baidu-marketing-pilot-2026-07-30`；状态必须为 `PILOT_DATA_READY`。管理员必须把项目明确绑定到选定的搜索账户与百度统计站点，运行时不得按“唯一活动站点”自动猜测。
-10. 百度营销 Access/Refresh Token 和百度统计 Data API Token 都只保留在服务器数据库密文中，不复制到 Git；本地解析、回归和异常测试只使用脱敏 fixture。临时人工联调文件必须被 Git 忽略并限制为仅当前用户可读。
+10. 唯一一套 OAuth Access/Refresh Token 只保留在服务器数据库密文和服务端内存中，不复制到 Git；本地解析、回归和异常测试只使用脱敏 fixture。临时人工联调文件必须被 Git 忽略并限制为仅当前用户可读。
 11. 补全金额、时区、错误与 refresh 轮换证据；新增零 blocker 的 `VERIFIED` 清单后再关闭试点模式。
 12. 生产验收未完成前不扩大项目白名单；百度不可达不得影响全局 readiness 或旧搜索快照读取。
 

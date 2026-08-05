@@ -51,4 +51,4 @@ blocked_by:
 - 回归证据：后端营销 188/188、后端全量 994/994、部署 26/26、前端合同 104/104、lint、TypeScript 和 40 路由生产构建全部通过。公开 API、Provider facade、四报表、预算、百度统计缓存和页面合同没有修改。
 - 正式部署入口：A2 候选把 `scripts/deploy.mjs` 的营销最高版本更新为 015，并以部署流程测试证明浏览器验收、备份、015 apply/audit 和 systemd 启动顺序不变。A2 恢复演练证明恢复数据库备份后，使用不含 015 的后代恢复 revision 可重新通过 014 audit；禁止只退代码或非快进回退。
 - 旧路径搜索：除不可变迁移 006/014、contract 迁移 015、迁移专项测试和带日期历史证据外，现役后端、前端、脚本和当前入口均不再读取、写入或序列化旧字段；不存在旧 service、旧凭据路由、配置、adapter 或双 Token fallback。
-- 当前正式路径：生产仍是 A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41` 的统一 Access Context，三个旧列仍在生产数据库中但零读写。本 issue 只交付 A2 候选，未停止服务、未发布、未应用 015；父需求继续 `active`，下一门禁为 Issue 006 的停服备份与 A2 正式发布。
+- 历史交付边界：本 issue 提交时生产仍是 A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41`，因此当时只交付 A2 候选、未停止服务、未应用 015。其后的 Issue 006 已于 2026-08-05 将 A2 与迁移 015 正式发布；当前运行 revision 和验收真值只以 `docs/DEPLOYMENT.md` 为准，不得把本段历史状态当成现役入口。

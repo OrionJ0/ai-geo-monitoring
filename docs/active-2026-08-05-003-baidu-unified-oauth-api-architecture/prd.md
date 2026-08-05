@@ -10,7 +10,7 @@ scope: product
 
 ## Problem Statement
 
-当前百度商业开发者应用已经申请搜索推广读取、搜索报表和百度统计权限，但系统仍维护两套 Token：搜索推广使用 dev2 OAuth Access Token / Refresh Token，百度统计由管理员另外填写 Data API Token。
+本需求实施前，百度商业开发者应用已经申请搜索推广读取、搜索报表和百度统计权限，但系统仍维护两套 Token：搜索推广使用 dev2 OAuth Access Token / Refresh Token，百度统计由管理员另外填写 Data API Token。该段描述历史问题，不是当前正式合同；现役系统已硬切为一套统一 OAuth Access/Refresh Token。
 
 这套历史实现带来四个直接问题：
 
@@ -255,5 +255,5 @@ A1 和 A2 必须是两个不同 Git Bundle 发布。A1 迁移命令必须声明�
 
 - PRD path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
 - Tech Spec path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Current state: Issue 001–005 已完成。A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41` 已正式运行并完成真实 OAuth 刷新和当前版本双产品复验；独立 A2 候选已新增带强门禁的迁移 015、SQLite/PostgreSQL contract 与恢复测试，并删除运行测试和探针对旧列的依赖。生产尚未发布 A2，三个旧列仍在生产数据库中但运行时零读写。
-- Recommended next step: 执行 Issue 006：停服前再次即时复验当前 Token 版本，停止正式 backend、创建 A2 专用数据库备份，以独立 Git Bundle 快进并用最高版本 015 应用迁移，再启动和验收正式入口。父需求继续为 `active`，不得在 A2 完成前宣称旧字段已生产退役。后续顺序仍为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。
+- Current state: Issue 001–005 已完成。A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41` 完成真实 OAuth 刷新和当前版本双产品复验；独立 A2 revision `9be1d7672ee639ceca82ce1428c284e86740054d` 已应用迁移 015，生产旧列已删除，正式页面与统一 Access Context 已复验。对抗式审查随后发现发布器停机顺序、瞬时刷新错误状态与 PostgreSQL 迁移并发门禁仍需加固，父需求因此保持 `active`。
+- Recommended next step: 发布并复验 Issue 006 的审查加固 revision；确认公开 revision、迁移 audit、双产品只读探针、正式页面和旧路径搜索全部通过后关闭 003。后续顺序仍为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。

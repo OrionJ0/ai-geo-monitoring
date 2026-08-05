@@ -107,3 +107,61 @@ test('统计用户名管理在移动端保持可操作', async ({ page }) => {
     fullPage: true
   });
 });
+
+test('更新统计用户名后立即刷新被后端暂停的项目绑定', async ({ page }) => {
+  let contextSaved = false;
+  let bindingReads = 0;
+  let releaseInitialBinding: (() => void) | null = null;
+  const initialBindingBlocked = new Promise<void>((resolve) => {
+    releaseInitialBinding = resolve;
+  });
+  await page.route('**/api/geo-projects', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify([{ id: 1, name: '营销项目', status: 'active' }])
+  }));
+  await page.route('**/api/marketing/projects/1/baidu-bindings', async (route) => {
+    bindingReads += 1;
+    const initialRequest = bindingReads === 1;
+    if (initialRequest) await initialBindingBlocked;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify([{
+        id: 'binding-redacted',
+        projectId: '1',
+        connectionId: 'connection-redacted',
+        externalAccountId: 'account-redacted',
+        externalAccountName: '搜索账户',
+        tongjiSiteId: 'site-redacted',
+        tongjiSiteDomain: 'example.test',
+        status: initialRequest ? 'ACTIVE' : 'PAUSED',
+        pausedReason: initialRequest ? null : 'TONGJI_CONTEXT_CHANGED'
+      }])
+    });
+  });
+  await page.route('**/tongji-context', (route) => {
+    contextSaved = true;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        userName: 'updated-user',
+        siteCount: 1,
+        verifiedAt: '2026-08-05T10:10:00.000Z'
+      })
+    });
+  });
+
+  await page.goto('/admin/settings#marketing');
+  await expect.poll(() => bindingReads).toBe(1);
+  await page.getByRole('button', { name: '更新统计用户名' }).click();
+  await page.getByLabel('百度统计账户名').fill('updated-user');
+  await page.getByRole('button', { name: '验证并保存用户名' }).click();
+
+  expect(contextSaved).toBe(true);
+  await expect(page.getByText('已暂停', { exact: true })).toBeVisible();
+  await expect(page.getByText('TONGJI_CONTEXT_CHANGED', { exact: false })).toBeVisible();
+  expect(bindingReads).toBeGreaterThanOrEqual(2);
+  releaseInitialBinding?.();
+  await page.waitForTimeout(100);
+  await expect(page.getByText('已暂停', { exact: true })).toBeVisible();
+  await expect(page.getByText('活动', { exact: true })).toHaveCount(0);
+});

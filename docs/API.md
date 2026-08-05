@@ -362,11 +362,12 @@ Authorization: Bearer <token>
 - `GET /api/admin/marketing/baidu/authorization/launch`：使用 HttpOnly launch Cookie 跳转百度授权页。
 - `GET /api/admin/marketing/baidu/oauth/callback`：公开 HTTPS callback；只接受百度文档规定的 `appId/authCode/state/userId/timestamp/signature`，验签成功后换 Token，最后跳转无查询参数结果页。
 - `GET /api/admin/marketing/baidu/authorization-results/current`：发起管理员读取一次性脱敏授权结果。
-- `GET /api/admin/marketing/baidu/connections`：管理员读取连接列表。
+- `GET /api/admin/marketing/baidu/connections`：管理员读取连接列表；继续返回裸数组，每个连接包含非秘密 `tongjiUserName` 和 `products.marketing` / `products.tongji` 独立能力状态，不返回 Token、授权代次、Token 版本、scope 或原始上游错误。
 - `GET /api/admin/marketing/baidu/connections/:connectionId/accounts`：管理员读取官方 `getUserInfo` 返回的主账户与子账户目录。
+- `PUT /api/admin/marketing/baidu/connections/:connectionId/tongji-context`：请求体严格只接受 `{ "userName": "..." }`；服务端使用当前统一 OAuth Access Context 实时读取百度统计站点目录，验证成功后才以观察版本 CAS 保存非秘密用户名。旧 `PUT .../tongji-credential` 已退役并固定返回 404，不存在兼容 fallback。
 - `POST /api/admin/marketing/baidu/connections/:connectionId/disconnect`：本地断开、清 Token 并暂停相关绑定。
 
-`PILOT_READY` 只开放上述授权、callback、Token、连接和账户目录接口；所有项目绑定、看板、刷新和调度接口返回 `MARKETING_PILOT_AUTH_ONLY`。`PILOT_DATA_READY` 仅对服务端项目白名单开放百度搜索账户绑定、搜索报表快照和百度统计读取；它不等同于正式 `READY`。广告快照的本地正式代码路径一次读取计划、单元、关键词和搜索词四份报告并全成全败；不存在计划级静默 fallback。网站流量的 `trend/time/a` 访问次数、UV、PV、质量指标，`source/all/a` / `source/engine/a` 来源汇总，以及 `visit/landingpage/a` / `visit/toppage/a` 页面报告都已取得同站点真实账号响应证据并由 manifest 开放运行；字段顺序、无数据标记、设备过滤、分页和响应上限仍由严格解析器约束。来源表中的跳出率、平均访问时长、平均访问页数仍没有通过“来源—质量指标”关联验证，固定返回缺失值；`sourcePageLinkage=false`，来源选择也不会联动页面报告。能力被关闭时客户端必须在 transport 前 fail-closed，不填 fixture、不把缺失值改成零。真实 App ID、SecretKey、Access Token、Refresh Token 和百度统计 Token 只保存在服务器环境与加密数据库中。系统不会向百度调用任何写接口，也不支持信息流、计划子集、创意、落地页或销售数据。
+`PILOT_READY` 只开放上述授权、callback、Token、连接和账户目录接口；所有项目绑定、看板、刷新和调度接口返回 `MARKETING_PILOT_AUTH_ONLY`。`PILOT_DATA_READY` 仅对服务端项目白名单开放百度搜索账户绑定、搜索报表快照和百度统计读取；它不等同于正式 `READY`。广告快照的本地正式代码路径一次读取计划、单元、关键词和搜索词四份报告并全成全败；不存在计划级静默 fallback。网站流量的 `trend/time/a` 访问次数、UV、PV、质量指标，`source/all/a` / `source/engine/a` 来源汇总，以及 `visit/landingpage/a` / `visit/toppage/a` 页面报告都已取得同站点真实账号响应证据并由 manifest 开放运行；字段顺序、无数据标记、设备过滤、分页和响应上限仍由严格解析器约束。来源表中的跳出率、平均访问时长、平均访问页数仍没有通过“来源—质量指标”关联验证，固定返回缺失值；`sourcePageLinkage=false`，来源选择也不会联动页面报告。能力被关闭时客户端必须在 transport 前 fail-closed，不填 fixture、不把缺失值改成零。真实 App ID、SecretKey 和唯一一套 OAuth Access/Refresh Token 只保存在服务器环境与加密数据库中；百度统计用户名是非秘密上下文，浏览器和公开接口永不接收 Token。系统不会向百度调用任何写接口，也不支持信息流、计划子集、创意、落地页或销售数据。
 
 2026-08-05 起，固定 30 日公开接口 `tongji-trend` 与 `tongji-source-trends` 已退役并返回 404；消费方必须使用带明确日期范围的 `website-traffic-overview`，不存在兼容 fallback。
 
