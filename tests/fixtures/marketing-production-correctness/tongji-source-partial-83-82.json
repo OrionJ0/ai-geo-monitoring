@@ -1,0 +1,71 @@
+{
+  "query": {
+    "projectId": "synthetic-project",
+    "device": "all",
+    "from": "2026-08-01",
+    "to": "2026-08-01",
+    "source": "ALL",
+    "metric": "visits",
+    "includeSourceComparison": true
+  },
+  "response": {
+    "projectId": "synthetic-project",
+    "source": "BAIDU_TONGJI",
+    "mode": "DATABASE_RANGE_SNAPSHOT",
+    "site": { "domain": "synthetic.example" },
+    "device": "all",
+    "coverage": { "from": "2026-08-01", "to": "2026-08-01" },
+    "previousCoverage": { "from": "2026-07-31", "to": "2026-07-31" },
+    "selectedSource": { "sourceKey": "ALL", "sourceLabel": "全部来源" },
+    "selectedMetric": "visits",
+    "selectedMetricState": "DATA",
+    "dataState": "DATA",
+    "summary": {
+      "visits": { "current": "83", "previous": "70", "changePercent": "18.6" },
+      "visitors": { "current": "61", "previous": "55", "changePercent": "10.9" },
+      "pageviews": { "current": "126", "previous": "110", "changePercent": "14.5" },
+      "bounceRate": { "current": null, "previous": null, "changePoints": null },
+      "averageVisitTime": { "current": null, "previous": null, "changeSeconds": null },
+      "averageVisitPages": { "current": null, "previous": null, "changePages": null }
+    },
+    "trend": [
+      { "date": "2026-08-01", "previousDate": "2026-07-31", "current": "83", "previous": "70" }
+    ],
+    "sourceQuality": {
+      "allSiteBounceRate": null,
+      "rows": [
+        { "sourceKey": "BAIDU_PAID", "sourceLabel": "百度推广", "visits": "5", "trafficShare": "6.0", "bounceRate": null, "averageVisitTime": null, "averageVisitPages": null, "dataState": "DATA" },
+        { "sourceKey": "DIRECT", "sourceLabel": "直接访问", "visits": "20", "trafficShare": "24.1", "bounceRate": null, "averageVisitTime": null, "averageVisitPages": null, "dataState": "DATA" },
+        { "sourceKey": "BAIDU_SEARCH", "sourceLabel": "百度搜索", "visits": "25", "trafficShare": "30.1", "bounceRate": null, "averageVisitTime": null, "averageVisitPages": null, "dataState": "DATA" },
+        { "sourceKey": "BING_SEARCH", "sourceLabel": "必应搜索", "visits": "10", "trafficShare": "12.0", "bounceRate": null, "averageVisitTime": null, "averageVisitPages": null, "dataState": "DATA" },
+        { "sourceKey": "GOOGLE_SEARCH", "sourceLabel": "Google 搜索", "visits": "7", "trafficShare": "8.4", "bounceRate": null, "averageVisitTime": null, "averageVisitPages": null, "dataState": "DATA" },
+        { "sourceKey": "OTHER_SEARCH", "sourceLabel": "其他搜索", "visits": "8", "trafficShare": "9.6", "bounceRate": null, "averageVisitTime": null, "averageVisitPages": null, "dataState": "DATA" },
+        { "sourceKey": "EXTERNAL_REFERRAL", "sourceLabel": "外部引荐", "visits": "7", "trafficShare": "8.4", "bounceRate": null, "averageVisitTime": null, "averageVisitPages": null, "dataState": "DATA" }
+      ]
+    },
+    "sourceComparison": {
+      "metric": "visits",
+      "state": "COMPLETE",
+      "rows": [
+        { "sourceKey": "BAIDU_PAID", "sourceLabel": "百度推广", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "5", "previous": "4", "changePercent": "25.0", "trafficShare": "6.0" }, "trend": [{ "date": "2026-08-01", "visits": "5" }] },
+        { "sourceKey": "DIRECT", "sourceLabel": "直接访问", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "20", "previous": "18", "changePercent": "11.1", "trafficShare": "24.1" }, "trend": [{ "date": "2026-08-01", "visits": "20" }] },
+        { "sourceKey": "BAIDU_SEARCH", "sourceLabel": "百度搜索", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "25", "previous": "21", "changePercent": "19.0", "trafficShare": "30.1" }, "trend": [{ "date": "2026-08-01", "visits": "25" }] },
+        { "sourceKey": "BING_SEARCH", "sourceLabel": "必应搜索", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "10", "previous": "8", "changePercent": "25.0", "trafficShare": "12.0" }, "trend": [{ "date": "2026-08-01", "visits": "10" }] },
+        { "sourceKey": "GOOGLE_SEARCH", "sourceLabel": "Google 搜索", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "7", "previous": "6", "changePercent": "16.7", "trafficShare": "8.4" }, "trend": [{ "date": "2026-08-01", "visits": "7" }] },
+        { "sourceKey": "OTHER_SEARCH", "sourceLabel": "其他搜索", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "8", "previous": "7", "changePercent": "14.3", "trafficShare": "9.6" }, "trend": [{ "date": "2026-08-01", "visits": "8" }] },
+        { "sourceKey": "EXTERNAL_REFERRAL", "sourceLabel": "外部引荐", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "7", "previous": "6", "changePercent": "16.7", "trafficShare": "8.4" }, "trend": [{ "date": "2026-08-01", "visits": "7" }] }
+      ]
+    },
+    "capabilities": { "trafficCounts": true, "sourceTraffic": true, "qualityMetrics": false, "pageReports": true, "sourcePageCorrelation": false, "unavailableReason": "" },
+    "cache": { "state": "HIT" }
+  },
+  "additiveFieldPath": "sourceComparison.partition",
+  "expectedPartition": {
+    "metric": "visits",
+    "state": "PARTIAL",
+    "totalVisits": "83",
+    "classifiedVisits": "82",
+    "unclassifiedVisits": "1",
+    "reasonCode": "SOURCE_COVERAGE_INCOMPLETE"
+  }
+}

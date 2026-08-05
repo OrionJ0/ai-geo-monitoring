@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "synthetic-marketing-null-zero-v1",
+  "exact": {
+    "zero": "0",
+    "beyondSafeInteger": "900719925474099312345",
+    "missing": null
+  },
+  "trend": [
+    { "date": "2026-08-01", "visits": "0" },
+    { "date": "2026-08-02", "visits": null },
+    { "date": "2026-08-03", "visits": "900719925474099312345" }
+  ],
+  "meaning": {
+    "zero": "observed exact zero",
+    "missing": "upstream metric unavailable",
+    "unavailable": "represented by an explicit state outside the metric"
+  }
+}
