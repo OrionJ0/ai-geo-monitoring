@@ -22,7 +22,9 @@ scope: deep
   ├→ 目标事实轨：程序按注册名称/别名直接扫描原文
   └→ Flash 阶段 1：尽力抽取原文实体表面词
        → 程序锚定、隔离坏项、保守归并、分配实体 ID
-       → Flash 阶段 2：只引用实体 ID / 片段 ID 做闭集语义判断
+       ├→ 程序用冻结的 brand_competitors 快照做身份归一；表外实体保留
+       └→ Flash 阶段 2：使用匹配前投影，只引用实体 ID / 片段 ID 做闭集语义判断
+            → 程序按 entity_id 回接身份映射，不回写模型结论
   → 目标事实、目标语义、开放竞品分别校验和标记状态
   → 程序按字段状态计算指标
   → 原子写入 VisibilityMetric
@@ -40,6 +42,7 @@ scope: deep
 - 增加 Flash 实体抽取阶段、程序锚定与实体目录构建。
 - 增加 Flash 闭集语义判断阶段和字段级修复协议。
 - 增加目标事实、目标语义、开放竞品三轨独立状态及字段级聚合合同。
+- 复用现有 `brand_competitors` 作为模型外已验证身份注册表，增加冻结快照、确定性匹配和表外实体保留合同。
 - 固定正式分析平台、模型与有效请求参数：DeepSeek、`deepseek-v4-flash`、`temperature=0`、`thinking.type=disabled`、Web 搜索关闭。
 - 新增 v5 结构、错误语义、诊断和历史兼容读取。
 - 扩展现有基线工具，建立冻结真实语料、人工真值、A/B/C/D 运行和对比报告。
@@ -53,6 +56,7 @@ scope: deep
 - 不通过模糊匹配、编辑距离或推测文本修复证据。
 - 不调用 DeepSeek Pro 或其他模型兜底。
 - 不将项目竞品配置或人工真值输入生产提示。
+- 不让竞品表成为实体允许列表、关系先验或回答事实来源；不因未匹配注册表而丢弃开放实体。
 - 不让模型输出提及次数、最终排名数字、比例或 SOV。
 - 不重算或覆盖历史 v4 记录。
 - 不在本需求中实现新的品牌主张 KPI；v5 核心链路不生成 `claims`。
@@ -62,6 +66,8 @@ scope: deep
 
 - 证据绑定的可选主张抽取。
 - v5 上线后的漂移告警和周期性重新标注策略。
+- 表外实体的独立人工审核与提升到正式竞品表的产品工作流。
+- 基于版本化竞品快照的封闭范围 SOV；当前需求只交付开放发现 SOV，二者不得混算。
 - 严格工具调用从实验候选升级为长期正式传输方式；本需求只收集 D 的能力和对比证据，不把 beta 能力设为正式默认。
 
 ## 3. 当前系统认知
@@ -115,14 +121,23 @@ v5 必须在最终请求体层证明参数有效，不能只测试中间对象�
 - `backend/services/QuestionSetRunCsvService.js` 对当前 v4 证据做导入校验，需要显式认识 v5，而不能用 v4 字段形状猜测。
 - 前端报告当前展示分析方式、模型、实体、关系、候选顺序、主张和证据，需要为 v5 增加版本标签与分阶段诊断，历史 v4 继续只读。
 
-### 3.5 现有测试缺口
+### 3.5 现有竞品表的真实职责与缺口
+
+- `backend/models/BrandCompetitor.js` 已提供项目级 `brand_competitors`，当前字段为 `name`、`aliases`、`website`，并由 `backend/routes/geoProjects.js` 提供项目管理员增删改接口。
+- 当前表用于目标/竞品名称与官网冲突校验、竞品官网引用识别、推荐监测问题生成、项目展示，以及 `QuestionSetRun.competitor_snapshot` 运行快照。
+- 当前 `ProjectRunService.buildVisibilityMetricPayload` 调用正式 v4 分析器时只传 `question / responseText / brand`，没有传入 `competitors`；因此该表不参与当前实体发现、上下文关系判断或 `contextual_competitor_mentions_sov_v1`。
+- 当前候选 v5 的阶段 1/2 同样没有接入竞品表。该事实避免了现役 closed-world bias，但也意味着已确认别名没有用于安全归一，候选代码仍通过模型 canonical name 和程序派生短名尝试补齐。
+- `QuestionSetRun` 已有竞品快照，单问题、自动监测和 analysis-only 尚无统一的不可变注册表快照合同；若直接读取实时表，同一回答重试可能因配置变更而得到不同身份映射。
+
+### 3.6 现有测试缺口
 
 - 相关单元测试可以证明坏 `surface_forms` 被拒绝，却没有用真实 Flash 证明生成端能稳定满足合同。
 - 设置页测试没有覆盖分析专用最终 HTTP 请求体中的温度、模型、思考模式和搜索参数。
 - 既有 20 条 Flash 验收重点覆盖 evidence 字段修复，无法代表新的“目标未出现 + 长回答 + 多类别 + 英文别名”故障簇。
 - 单次成功率没有衡量同输入重复运行的稳定性，也没有区分“结构合法但语义错误”。
+- 现有测试没有证明竞品表为空时可运行、表外实体不会被丢弃、表内未出现品牌不会被制造，以及增删竞品配置不会改变阶段 1 请求体。
 
-### 3.6 2026-08-05 已完成的可行性探针与正式对比
+### 3.7 2026-08-05 已完成的可行性探针与正式对比
 
 以下结果来自本地直接调用真实 DeepSeek API，输入为同一真实问题和完整回答；它们是方案方向证据，不是正式验收：
 
@@ -134,7 +149,7 @@ v5 必须在最终请求体层证明参数有效，不能只测试中间对象�
 
 阶段 1 探针的提示长度为 4,381 字符，Token 用量为输入 2,212、输出 739、合计 2,951；它正确把 `Hikvision` 归一为“海康威视”、把 `Dahua Tech` 归一为“大华股份”，也没有把 `iVMS-9800`、`DSS` 当成组织实体。
 
-此后已完成 41 条真实完整回答、每条每臂 3 次的 A/B/C Flash 对比。v5 完成率由 A 的 82.11% 提升到 98.37%，用户挑战样本由 A/B 的 3/3 失败变为 C 的 3/3 成功；但 C 的完整核心签名稳定率只有 74.79%，未达到 99% 硬门槛。完整数据见同目录 `validation-report.md`。该结果证明架构方向能解决本次目标品牌污染和大量整条失败，但不构成上线批准。
+此后已完成 41 条真实完整回答、每条每臂 3 次的 A/B/C Flash 对比。v5 完成率由 A 的 82.11% 提升到 98.37%，用户挑战样本由 A/B 的 3/3 失败变为 C 的 3/3 成功；C 的完整签名稳定率为 74.79%，未达到首轮历史预注册的 99% 门槛。用户确认竞品允许遗漏后，该完整签名已降为诊断项，但候选仍因自我修复路径、三轨状态和新合同全量重跑未完成而不能上线。完整数据见同目录 `validation-report.md`。
 
 ## 4. 需求、约束与不变量
 
@@ -163,6 +178,13 @@ v5 必须在最终请求体层证明参数有效，不能只测试中间对象�
 - REQ-021：聚合器只把目标语义字段的 `assessed` 结果放入对应分母；`unresolved/invalid/not_applicable` 不得映射成未推荐、中性或无排名参与统计。
 - REQ-022：开放发现 SOV 必须使用 `contextual_competitor_mentions_sov_v2_scoped`，携带 `observed_only / open_discovery / not_proven`；不得与历史 v1 静默混算。
 - REQ-023：`canonical_name` 只作显示候选；未经注册或原文证明的派生短名/别名不得影响提及、目标映射、关系或 SOV。
+- REQ-024：阶段 1 的函数输入、提示词和最终 HTTP body 不得包含竞品注册表、快照、名称、别名、官网、`competitor_id` 或匹配状态；同一 source map 在任意竞品表配置下必须产生字节级相同的阶段 1 请求。
+- REQ-025：阶段 1 原文校验完成后，程序使用本次运行冻结的竞品注册表快照做确定性身份匹配；匹配结果只允许为 `matched / unmatched / ambiguous`。
+- REQ-026：注册表匹配不得创建实体、增加表面词/提及位置、修改 source ID 或改变 occurrence 数量；`unmatched/ambiguous` 实体必须继续保留并进入第二阶段。
+- REQ-027：阶段 2 只接收注册表匹配前的 grounded 实体投影及目标事实；实体显示名也必须来自原文/阶段 1，而不是注册表标准名。不得接收完整竞品表、未出现的表内实体、`competitor_id`、`registry_name`、`registry_match_status` 或“已知竞品”布尔值。
+- REQ-028：表内但原回答未出现的品牌不得进入实体目录、关系、证据或 SOV；注册表存在性不能单独产生任何回答级事实。
+- REQ-029：开放 SOV 对 matched 与 unmatched 的已证明竞品使用相同规则；注册表只统一身份，不作为过滤器。封闭范围 SOV 延后并使用不同语义版本。
+- REQ-030：所有入口必须绑定不可变竞品注册表快照或稳定空快照，并把快照版本与哈希写入 v5 结构；analysis-only 复用原记录快照，不读取最新配置改变历史分析身份。
 
 ### 4.2 约束
 
@@ -171,11 +193,13 @@ v5 必须在最终请求体层证明参数有效，不能只测试中间对象�
 - CON-003：不新增运行时 v4 fallback、模型 fallback 或按错误码切换提示词的隐藏分支。
 - CON-004：管理员保存的分析请求选项不得覆盖 v5 固定的模型、温度、思考、搜索和响应格式策略；设置接口必须返回最终有效值。
 - CON-005：每阶段最多一次定向修复，整条最多 4 次模型调用；实验和生产均记录实际调用数。
-- CON-006：原回答超出 Flash 上下文时返回 `analysis_input_too_long`，不静默截断或分片后拼接指标。
+- CON-006：原回答超出 Flash 上下文时不静默截断或分片后拼接语义/竞品指标；目标事实仍由程序扫描，Flash 两轨标为 `unavailable` 并记录 `analysis_input_too_long`。
 - CON-007：生产诊断不持久化无界模型原始输出；基准实验可在脱敏、访问受控的 `work/` 目录保存完整输出。
 - CON-008：历史 v4、v3 及更早记录不迁移、不覆盖，只通过版本分支读取。
 - CON-009：严格工具调用属于独立实验臂；如果能力不满足，v5 JSON mode 仍须独立通过全部门槛。
 - CON-010：程序只验证、拒绝、隔离和计算，不得补造语义证据、扩大别名集合或覆盖模型语义结论来提高表面完成率。
+- CON-011：复用现有 `brand_competitors`，不得创建第二张含义重叠的竞品主表；新增字段采用 additive 迁移，历史行继续有效。
+- CON-012：竞品表匹配失败、表外品牌出现、竞品遗漏和注册表为空不得增加模型调用次数；正常 2 次、最坏 4 次的调用预算不变。
 
 ### 4.3 不变量
 
@@ -189,6 +213,13 @@ v5 必须在最终请求体层证明参数有效，不能只测试中间对象�
 - INV-008：所有新正式记录写 v5；所有历史 v4 结果保持其原版本身份。
 - INV-009：开放竞品遗漏、关系未判出或 Flash 语义超时不能把 `target_fact.status=complete` 降为失败。
 - INV-010：`unresolved` 与业务值 `false / neutral / null rank` 语义不同，任何消费者不得合并两者。
+- INV-011：阶段 1 请求是 `sourceMap + prompt revision + fixed request policy` 的纯函数，与竞品表内容无关。
+- INV-012：注册表匹配前后的 grounded occurrence 集合完全相等；只能增加身份映射元数据，不能增加回答事实。
+- INV-013：进入阶段 2 的每个实体必须至少有一个目标确定性 span 或阶段 1 已验证 span；任何表内未出现实体都没有合法进入路径。
+- INV-014：`unmatched` 不是无效状态，不能被过滤、降级为 `non_competitor` 或阻止关系判断。
+- INV-015：匹配状态与上下文关系正交；`matched` 不等于 `competitor`，`unmatched` 也不等于 `non_competitor`。
+- INV-016：改变注册表只能改变身份归一结果和未来封闭范围指标，不能改变同一回答的阶段 1 原始发现结果或模型调用次数。
+- INV-017：同一 grounded 实体目录在任意注册表快照下产生字节级相同的阶段 2 实体投影；注册表结果只在阶段 2 判断完成后按 `entity_id` 回接。
 
 ## 5. 接口与数据契约
 
@@ -203,6 +234,7 @@ SOURCE_MAP_VERSION = answer_source_lines_v1
 ENTITY_PROMPT_REVISION = grounded_entity_catalog_v1
 SEMANTIC_PROMPT_REVISION = closed_entity_semantics_v3
 REPAIR_PROTOCOL_VERSION = structured_field_repair_v1
+COMPETITOR_REGISTRY_SNAPSHOT_VERSION = competitor_registry_snapshot_v1
 ```
 
 v5 是新的分析合同，因为模型输出从自由文本名称交叉引用改为实体 ID / 片段 ID，并改变了调用拓扑。不能只更新提示词修订号继续写 v4。
@@ -309,13 +341,69 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
 
 1. 每个有效表面词在所指片段中展开为原回答的绝对位置。
 2. 重叠提及使用“起点更早、表面词更长优先”的确定性规则生成非重叠计数，与现行计数原则一致。
-3. 只有相同原文表面词或经过项目注册/明确原文证明的同义表面词才可归并；模型 `canonical_name` 仅为显示候选，不得自动派生短名或别名参与扫描。实体按首次提及偏移排序并分配 `E001...`。
+3. 第一轮只按相同原文表面词和原文明确表达的别名关系做保守归并；模型 `canonical_name` 仅为显示候选，不得自动派生短名或别名参与扫描。竞品注册表匹配在全部原文 span 固定后单独执行，不得回头扩大 occurrence 集合。
 4. 实体类型冲突时进入阶段 1 修复，程序不以多数票猜测。
 5. 目标事实轨在阶段 1 之前或并行执行：使用目标名称和项目已配置别名直接扫描完整原回答，采用 NFKC、大小写折叠和边界感知比较，不使用编辑距离、模型标准名或程序派生别名猜测。
 6. `target_fact.mentions` 由该确定性扫描直接产生；阶段 1 漏掉目标实体不影响目标事实。
 7. 阶段 2 如需 `target_entity_id`，程序只可把目标事实命中的原文 span 与已验证实体 span 做精确对齐；无法唯一对齐时目标事实仍可完成，但目标语义标为 `unavailable/ambiguous`，不能任选实体。
 
-### 5.5 阶段 2 输入与输出
+### 5.5 竞品注册表快照与身份归一
+
+#### 冻结快照
+
+所有入口在创建运行/记录时生成稳定快照；`QuestionSetRun.competitor_snapshot` 沿用现有字段，单问题和自动监测增加等价的不可变记录级快照或引用。analysis-only 必须复用原快照。
+
+```json
+{
+  "version": "competitor_registry_snapshot_v1",
+  "sha256": "<按 competitor_id 排序后的规范 JSON 哈希>",
+  "entries": [
+    {
+      "competitor_id": 12,
+      "name": "海康威视",
+      "aliases": ["海康", "Hikvision"],
+      "website": "hikvision.com"
+    }
+  ]
+}
+```
+
+空竞品表生成合法空快照而不是 `null`：
+
+```json
+{
+  "version": "competitor_registry_snapshot_v1",
+  "sha256": "<空 entries 的稳定哈希>",
+  "entries": []
+}
+```
+
+#### 确定性匹配输出
+
+```json
+{
+  "entity_id": "E001",
+  "name": "海康威视",
+  "surface_forms": ["Hikvision"],
+  "registry_match": {
+    "status": "matched",
+    "competitor_id": 12,
+    "registry_name": "海康威视",
+    "matched_term": "Hikvision"
+  }
+}
+```
+
+匹配合同：
+
+1. 只使用已经通过原文校验的 `surface_forms` 与快照中的 `name/aliases` 做 NFKC、大小写折叠、受控空白/标点归一后的精确相等匹配；不使用编辑距离、前缀猜测或模型 canonical name 单独命中。
+2. 唯一命中时为 `matched`；零命中时为 `unmatched`；同时命中多个 `competitor_id` 时为 `ambiguous` 并保存候选 ID，但不任选一个。
+3. `matched` 可在最终展示/聚合层绑定注册表标准身份；`unmatched/ambiguous` 保留原实体 ID、原文表面词和阶段 1 显示候选。三种状态进入阶段 2 时都使用匹配前的同形 grounded 投影。
+4. 多个开放实体唯一映射到同一 `competitor_id` 时，只在阶段 2 之后建立 `identity_group` 用于最终聚合；不得合并或重编号阶段 2 实体，所有原文 span、逐实体关系和提及计数原样保留。
+5. 匹配器不得扫描回答补充注册别名的额外出现位置，不得创建表内未出现实体，也不得赋予 `competitor/non_competitor` 关系。
+6. 快照和匹配结果写入 `analysis_structure` 供审计，但完整快照、`competitor_id`、`registry_name`、匹配状态和“已知竞品”标记不进入任何模型提示；resolver 输出按 `entity_id` 在阶段 2 之后回接。
+
+### 5.6 阶段 2 输入与输出
 
 #### 输入
 
@@ -338,7 +426,7 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
 }
 ```
 
-阶段 2 可以看到程序依据目标事实生成的目标实体 ID 和目标命中证据，但不能创建新的目标表面词。`target_fact.brand_mentioned=false` 时，提示词明确禁止构造目标情绪、推荐或排名。
+阶段 2 可以看到程序依据目标事实生成的目标实体 ID 和目标命中证据，但不能创建新的目标表面词。实体 `name` 使用注册表匹配前、由原文或阶段 1 给出的显示候选；输入不得包含完整注册表、注册表标准名、`competitor_id`、`registry_match` 或已知/未知标签。同一 grounded 目录在不同注册表快照下必须生成字节级相同的阶段 2 实体投影。`target_fact.brand_mentioned=false` 时，提示词明确禁止构造目标情绪、推荐或排名。
 
 #### 模型输出
 
@@ -386,7 +474,7 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
 - 目标存在时 `sentiment.status=assessed` 且 `label` 为 `positive / neutral / negative`；目标不存在时必须为 `not_applicable` 且 `label=null`。
 - `claims` 不在本合同中。
 
-### 5.6 最终 v5 结构
+### 5.7 最终 v5 结构
 
 程序在目标事实完成后合并两个 Flash 阶段的可用结果，生成持久结构。开放竞品或单个目标语义字段未解决不会阻止结构生成：
 
@@ -396,6 +484,11 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
   "contract_revision": "three_track_partial_v1",
   "source_map_version": "answer_source_lines_v1",
   "answer_sha256": "<hash>",
+  "competitor_registry_snapshot": {
+    "version": "competitor_registry_snapshot_v1",
+    "sha256": "<hash>",
+    "entry_count": 1
+  },
   "target_fact": {
     "status": "complete",
     "brand_mentioned": false,
@@ -412,7 +505,7 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
     "status": "partial",
     "scope": "open_discovery",
     "completeness": "not_proven",
-    "entities": [],
+    "entities": ["E001"],
     "relations": [],
     "unresolved_entity_ids": ["E001"],
     "quarantined_items": []
@@ -429,7 +522,13 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
     {
       "entity_id": "E001",
       "name": "海康威视",
-      "type": "brand"
+      "type": "brand",
+      "registry_match": {
+        "status": "matched",
+        "competitor_id": 12,
+        "registry_name": "海康威视",
+        "matched_term": "Hikvision"
+      }
     }
   ],
   "mentions": [
@@ -466,7 +565,16 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
 
 最终结构中的所有 `mentions.start/end` 必须再次与 `answer_sha256` 对应原文校验。对当前报告需要的 `evidence` 文本，由程序从 `evidence_source_ids` 和原回答提取，不信任模型自由文本。顶层旧字段可暂时保留为兼容镜像，但三轨结构是 v5 的权威事实。
 
-### 5.7 指标输出兼容
+`competitor_registry_snapshot` 只保存本次使用的版本、哈希和数量；完整快照由运行/记录的不可变配置保存。CSV 和报告可展示每个实体的匹配状态，但不能据此改变关系语义。`unmatched/ambiguous` 的实体结构与 `matched` 等价可用。
+
+状态派生规则：
+
+- `target_fact.status=complete`：输入有效、哈希一致、目标注册别名无歧义，程序完成全量原文扫描。
+- `target_semantics.status=complete`：三个字段均为 `assessed` 或 `not_applicable`；任一字段为 `unresolved/invalid` 时总状态为 `partial`；目标已出现但 Flash 整体不可用时为 `unavailable`。
+- `competition_analysis.status=complete` 只表示“所有已发现实体均已处理”，不表示实体发现完整；因此 `completeness` 在开放模式始终为 `not_proven`。存在未解决/隔离项时为 `partial`，Flash 阶段不可用时为 `unavailable`。
+- `sov.status=observed_only` 不是质量通过状态，而是指标范围声明；分母为 0 时 `value=null`。
+
+### 5.8 指标输出兼容
 
 `AIResponseAnalysisService.analyze` 对调用方继续返回现有顶层指标字段，减少正式入口改动：
 
@@ -501,7 +609,7 @@ v5 是新的分析合同，因为模型输出从自由文本名称交叉引用�
 
 注意：`brand_recommended=false`、`brand_rank=null` 和 `VisibilityMetric.sentiment=neutral` 可能只是旧数据库/接口的兼容投影，不能单独证明 v5 已判断为“未推荐、无排名、中性”。v5 聚合、报告和 CSV 必须读取 `analysis_structure.target_semantics.<field>.status`；只有 `assessed` 进入对应分母。若任何消费者无法证明会读取状态，应在硬切前修改消费者或新增可查询状态列，不能继续扩大占位语义。
 
-### 5.8 修复协议
+### 5.9 修复协议
 
 每个阶段最多一次修复，整条最多 4 次模型调用：
 
@@ -525,7 +633,7 @@ entity_extract → entity_repair? → semantic_judge → semantic_repair?
 
 修复响应不得覆盖未列出的字段，不得创建实体。补丁合并后必须对受影响结构重新校验。第二次仍无效时：实体坏行进入 `quarantined_items`，缺失关系进入 `unresolved_entity_ids`，目标语义字段进入 `unresolved/invalid`；不得自动补证据、扩展别名或重写已通过结论。
 
-### 5.9 错误与诊断
+### 5.10 错误与诊断
 
 新增或细分内部错误代码：
 
@@ -565,7 +673,7 @@ entity_extract → entity_repair? → semantic_judge → semantic_repair?
 
 诊断不保存 API Key、请求头、完整原回答、完整无效输出或服务器绝对路径。
 
-### 5.10 历史与 CSV 兼容
+### 5.11 历史与 CSV 兼容
 
 - 新运行和 analysis-only 新记录写 `ai_structured_v5`；历史记录保留原版本。
 - `QuestionSetRunService` 的结构化方法白名单增加 v5，同时继续识别 v1–v4 历史数据。
@@ -627,6 +735,14 @@ DeepSeek 官方 JSON mode 保证模型输出可解析 JSON 的能力，但不保
 
 本需求只实现开放发现 SOV：分子、分母都基于本次已发现且已验证的实体，因此结果标记 `observed_only / open_discovery / not_proven`。若未来需要可跨周期严格比较的 SOV，必须引入版本化封闭竞品集合和注册别名，并使用新的 scope 与 `metric_semantics_version`；两种结果不得混在同一趋势中。
 
+### KTD-012：竞品注册表只在模型边界之间做身份归一
+
+竞品表进入阶段 1 提示会形成 anchoring/closed-world bias；进入阶段 2 提示或暴露“已知竞品”标签会把身份先验污染成关系判断。因此完整注册表永远不进入模型上下文。安全接点只有阶段 1 原文锚定之后、阶段 2 之前的纯程序 resolver：它可以把 grounded surface form 映射到稳定 `competitor_id`，但不能新增实体、span、提及或关系。阶段 2 仅看到本条回答已经证明的实体目录。
+
+### KTD-013：复用现有主表，表外观察保留在分析结构
+
+`brand_competitors` 已承担项目配置、别名、官网引用和运行快照职责，新增第二张竞品主表会产生双重真值。本需求复用现有表；表外发现作为 `analysis_structure.entities[].registry_match.status=unmatched` 保存。自动候选池、人工审核和提升流程延后，且未来也不得自动把一次模型发现写入主表。
+
 ## 7. 真实 Flash 对比实验设计
 
 ### 7.1 实验问题
@@ -638,6 +754,7 @@ DeepSeek 官方 JSON mode 保证模型输出可解析 JSON 的能力，但不保
 3. JSON mode 与严格工具调用的差异来自传输约束还是语义质量？
 4. 分阶段的 Token、延迟和重试成本是否可接受？
 5. 同一输入重复运行时，核心指标是否稳定？
+6. 竞品注册表内容变化时，阶段 1 开放发现是否保持完全独立，且表外实体是否不丢失？
 
 ### 7.2 冻结语料
 
@@ -735,6 +852,7 @@ D 先执行小型能力探针。若官方接口拒绝 schema、工具选择与�
 
 - `target_fact` 可用率、目标 presence/count 准确率与 grounding precision。
 - 被保留实体 span grounding precision；开放实体 precision / recall / micro-F1 和 canonicalization accuracy 作为独立诊断。
+- 阶段 1 请求哈希不变率；注册表 `matched / unmatched / ambiguous` 比例、表外实体保留率、表内未出现品牌生成数。
 - target presence accuracy、false-positive rate、false-negative rate。
 - 已输出 competitor relation precision、coverage、未解决率和隔离率。
 - candidate group/order exact-match。
@@ -745,6 +863,7 @@ D 先执行小型能力探针。若官方接口拒绝 schema、工具选择与�
 
 - 三次运行的目标核心签名一致率。签名包括目标是否出现、目标提及次数、目标排名、推荐和目标情绪；开放竞品集合与依赖它的 SOV 分母不进入核心门槛，另以集合 Jaccard、SOV 波动和未解决率报告。
 - 每阶段和总调用次数、Token、耗时；报告 mean、median、P95。
+- 注册表为空、全命中或存在表外实体时，正常路径均为 2 次、最坏均为 4 次模型调用；注册表未命中不得触发附加模型调用。
 - 每个有效分析的 Token 与估算成本。
 
 #### 统计呈现
@@ -755,7 +874,7 @@ D 先执行小型能力探针。若官方接口拒绝 schema、工具选择与�
 
 ### 7.6 预注册上线门槛
 
-门槛直接沿用 PRD AC-009 至 AC-016，关键硬门槛为：
+门槛直接沿用 PRD AC-009 至 AC-028，关键硬门槛为：
 
 - 对全部输入有效的冻结运行，`target_fact` 可用率 100%；目标出现、提及次数和原文证据准确率及重复一致率均为 100%，目标假阳性 0，无效事实写指标 0。
 - 被保留实体和语义证据的原文锚定率 100%；语义证据自动补写数 0，未经确认的派生别名影响指标数 0，未解决值进入已判断聚合数 0。
@@ -763,6 +882,7 @@ D 先执行小型能力探针。若官方接口拒绝 schema、工具选择与�
 - 推荐 F1 ≥ 0.95、目标情绪 accuracy ≥ 0.90、明确排名 exact-match ≥ 0.95；每项人工真值实例不少于 20。
 - 目标核心签名重复一致率 ≥ 99%，其中目标出现与提及次数一致率为 100%。
 - 中位总 Token ≤ A 的 1.5 倍，P95 总耗时 ≤ A 的 2 倍。
+- 同一回答、问题和目标配置下，竞品注册表从空表切换为任意快照时，阶段 1 最终请求哈希一致率 100%；表内未出现品牌生成数为 0，grounded 表外实体保留率为 100%。
 - A 至少有 4 次目标事实不可用时，C 相对减少至少 75%；否则 C 的目标事实可用率不得低于 A，且仍必须为 100%。
 
 任何硬门槛失败时，结论为“不批准硬切”。可以根据失败分层修改 v5 并创建新实验修订号，但不得修改既有报告或事后降低门槛来宣布成功。
@@ -819,7 +939,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 
 **验收方式：** 生成至少 40 条冻结样本的预注册清单，所有门槛和公式在首次 C 全量运行前固定。
 
-### U2. 原文片段、锚定和封闭实体目录
+### U2. 原文片段、竞品注册表归一和封闭实体目录
 
 **目标：** 用纯函数把完整回答转换为可校验的 source map，并从阶段 1 输出构建唯一可信实体目录。
 
@@ -829,14 +949,18 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 
 - `backend/services/AIAnalysisSourceMapService.js`（新增）
 - `backend/services/AIEntityCatalogService.js`（新增）
+- `backend/services/AICompetitorRegistryResolverService.js`（新增）
 - `backend/tests/AIAnalysisSourceMapService.test.js`（新增）
 - `backend/tests/AIEntityCatalogService.test.js`（新增）
+- `backend/tests/AICompetitorRegistryResolverService.test.js`（新增）
 
 **方案：**
 
 - 实现无损逻辑行分段、偏移和 SHA-256。
 - 校验 `source_id + surface_form`，展开所有绝对位置并确定性处理重叠。
-- 根据标准名和有效表面词归并、排序、分配 `E001...`。
+- 先按原文锚定事实做保守归并、排序并分配 `E001...`；模型边界内不接收竞品表。
+- 在阶段 1 完成且 occurrence 已冻结后，用本次运行的竞品注册表快照做精确身份归一，输出 `matched / unmatched / ambiguous`；表外实体必须原样保留。
+- 注册表匹配不得改变 `surface_forms`、`source_ids`、绝对位置、提及次数、实体集合或任何关系结论；只能附加稳定身份元数据。
 - 在模型边界之后执行目标名称/别名匹配；模型标准名不参与单独命中。
 - 对类型冲突、目标歧义和无效表面词返回稳定错误。
 
@@ -848,8 +972,10 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 目标缺失时不因 canonical name 等于目标而命中。
 - 两个实体同时命中同一目标别名时失败。
 - source map 重建与原文哈希不一致时失败。
+- 空注册表、唯一别名命中、别名冲突、纯表外品牌、表内但原文未出现品牌、多个原文实体唯一映射同一 `competitor_id` 但只在阶段 2 后形成 identity group。
+- 对匹配前后 occurrence 集合做深比较，证明注册表不能补造、删除或移动任何原文事实。
 
-**验收方式：** 纯函数 fixture 全部通过，任何不存在于原文的实体无法进入实体目录。
+**验收方式：** 纯函数 fixture 全部通过，任何不存在于原文的实体无法进入实体目录；注册表为空、未命中或有歧义时，已有 grounded 实体仍可继续分析。
 
 ### U3. Flash 阶段 1 与最终请求策略
 
@@ -880,6 +1006,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 最终 `httpClient.post` 请求体精确断言模型、温度、思考、JSON mode 和无搜索字段。
 - 管理员保存 `temperature=0.7`、Pro 或工具搜索覆盖时拒绝或显示被策略覆盖，不能静默生效。
 - 提示快照断言不出现目标品牌、别名和竞品字段。
+- 对空注册表、正常注册表和加入无关品牌后的注册表分别构建阶段 1 请求，最终 prompt 与 HTTP body 字节级一致。
 - JSON 无效、未知字段、错误 source ID、整句 surface form、截断、超时和第二次仍失败。
 
 **验收方式：** 设置页真实测试和直接服务测试都能展示最终 Flash 请求策略，且真实挑战样本阶段 1 无目标幻觉。
@@ -897,7 +1024,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 
 **方案：**
 
-- 阶段 2 输入只包含实体 ID、有效名称/表面词、source ID、问题和目标实体 ID。
+- 阶段 2 输入只包含实体 ID、有效名称/表面词、source ID、问题和目标实体 ID；不得包含完整竞品表、`competitor_id`、注册表匹配状态或“已知竞品”标签。
 - 校验关系覆盖集合、候选组、推荐和情绪状态机。
 - 将证据 ID 转为程序提取的原文片段；模型 reason 只作解释，不作为指标事实。
 - 修复协议只允许替换已声明字段；完整重校验后才能通过。
@@ -910,6 +1037,8 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 目标不存在却返回情绪或推荐时拒绝。
 - evidence source ID 存在但不包含相应实体的误引用。
 - 修复覆盖未授权字段、创建实体或重复路径时拒绝。
+- 注册表中存在但原文未出现的品牌不能进入关系输出；表外 grounded 品牌可以判为竞品；表内 matched 品牌也可以根据当前问题判为 `non_competitor`。
+- 相同 grounded 目录搭配空、正常和冲突注册表时，阶段 2 实体投影与请求体字节级一致，关系差异不能由注册表身份先验造成。
 
 **验收方式：** 所有进入最终结构的语义字段只引用封闭 ID，并能从原回答生成精确证据。
 
@@ -924,6 +1053,8 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - `backend/services/AIResponseAnalysisService.js`
 - `backend/services/GeoMetricSemanticsService.js`
 - `backend/services/ProjectRunService.js`
+- `backend/models/QuestionSetRun.js`（若现有运行快照字段需扩展）
+- `backend/models/QuestionRecord.js`（若单问题需保存独立快照身份）
 - `backend/models/VisibilityMetric.js`（仅在情绪空值审计需要时修改）
 - `backend/tests/AIResponseAnalysisV5.test.js`（新增）
 - `backend/tests/AIResponseAnalysisService.test.js`
@@ -931,7 +1062,8 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 
 **方案：**
 
-- 编排 source map、独立目标事实扫描、开放实体抽取、目录构建、目标语义判断、开放竞品判断和 calculate。
+- 编排 source map、独立目标事实扫描、开放实体抽取、目录构建、冻结注册表快照身份归一、目标语义判断、开放竞品判断和 calculate。
+- 单问题、问题集、自动监测和 analysis-only 均绑定不可变注册表快照；analysis-only 必须复用原记录的 `version/hash/entries`，不能读取重试时的实时表。
 - 删除语义证据自动补齐、未确认短别名派生和程序性情绪覆盖；坏竞品项只隔离/未解决。
 - 将每阶段 attempts、usage 和 duration 汇总为有界诊断。
 - 更新分析租约预算：正常 2 次、最坏 4 次调用，避免 worker 在合法分析期间失去租约。
@@ -945,6 +1077,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 阶段 1 或阶段 2 部分失败时，目标事实仍写入；受影响语义字段为 `unresolved/invalid`，开放竞品为 `partial/unavailable`。
 - 目标未提及、目标提及、多候选组和零竞品。
 - analysis-only 保持原回答哈希、引用和配额。
+- 原运行后修改竞品表再执行 analysis-only，仍使用原快照；新运行使用新快照哈希，但相同回答的阶段 1 请求保持不变。
 - 事务失败和执行租约失效不产生部分写入。
 
 **验收方式：** 服务级 fixture 和真实 Flash 单条测试返回 v5；开放竞品遗漏不会阻止目标事实写入，真正的目标事实错误不会产生对应业务指标，且事务失败不留下半条记录。
@@ -973,13 +1106,15 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 实体、关系、候选和推荐以最终程序结构展示，证据由 source ID 解析。
 - v5 主张显示 `not_collected`，历史 v4 正常显示旧主张。
 - API、CSV 和 UI 分别展示推荐、排名、情绪的字段状态；聚合仅纳入 `assessed`。开放 SOV 显示“仅基于本次已发现实体”，并展示 scope/completeness、未解决数和隔离数。
-- CSV 导入按版本选择 validator，完整保留 `entity_id`、`source_id` 和诊断。
+- 注册表 `matched / unmatched / ambiguous` 只作为中性身份诊断展示，不使用“未知品牌”“非竞品”等误导文案，也不改变排序或推荐。
+- CSV 导入按版本选择 validator，完整保留 `entity_id`、`source_id`、注册表快照 `version/hash`、每实体匹配状态和诊断。
 - 设置页明确显示“正式结构化分析固定使用 Flash”，并显示实际请求策略。
 
 **测试场景：**
 
 - v4 历史、v5 完整、v5 目标不适用、v5 目标语义部分未解决、v5 开放竞品 partial/unavailable、v5 目标事实失败。
 - v5 CSV 导出再导入结构相等；未知 ID 和哈希不匹配拒绝。
+- CSV 往返不丢失表外实体；注册表状态不能泄漏进阶段 2 判断字段或改变开放 SOV 分母。
 - 前端长错误信息有界、移动端可读，历史标签不误称当前版本。
 
 **验收方式：** API、CSV 和页面同时能正确区分 v4/v5 及三轨/字段状态，所有聚合分母符合状态合同，且 v5 证据可从原回答复核。
@@ -1001,6 +1136,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 按 7.4 运行各实验臂，D 能力不满足时明确退出。
 - 自动生成逐样本和汇总报告、失败簇、配对差异、置信区间、Token/延迟和门槛判定。
 - 人工抽查全部错误及固定比例成功样本，识别 wrong-but-schema-valid。
+- 冻结语料增加“表内 + 表外同时出现”“纯表外”“空注册表”“表内品牌未出现”夹具，并对同一答案切换注册表快照做不变性对照。
 - 报告写明模型、最终请求体摘要、prompt revision、语料哈希和代码提交。
 
 **测试场景：**
@@ -1008,6 +1144,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 用户本次“大工业园区”回答必须在目标未提及层通过，且目标假阳性为 0。
 - 六类用户问题全部进入结果。
 - 同一答案三次输出核心指标签名比较。
+- 报告阶段 1 请求哈希不变率、注册表匹配率/歧义率、表外保留率和表内未出现品牌生成数；匹配率仅作主数据质量诊断。
 - 模型请求失败、能力不支持和中断恢复不会被计为成功。
 
 **验收方式：** `COMPARISON-REPORT.md` 对每个预注册门槛给出 pass/fail；任一硬门槛失败即停止硬切。
@@ -1055,7 +1192,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - AC-005：Given 同一候选类别并列列举多个品牌，When 阶段 2 判断，Then 可保存无序候选组但不产生品牌排名。
 - AC-006：Given 关系覆盖缺失，When 语义阶段结束，Then 缺失实体进入 `unresolved_entity_ids`；Given 已返回关系证据无效且修复失败，Then 该关系隔离。两种情况均不使目标事实失败，也不得自动补证据。
 - AC-007：Given 管理员保存 Pro、非零温度或搜索参数，When v5 配置生效，Then 接口拒绝不合法配置或固定策略覆盖并明确展示，最终请求不能静默使用该值。
-- AC-008：Given 完整原回答过长，When 预估超过上下文，Then 返回 `analysis_input_too_long`，原文不截断且不分片计算指标。
+- AC-008：Given 完整原回答过长，When 预估超过上下文，Then 原文不截断，`target_fact` 仍完成；目标语义和开放竞品标为 `unavailable` 并记录 `analysis_input_too_long`，不得分片后拼接这些指标。
 - AC-009：Given 40 条冻结真实回答和人工真值，When A/B/C 各运行 3 次，Then 报告按预注册公式计算全部门槛，不遗漏失败输出。
 - AC-010：Given C 任一硬门槛失败，When 评审上线，Then v5 不设为默认，生产保持当前 v4，文档明确“尚不可切换”。
 - AC-011：Given C 全部门槛通过并批准硬切，When 从四类正式入口运行，Then 新记录均为 v5、模型均为 Flash，v4 和 Pro 调用数均为 0。
@@ -1063,6 +1200,14 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - AC-013：Given 推荐、排名或情绪为 `unresolved/invalid/not_applicable`，When API、CSV、页面和聚合运行，Then 该字段不进入对应已判断分母，也不被显示为未推荐、中性或无排名。
 - AC-014：Given 开放发现产生 SOV，When 持久化与展示，Then 使用 `contextual_competitor_mentions_sov_v2_scoped` 并携带 `observed_only / open_discovery / not_proven`；历史 v1 不与其静默混算。
 - AC-015：Given 全部输入有效的冻结回答，When C 重跑 3 次，Then `target_fact` 可用率、目标出现/次数准确率和重复一致率均为 100%，被保留实体与证据 grounding 为 100%，自动语义补证据数和未确认派生别名影响指标数均为 0。
+- AC-016：Given 同一问题、回答和目标配置，以及空、正常、加入无关品牌三种竞品注册表快照，When 构建阶段 1 请求，Then 最终 prompt、消息和 HTTP body 字节级一致，请求哈希一致率为 100%。
+- AC-017：Given 回答同时出现注册表内品牌和表外品牌，When 完成身份归一，Then 两者都保留在封闭实体目录；前者可为 `matched`，后者为 `unmatched`，均继续进入相同的阶段 2 关系判断。
+- AC-018：Given 竞品注册表为空，When 分析有效回答，Then 开放发现、目标事实和目标语义仍可执行，注册表未命中不产生失败或附加模型调用。
+- AC-019：Given 注册表包含回答中未出现的品牌，When 完成任一阶段，Then 该品牌不能产生实体、span、提及、证据、关系、推荐、排名或 SOV 贡献。
+- AC-020：Given grounded occurrence 集合已经冻结，When 注册表解析返回 `matched / unmatched / ambiguous`，Then 解析前后的实体 occurrence、source ID、绝对位置和提及次数深度相等；歧义不得猜测或删除实体。
+- AC-021：Given 阶段 2 判断当前问题中的竞品关系，When 构建模型请求，Then 请求中不存在完整注册表、注册表标准名、`competitor_id`、匹配状态或“已知竞品”标签；同一 grounded 目录在不同注册表下的阶段 2 实体投影字节级一致，matched 与 unmatched 实体适用同一关系 schema 和校验规则。
+- AC-022：Given 原运行完成后管理员修改竞品表，When 对原记录执行 analysis-only，Then 使用原运行冻结快照；新运行使用新快照，但相同回答的阶段 1 请求不变。
+- AC-023：Given 正常、一次阶段 1 修复、一次阶段 2 修复和双阶段各一次修复，When 统计模型调用，Then 分别为 2、3、3、4 次；注册表命中、未命中或歧义均不增加调用次数。
 
 ## 10. 测试与验证计划
 
@@ -1075,6 +1220,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 字段级修复授权边界与四调用上限。
 - 指标计算保留 SOV 数学公式，但输出 v2 scope/status/completeness 并阻止与历史 v1 混算。
 - 禁止自动语义证据补齐、未注册别名影响指标和 `unresolved` 进入业务分母的回归测试。
+- 竞品注册表独立性十二项回归：表内+表外、纯表外、空表、表内未出现不生成、唯一别名归一、别名歧义不猜、unmatched 保留、目标事实不受影响、阶段 2 不接收注册表标签、证据 occurrence 不变、开放 SOV 同等纳入、重试不增调用。
 - 对比指标和置信区间计算。
 
 ### 10.2 服务与集成测试
@@ -1082,6 +1228,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 用可编程假模型覆盖所有成功、失败和修复路径。
 - 在 `AIPlatformRequestService` 的 HTTP 客户端边界捕获最终请求体。
 - `ProjectRunService` 原子写入、租约、失败隔离和 analysis-only 复用。
+- 四类入口冻结相同形状的注册表快照；analysis-only 在实时竞品表变化后仍复用原快照。
 - `QuestionSetRunService`、CSV、设置 API 和历史兼容。
 - 全部后端标准测试、前端 lint、TypeScript 和生产构建。
 
@@ -1162,6 +1309,10 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 | 为追求完成率放松校验 | 虚假指标进入报告 | 100% grounding 和 0 无效写入为不可谈判硬门槛 |
 | 兼容标量把未知伪装成业务否定 | 推荐率/情绪/排名分母被污染 | `analysis_structure` 状态为权威；审计全部消费者，必要时新增状态列后再硬切 |
 | 程序自动补语义证据或覆盖结论 | 表面完成率上升但事实不可审计 | 自动补证据、派生别名影响指标和程序性情绪覆盖均设为 0 容忍测试门槛 |
+| 把竞品注册表放进阶段 1 提示 | 模型只找已知品牌，表外品牌召回下降 | 阶段 1 请求体禁止任何注册表数据，并做空表/非空表请求哈希不变性测试 |
+| 把 `matched` 当作竞品关系先验 | 表内品牌被默认判竞品，表外品牌被忽略 | 阶段 2 不接收 `competitor_id` 或匹配状态；身份和当前问题关系使用独立字段与测试 |
+| 注册表解析器补实体或合并证据 | 表面完成率提高但原文事实被改写 | resolver 只附加身份元数据；解析前后 occurrence 深度相等，表内未出现品牌生成数必须为 0 |
+| analysis-only 使用实时竞品表 | 同一回答重试结果随配置漂移，无法审计 | 运行时冻结 `version/hash/entries`；analysis-only 强制复用原快照，新运行才读取新快照 |
 
 ## 13. 方案依据与外部参考
 
@@ -1186,6 +1337,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 - 完整原回答和目标品牌别名可以从现有记录与品牌资料读取。
 - v5 可以保留现行 SOV 数学公式，但开放发现结果必须升级为带 scope/status/completeness 的 v2 语义版本；历史 v1 保持只读。
 - 用户接受增加第二次正常模型调用，但要求用对比证明质量和成本可接受。
+- 现有 `brand_competitors` 继续作为项目级已核验身份注册表；它不是完整竞品知识图谱，也不是模型抽取候选白名单。
 
 ### 14.2 非阻塞开放问题
 
@@ -1197,7 +1349,7 @@ C 相对 A 减少 90.91% 失败，目标品牌五项人工真值在 121 条有�
 
 - Tech Spec path: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/TECH-SPEC.md`
 - Validation report: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/validation-report.md`
-- 可拆 issue：U1–U8 可分别拆为垂直 issue；当前应优先落实 KTD-002、KTD-008、KTD-010、KTD-011，删除自我修复路径、补齐三轨状态与消费者聚合，再扩充真值。U8 只能在新一轮 U7 全部通过后开始。
-- 建议下一个 issue：先删除语义证据自动补齐、未确认别名派生和情绪覆盖，并实现三轨/字段状态；随后把推荐、排名、情绪和已输出关系真值扩充到每项至少 20 个可评估实例，按新合同重跑，不修改生产默认入口。
+- 可拆 issue：U1–U8 可分别拆为垂直 issue；当前应优先落实 KTD-002、KTD-008、KTD-010 至 KTD-013，删除自我修复路径、实现模型外竞品注册表 resolver 与不可变快照、补齐三轨状态和消费者聚合，再扩充真值。U8 只能在新一轮 U7 全部通过后开始。
+- 建议下一个 issue：先删除语义证据自动补齐、未确认别名派生和情绪覆盖，并实现“阶段 1 开放发现 → 程序注册表归一 → 阶段 2 无先验关系判断”及其十二项不变性测试；随后把推荐、排名、情绪和已输出关系真值扩充到每项至少 20 个可评估实例，按新合同重跑，不修改生产默认入口。
 - 是否适合 TDD：适合。source map、ID 合同、验证器、指标计算、请求体和报告兼容均应先写失败测试；真实 Flash 基线作为单元测试之外的独立验收层。
 - 当前正式路径：仍为 `ai_structured_v4` / `geo_metric_input_v4`；v5 隔离模块已按“竞品允许漏”修改候选合同，但尚未完成新合同全量重跑、正式接入或默认切换，v4 运行时代码和现役调用方尚未删除。
