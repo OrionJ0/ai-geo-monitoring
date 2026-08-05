@@ -260,8 +260,6 @@ GET /api/marketing/status
 GET  /api/marketing/projects/:projectId/dashboard
 POST /api/marketing/projects/:projectId/refresh-runs
 GET  /api/marketing/projects/:projectId/refresh-runs/:runId
-GET  /api/marketing/projects/:projectId/tongji-trend
-GET  /api/marketing/projects/:projectId/tongji-source-trends
 GET  /api/marketing/projects/:projectId/website-traffic-overview
 GET  /api/marketing/projects/:projectId/website-traffic-pages
 ```
@@ -269,12 +267,14 @@ GET  /api/marketing/projects/:projectId/website-traffic-pages
 兼容要求：
 
 - 广告 Dashboard 和非来源字段不重命名、不删除、不改变含义。旧百度统计 `OTHER` 来源键已被新内置渠道目录硬切替代，不保留静默 fallback；消费方必须迁移到 `OTHER_SEARCH` 或 `EXTERNAL_REFERRAL`。
-- 广告页面和市场总览读取广告 Dashboard；市场总览另读 Tongji 基础/来源趋势，网站流量页只读独立的 overview/pages 合同。三者复用鉴权和严格响应校验，但不静默回退到另一页面的数据接口。
-- 市场总览使用 `Promise.allSettled` 等价语义独立接收广告快照、百度统计全站趋势和百度统计来源趋势；任一失败不会抹掉其他来源。
+- 广告页面和市场总览读取广告 Dashboard；市场总览与网站流量页共用 `website-traffic-overview` 区间合同，网站流量页另读 pages 合同。三者复用鉴权和严格响应校验，但不静默回退到另一页面的数据接口。
+- 市场总览使用等价的独立状态接收广告快照、百度统计全部来源比较和官网咨询；任一失败不会抹掉其他来源。
 - 百度统计固定 30 日入口使用 `baidu_tongji_snapshots`，网站流量任意当前/上一周期使用 `baidu_tongji_range_snapshots`，明确来源趋势使用 `baidu_tongji_source_trend_snapshots`；三者不能混用唯一约束。基础快照按调用能力读取全站趋势、来源汇总或全站质量，来源趋势只在收到明确 `source` 参数时读取。任一缓存未命中或超过 10 分钟时才调用上游，同键并发请求合并，失败时可回退最后成功快照。
 - 市场总览不得为追求“单接口方便”把百度统计刷新塞入广告快照 GET。
-- `tongji-source-trends` 仍是单一百度统计渠道 API，不是跨系统归因 API。它暴露固定的七渠道目录 `BAIDU_PAID|DIRECT|BAIDU_SEARCH|BING_SEARCH|GOOGLE_SEARCH|OTHER_SEARCH|EXTERNAL_REFERRAL`，并使用百度稳定来源/引擎标识读取选中渠道的 `trend/time/a` 趋势。
+- `website-traffic-overview` 是单一百度统计渠道 API，不是跨系统归因 API。它暴露固定的七渠道目录 `BAIDU_PAID|DIRECT|BAIDU_SEARCH|BING_SEARCH|GOOGLE_SEARCH|OTHER_SEARCH|EXTERNAL_REFERRAL`，并使用百度稳定来源/引擎标识读取选中渠道的 `trend/time/a` 趋势；`source=ALL&metric=visits&includeSourceComparison=true` 返回全部渠道对比。
 - 响应必须携带 `attribution.level = WEBSITE_TRAFFIC_SOURCE` 与 `isCrossSystemVerified = false`；非付费渠道只把 `visits` 放入“访问”。百度推广行的广告投入/展现来自 Dashboard，访问来自 `BAIDU_PAID` 统计趋势；不得用 Dashboard 点击数代替。
+
+2026-08-05 硬切说明：固定 30 日 `tongji-trend`、`tongji-source-trends` 路由及其专属服务包装已经删除；当前正式代码和文档不得继续选择旧链路。
 
 ### 5.4 前端页面数据状态
 

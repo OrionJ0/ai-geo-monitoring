@@ -27,6 +27,7 @@ import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import useMarketingCapabilities from '@/lib/useMarketingCapabilities';
 import useMarketOverview from '@/lib/marketing/useMarketOverview';
 import { useWebsiteTrafficOverview } from '@/lib/marketing/useWebsiteTraffic';
+import type { WebsiteSourceKey } from '@/lib/marketing/websiteTrafficTypes';
 import useWebsiteFormConsultations from '@/lib/websiteData/useWebsiteFormConsultations';
 import { MARKETING_SOURCE_LABELS } from '@/lib/marketing/sourceCatalog';
 import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
@@ -39,7 +40,9 @@ import MarketingMetricCard, {
 } from '@/components/marketing/MarketingMetricCard';
 import { groupDigits } from '@/utils/marketingValues.cjs';
 import {
+  buildDailyChannelComparison,
   buildPeriodRows,
+  completeAdTrendWithinCoverage,
   divideScaledAmount,
   formatAverage,
   formatPeriodChange,
@@ -54,15 +57,18 @@ import styles from './market-overview.module.css';
 const { Title } = Typography;
 
 const PAID_SOURCE = 'BAIDU_PAID';
-const TONGJI_ALL_SOURCE = 'BAIDU_TONGJI_ALL';
-const TONGJI_SOURCE_KEYS = Object.freeze({
-  BAIDU_PAID: 'BAIDU_PAID',
-  BAIDU_TONGJI_DIRECT: 'DIRECT',
-  BAIDU_TONGJI_BAIDU_SEARCH: 'BAIDU_SEARCH',
-  BAIDU_TONGJI_BING_SEARCH: 'BING_SEARCH',
-  BAIDU_TONGJI_GOOGLE_SEARCH: 'GOOGLE_SEARCH',
-  BAIDU_TONGJI_OTHER_SEARCH: 'OTHER_SEARCH',
-  BAIDU_TONGJI_EXTERNAL_REFERRAL: 'EXTERNAL_REFERRAL'
+const ALL_SOURCE = 'ALL';
+const CHANNEL_COLORS = Object.freeze({
+  ALL: '#1d4ed8',
+  BAIDU_PAID: '#7c3aed',
+  DIRECT: '#0f766e',
+  BAIDU_SEARCH: '#2563eb',
+  BING_SEARCH: '#0891b2',
+  GOOGLE_SEARCH: '#dc2626',
+  OTHER_SEARCH: '#d97706',
+  EXTERNAL_REFERRAL: '#64748b',
+  CURRENT: '#2f6bff',
+  PREVIOUS: '#94a3b8'
 });
 const TONGJI_CHANNEL_DEFINITIONS = Object.freeze([
   { sourceKey: 'BAIDU_PAID', sourceLabel: MARKETING_SOURCE_LABELS.BAIDU_PAID, sourceHost: 'e.baidu.com', sourceType: 'PAID' },
@@ -100,33 +106,15 @@ const TREND_METRICS = [
   }
 ];
 
-const TRAFFIC_TREND_METRICS = [
-  {
-    key: 'visits',
-    label: '访问次数',
-    unit: '次'
-  },
-  {
-    key: 'visitors',
-    label: '访客数（UV）',
-    unit: '人'
-  },
-  {
-    key: 'pageviews',
-    label: '浏览量（PV）',
-    unit: '次'
-  }
-];
-
 const TREND_SOURCES = [
+  { value: ALL_SOURCE, label: '全部' },
   { value: PAID_SOURCE, label: '百度推广' },
-  { value: TONGJI_ALL_SOURCE, label: '官网全站（百度统计）' },
-  { value: 'BAIDU_TONGJI_DIRECT', label: MARKETING_SOURCE_LABELS.DIRECT },
-  { value: 'BAIDU_TONGJI_BAIDU_SEARCH', label: MARKETING_SOURCE_LABELS.BAIDU_SEARCH },
-  { value: 'BAIDU_TONGJI_BING_SEARCH', label: MARKETING_SOURCE_LABELS.BING_SEARCH },
-  { value: 'BAIDU_TONGJI_GOOGLE_SEARCH', label: MARKETING_SOURCE_LABELS.GOOGLE_SEARCH },
-  { value: 'BAIDU_TONGJI_OTHER_SEARCH', label: MARKETING_SOURCE_LABELS.OTHER_SEARCH },
-  { value: 'BAIDU_TONGJI_EXTERNAL_REFERRAL', label: MARKETING_SOURCE_LABELS.EXTERNAL_REFERRAL }
+  { value: 'DIRECT', label: MARKETING_SOURCE_LABELS.DIRECT },
+  { value: 'BAIDU_SEARCH', label: MARKETING_SOURCE_LABELS.BAIDU_SEARCH },
+  { value: 'BING_SEARCH', label: MARKETING_SOURCE_LABELS.BING_SEARCH },
+  { value: 'GOOGLE_SEARCH', label: MARKETING_SOURCE_LABELS.GOOGLE_SEARCH },
+  { value: 'OTHER_SEARCH', label: MARKETING_SOURCE_LABELS.OTHER_SEARCH },
+  { value: 'EXTERNAL_REFERRAL', label: MARKETING_SOURCE_LABELS.EXTERNAL_REFERRAL }
 ];
 
 const KPI_DEFINITIONS = [
@@ -197,6 +185,12 @@ function groupDecimal(value) {
   const [whole, fraction] = String(value).split('.');
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
   return fraction == null ? grouped : `${grouped}.${fraction}`;
+}
+
+function signedPercent(value) {
+  if (value == null) return '—';
+  const text = String(value);
+  return `${text.startsWith('-') || text === '0' || text.startsWith('0.') ? '' : '+'}${text}%`;
 }
 
 function sumField(rows, field) {
@@ -340,30 +334,47 @@ function WebsiteFormConsultationCell({ source, websiteForms, label }) {
     return (
       <>
         <strong>{groupDigits(source.formConsultationRecords)}</strong>
-        <small>官网表单咨询记录</small>
+        <small>官网成功表单记录</small>
       </>
     );
   }
   const reason = websiteForms.state === 'SOURCE_ERROR'
-    ? websiteForms.errorMessage || '官网表单咨询读取失败。'
+    ? websiteForms.errorMessage || '官网咨询读取失败。'
     : websiteForms.state === 'IDLE'
-      ? '等待项目与日期范围后读取官网表单咨询。'
+      ? '等待项目与日期范围后读取官网咨询。'
       : '官网接口未提供该来源拆分，不能按 0 展示。';
-  return <MissingValue reason={reason} label={`${label}官网表单咨询`} />;
+  return <MissingValue reason={reason} label={`${label}官网咨询`} />;
 }
 
 function TrafficSourceRow({
   source,
   formConsultation,
-  websiteForms
+  websiteForms,
+  selected,
+  onActivate
 }) {
   const visits = source.summary?.visits ?? null;
   const noAdReason = '百度统计来源报告不包含广告投入，这不是 0。';
   const noImpressionReason = '百度统计记录站内访问，不提供搜索结果展现。';
   return (
-    <tr>
+    <tr
+      className={styles.interactiveRow}
+      tabIndex={0}
+      aria-selected={selected}
+      onClick={onActivate}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onActivate();
+        }
+      }}
+    >
       <th scope="row">
-        <Link href="/geo/website-traffic" className={styles.sourceLink}>
+        <Link
+          href="/geo/website-traffic"
+          className={styles.sourceLink}
+          onClick={(event) => event.stopPropagation()}
+        >
           <SourceIdentity
             sourceKey={source.sourceKey}
             label={source.sourceLabel}
@@ -450,9 +461,7 @@ function WebsiteFormOnlyRow({ source, websiteForms }) {
 
 function StatusMessages({
   defaultContext,
-  marketing,
-  overview,
-  websiteForms
+  marketing
 }) {
   const messages = [];
   if (defaultContext.errorMessage) {
@@ -469,65 +478,6 @@ function StatusMessages({
       title: '无法确认市场数据权限',
       description: '当前没有读取任何来源数据，请稍后重试。',
       action: <Button size="small" onClick={marketing.reload}>重试</Button>
-    });
-  } else if (!marketing.capabilities.adsRead) {
-    messages.push({
-      key: 'blocked',
-      type: 'info',
-      title: '广告数据尚未开放',
-      description: '页面结构可用，但不会越过现有能力门读取或展示数据。'
-    });
-  }
-  if (overview.ad.state === 'SOURCE_ERROR') {
-    messages.push({
-      key: 'ad-error',
-      type: 'error',
-      title: '广告来源读取失败',
-      description: overview.ad.errorMessage || '无法读取广告快照。',
-      action: <Button size="small" onClick={overview.reload}>重试</Button>
-    });
-  } else if (overview.ad.state === 'STALE') {
-    messages.push({
-      key: 'ad-stale',
-      type: 'warning',
-      title: '广告快照刷新失败',
-      description: overview.ad.errorMessage || '当前展示最后一份成功快照。',
-      action: <Button size="small" onClick={overview.reload}>重试</Button>
-    });
-  }
-  if (overview.traffic.state === 'SOURCE_ERROR') {
-    messages.push({
-      key: 'traffic-error',
-      type: 'warning',
-      title: '网站流量来源读取失败',
-      description: overview.traffic.errorMessage || '百度统计暂时不可用。',
-      action: <Link href="/geo/website-traffic">查看网站流量</Link>
-    });
-  }
-  if (overview.trafficSources.state === 'SOURCE_ERROR') {
-    messages.push({
-      key: 'traffic-sources-error',
-      type: 'warning',
-      title: '网站来源读取失败',
-      description: overview.trafficSources.errorMessage || '百度统计来源暂时不可用。',
-      action: <Button size="small" onClick={overview.reload}>重试</Button>
-    });
-  }
-  if (websiteForms.state === 'SOURCE_ERROR') {
-    messages.push({
-      key: 'website-forms-error',
-      type: 'warning',
-      title: '官网表单咨询读取失败',
-      description: websiteForms.errorMessage || '官网表单咨询暂时不可用。',
-      action: <Button size="small" onClick={websiteForms.reload}>重试</Button>
-    });
-  } else if (websiteForms.state === 'FALLBACK') {
-    messages.push({
-      key: 'website-forms-fallback',
-      type: 'warning',
-      title: '官网表单咨询使用缓存',
-      description: '官网接口暂时不可用，当前展示相同日期范围的最后成功聚合快照。',
-      action: <Button size="small" onClick={websiteForms.reload}>重试</Button>
     });
   }
   if (!messages.length) return null;
@@ -557,14 +507,14 @@ export default function MarketOverviewPage() {
     setDateRange
   } = useMarketingFilters();
   const projectId = defaultContext.project?.id || '';
-  const enabled = marketing.capabilities.adsRead || marketing.capabilities.trafficRead;
-  const [trendSource, setTrendSource] = useState(PAID_SOURCE);
-  const selectedTrafficSourceKey = TONGJI_SOURCE_KEYS[trendSource] || null;
+  const adEnabled = marketing.capabilities.adsRead;
+  const [trendSource, setTrendSource] = useState<WebsiteSourceKey>(ALL_SOURCE);
+  const [hiddenTrendSources, setHiddenTrendSources] = useState<Set<string>>(
+    () => new Set()
+  );
   const overview = useMarketOverview({
     projectId,
-    enabled,
-    device: trafficDevice,
-    trafficTrendSource: selectedTrafficSourceKey
+    enabled: adEnabled
   });
   const reducedMotion = useReducedMotion();
   const websiteFallbackRange = useMemo(() => {
@@ -576,6 +526,19 @@ export default function MarketOverviewPage() {
   }, []);
   const [efficiencySource, setEfficiencySource] = useState(PAID_SOURCE);
   const [trendMetric, setTrendMetric] = useState('visits');
+  const activateTrendSource = (sourceKey: WebsiteSourceKey) => {
+    if (trendSource === sourceKey) setTrendSource(ALL_SOURCE);
+    else setTrendSource(sourceKey);
+    setTrendMetric('visits');
+  };
+  const toggleHiddenTrendSource = (sourceKey: string) => {
+    setHiddenTrendSources((current) => {
+      const next = new Set(current);
+      if (next.has(sourceKey)) next.delete(sourceKey);
+      else next.add(sourceKey);
+      return next;
+    });
+  };
   const websiteForms = useWebsiteFormConsultations({
     projectId,
     enabled: Boolean(projectId && dateRange),
@@ -589,7 +552,8 @@ export default function MarketOverviewPage() {
     from: dateRange?.[0] || websiteFallbackRange[0],
     to: dateRange?.[1] || websiteFallbackRange[1],
     source: 'ALL',
-    metric: 'visits'
+    metric: 'visits',
+    includeSourceComparison: true
   }), [
     dateRange,
     marketing.capabilities.trafficRead,
@@ -598,16 +562,45 @@ export default function MarketOverviewPage() {
     websiteFallbackRange
   ]);
   const trafficRange = useWebsiteTrafficOverview(trafficRangeQuery);
+  const selectedTrafficQuery = useMemo(() => ({
+    projectId,
+    enabled: Boolean(
+      projectId
+      && dateRange
+      && marketing.capabilities.trafficRead
+      && trendSource !== ALL_SOURCE
+      && (trendSource !== PAID_SOURCE || trendMetric === 'visits')
+    ),
+    device: trafficDevice,
+    from: dateRange?.[0] || websiteFallbackRange[0],
+    to: dateRange?.[1] || websiteFallbackRange[1],
+    source: trendSource === ALL_SOURCE ? ALL_SOURCE : trendSource,
+    metric: 'visits'
+  }), [
+    dateRange,
+    marketing.capabilities.trafficRead,
+    projectId,
+    trafficDevice,
+    trendMetric,
+    trendSource,
+    websiteFallbackRange
+  ]);
+  const selectedTraffic = useWebsiteTrafficOverview(selectedTrafficQuery);
 
   const ad = overview.ad;
-  const trafficData = overview.traffic.data?.device === trafficDevice
-    ? overview.traffic.data
+  const trafficData = trafficRange.data?.device === trafficDevice
+    && trafficRange.data.coverage.from === dateRange?.[0]
+    && trafficRange.data.coverage.to === dateRange?.[1]
+    && trafficRange.data.selectedSource.sourceKey === ALL_SOURCE
+    && trafficRange.data.selectedMetric === 'visits'
+    ? trafficRange.data
     : null;
-  const paidTrafficData = overview.paidTraffic.data?.device === trafficDevice
-    ? overview.paidTraffic.data
-    : null;
-  const trafficTrendData = overview.trafficTrend.data?.device === trafficDevice
-    ? overview.trafficTrend.data
+  const selectedTrafficData = selectedTraffic.data?.device === trafficDevice
+    && selectedTraffic.data.coverage.from === dateRange?.[0]
+    && selectedTraffic.data.coverage.to === dateRange?.[1]
+    && selectedTraffic.data.selectedSource.sourceKey === trendSource
+    && selectedTraffic.data.selectedMetric === 'visits'
+    ? selectedTraffic.data
     : null;
   const coverage = ad.data?.coverage || trafficData?.coverage || null;
 
@@ -619,10 +612,15 @@ export default function MarketOverviewPage() {
     }
   }, [coverage, dateRange, setDateRange]);
 
+  const completedAdTrend = useMemo(() => (
+    ad.data?.coverage
+      ? completeAdTrendWithinCoverage(ad.data.trend || [], ad.data.coverage)
+      : []
+  ), [ad.data]);
   const period = useMemo(() => {
     if (!dateRange) return null;
-    return buildPeriodRows(ad.data?.trend || [], dateRange[0], dateRange[1]);
-  }, [ad.data?.trend, dateRange]);
+    return buildPeriodRows(completedAdTrend, dateRange[0], dateRange[1]);
+  }, [completedAdTrend, dateRange]);
 
   const currentTotals = useMemo(() => ({
     costAmountScaled: period && hasCompletePeriod(
@@ -694,8 +692,12 @@ export default function MarketOverviewPage() {
     CPC: { current: cpcCurrent, previous: cpcPrevious, change: cpcChange }
   };
 
+  const sourceComparisonRows = useMemo(
+    () => trafficData?.sourceComparison?.rows || [],
+    [trafficData]
+  );
   const rangeSourceRows = new Map(
-    (trafficRange.data?.sourceQuality?.rows || []).map((source) => [source.sourceKey, source])
+    sourceComparisonRows.map((source) => [source.sourceKey, source])
   );
   const trafficSources = TONGJI_CHANNEL_DEFINITIONS.map((definition) => {
     const rangeSource = rangeSourceRows.get(definition.sourceKey);
@@ -704,7 +706,7 @@ export default function MarketOverviewPage() {
       sourceHost: definition.sourceKey === 'DIRECT'
         ? trafficRange.data?.site?.domain || '官网'
         : definition.sourceHost,
-      summary: { visits: rangeSource?.visits ?? null }
+      summary: { visits: rangeSource?.summary?.current ?? null }
     };
   });
   const paidTrafficSource = trafficSources.find(
@@ -728,38 +730,43 @@ export default function MarketOverviewPage() {
       && BigInt(source.formConsultationRecords) > BigInt(0)
     )
   );
-  const paidTrafficTrend = paidTrafficData?.selectedTrend?.sourceKey === PAID_SOURCE
-    ? paidTrafficData.selectedTrend
-    : null;
-  const selectedTrafficTrend = (
-    trafficTrendData?.selectedTrend?.sourceKey === selectedTrafficSourceKey
-  ) ? trafficTrendData.selectedTrend : null;
+  const rangeTrafficTrend = useMemo(() => (
+    (trafficData?.trend || []).flatMap((row) => [
+      { date: row.date, visits: row.current },
+      { date: row.previousDate, visits: row.previous }
+    ])
+  ), [trafficData?.trend]);
+  const selectedRangeTrafficTrend = useMemo(() => (
+    (selectedTrafficData?.trend || []).flatMap((row) => [
+      { date: row.date, visits: row.current },
+      { date: row.previousDate, visits: row.previous }
+    ])
+  ), [selectedTrafficData?.trend]);
   const selectedTrendRows = useMemo(() => (
     trendSource === PAID_SOURCE
       ? trendMetric === 'visits'
-        ? paidTrafficTrend?.trend || []
-        : ad.data?.trend || []
-      : trendSource === TONGJI_ALL_SOURCE
-        ? trafficData?.trend || []
-        : selectedTrafficTrend?.trend || []
+        ? selectedRangeTrafficTrend
+        : completedAdTrend
+      : trendSource === ALL_SOURCE
+        ? rangeTrafficTrend
+        : selectedRangeTrafficTrend
   ), [
-    ad.data?.trend,
-    paidTrafficTrend?.trend,
-    trafficData?.trend,
-    selectedTrafficTrend?.trend,
+    completedAdTrend,
+    rangeTrafficTrend,
+    selectedRangeTrafficTrend,
     trendMetric,
     trendSource
   ]);
   const selectedTrendCoverage = trendSource === PAID_SOURCE
     ? trendMetric === 'visits'
-      ? paidTrafficData?.coverage || coverage
+      ? selectedTrafficData?.coverage || coverage
       : ad.data?.coverage || coverage
-    : trendSource === TONGJI_ALL_SOURCE
+    : trendSource === ALL_SOURCE
       ? trafficData?.coverage || coverage
-      : trafficTrendData?.coverage || coverage;
+      : selectedTrafficData?.coverage || coverage;
   const availableTrendMetrics = trendSource === PAID_SOURCE
     ? TREND_METRICS
-    : TRAFFIC_TREND_METRICS;
+    : TREND_METRICS.filter((metric) => metric.key === 'visits');
   const selectedMetric = availableTrendMetrics.find(
     (metric) => metric.key === trendMetric
   ) || availableTrendMetrics[0];
@@ -784,12 +791,12 @@ export default function MarketOverviewPage() {
   const previousSummary = previousComplete
     ? summarizeMetric(previousMetricRows)
     : summarizeMetric([]);
-  const chartMaximum = [currentSummary.peak?.value, previousSummary.peak?.value]
+  const singleChartMaximum = [currentSummary.peak?.value, previousSummary.peak?.value]
     .filter(Boolean)
     .reduce((largest, value) => (
       BigInt(value) > BigInt(largest) ? value : largest
     ), '0');
-  const chartData = [
+  const singleChartData = [
     ...currentMetricRows.map((row, index) => ({
       slot: row.date.slice(5),
       actualDate: row.date,
@@ -797,8 +804,10 @@ export default function MarketOverviewPage() {
       displayValue: trendValue(row.value, selectedMetric, selectedTrendCoverage),
       coordinate: row.value == null
         ? null
-        : relativeCoordinate(row.value, chartMaximum),
-      period: '当前周期',
+        : relativeCoordinate(row.value, singleChartMaximum),
+      series: '当前周期',
+      seriesKey: 'CURRENT',
+      isTotal: false,
       index
     })),
     ...(previousComplete ? previousMetricRows.map((row, index) => ({
@@ -808,11 +817,41 @@ export default function MarketOverviewPage() {
       displayValue: trendValue(row.value, selectedMetric, selectedTrendCoverage),
       coordinate: row.value == null
         ? null
-        : relativeCoordinate(row.value, chartMaximum),
-      period: '上一周期',
+        : relativeCoordinate(row.value, singleChartMaximum),
+      series: '上一周期',
+      seriesKey: 'PREVIOUS',
+      isTotal: false,
       index
     })) : [])
   ].filter((row) => row.coordinate != null);
+  const allComparisonRows = useMemo(() => buildDailyChannelComparison(
+    trafficData?.trend || [],
+    sourceComparisonRows,
+    hiddenTrendSources
+  ), [
+    hiddenTrendSources,
+    sourceComparisonRows,
+    trafficData?.trend
+  ]);
+  const allChartMaximum = allComparisonRows
+    .map((row) => row.value)
+    .reduce((largest, value) => (
+      BigInt(value) > BigInt(largest) ? value : largest
+    ), '0');
+  const allChartData = allComparisonRows.map((row, index) => ({
+    slot: row.date.slice(5),
+    actualDate: row.date,
+    exactValue: row.value,
+    displayValue: groupDigits(row.value),
+    coordinate: relativeCoordinate(row.value, allChartMaximum),
+    series: row.sourceLabel,
+    seriesKey: row.sourceKey,
+    isTotal: row.isTotal,
+    index
+  }));
+  const chartData = trendSource === ALL_SOURCE
+    ? allChartData
+    : singleChartData;
 
   const trendChange = formatPeriodChange(
     currentSummary.total,
@@ -821,21 +860,21 @@ export default function MarketOverviewPage() {
   );
   const selectedTrendError = trendSource === PAID_SOURCE
       ? trendMetric === 'visits'
-        ? overview.paidTraffic.errorMessage
+        ? selectedTraffic.error
         : overview.ad.errorMessage
-      : trendSource === TONGJI_ALL_SOURCE
-        ? overview.traffic.errorMessage
-        : overview.trafficTrend.errorMessage;
+      : trendSource === ALL_SOURCE
+        ? trafficRange.error
+        : selectedTraffic.error;
   const loading = (
     defaultContext.loading
     || marketing.loading
-    || (enabled && overview.status === 'LOADING' && !ad.data)
+    || (adEnabled && overview.status === 'LOADING' && !ad.data)
+    || (marketing.capabilities.trafficRead && trafficRange.loading && !trafficData)
   );
   const paidVisits = paidTrafficSource?.summary?.visits ?? null;
   const canShowAdRow = ['AVAILABLE', 'ZERO', 'STALE'].includes(ad.state);
-  const canShowTrafficSourceRows = ['AVAILABLE', 'NO_DATA'].includes(
-    overview.trafficSources.state
-  ) && nonPaidTrafficSources.length > 0;
+  const canShowTrafficSourceRows = Boolean(trafficData?.sourceComparison)
+    && nonPaidTrafficSources.length > 0;
   const canShowFormOnlyRows = formOnlySources.length > 0;
 
   return (
@@ -858,19 +897,7 @@ export default function MarketOverviewPage() {
       <StatusMessages
         defaultContext={defaultContext}
         marketing={marketing}
-        overview={overview}
-        websiteForms={websiteForms}
       />
-      {trafficRange.error ? (
-        <Alert
-          className={styles.rangeSourceAlert}
-          type="warning"
-          showIcon
-          title="当前日期范围的渠道访问读取失败"
-          description={trafficRange.error}
-          action={<Button size="small" onClick={trafficRange.reload}>重试</Button>}
-        />
-      ) : null}
 
       {!defaultContext.errorMessage ? (
         <>
@@ -917,7 +944,7 @@ export default function MarketOverviewPage() {
             <InfoTip label="全链路">
               渠道目录是内置且稳定的：百度推广的投入和展现来自百度推广报告，
               访问来自百度统计；其余渠道的访问均来自百度统计。
-              官网表单咨询只展示可归因成功提交会话，不包含 53KF 客服咨询；
+              官网咨询当前只展示可归因成功表单记录，不包含 53KF 在线客服咨询；
               这些数据是独立事实，不会因同期出现而伪造跨系统归因。
             </InfoTip>
           </div>
@@ -943,7 +970,12 @@ export default function MarketOverviewPage() {
                     setTrendMetric={setTrendMetric}
                   />
                 ))}
-                <th scope="col">官网表单咨询</th>
+                <th scope="col">
+                  官网咨询
+                  <InfoTip label="官网咨询">
+                    当前仅包含官网成功表单记录，不包含 53KF 在线客服咨询。
+                  </InfoTip>
+                </th>
                 <th scope="col">线索入池</th>
                 <th scope="col">成交结果</th>
                 <th scope="col">整体转换率</th>
@@ -956,9 +988,24 @@ export default function MarketOverviewPage() {
                 </tr>
               ) : (canShowAdRow || canShowTrafficSourceRows || canShowFormOnlyRows) ? (
                 <>
-                {canShowAdRow ? <tr>
+                {canShowAdRow ? <tr
+                  className={styles.interactiveRow}
+                  tabIndex={0}
+                  aria-selected={trendSource === PAID_SOURCE}
+                  onClick={() => activateTrendSource(PAID_SOURCE)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      activateTrendSource(PAID_SOURCE);
+                    }
+                  }}
+                >
                   <th scope="row">
-                    <Link href="/geo/ad-performance" className={styles.sourceLink}>
+                    <Link
+                      href="/geo/ad-performance"
+                      className={styles.sourceLink}
+                      onClick={(event) => event.stopPropagation()}
+                    >
                       <SourceIdentity
                         sourceKey={PAID_SOURCE}
                         label="百度推广"
@@ -974,6 +1021,9 @@ export default function MarketOverviewPage() {
                         coverage?.costScale ?? 0,
                         coverage?.currency || 'CNY'
                       )}</strong>
+                    {ad.state === 'STALE' && coverage?.to ? (
+                      <small>截至 {coverage.to} 的最后成功广告快照</small>
+                    ) : null}
                   </td>
                   <td className={styles.metricCell}>
                     <strong>{currentTotals.impressions == null
@@ -1010,6 +1060,8 @@ export default function MarketOverviewPage() {
                     source={source}
                     formConsultation={websiteFormBySource.get(source.sourceKey)}
                     websiteForms={websiteForms}
+                    selected={trendSource === source.sourceKey}
+                    onActivate={() => activateTrendSource(source.sourceKey)}
                   />
                 ))}
                 {formOnlySources.map((source) => (
@@ -1084,6 +1136,43 @@ export default function MarketOverviewPage() {
           </dl>
         </div>
 
+        {trendSource === ALL_SOURCE && sourceComparisonRows.length ? (
+          <div className={styles.channelLegend} aria-label="渠道趋势图例">
+            {sourceComparisonRows.map((source) => {
+              const hidden = hiddenTrendSources.has(source.sourceKey);
+              const unavailable = source.trendState === 'UNAVAILABLE';
+              return (
+                <button
+                  key={source.sourceKey}
+                  type="button"
+                  className={styles.legendButton}
+                  aria-pressed={!hidden}
+                  aria-label={`${hidden ? '显示' : '隐藏'}${source.sourceLabel}趋势`}
+                  onClick={() => toggleHiddenTrendSource(source.sourceKey)}
+                  data-hidden={hidden ? 'true' : 'false'}
+                >
+                  <span
+                    className={styles.legendSwatch}
+                    style={{ background: CHANNEL_COLORS[source.sourceKey] }}
+                    aria-hidden="true"
+                  />
+                  <span className={styles.legendCopy}>
+                    <strong>{source.sourceLabel}</strong>
+                    <small>
+                      占比 {source.summary.trafficShare == null
+                        ? '—'
+                        : `${source.summary.trafficShare}%`}
+                      {' · '}
+                      环比 {signedPercent(source.summary.changePercent)}
+                      {unavailable ? ' · 趋势暂不可用' : ''}
+                    </small>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
         {loading ? (
           <Skeleton active paragraph={{ rows: 6 }} title={false} />
         ) : chartData.length ? (
@@ -1091,20 +1180,31 @@ export default function MarketOverviewPage() {
             <div
               className={styles.chartRegion}
               role="img"
-              aria-label={`${selectedMetric.label}每日趋势。当前周期${trendValue(currentSummary.total, selectedMetric, selectedTrendCoverage)}；上一周期${trendValue(previousSummary.total, selectedMetric, selectedTrendCoverage)}。`}
+              aria-label={trendSource === ALL_SOURCE
+                ? `全部访问与各渠道访问每日趋势。当前周期${trendValue(currentSummary.total, selectedMetric, selectedTrendCoverage)}；上一周期总量${trendValue(previousSummary.total, selectedMetric, selectedTrendCoverage)}。`
+                : `${selectedMetric.label}每日趋势。当前周期${trendValue(currentSummary.total, selectedMetric, selectedTrendCoverage)}；上一周期${trendValue(previousSummary.total, selectedMetric, selectedTrendCoverage)}。`}
             >
               <Line
                 data={chartData}
                 xField="slot"
                 yField="coordinate"
-                seriesField="period"
-                colorField="period"
+                seriesField="series"
+                colorField="series"
                 height={232}
                 scale={{
                   x: { tickCount: 7 },
                   color: {
-                    domain: ['当前周期', '上一周期'],
-                    range: ['#2f6bff', '#94a3b8']
+                    domain: trendSource === ALL_SOURCE
+                      ? ['全部访问', ...sourceComparisonRows.map((source) => source.sourceLabel)]
+                      : ['当前周期', '上一周期'],
+                    range: trendSource === ALL_SOURCE
+                      ? [
+                          CHANNEL_COLORS.ALL,
+                          ...sourceComparisonRows.map(
+                            (source) => CHANNEL_COLORS[source.sourceKey]
+                          )
+                        ]
+                      : [CHANNEL_COLORS.CURRENT, CHANNEL_COLORS.PREVIOUS]
                   },
                   y: { domain: [0, 100] }
                 }}
@@ -1112,12 +1212,18 @@ export default function MarketOverviewPage() {
                   x: { title: false, tick: false, labelAutoRotate: false },
                   y: { title: false, label: false, grid: true }
                 }}
-                legend={{ color: { position: 'bottom' } }}
+                legend={trendSource === ALL_SOURCE
+                  ? false
+                  : { color: { position: 'bottom' } }}
                 point={{ size: 3 }}
                 style={{
-                  lineWidth: 2,
+                  lineWidth: (datum) => (
+                    (Array.isArray(datum) ? datum[0]?.isTotal : datum?.isTotal)
+                      ? 3
+                      : 2
+                  ),
                   lineDash: (datum) => (
-                    (Array.isArray(datum) ? datum[0]?.period : datum?.period) === '上一周期'
+                    (Array.isArray(datum) ? datum[0]?.series : datum?.series) === '上一周期'
                       ? [6, 4]
                       : [0, 0]
                   )
@@ -1126,9 +1232,9 @@ export default function MarketOverviewPage() {
                   title: { field: 'actualDate' },
                   items: [
                     (datum) => ({
-                      name: datum.period,
+                      name: datum.series,
                       value: datum.displayValue,
-                      color: datum.period === '当前周期' ? '#2f6bff' : '#94a3b8'
+                      color: CHANNEL_COLORS[datum.seriesKey]
                     })
                   ]
                 }}
@@ -1144,24 +1250,48 @@ export default function MarketOverviewPage() {
                 <table className={styles.equivalentTable}>
                   <caption>每日趋势等价数据表</caption>
                   <thead>
-                    <tr>
-                      <th scope="col">当前日期</th>
-                      <th scope="col">当前周期</th>
-                      <th scope="col">上一日期</th>
-                      <th scope="col">上一周期</th>
-                    </tr>
+                    {trendSource === ALL_SOURCE ? (
+                      <tr>
+                        <th scope="col">日期</th>
+                        <th scope="col">全部访问</th>
+                        {sourceComparisonRows.map((source) => (
+                          <th scope="col" key={source.sourceKey}>{source.sourceLabel}</th>
+                        ))}
+                      </tr>
+                    ) : (
+                      <tr>
+                        <th scope="col">当前日期</th>
+                        <th scope="col">当前周期</th>
+                        <th scope="col">上一日期</th>
+                        <th scope="col">上一周期</th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody>
-                    {currentMetricRows.map((row, index) => (
-                      <tr key={row.date}>
-                        <th scope="row">{row.date}</th>
-                        <td>{trendValue(row.value, selectedMetric, selectedTrendCoverage)}</td>
-                        <td>{previousComplete ? previousMetricRows[index]?.date || '—' : '—'}</td>
-                        <td>{previousComplete
-                          ? trendValue(previousMetricRows[index]?.value, selectedMetric, selectedTrendCoverage)
-                          : '—'}</td>
-                      </tr>
-                    ))}
+                    {trendSource === ALL_SOURCE
+                      ? (trafficData?.trend || []).map((row) => (
+                          <tr key={row.date}>
+                            <th scope="row">{row.date}</th>
+                            <td>{groupDigits(row.current)}</td>
+                            {sourceComparisonRows.map((source) => (
+                              <td key={source.sourceKey}>
+                                {groupDigits(source.trend.find(
+                                  (point) => point.date === row.date
+                                )?.visits ?? null)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      : currentMetricRows.map((row, index) => (
+                          <tr key={row.date}>
+                            <th scope="row">{row.date}</th>
+                            <td>{trendValue(row.value, selectedMetric, selectedTrendCoverage)}</td>
+                            <td>{previousComplete ? previousMetricRows[index]?.date || '—' : '—'}</td>
+                            <td>{previousComplete
+                              ? trendValue(previousMetricRows[index]?.value, selectedMetric, selectedTrendCoverage)
+                              : '—'}</td>
+                          </tr>
+                        ))}
                   </tbody>
                 </table>
               </div>

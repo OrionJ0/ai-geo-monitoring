@@ -58,12 +58,12 @@ test('market overview labels website forms clearly and only merges exact source 
   const source = fs.readFileSync(pagePath, 'utf8');
 
   assert.match(source, /useWebsiteFormConsultations/u);
-  assert.match(source, />官网表单咨询</u);
+  assert.match(source, /官网咨询/u);
   assert.match(source, /BAIDU_PAID/u);
   assert.match(source, /DIRECT/u);
   assert.match(source, /MARKETING_SOURCE_LABELS\.UNKNOWN/u);
-  assert.match(source, /不包含 53KF 客服咨询/u);
+  assert.match(source, /不包含 53KF 在线客服咨询/u);
   assert.doesNotMatch(source, />客服咨询<\/th>/u);
   assert.match(source, /websiteFormBySource\.get\(source\.sourceKey\)/u);
-  assert.match(source, /官网表单咨询记录/u);
+  assert.match(source, /官网成功表单记录/u);
 });

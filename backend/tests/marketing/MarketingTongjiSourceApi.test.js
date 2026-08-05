@@ -75,7 +75,7 @@ test('dashboard HTTP contract preserves stale revisions and fails without a snap
   });
 });
 
-test('Tongji source API authorizes the project and returns source trends', async (t) => {
+test('website traffic APIs authorize the project and retired Tongji routes stay unavailable', async (t) => {
   const calls = [];
   const app = express();
   app.use((req, _res, next) => {
@@ -90,14 +90,6 @@ test('Tongji source API authorizes the project and returns source trends', async
     },
     refreshService: {},
     tongjiService: {
-      async readProjectSourceTrends(projectId, device, source) {
-        calls.push(['sources', projectId, device, source]);
-        return {
-          projectId,
-          source: 'BAIDU_TONGJI',
-          sources: []
-        };
-      },
       async readProjectWebsiteTraffic(projectId, options) {
         calls.push(['overview', projectId, options]);
         if (options.metric === 'pageviews') {
@@ -127,24 +119,18 @@ test('Tongji source API authorizes the project and returns source trends', async
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const address = server.address();
 
-  const response = await fetch(
+  const retiredTrendResponse = await fetch(
+    `http://127.0.0.1:${address.port}/api/marketing/projects/11/tongji-trend?device=pc`
+  );
+  const retiredSourceResponse = await fetch(
     `http://127.0.0.1:${address.port}/api/marketing/projects/11/tongji-source-trends?device=mobile&source=DIRECT`
   );
-
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), {
-    projectId: '11',
-    source: 'BAIDU_TONGJI',
-    sources: []
-  });
-  assert.deepEqual(calls, [
-    ['access', { projectId: '11', user: { id: 7, role: 'admin' } }],
-    ['sources', '11', 'mobile', 'DIRECT']
-  ]);
-  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.equal(retiredTrendResponse.status, 404);
+  assert.equal(retiredSourceResponse.status, 404);
+  assert.deepEqual(calls, []);
 
   const overviewResponse = await fetch(
-    `http://127.0.0.1:${address.port}/api/marketing/projects/11/website-traffic-overview?device=all&from=2026-07-01&to=2026-07-30&source=ALL&metric=visits`
+    `http://127.0.0.1:${address.port}/api/marketing/projects/11/website-traffic-overview?device=all&from=2026-07-01&to=2026-07-30&source=ALL&metric=visits&includeSourceComparison=true`
   );
   assert.equal(overviewResponse.status, 200);
   assert.deepEqual(await overviewResponse.json(), {
@@ -162,14 +148,15 @@ test('Tongji source API authorizes the project and returns source trends', async
     view: 'landing'
   });
   assert.equal(pagesResponse.headers.get('cache-control'), 'private, max-age=60');
-  assert.deepEqual(calls.slice(2), [
+  assert.deepEqual(calls, [
     ['access', { projectId: '11', user: { id: 7, role: 'admin' } }],
     ['overview', '11', {
       device: 'all',
       from: '2026-07-01',
       to: '2026-07-30',
       source: 'ALL',
-      metric: 'visits'
+      metric: 'visits',
+      includeSourceComparison: 'true'
     }],
     ['access', { projectId: '11', user: { id: 7, role: 'admin' } }],
     ['pages', '11', {

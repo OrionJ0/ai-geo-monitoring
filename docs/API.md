@@ -353,9 +353,7 @@ Authorization: Bearer <token>
 
 - `GET /api/marketing/status`：读取模块状态，不探测百度网络；授权试点返回 `PILOT_READY`，真实数据只读试点返回 `PILOT_DATA_READY`。
 - `GET /api/marketing/projects/:projectId/dashboard`：读取同一百度广告快照 revision；可同时传 `from`、`to` 筛选当前本地覆盖范围。响应分别包含范围汇总 `summary`、逐日 `trend`、`campaigns`、`adGroups`、`keywords`、`searchTerms` 和 `hierarchyCounts`。前三组用账户/计划/单元/关键词 ID 形成严格层级；`searchTerms` 不返回 `keywordId`，因为百度搜索词报告没有该字段，不得由名称补造。
-- `GET /api/marketing/projects/:projectId/tongji-trend`：在真实数据只读试点中实时读取百度统计最近 30 个上海自然日的 PV、访问次数和访客数；百度无数据标记返回 `null`，不会伪装成 `0`。
-- `GET /api/marketing/projects/:projectId/website-traffic-overview?device=all|pc|mobile&from=YYYY-MM-DD&to=YYYY-MM-DD&source=ALL|BAIDU_PAID|DIRECT|BAIDU_SEARCH|BING_SEARCH|GOOGLE_SEARCH|OTHER_SEARCH|EXTERNAL_REFERRAL&metric=visits|visitors|pageviews|bounceRate|averageVisitTime|averageVisitPages`：网站流量页周期汇总、单一渠道/指标趋势和来源质量的正式合同。渠道目录固定为百度推广、直接访问、百度搜索、必应搜索、Google 搜索、其他搜索和外部引荐；没有访问也保留渠道行。`device=all` 表示不向百度添加设备过滤；当前/上一周期必须是等长、连续的自然日。响应用 `capabilities` 和 `selectedMetricState` 区分已验证真实数据、无数据与未开放能力。
-- `GET /api/marketing/projects/:projectId/tongji-source-trends?device=all|pc|mobile&source=BAIDU_PAID|DIRECT|BAIDU_SEARCH|BING_SEARCH|GOOGLE_SEARCH|OTHER_SEARCH|EXTERNAL_REFERRAL`：读取内置渠道目录和可选单渠道趋势。百度推广行的站内访问必须来自该合同的 `BAIDU_PAID` 趋势，不得用 Dashboard 广告点击数代替。
+- `GET /api/marketing/projects/:projectId/website-traffic-overview?device=all|pc|mobile&from=YYYY-MM-DD&to=YYYY-MM-DD&source=ALL|BAIDU_PAID|DIRECT|BAIDU_SEARCH|BING_SEARCH|GOOGLE_SEARCH|OTHER_SEARCH|EXTERNAL_REFERRAL&metric=visits|visitors|pageviews|bounceRate|averageVisitTime|averageVisitPages&includeSourceComparison=true|false`：网站流量和市场总览共用的正式区间合同，返回当前/上一周期汇总、单一渠道/指标趋势和来源质量。仅 `source=ALL&metric=visits` 可以启用 `includeSourceComparison=true`；此时额外返回七个固定渠道的本期汇总、占比、周期变化和逐日访问趋势，单渠道读取失败时按行返回 `UNAVAILABLE`，不会抹掉其他渠道。渠道目录固定为百度推广、直接访问、百度搜索、必应搜索、Google 搜索、其他搜索和外部引荐；没有访问也保留渠道行。`device=all` 表示不向百度添加设备过滤；当前/上一周期必须是等长、连续的自然日。响应用 `capabilities`、`selectedMetricState` 和来源比较状态区分已验证真实数据、无数据与未开放能力。百度推广行的站内访问只来自百度统计 `BAIDU_PAID`，不得用 Dashboard 广告点击数代替。
 - `GET /api/marketing/projects/:projectId/website-traffic-pages?device=all|pc|mobile&from=YYYY-MM-DD&to=YYYY-MM-DD&view=landing|visited&page=1&pageSize=20&sortBy=...&sortOrder=ascend|descend&query=...`：网站流量页入口页面/受访页面的独立分页合同。服务端显式遍历百度上游分页；页面稳定键使用上游 `pageId`，百度没有返回页面标题时 `title=null`，不得把 URL 冒充标题。只展示与项目绑定站点同域的 URL，`dataQuality.excludedCrossDomainRows` 返回被排除的本机或跨域污染行数；公开分页总数是经过域名与查询过滤后的可展示行数。
 - `POST /api/marketing/projects/:projectId/refresh-runs`：请求体只接受 `triggerType`；固定读取最近 30 个上海自然日。
 - `GET /api/marketing/projects/:projectId/refresh-runs/:runId`：读取同项目运行状态。
@@ -369,6 +367,8 @@ Authorization: Bearer <token>
 - `POST /api/admin/marketing/baidu/connections/:connectionId/disconnect`：本地断开、清 Token 并暂停相关绑定。
 
 `PILOT_READY` 只开放上述授权、callback、Token、连接和账户目录接口；所有项目绑定、看板、刷新和调度接口返回 `MARKETING_PILOT_AUTH_ONLY`。`PILOT_DATA_READY` 仅对服务端项目白名单开放百度搜索账户绑定、搜索报表快照和百度统计读取；它不等同于正式 `READY`。广告快照的本地正式代码路径一次读取计划、单元、关键词和搜索词四份报告并全成全败；不存在计划级静默 fallback。网站流量的 `trend/time/a` 访问次数、UV、PV、质量指标，`source/all/a` / `source/engine/a` 来源汇总，以及 `visit/landingpage/a` / `visit/toppage/a` 页面报告都已取得同站点真实账号响应证据并由 manifest 开放运行；字段顺序、无数据标记、设备过滤、分页和响应上限仍由严格解析器约束。来源表中的跳出率、平均访问时长、平均访问页数仍没有通过“来源—质量指标”关联验证，固定返回缺失值；`sourcePageLinkage=false`，来源选择也不会联动页面报告。能力被关闭时客户端必须在 transport 前 fail-closed，不填 fixture、不把缺失值改成零。真实 App ID、SecretKey、Access Token、Refresh Token 和百度统计 Token 只保存在服务器环境与加密数据库中。系统不会向百度调用任何写接口，也不支持信息流、计划子集、创意、落地页或销售数据。
+
+2026-08-05 起，固定 30 日公开接口 `tongji-trend` 与 `tongji-source-trends` 已退役并返回 404；消费方必须使用带明确日期范围的 `website-traffic-overview`，不存在兼容 fallback。
 
 ## 官网表单数据（需认证）
 

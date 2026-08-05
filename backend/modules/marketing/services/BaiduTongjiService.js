@@ -276,6 +276,22 @@ function normalizeWebsiteMetric(metric = 'visits') {
   return metric;
 }
 
+function normalizeSourceComparison(value, sourceKey, metric) {
+  if (value === undefined || value === false || value === 'false') return false;
+  if (
+    (value !== true && value !== 'true')
+    || sourceKey !== 'ALL'
+    || metric !== 'visits'
+  ) {
+    throw new BaiduTongjiError(
+      '渠道趋势对比参数无效',
+      'TONGJI_SOURCE_COMPARISON_QUERY_INVALID',
+      400
+    );
+  }
+  return true;
+}
+
 function normalizeSummaryRows(rows) {
   if (!Array.isArray(rows)) {
     throw new BaiduTongjiError(
@@ -831,6 +847,23 @@ function cacheState(...states) {
   return 'HIT';
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(limit, items.length) },
+    () => worker()
+  ));
+  return results;
+}
+
 function snapshotTable(cacheScope) {
   if (cacheScope === 'FIXED') return 'baidu_tongji_snapshots';
   if (cacheScope === 'RANGE') return 'baidu_tongji_range_snapshots';
@@ -1079,6 +1112,31 @@ function normalizeStoredSourceTrend(payload, baseSnapshot) {
   };
 }
 
+function assertSourceTrendMatchesSnapshot(sourceTrend, baseSnapshot) {
+  const sourceSummary = baseSnapshot.sources.find(
+    (source) => source.sourceKey === sourceTrend.sourceKey
+  );
+  if (!sourceSummary) {
+    throw new BaiduTongjiError(
+      '百度统计来源趋势缺少对应来源汇总',
+      'TONGJI_SOURCE_RESPONSE_INVALID',
+      502
+    );
+  }
+  const expectedVisits = sourceSummary.summary.visits;
+  if (
+    expectedVisits !== null
+    && sourceTrend.summary.visits !== expectedVisits
+  ) {
+    throw new BaiduTongjiError(
+      '百度统计来源趋势与来源汇总不一致',
+      'TONGJI_SOURCE_TREND_MISMATCH',
+      502
+    );
+  }
+  return sourceTrend;
+}
+
 class BaiduTongjiService {
   constructor({
     sequelize,
@@ -1087,7 +1145,8 @@ class BaiduTongjiService {
     clock = () => Date.now(),
     cacheTtlMs = CACHE_TTL_MS,
     cacheMaxStaleMs = CACHE_MAX_STALE_MS,
-    capabilities = {}
+    capabilities = {},
+    logger = { warn() {} }
   }) {
     this.sequelize = sequelize;
     this.provider = provider;
@@ -1095,6 +1154,7 @@ class BaiduTongjiService {
     this.clock = clock;
     this.cacheTtlMs = cacheTtlMs;
     this.cacheMaxStaleMs = cacheMaxStaleMs;
+    this.logger = logger;
     this.capabilities = Object.freeze({
       sourceTraffic: capabilities.sourceTraffic === true,
       qualityMetrics: capabilities.qualityMetrics === true,
@@ -1672,13 +1732,16 @@ class BaiduTongjiService {
       sourceKey,
       selectors: baseSnapshot.selectors
     });
-    const payload = normalizeStoredSourceTrend({
-      site: result?.site,
-      coverage: baseSnapshot.coverage,
-      device: baseSnapshot.device,
-      sourceKey: result?.sourceKey,
-      trend: result?.rows
-    }, baseSnapshot);
+    const payload = assertSourceTrendMatchesSnapshot(
+      normalizeStoredSourceTrend({
+        site: result?.site,
+        coverage: baseSnapshot.coverage,
+        device: baseSnapshot.device,
+        sourceKey: result?.sourceKey,
+        trend: result?.rows
+      }, baseSnapshot),
+      baseSnapshot
+    );
     if (payload.sourceKey !== sourceKey) {
       throw new BaiduTongjiError(
         '百度统计来源趋势与请求不一致',
@@ -1707,7 +1770,10 @@ class BaiduTongjiService {
       && new Date(cached.row.expires_at).getTime() > this.clock();
     if (fresh) {
       return {
-        ...normalizeStoredSourceTrend(cached.payload, baseSnapshot),
+        ...assertSourceTrendMatchesSnapshot(
+          normalizeStoredSourceTrend(cached.payload, baseSnapshot),
+          baseSnapshot
+        ),
         cache: {
           state: 'HIT',
           ttlSeconds: Math.floor(this.cacheTtlMs / 1000),
@@ -1750,7 +1816,10 @@ class BaiduTongjiService {
         : Number.POSITIVE_INFINITY;
       if (!cacheMatchesCoverage || staleAgeMs > this.cacheMaxStaleMs) throw error;
       return {
-        ...normalizeStoredSourceTrend(cached.payload, baseSnapshot),
+        ...assertSourceTrendMatchesSnapshot(
+          normalizeStoredSourceTrend(cached.payload, baseSnapshot),
+          baseSnapshot
+        ),
         cache: {
           state: 'FALLBACK',
           ttlSeconds: Math.floor(this.cacheTtlMs / 1000),
@@ -1770,47 +1839,91 @@ class BaiduTongjiService {
     );
   }
 
-  async readProjectTrend(projectId, device = 'pc') {
-    const snapshot = await this.readSnapshot(projectId, device);
+  async readSourceComparison(projectId, currentSnapshot, previousSnapshot) {
+    const results = await mapWithConcurrency(
+      SOURCE_DEFINITIONS,
+      3,
+      async ({ sourceKey, sourceLabel }) => {
+        const currentSource = sourceForSnapshot(currentSnapshot, sourceKey);
+        const previousSource = sourceForSnapshot(previousSnapshot, sourceKey);
+        const summary = {
+          current: currentSource.summary.visits,
+          previous: previousSource.summary.visits,
+          changePercent: comparisonValue(
+            currentSource.summary.visits,
+            previousSource.summary.visits
+          ),
+          trafficShare: trafficShare(
+            currentSource.summary.visits,
+            currentSnapshot.summary.visits
+          )
+        };
+        if (currentSource.summary.visits === null) {
+          return {
+            row: {
+              sourceKey,
+              sourceLabel,
+              summaryState: 'NO_DATA',
+              trendState: 'NO_DATA',
+              summary,
+              trend: []
+            },
+            cacheState: null
+          };
+        }
+        try {
+          const sourceTrend = await this.readSourceTrend(
+            projectId,
+            currentSnapshot,
+            sourceKey
+          );
+          return {
+            row: {
+              sourceKey,
+              sourceLabel,
+              summaryState: 'DATA',
+              trendState: 'DATA',
+              summary,
+              trend: sourceTrend.trend.map((row) => ({
+                date: row.date,
+                visits: row.visits
+              }))
+            },
+            cacheState: sourceTrend.cache?.state || null
+          };
+        } catch (error) {
+          this.logger.warn?.({
+            event: 'tongji_source_comparison_partial',
+            projectId: String(projectId),
+            sourceKey,
+            errorCode: error?.code || 'UNKNOWN'
+          });
+          return {
+            row: {
+              sourceKey,
+              sourceLabel,
+              summaryState: 'DATA',
+              trendState: 'UNAVAILABLE',
+              summary,
+              trend: []
+            },
+            cacheState: null
+          };
+        }
+      }
+    );
+    const rows = results.map((result) => result.row);
     return {
-      projectId: String(projectId),
-      source: 'BAIDU_TONGJI',
-      mode: 'DATABASE_SNAPSHOT',
-      site: snapshot.site,
-      device: snapshot.device,
-      coverage: snapshot.coverage,
-      dataState: snapshot.dataState,
-      summary: snapshot.summary,
-      trend: snapshot.trend,
-      cache: snapshot.cache
-    };
-  }
-
-  async readProjectSourceTrends(projectId, device = 'pc', sourceKey = null) {
-    const requestedSourceKey = normalizeSourceKey(sourceKey, { optional: true });
-    const snapshot = await this.readSnapshot(projectId, device, {
-      requireSources: this.capabilities.sourceTraffic
-    });
-    const selectedTrend = requestedSourceKey
-      ? await this.readSourceTrend(projectId, snapshot, requestedSourceKey)
-      : null;
-    return {
-      projectId: String(projectId),
-      source: 'BAIDU_TONGJI',
-      mode: 'DATABASE_SNAPSHOT',
-      site: snapshot.site,
-      device: snapshot.device,
-      coverage: snapshot.coverage,
-      dataState: snapshot.sources.some((source) => source.dataState === 'DATA')
-        ? 'DATA'
-        : 'NO_DATA',
-      attribution: {
-        level: 'WEBSITE_TRAFFIC_SOURCE',
-        isCrossSystemVerified: false
+      payload: {
+        metric: 'visits',
+        state: rows.some((row) => row.trendState === 'UNAVAILABLE')
+          ? 'PARTIAL'
+          : 'COMPLETE',
+        rows
       },
-      sources: snapshot.sources,
-      selectedTrend,
-      cache: snapshot.cache
+      cacheStates: results
+        .map((result) => result.cacheState)
+        .filter(Boolean)
     };
   }
 
@@ -1822,9 +1935,15 @@ class BaiduTongjiService {
     });
     const sourceKey = normalizeWebsiteSource(options.source || 'ALL');
     const metric = normalizeWebsiteMetric(options.metric || 'visits');
+    const includeSourceComparison = normalizeSourceComparison(
+      options.includeSourceComparison,
+      sourceKey,
+      metric
+    );
     const previous = previousCoverage(coverage);
     const requireQuality = this.capabilities.qualityMetrics;
-    const requireSources = this.capabilities.sourceTraffic;
+    const requireSources = this.capabilities.sourceTraffic
+      || includeSourceComparison;
     const [currentSnapshot, previousSnapshot] = await Promise.all([
       this.readSnapshotForCoverage(
         projectId,
@@ -1839,13 +1958,16 @@ class BaiduTongjiService {
         { requireQuality, requireSources, cacheScope: 'RANGE' }
       )
     ]);
-    const [currentSource, previousSource] = await Promise.all([
+    const [currentSource, previousSource, comparisonResult] = await Promise.all([
       sourceKey === 'ALL'
         ? sourceForSnapshot(currentSnapshot, sourceKey)
         : this.readSourceTrend(projectId, currentSnapshot, sourceKey),
       sourceKey === 'ALL'
         ? sourceForSnapshot(previousSnapshot, sourceKey)
-        : this.readSourceTrend(projectId, previousSnapshot, sourceKey)
+        : this.readSourceTrend(projectId, previousSnapshot, sourceKey),
+      includeSourceComparison
+        ? this.readSourceComparison(projectId, currentSnapshot, previousSnapshot)
+        : null
     ]);
     if (currentSource.trend.length !== previousSource.trend.length) {
       throw new BaiduTongjiError(
@@ -1941,7 +2063,7 @@ class BaiduTongjiService {
     const selectedSummaryValue = qualityField
       ? currentSnapshot.quality?.summary[qualityField] ?? null
       : currentSource.summary[metric];
-    return {
+    const response = {
       projectId: String(projectId),
       source: 'BAIDU_TONGJI',
       mode: 'DATABASE_RANGE_SNAPSHOT',
@@ -1986,12 +2108,17 @@ class BaiduTongjiService {
           currentSnapshot.cache.state,
           previousSnapshot.cache.state,
           currentSource.cache?.state,
-          previousSource.cache?.state
+          previousSource.cache?.state,
+          ...(comparisonResult?.cacheStates || [])
         ),
         current: currentSnapshot.cache,
         previous: previousSnapshot.cache
       }
     };
+    if (comparisonResult) {
+      response.sourceComparison = comparisonResult.payload;
+    }
+    return response;
   }
 
   async readProjectWebsitePages(projectId, options = {}) {

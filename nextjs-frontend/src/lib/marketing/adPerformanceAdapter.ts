@@ -357,6 +357,17 @@ export function assertMarketingDashboardResponse(
   if (!exactMetrics(value.summary) || !exactTrend(value.trend)) {
     invalidDashboard();
   }
+  const verifiedTrend = value.trend as AdDailyMetrics[];
+  if (
+    snapshotState !== 'NONE'
+    && objectRecord(coverage)
+    && (
+      new Set(verifiedTrend.map((row) => row.date)).size !== verifiedTrend.length
+      || verifiedTrend.some((row) => (
+        row.date < String(coverage.from) || row.date > String(coverage.to)
+      ))
+    )
+  ) invalidDashboard();
   const bindings = value.bindings;
   const campaigns = value.campaigns;
   const adGroups = value.adGroups;

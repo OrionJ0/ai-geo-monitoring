@@ -148,6 +148,7 @@ async function createService(t, options = {}) {
       cacheTtlMs: options.cacheTtlMs || 600_000,
       cacheMaxStaleMs: options.cacheMaxStaleMs,
       capabilities: options.capabilities,
+      logger: options.logger,
       provider: options.provider || {
         async readTrafficSnapshot() {
           return trafficSnapshot();
@@ -155,6 +156,25 @@ async function createService(t, options = {}) {
       }
     })
   };
+}
+
+async function readFixedSnapshot(service, projectId, device = 'pc') {
+  return service.readSnapshot(projectId, device);
+}
+
+async function readFixedSources(
+  service,
+  projectId,
+  device = 'pc',
+  sourceKey = null
+) {
+  const snapshot = await service.readSnapshot(projectId, device, {
+    requireSources: service.capabilities.sourceTraffic
+  });
+  const selectedTrend = sourceKey
+    ? await service.readSourceTrend(projectId, snapshot, sourceKey)
+    : null;
+  return { ...snapshot, selectedTrend };
 }
 
 test('Tongji service persists one ten-minute snapshot shared by trend and source reads', async (t) => {
@@ -176,11 +196,10 @@ test('Tongji service persists one ten-minute snapshot shared by trend and source
     }
   });
 
-  const trend = await service.readProjectTrend('11', 'pc');
-  const sources = await service.readProjectSourceTrends('11', 'pc');
+  const trend = await readFixedSnapshot(service, '11', 'pc');
+  const sources = await readFixedSources(service, '11', 'pc');
 
   assert.equal(calls, 1);
-  assert.equal(trend.mode, 'DATABASE_SNAPSHOT');
   assert.equal(trend.cache.state, 'REFRESHED');
   assert.equal(sources.cache.state, 'HIT');
   assert.equal(sources.device, 'pc');
@@ -221,7 +240,7 @@ test('Tongji service persists one ten-minute snapshot shared by trend and source
   assert.equal(storedPayload.sourcesV2.length, 7);
 
   now += 5 * 60 * 1000;
-  await service.readProjectTrend('11', 'pc');
+  await readFixedSnapshot(service, '11', 'pc');
   assert.equal(calls, 1);
 });
 
@@ -320,8 +339,8 @@ test('Tongji cache write prunes rows older than the max-stale fallback window', 
     );
   }
 
-  await service.readProjectTrend('11', 'pc');
-  await service.readProjectSourceTrends('11', 'pc', 'DIRECT');
+  await readFixedSnapshot(service, '11', 'pc');
+  await readFixedSources(service, '11', 'pc', 'DIRECT');
   await service.saveSnapshotCache(
     '11',
     buildSnapshotPayload(
@@ -385,21 +404,188 @@ test('Tongji source summaries do not prefetch trends and cache only the selected
     }
   });
 
-  const summaries = await service.readProjectSourceTrends('11', 'pc');
+  const summaries = await readFixedSources(service, '11', 'pc');
   assert.equal(trendCalls, 0);
   assert.ok(summaries.sources.every((source) => (
     !Object.hasOwn(source, 'trend')
   )));
   assert.equal(summaries.selectedTrend, null);
 
-  const direct = await service.readProjectSourceTrends('11', 'pc', 'DIRECT');
+  const direct = await readFixedSources(service, '11', 'pc', 'DIRECT');
   assert.equal(trendCalls, 1);
   assert.equal(direct.selectedTrend.sourceKey, 'DIRECT');
   assert.equal(direct.selectedTrend.summary.visits, '3');
 
-  const cached = await service.readProjectSourceTrends('11', 'pc', 'DIRECT');
+  const cached = await readFixedSources(service, '11', 'pc', 'DIRECT');
   assert.equal(trendCalls, 1);
   assert.deepEqual(cached.selectedTrend.trend, direct.selectedTrend.trend);
+});
+
+test('Tongji source trend rejects a refreshed visit total that disagrees with its source summary', async (t) => {
+  const { database, service } = await createService(t, {
+    provider: {
+      async readTrafficSnapshot() {
+        return trafficSnapshot();
+      },
+      async readSourceTrend({ sourceKey }) {
+        assert.equal(sourceKey, 'DIRECT');
+        return {
+          site: trafficSnapshot().site,
+          sourceKey,
+          rows: rows(20, 4, 3)
+        };
+      }
+    }
+  });
+
+  await assert.rejects(
+    readFixedSources(service, '11', 'pc', 'DIRECT'),
+    { code: 'TONGJI_SOURCE_TREND_MISMATCH', status: 502 }
+  );
+
+  const cachedRows = await database.sequelize.query(
+    'SELECT COUNT(*) AS count FROM baidu_tongji_source_trend_snapshots',
+    { type: QueryTypes.SELECT }
+  );
+  assert.equal(Number(cachedRows[0].count), 0);
+});
+
+test('Tongji source trend preserves a verified zero visit total', async (t) => {
+  const zeroSnapshot = trafficSnapshot();
+  zeroSnapshot.allTrend = rows(0, 0, 0);
+  zeroSnapshot.sourceSummaries = zeroSnapshot.sourceSummaries.map((row) => ({
+    ...row,
+    pageviews: '0',
+    visits: '0',
+    visitors: '0'
+  }));
+  zeroSnapshot.engineSummaries = zeroSnapshot.engineSummaries.map((row) => ({
+    ...row,
+    pageviews: '0',
+    visits: '0',
+    visitors: '0'
+  }));
+  const { service } = await createService(t, {
+    provider: {
+      async readTrafficSnapshot() {
+        return zeroSnapshot;
+      },
+      async readSourceTrend({ sourceKey }) {
+        return {
+          site: zeroSnapshot.site,
+          sourceKey,
+          rows: rows(0, 0, 0)
+        };
+      }
+    }
+  });
+
+  const result = await readFixedSources(
+    service,
+    '11',
+    'pc',
+    'BAIDU_PAID'
+  );
+  assert.equal(result.selectedTrend.dataState, 'DATA');
+  assert.equal(result.selectedTrend.summary.visits, '0');
+});
+
+test('Tongji source trend rejects a fresh cached visit total that disagrees with its source summary', async (t) => {
+  let trendCalls = 0;
+  const { database, service } = await createService(t, {
+    provider: {
+      async readTrafficSnapshot() {
+        return trafficSnapshot();
+      },
+      async readSourceTrend({ sourceKey }) {
+        trendCalls += 1;
+        return {
+          site: trafficSnapshot().site,
+          sourceKey,
+          rows: rows(20, 3, 3)
+        };
+      }
+    }
+  });
+
+  const refreshed = await readFixedSources(
+    service,
+    '11',
+    'pc',
+    'DIRECT'
+  );
+  assert.equal(refreshed.selectedTrend.cache.state, 'REFRESHED');
+
+  const cacheRows = await database.sequelize.query(
+    'SELECT id, payload_json FROM baidu_tongji_source_trend_snapshots',
+    { type: QueryTypes.SELECT }
+  );
+  const invalidPayload = JSON.parse(cacheRows[0].payload_json);
+  invalidPayload.trend[0].visits = '4';
+  await database.sequelize.query(
+    `UPDATE baidu_tongji_source_trend_snapshots
+     SET payload_json = :payloadJson
+     WHERE id = :id`,
+    {
+      replacements: {
+        id: cacheRows[0].id,
+        payloadJson: JSON.stringify(invalidPayload)
+      }
+    }
+  );
+
+  await assert.rejects(
+    readFixedSources(service, '11', 'pc', 'DIRECT'),
+    { code: 'TONGJI_SOURCE_TREND_MISMATCH', status: 502 }
+  );
+  assert.equal(trendCalls, 1, 'fresh 缓存不能静默触发第二套来源 selector');
+});
+
+test('Tongji source trend rejects a stale fallback that disagrees with its source summary', async (t) => {
+  let now = Date.parse('2026-07-30T04:00:00.000Z');
+  let upstreamAvailable = true;
+  const { database, service } = await createService(t, {
+    clock: () => now,
+    provider: {
+      async readTrafficSnapshot() {
+        return trafficSnapshot();
+      },
+      async readSourceTrend({ sourceKey }) {
+        if (!upstreamAvailable) throw new Error('upstream unavailable');
+        return {
+          site: trafficSnapshot().site,
+          sourceKey,
+          rows: rows(20, 3, 3)
+        };
+      }
+    }
+  });
+
+  await readFixedSources(service, '11', 'pc', 'DIRECT');
+  const cacheRows = await database.sequelize.query(
+    'SELECT id, payload_json FROM baidu_tongji_source_trend_snapshots',
+    { type: QueryTypes.SELECT }
+  );
+  const invalidPayload = JSON.parse(cacheRows[0].payload_json);
+  invalidPayload.trend[0].visits = '4';
+  await database.sequelize.query(
+    `UPDATE baidu_tongji_source_trend_snapshots
+     SET payload_json = :payloadJson
+     WHERE id = :id`,
+    {
+      replacements: {
+        id: cacheRows[0].id,
+        payloadJson: JSON.stringify(invalidPayload)
+      }
+    }
+  );
+  now += 11 * 60 * 1000;
+  upstreamAvailable = false;
+
+  await assert.rejects(
+    readFixedSources(service, '11', 'pc', 'DIRECT'),
+    { code: 'TONGJI_SOURCE_TREND_MISMATCH', status: 502 }
+  );
 });
 
 test('Tongji cache refreshes after ten minutes and isolates PC from mobile', async (t) => {
@@ -415,10 +601,10 @@ test('Tongji cache refreshes after ten minutes and isolates PC from mobile', asy
     }
   });
 
-  await service.readProjectTrend('11', 'pc');
+  await readFixedSnapshot(service, '11', 'pc');
   now += 11 * 60 * 1000;
-  await service.readProjectTrend('11', 'pc');
-  await service.readProjectTrend('11', 'mobile');
+  await readFixedSnapshot(service, '11', 'pc');
+  await readFixedSnapshot(service, '11', 'mobile');
 
   assert.deepEqual(devices, ['pc', 'pc', 'mobile']);
   const count = await database.sequelize.query(
@@ -449,14 +635,14 @@ test('Tongji cache coalesces concurrent refreshes and falls back to the last dat
   });
 
   await Promise.all([
-    service.readProjectTrend('11', 'pc'),
-    service.readProjectSourceTrends('11', 'pc')
+    readFixedSnapshot(service, '11', 'pc'),
+    readFixedSources(service, '11', 'pc')
   ]);
   assert.equal(calls, 1);
 
   now += 11 * 60 * 1000;
   fail = true;
-  const fallback = await service.readProjectTrend('11', 'pc');
+  const fallback = await readFixedSnapshot(service, '11', 'pc');
   assert.equal(calls, 2);
   assert.equal(fallback.cache.state, 'FALLBACK');
   assert.equal(fallback.summary.visits, '15');
@@ -476,7 +662,7 @@ test('Tongji deployment reads a stale four-source cache when the upstream is una
     }
   });
 
-  await service.readProjectSourceTrends('11', 'pc');
+  await readFixedSources(service, '11', 'pc');
   const rowsFromDatabase = await database.sequelize.query(
     `SELECT payload_json FROM baidu_tongji_snapshots
      WHERE project_id = 11 AND device = 'pc'`,
@@ -500,7 +686,7 @@ test('Tongji deployment reads a stale four-source cache when the upstream is una
 
   now += 11 * 60 * 1000;
   fail = true;
-  const fallback = await service.readProjectSourceTrends('11', 'pc');
+  const fallback = await readFixedSources(service, '11', 'pc');
   assert.equal(fallback.cache.state, 'FALLBACK');
   assert.equal(fallback.sources.length, 7);
   assert.equal(
@@ -599,7 +785,7 @@ test('Tongji refresh coalescing never lets a basic request satisfy a richer capa
 test('Tongji service rejects an invalid device and a binding without an explicit site', async (t) => {
   const { service } = await createService(t);
   await assert.rejects(
-    service.readProjectTrend('11', 'tablet'),
+    readFixedSnapshot(service, '11', 'tablet'),
     { code: 'TONGJI_DEVICE_INVALID', status: 400 }
   );
 
@@ -621,7 +807,7 @@ test('Tongji service rejects an invalid device and a binding without an explicit
     }
   });
   await assert.rejects(
-    missingSite.readProjectTrend('11', 'pc'),
+    readFixedSnapshot(missingSite, '11', 'pc'),
     { code: 'TONGJI_SITE_BINDING_MISSING', status: 409 }
   );
 });
@@ -653,14 +839,14 @@ test('Tongji service deduplicates same-site account bindings and rejects differe
       }
     }
   });
-  await service.readProjectTrend('11', 'pc');
+  await readFixedSnapshot(service, '11', 'pc');
   assert.equal(calls, 1);
 
   await database.sequelize.query(
     "UPDATE baidu_project_bindings SET tongji_site_id = '302' WHERE id = 'binding-2'"
   );
   await assert.rejects(
-    service.readProjectTrend('11', 'pc'),
+    readFixedSnapshot(service, '11', 'pc'),
     { code: 'TONGJI_BINDING_AMBIGUOUS', status: 409 }
   );
 });
@@ -726,6 +912,210 @@ function rangeSnapshot(coverage) {
     }
   };
 }
+
+test('website source comparison only accepts all-source visits requests', async (t) => {
+  const { service } = await createService(t);
+
+  await assert.rejects(
+    service.readProjectWebsiteTraffic('11', {
+      device: 'all',
+      from: '2026-07-29',
+      to: '2026-07-30',
+      source: 'DIRECT',
+      metric: 'visits',
+      includeSourceComparison: true
+    }),
+    {
+      code: 'TONGJI_SOURCE_COMPARISON_QUERY_INVALID',
+      status: 400
+    }
+  );
+  await assert.rejects(
+    service.readProjectWebsiteTraffic('11', {
+      device: 'all',
+      from: '2026-07-29',
+      to: '2026-07-30',
+      source: 'ALL',
+      metric: 'pageviews',
+      includeSourceComparison: 'true'
+    }),
+    {
+      code: 'TONGJI_SOURCE_COMPARISON_QUERY_INVALID',
+      status: 400
+    }
+  );
+});
+
+test('website source comparison returns every canonical source in one response', async (t) => {
+  const sourceValues = {
+    DIRECT: { pageviews: [20, 30], visits: [10, 20], visitors: [10, 10] },
+    BAIDU_SEARCH: { pageviews: [30, 30], visits: [20, 20], visitors: [15, 15] },
+    BING_SEARCH: { pageviews: [15, 15], visits: [10, 10], visitors: [5, 5] },
+    EXTERNAL_REFERRAL: { pageviews: [10, 10], visits: [5, 5], visitors: [5, 5] }
+  };
+  const sourceCalls = [];
+  const { service } = await createService(t, {
+    capabilities: { sourceTraffic: true },
+    provider: {
+      async readTrafficSnapshot({ coverage }) {
+        return {
+          ...rangeSnapshot(coverage),
+          sourceReportsIncluded: true
+        };
+      },
+      async readSourceTrend({ coverage, sourceKey }) {
+        sourceCalls.push({ coverage, sourceKey });
+        return {
+          site: trafficSnapshot().site,
+          sourceKey,
+          rows: rangeRows(coverage, sourceValues[sourceKey])
+        };
+      }
+    }
+  });
+
+  const result = await service.readProjectWebsiteTraffic('11', {
+    device: 'all',
+    from: '2026-07-29',
+    to: '2026-07-30',
+    source: 'ALL',
+    metric: 'visits',
+    includeSourceComparison: true
+  });
+
+  assert.deepEqual(
+    sourceCalls.map((call) => call.sourceKey).sort(),
+    ['BAIDU_SEARCH', 'BING_SEARCH', 'DIRECT', 'EXTERNAL_REFERRAL']
+  );
+  assert.ok(sourceCalls.every((call) => (
+    call.coverage.from === '2026-07-29'
+    && call.coverage.to === '2026-07-30'
+  )));
+  assert.equal(result.sourceComparison.metric, 'visits');
+  assert.equal(result.sourceComparison.state, 'COMPLETE');
+  assert.deepEqual(
+    result.sourceComparison.rows.map((row) => row.sourceKey),
+    [
+      'BAIDU_PAID',
+      'DIRECT',
+      'BAIDU_SEARCH',
+      'BING_SEARCH',
+      'GOOGLE_SEARCH',
+      'OTHER_SEARCH',
+      'EXTERNAL_REFERRAL'
+    ]
+  );
+  assert.deepEqual(result.sourceComparison.rows[0], {
+    sourceKey: 'BAIDU_PAID',
+    sourceLabel: '百度推广',
+    summaryState: 'NO_DATA',
+    trendState: 'NO_DATA',
+    summary: {
+      current: null,
+      previous: null,
+      changePercent: null,
+      trafficShare: null
+    },
+    trend: []
+  });
+  assert.deepEqual(result.sourceComparison.rows[1], {
+    sourceKey: 'DIRECT',
+    sourceLabel: '直接访问',
+    summaryState: 'DATA',
+    trendState: 'DATA',
+    summary: {
+      current: '30',
+      previous: '24',
+      changePercent: '25.0',
+      trafficShare: '30.0'
+    },
+    trend: [
+      { date: '2026-07-29', visits: '10' },
+      { date: '2026-07-30', visits: '20' }
+    ]
+  });
+});
+
+test('website source comparison isolates one failed source and limits concurrency', async (t) => {
+  const sourceValues = {
+    DIRECT: { pageviews: [20, 30], visits: [10, 20], visitors: [10, 10] },
+    BAIDU_SEARCH: { pageviews: [30, 30], visits: [20, 20], visitors: [15, 15] },
+    BING_SEARCH: { pageviews: [15, 15], visits: [10, 10], visitors: [5, 5] },
+    EXTERNAL_REFERRAL: { pageviews: [10, 10], visits: [5, 5], visitors: [5, 5] }
+  };
+  const warnings = [];
+  let active = 0;
+  let maxActive = 0;
+  const { service } = await createService(t, {
+    capabilities: { sourceTraffic: true },
+    logger: { warn(event) { warnings.push(event); } },
+    provider: {
+      async readTrafficSnapshot({ coverage }) {
+        return {
+          ...rangeSnapshot(coverage),
+          sourceReportsIncluded: true
+        };
+      },
+      async readSourceTrend({ coverage, sourceKey }) {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        if (sourceKey === 'DIRECT') {
+          const error = new Error('sensitive upstream response');
+          error.code = 'BAIDU_TONGJI_FAILED';
+          throw error;
+        }
+        return {
+          site: trafficSnapshot().site,
+          sourceKey,
+          rows: rangeRows(coverage, sourceValues[sourceKey])
+        };
+      }
+    }
+  });
+
+  const result = await service.readProjectWebsiteTraffic('11', {
+    device: 'all',
+    from: '2026-07-29',
+    to: '2026-07-30',
+    source: 'ALL',
+    metric: 'visits',
+    includeSourceComparison: 'true'
+  });
+
+  assert.equal(maxActive, 3);
+  assert.equal(result.sourceComparison.state, 'PARTIAL');
+  assert.deepEqual(
+    result.sourceComparison.rows.find((row) => row.sourceKey === 'DIRECT'),
+    {
+      sourceKey: 'DIRECT',
+      sourceLabel: '直接访问',
+      summaryState: 'DATA',
+      trendState: 'UNAVAILABLE',
+      summary: {
+        current: '30',
+        previous: '24',
+        changePercent: '25.0',
+        trafficShare: '30.0'
+      },
+      trend: []
+    }
+  );
+  assert.equal(
+    result.sourceComparison.rows.find(
+      (row) => row.sourceKey === 'BAIDU_SEARCH'
+    ).trendState,
+    'DATA'
+  );
+  assert.deepEqual(warnings, [{
+    event: 'tongji_source_comparison_partial',
+    projectId: '11',
+    sourceKey: 'DIRECT',
+    errorCode: 'BAIDU_TONGJI_FAILED'
+  }]);
+  assert.equal(JSON.stringify(result).includes('sensitive upstream response'), false);
+});
 
 test('website traffic contract exposes verified all-site quality summary and trend', async (t) => {
   const { database, service } = await createService(t, {

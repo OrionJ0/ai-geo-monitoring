@@ -23,6 +23,7 @@ export type WebsiteTrafficQuery = {
   to: string;
   source: WebsiteSourceKey;
   metric: WebsiteMetric;
+  includeSourceComparison?: boolean;
 };
 
 export type WebsitePagesQuery = {
@@ -71,7 +72,8 @@ export function useWebsiteTrafficOverview(query: WebsiteTrafficQuery) {
             from: query.from,
             to: query.to,
             source: query.source,
-            metric: query.metric
+            metric: query.metric,
+            includeSourceComparison: query.includeSourceComparison
           }
         }
       );

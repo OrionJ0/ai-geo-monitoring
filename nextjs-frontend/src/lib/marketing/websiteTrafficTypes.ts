@@ -23,6 +23,15 @@ export type CountComparison = {
   changePercent: string | null;
 };
 
+export type WebsiteSourceComparisonRow = {
+  sourceKey: Exclude<WebsiteSourceKey, 'ALL'>;
+  sourceLabel: string;
+  summaryState: 'DATA' | 'NO_DATA';
+  trendState: 'DATA' | 'NO_DATA' | 'UNAVAILABLE';
+  summary: CountComparison & { trafficShare: string | null };
+  trend: Array<{ date: string; visits: string | null }>;
+};
+
 export type WebsiteTrafficOverview = {
   projectId: string;
   source: 'BAIDU_TONGJI';
@@ -76,6 +85,11 @@ export type WebsiteTrafficOverview = {
       averageVisitPages: string | null;
       dataState: 'DATA' | 'NO_DATA';
     }>;
+  };
+  sourceComparison?: {
+    metric: 'visits';
+    state: 'COMPLETE' | 'PARTIAL';
+    rows: WebsiteSourceComparisonRow[];
   };
   capabilities: {
     trafficCounts: boolean;
@@ -204,6 +218,68 @@ function sourceQualityRows(value: unknown): boolean {
       && ['DATA', 'NO_DATA'].includes(String(row.dataState)));
 }
 
+function sourceComparison(
+  value: unknown,
+  from: string,
+  to: string
+): boolean {
+  if (!record(value) || value.metric !== 'visits') return false;
+  if (!['COMPLETE', 'PARTIAL'].includes(String(value.state))) return false;
+  if (!Array.isArray(value.rows) || value.rows.length !== WEBSITE_TRAFFIC_SOURCE_KEYS.length) {
+    return false;
+  }
+  const rows = value.rows;
+  if (!rows.every((row, index) => (
+    record(row)
+    && row.sourceKey === WEBSITE_TRAFFIC_SOURCE_KEYS[index]
+    && text(row.sourceLabel)
+    && ['DATA', 'NO_DATA'].includes(String(row.summaryState))
+    && ['DATA', 'NO_DATA', 'UNAVAILABLE'].includes(String(row.trendState))
+    && record(row.summary)
+    && metric(row.summary.current)
+    && metric(row.summary.previous)
+    && metric(row.summary.changePercent)
+    && metric(row.summary.trafficShare)
+    && Array.isArray(row.trend)
+    && row.trend.every((point) => record(point)
+      && typeof point.date === 'string'
+      && text(point.date)
+      && point.date >= from
+      && point.date <= to
+      && metric(point.visits))
+  ))) return false;
+  const hasUnavailable = rows.some((row) => (
+    record(row) && row.trendState === 'UNAVAILABLE'
+  ));
+  if ((value.state === 'PARTIAL') !== hasUnavailable) return false;
+  return rows.every((row) => {
+    if (!record(row) || !record(row.summary) || !Array.isArray(row.trend)) {
+      return false;
+    }
+    const dates = row.trend.map((point) => (
+      record(point) ? String(point.date) : ''
+    ));
+    if (new Set(dates).size !== dates.length) return false;
+    if (dates.some((date, index) => index > 0 && date <= dates[index - 1])) {
+      return false;
+    }
+    if (row.summaryState === 'NO_DATA') {
+      return row.summary.current === null
+        && row.trendState === 'NO_DATA'
+        && row.trend.length === 0;
+    }
+    if (row.summary.current === null || row.trendState === 'NO_DATA') {
+      return false;
+    }
+    if (row.trendState === 'UNAVAILABLE') return row.trend.length === 0;
+    const observed = row.trend
+      .filter((point) => record(point) && point.visits !== null)
+      .map((point) => BigInt(String((point as Record<string, unknown>).visits)));
+    const total = observed.reduce((sum, visits) => sum + visits, BigInt(0));
+    return observed.length > 0 && total.toString() === row.summary.current;
+  });
+}
+
 export function assertWebsiteTrafficOverview(
   value: unknown,
   query: {
@@ -213,6 +289,7 @@ export function assertWebsiteTrafficOverview(
     to: string;
     source: WebsiteSourceKey;
     metric: WebsiteMetric;
+    includeSourceComparison?: boolean;
   }
 ): asserts value is WebsiteTrafficOverview {
   if (!record(value)) invalidWebsiteTraffic();
@@ -244,6 +321,12 @@ export function assertWebsiteTrafficOverview(
     || !record(sourceQuality)
     || !metric(sourceQuality.allSiteBounceRate)
     || !sourceQualityRows(sourceQuality.rows)
+    || (
+      query.includeSourceComparison === true
+        ? !sourceComparison(value.sourceComparison, query.from, query.to)
+        : value.sourceComparison !== undefined
+          && !sourceComparison(value.sourceComparison, query.from, query.to)
+    )
     || !capabilities(responseCapabilities)
     || !record(value.cache)
     || !['HIT', 'REFRESHED', 'FALLBACK'].includes(String(value.cache.state))

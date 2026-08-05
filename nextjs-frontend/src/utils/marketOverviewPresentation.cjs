@@ -46,6 +46,116 @@ function buildPeriodRows(rows, from, to) {
   };
 }
 
+function completeAdTrendWithinCoverage(rows, coverage) {
+  if (
+    !Array.isArray(rows)
+    || !coverage
+    || typeof coverage !== 'object'
+  ) throw new TypeError('广告趋势覆盖范围无效');
+  const from = parseIsoDate(coverage.from);
+  const to = parseIsoDate(coverage.to);
+  if (from.getTime() > to.getTime()) {
+    throw new TypeError('广告趋势覆盖范围无效');
+  }
+  const byDate = new Map();
+  for (const row of rows) {
+    const date = parseIsoDate(row?.date);
+    if (date < from || date > to) {
+      throw new TypeError('广告趋势日期超出已验证覆盖范围');
+    }
+    if (byDate.has(row.date)) throw new TypeError('广告趋势日期重复');
+    byDate.set(row.date, {
+      date: row.date,
+      costAmountScaled: requireDecimalText(row.costAmountScaled),
+      impressions: requireDecimalText(row.impressions),
+      clicks: requireDecimalText(row.clicks)
+    });
+  }
+  const completed = [];
+  for (
+    let cursor = from.getTime();
+    cursor <= to.getTime();
+    cursor += DAY_MS
+  ) {
+    const date = new Date(cursor).toISOString().slice(0, 10);
+    completed.push(byDate.get(date) || {
+      date,
+      costAmountScaled: '0',
+      impressions: '0',
+      clicks: '0'
+    });
+  }
+  return completed;
+}
+
+function buildDailyChannelComparison(totalTrend, sourceRows, hiddenKeys = new Set()) {
+  if (!Array.isArray(totalTrend) || !Array.isArray(sourceRows)) {
+    throw new TypeError('渠道趋势数据无效');
+  }
+  const hidden = new Set(hiddenKeys);
+  const totalByDate = new Map();
+  const dates = new Set();
+  for (const row of totalTrend) {
+    parseIsoDate(row?.date);
+    if (totalByDate.has(row.date)) throw new TypeError('全部访问趋势日期重复');
+    const value = row.current == null ? null : requireDecimalText(row.current);
+    totalByDate.set(row.date, value);
+    dates.add(row.date);
+  }
+  const normalizedSources = sourceRows.map((source, sourceIndex) => {
+    const values = new Map();
+    for (const point of source?.trend || []) {
+      parseIsoDate(point?.date);
+      if (values.has(point.date)) throw new TypeError('渠道趋势日期重复');
+      values.set(
+        point.date,
+        point.visits == null ? null : requireDecimalText(point.visits)
+      );
+      dates.add(point.date);
+    }
+    return {
+      sourceKey: String(source?.sourceKey || ''),
+      sourceLabel: String(source?.sourceLabel || ''),
+      sourceIndex,
+      values
+    };
+  });
+  return [...dates].sort().flatMap((date) => {
+    const daily = [];
+    const total = totalByDate.get(date);
+    if (total != null) {
+      daily.push({
+        date,
+        sourceKey: 'ALL',
+        sourceLabel: '全部访问',
+        value: total,
+        isTotal: true
+      });
+    }
+    const channels = normalizedSources
+      .filter((source) => !hidden.has(source.sourceKey))
+      .map((source) => ({
+        ...source,
+        value: source.values.get(date)
+      }))
+      .filter((source) => source.value != null)
+      .sort((left, right) => {
+        const leftValue = BigInt(left.value);
+        const rightValue = BigInt(right.value);
+        if (leftValue === rightValue) return left.sourceIndex - right.sourceIndex;
+        return leftValue > rightValue ? -1 : 1;
+      })
+      .map((source) => ({
+        date,
+        sourceKey: source.sourceKey,
+        sourceLabel: source.sourceLabel,
+        value: source.value,
+        isTotal: false
+      }));
+    return [...daily, ...channels];
+  });
+}
+
 function powerOfTen(digits) {
   if (!Number.isInteger(digits) || digits < 0 || digits > 12) {
     throw new TypeError('精度无效');
@@ -211,8 +321,10 @@ function formatRatioChange(
 }
 
 module.exports = {
+  buildDailyChannelComparison,
   buildPeriodRows,
   calculateRate,
+  completeAdTrendWithinCoverage,
   divideScaledAmount,
   formatAverage,
   formatPeriodChange,

@@ -46,13 +46,17 @@ test('workspace navigation exposes the new pages even before sources have data',
   assert.match(navigation, /\/geo\/order-results/);
 });
 
-test('formal overview keeps Baidu Tongji separate from the local ad snapshot', () => {
-  const source = fs.readFileSync(
+test('formal overview keeps dashboard ads and range Tongji on separate contracts', () => {
+  const overviewHook = fs.readFileSync(
     path.join(frontendDirectory, 'src/lib/marketing/useMarketOverview.ts'),
     'utf8'
   );
+  const page = fs.readFileSync(
+    path.join(frontendDirectory, 'src/app/geo/market-overview/page.tsx'),
+    'utf8'
+  );
 
-  assert.match(source, /\/tongji-trend/);
-  assert.match(source, /\/dashboard/);
-  assert.match(source, /Promise\.allSettled/);
+  assert.match(overviewHook, /\/dashboard/);
+  assert.doesNotMatch(overviewHook + page, /\/tongji-trend|\/tongji-source-trends/);
+  assert.match(page, /includeSourceComparison:\s*true/);
 });

@@ -684,7 +684,7 @@ test('Tongji trend accepts only documented stable source filters', async () => {
   };
 
   for (const [sourceKey, providerValue] of [
-    ['BAIDU_PAID', 'searchBaiduProFc'],
+    ['BAIDU_PAID', 'searchBaiduPro'],
     ['DIRECT', 'through'],
     ['SEARCH', 'search,0'],
     ['EXTERNAL', 'link'],

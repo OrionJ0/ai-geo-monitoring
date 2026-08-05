@@ -46,26 +46,6 @@ function createMarketingDashboardRouter({
   });
 
   if (tongjiService) router.get(
-    '/projects/:projectId/tongji-trend',
-    async (req, res) => {
-      try {
-        await dashboardService.assertAccess({
-          projectId: req.params.projectId,
-          user: req.user
-        });
-        const result = await tongjiService.readProjectTrend(
-          req.params.projectId,
-          req.query.device
-        );
-        res.set('Cache-Control', 'private, no-store');
-        return res.json(result);
-      } catch (error) {
-        return sendError(res, error);
-      }
-    }
-  );
-
-  if (tongjiService) router.get(
     '/projects/:projectId/website-traffic-overview',
     async (req, res) => {
       try {
@@ -80,7 +60,8 @@ function createMarketingDashboardRouter({
             from: req.query.from,
             to: req.query.to,
             source: req.query.source,
-            metric: req.query.metric
+            metric: req.query.metric,
+            includeSourceComparison: req.query.includeSourceComparison
           }
         );
         res.set('Cache-Control', 'private, max-age=60');
@@ -114,27 +95,6 @@ function createMarketingDashboardRouter({
           }
         );
         res.set('Cache-Control', 'private, max-age=60');
-        return res.json(result);
-      } catch (error) {
-        return sendError(res, error);
-      }
-    }
-  );
-
-  if (tongjiService) router.get(
-    '/projects/:projectId/tongji-source-trends',
-    async (req, res) => {
-      try {
-        await dashboardService.assertAccess({
-          projectId: req.params.projectId,
-          user: req.user
-        });
-        const result = await tongjiService.readProjectSourceTrends(
-          req.params.projectId,
-          req.query.device,
-          req.query.source
-        );
-        res.set('Cache-Control', 'private, no-store');
         return res.json(result);
       } catch (error) {
         return sendError(res, error);

@@ -117,6 +117,7 @@
 
 .sourceLink:focus-visible,
 .headerButton:focus-visible,
+.legendButton:focus-visible,
 .tableScroller:focus-visible {
   outline: 2px solid #2f6bff;
   outline-offset: 2px;
@@ -244,6 +245,19 @@
 
 .journeyTable tbody tr:hover > * {
   background: #f5f7fa;
+}
+
+.interactiveRow {
+  cursor: pointer;
+}
+
+.interactiveRow[aria-selected="true"] > * {
+  background: #f5f8ff;
+}
+
+.interactiveRow:focus-visible {
+  outline: 2px solid #2f6bff;
+  outline-offset: -2px;
 }
 
 .selectedHeader {
@@ -461,6 +475,70 @@
   white-space: nowrap;
 }
 
+.channelLegend {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.legendButton {
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  padding: 7px 9px;
+  border: 1px solid #d8e0eb;
+  align-items: center;
+  gap: 8px;
+  color: #172b4d;
+  background: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.legendButton:hover {
+  border-color: #8fb8ff;
+  background: #f7faff;
+}
+
+.legendButton[data-hidden="true"] {
+  color: #667085;
+  background: #f5f7fa;
+  opacity: 0.72;
+}
+
+.legendSwatch {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 50%;
+}
+
+.legendCopy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.legendCopy strong,
+.legendCopy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legendCopy strong {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.legendCopy small {
+  color: #667085;
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .chartRegion {
   min-height: 232px;
   margin-top: 4px;
@@ -513,6 +591,10 @@
   .trendSummary > div:first-child {
     padding-left: 0;
     border-left: 0;
+  }
+
+  .channelLegend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -573,6 +655,10 @@
 
   .chartRegion {
     min-height: 210px;
+  }
+
+  .channelLegend {
+    grid-template-columns: 1fr;
   }
 }
 

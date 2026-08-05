@@ -52,6 +52,19 @@ test('website traffic contract requires every source exactly once', () => {
   assert.match(contract, /WEBSITE_TRAFFIC_SOURCE_KEYS\.every\(\(key\) => keys\.includes\(key\)\)/);
 });
 
+test('website traffic hook strictly validates the optional source comparison contract', () => {
+  const contract = fs.readFileSync(typesPath, 'utf8');
+  const hook = fs.readFileSync(hookPath, 'utf8');
+
+  assert.match(hook, /includeSourceComparison\?: boolean/);
+  assert.match(hook, /includeSourceComparison: query\.includeSourceComparison/);
+  assert.match(contract, /sourceComparison\?:/);
+  assert.match(contract, /function sourceComparison\(/);
+  assert.match(contract, /query\.includeSourceComparison === true/);
+  assert.match(contract, /trendState/);
+  assert.match(contract, /\['DATA', 'NO_DATA', 'UNAVAILABLE'\]/);
+});
+
 test('page keeps fixed information architecture and honest missing states', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 

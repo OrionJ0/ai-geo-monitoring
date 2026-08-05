@@ -20,37 +20,32 @@ const sharedCssPath = path.resolve(
   '../../src/components/marketing/marketing-shared.module.css'
 );
 
-test('overview independently settles advertising, traffic and traffic-source reads', () => {
+test('overview hook owns only the dashboard while range traffic uses the shared hook', () => {
   const source = fs.readFileSync(hookPath, 'utf8');
 
-  assert.match(source, /Promise\.allSettled/);
   assert.match(source, /assertMarketingDashboardResponse/);
   assert.match(source, /assertMarketingDashboardResponse\(value, projectId\)/);
-  assert.match(source, /assertTongjiOverviewResponse/);
   assert.match(source, /\/dashboard/);
-  assert.match(source, /\/tongji-trend/);
-  assert.match(source, /\/tongji-source-trends/);
   assert.match(source, /ad:\s*SourceSlot/);
-  assert.match(source, /traffic:\s*SourceSlot/);
-  assert.match(source, /trafficSources:\s*SourceSlot/);
-  assert.match(source, /paidTraffic:\s*SourceSlot/);
-  assert.match(source, /trafficTrend:\s*SourceSlot/);
-  assert.match(source, /validSelectedSourceTrend/);
-  assert.match(source, /value\.sourceKey === expectedSourceKey/);
-  assert.match(source, /new Set\(keys\)\.size === TONGJI_SOURCE_KEYS\.length/);
-  assert.match(source, /source: 'BAIDU_PAID'/);
-  assert.match(source, /nextTrafficSources[\s\S]*?'sources'\s*\)/);
-  assert.match(source, /nextPaidTraffic[\s\S]*?'sources',\s*'BAIDU_PAID'/);
+  assert.doesNotMatch(source, /traffic:\s*SourceSlot/);
+  assert.doesNotMatch(source, /trafficSources|paidTraffic|trafficTrend/);
+  assert.doesNotMatch(source, /\/tongji-trend|\/tongji-source-trends/);
   assert.match(source, /10 \* 60 \* 1000/);
   assert.doesNotMatch(source, /setInterval/);
   assert.match(source, /visibilitychange/);
   assert.match(source, /snapshotFreshnessState/);
   assert.match(source, /state: stale \? 'STALE'/);
   const page = fs.readFileSync(pagePath, 'utf8');
+  assert.match(page, /useWebsiteTrafficOverview/);
+  assert.match(page, /includeSourceComparison:\s*true/);
   assert.match(page, /websiteFallbackRange/);
   assert.match(page, /useMarketingFilters\(\)/);
+  assert.match(page, /trafficRange\.data\.coverage\.from === dateRange\?\.\[0\]/);
+  assert.match(page, /trafficRange\.data\.selectedSource\.sourceKey === ALL_SOURCE/);
+  assert.match(page, /selectedTraffic\.data\.selectedSource\.sourceKey === trendSource/);
   assert.doesNotMatch(page, /<MarketingPageFilters[\s\S]*?disabled=/);
-  assert.match(page, /广告快照刷新失败/);
+  assert.match(page, /最后成功广告快照/);
+  assert.doesNotMatch(page, /广告来源读取失败|网站来源读取失败/);
 });
 
 test('overview implements the final three-section visual hierarchy', () => {
@@ -83,7 +78,7 @@ test('journey uses fixed stages and never fabricates unsupported attribution', (
     '广告投入',
     '展现',
     '访问',
-    '官网表单咨询',
+    '官网咨询',
     '线索入池',
     '成交结果',
     '整体转换率'
@@ -101,12 +96,12 @@ test('journey uses fixed stages and never fabricates unsupported attribution', (
 test('journey adds Baidu Tongji source rows as visit-only evidence', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
 
-  assert.match(source, /overview\.trafficSources/);
+  assert.match(source, /trafficData\?\.sourceComparison/);
   assert.match(source, /source\.sourceLabel/);
   assert.match(source, /source\.summary\?\.visits/);
   assert.match(source, /TONGJI_CHANNEL_DEFINITIONS/);
-  assert.match(source, /BAIDU_PAID: 'BAIDU_PAID'/);
-  assert.match(source, /BAIDU_TONGJI_EXTERNAL_REFERRAL: 'EXTERNAL_REFERRAL'/);
+  assert.match(source, /sourceKey: 'BAIDU_PAID'/);
+  assert.match(source, /sourceKey: 'EXTERNAL_REFERRAL'/);
   assert.match(source, /不会因同期出现而伪造跨系统归因/);
   assert.match(source, /paidVisits/);
   assert.match(source, /不能用广告点击代替/);
@@ -133,8 +128,7 @@ test('selectable headers update only the trend metric', () => {
   assert.match(source, /disabled=\{!targetMetric\}/);
   assert.match(source, /metric\.key === 'visits' \? 'visits' : null/);
   assert.match(source, /trendSource/);
-  assert.match(source, /trafficTrendData\?\.selectedTrend/);
-  assert.doesNotMatch(source, /onRow|onClick:\s*\(.*setTrendSource/s);
+  assert.match(source, /selectedTrafficData\?\.trend/);
 });
 
 test('trend exposes two selectors, summaries, two-period semantics and equivalent data', () => {
@@ -150,19 +144,35 @@ test('trend exposes two selectors, summaries, two-period semantics and equivalen
   assert.match(source, /上一周期/);
   assert.match(source, /每日趋势等价数据表/);
   for (const sourceKey of [
-    'BAIDU_TONGJI_ALL',
-    'BAIDU_TONGJI_DIRECT',
-    'BAIDU_TONGJI_BAIDU_SEARCH',
-    'BAIDU_TONGJI_BING_SEARCH',
-    'BAIDU_TONGJI_GOOGLE_SEARCH',
-    'BAIDU_TONGJI_OTHER_SEARCH',
-    'BAIDU_TONGJI_EXTERNAL_REFERRAL'
+    'ALL',
+    'DIRECT',
+    'BAIDU_SEARCH',
+    'BING_SEARCH',
+    'GOOGLE_SEARCH',
+    'OTHER_SEARCH',
+    'EXTERNAL_REFERRAL'
   ]) {
     assert.match(source, new RegExp(sourceKey));
   }
-  for (const metric of ['pageviews', 'visits', 'visitors']) {
-    assert.match(source, new RegExp(`key: '${metric}'`));
-  }
+  assert.match(source, /metric\.key === 'visits'/);
+  assert.doesNotMatch(source, /key: 'pageviews'|key: 'visitors'/);
+  assert.doesNotMatch(source, /BAIDU_TONGJI_ALL|BAIDU_TONGJI_DIRECT/);
+});
+
+test('all-channel trend has an accessible legend and table-row drill interaction', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /buildDailyChannelComparison/);
+  assert.match(source, /hiddenTrendSources/);
+  assert.match(source, /aria-label="渠道趋势图例"/);
+  assert.match(source, /aria-pressed=\{!hidden\}/);
+  assert.match(source, /trafficShare/);
+  assert.match(source, /changePercent/);
+  assert.match(source, /aria-selected=\{selected\}/);
+  assert.match(source, /event\.key === 'Enter' \|\| event\.key === ' '/);
+  assert.match(source, /event\.stopPropagation\(\)/);
+  assert.match(source, /setTrendSource\(ALL_SOURCE\)/);
+  assert.doesNotMatch(source, /官网全站（百度统计）/);
 });
 
 test('overview preserves local scrolling, responsive stacking and reduced motion', () => {

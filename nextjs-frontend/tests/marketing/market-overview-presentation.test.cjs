@@ -3,7 +3,9 @@ const assert = require('node:assert/strict');
 
 const {
   buildPeriodRows,
+  buildDailyChannelComparison,
   calculateRate,
+  completeAdTrendWithinCoverage,
   divideScaledAmount,
   formatRatioChange,
   summarizeMetric
@@ -29,6 +31,91 @@ test('period builder aligns an equal adjacent previous period without inventing 
   ]);
   assert.equal(result.previousFrom, '2026-07-01');
   assert.equal(result.previousTo, '2026-07-02');
+});
+
+test('verified ad coverage fills only omitted in-coverage days with exact zero', () => {
+  const completed = completeAdTrendWithinCoverage([
+    {
+      date: '2026-07-02',
+      costAmountScaled: '1200000',
+      impressions: '30',
+      clicks: '2'
+    }
+  ], {
+    from: '2026-07-01',
+    to: '2026-07-03'
+  });
+
+  assert.deepEqual(completed, [
+    {
+      date: '2026-07-01',
+      costAmountScaled: '0',
+      impressions: '0',
+      clicks: '0'
+    },
+    {
+      date: '2026-07-02',
+      costAmountScaled: '1200000',
+      impressions: '30',
+      clicks: '2'
+    },
+    {
+      date: '2026-07-03',
+      costAmountScaled: '0',
+      impressions: '0',
+      clicks: '0'
+    }
+  ]);
+  assert.deepEqual(
+    completeAdTrendWithinCoverage([], {
+      from: '2026-07-02',
+      to: '2026-07-03'
+    }).map((row) => row.date),
+    ['2026-07-02', '2026-07-03']
+  );
+  assert.throws(
+    () => completeAdTrendWithinCoverage([
+      {
+        date: '2026-06-30',
+        costAmountScaled: '1',
+        impressions: '1',
+        clicks: '1'
+      }
+    ], { from: '2026-07-01', to: '2026-07-03' }),
+    /广告趋势日期超出已验证覆盖范围/u
+  );
+});
+
+test('all-channel comparison keeps total first and sorts exact channel visits', () => {
+  const rows = buildDailyChannelComparison(
+    [{ date: '2026-07-01', current: '18014398509481988' }],
+    [
+      {
+        sourceKey: 'DIRECT',
+        sourceLabel: '直接访问',
+        trend: [{ date: '2026-07-01', visits: '9007199254740993' }]
+      },
+      {
+        sourceKey: 'BAIDU_SEARCH',
+        sourceLabel: '百度搜索',
+        trend: [{ date: '2026-07-01', visits: '9007199254740995' }]
+      },
+      {
+        sourceKey: 'BING_SEARCH',
+        sourceLabel: '必应搜索',
+        trend: [{ date: '2026-07-01', visits: '1' }]
+      }
+    ],
+    new Set(['BING_SEARCH'])
+  );
+
+  assert.deepEqual(rows.map((row) => [row.sourceKey, row.value]), [
+    ['ALL', '18014398509481988'],
+    ['BAIDU_SEARCH', '9007199254740995'],
+    ['DIRECT', '9007199254740993']
+  ]);
+  assert.equal(rows[0].isTotal, true);
+  assert.ok(rows.slice(1).every((row) => row.isTotal === false));
 });
 
 test('exact ratios and summaries use decimal strings beyond safe integer range', () => {

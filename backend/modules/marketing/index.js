@@ -537,7 +537,8 @@ function createMarketingModule({
           sourceTraffic: manifest.tongji?.sourceReports?.runtimeEnabled === true,
           qualityMetrics: manifest.tongji?.qualityMetrics?.runtimeEnabled === true,
           pageReports: manifest.tongji?.pageReports?.runtimeEnabled === true
-        }
+        },
+        logger: console
       });
       executor = new MarketingExecutor({
         sequelize,

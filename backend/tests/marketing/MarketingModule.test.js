@@ -495,10 +495,16 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
           { siteId: '23412673', domain: 'gato.com.cn', status: 'ACTIVE' }
         ];
       },
-      async fetchTongjiTrend({ siteId, sourceKey = 'ALL', device }) {
-        tongjiReportCalls.push({ kind: 'trend', siteId, sourceKey, device });
+      async fetchTongjiTrend({ siteId, sourceKey = 'ALL', device, coverage }) {
+        tongjiReportCalls.push({
+          kind: 'trend',
+          siteId,
+          sourceKey,
+          device,
+          coverage
+        });
         return [{
-          date: '2026-08-03',
+          date: coverage.from,
           pageviews: null,
           visits: null,
           visitors: null
@@ -507,6 +513,9 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
       async fetchTongjiSourceSummary({ siteId, reportKey, device }) {
         tongjiReportCalls.push({ kind: 'summary', siteId, reportKey, device });
         return [];
+      },
+      async fetchTongjiQualityTrend() {
+        return null;
       }
     }
   });
@@ -522,26 +531,24 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
   await new Promise((resolve) => server.once('listening', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  const response = await fetch(
-    `${baseUrl}/api/marketing/projects/11/tongji-trend`
+  const url = (
+    `${baseUrl}/api/marketing/projects/11/website-traffic-overview`
+    + '?device=pc&from=2026-08-03&to=2026-08-03'
+    + '&source=ALL&metric=visits'
   );
+  const response = await fetch(url);
   const body = await response.json();
-  const sourceResponse = await fetch(
-    `${baseUrl}/api/marketing/projects/11/tongji-source-trends?device=pc&source=DIRECT`
-  );
-  const sourceBody = await sourceResponse.json();
-  const cachedSourceResponse = await fetch(
-    `${baseUrl}/api/marketing/projects/11/tongji-source-trends?device=pc&source=DIRECT`
+  const retiredResponse = await fetch(
+    `${baseUrl}/api/marketing/projects/11/tongji-trend`
   );
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
   await module.shutdown();
   assert.equal(response.status, 200, JSON.stringify(body));
-  assert.equal(body.site.siteId, '23412673');
-  assert.equal(sourceResponse.status, 200, JSON.stringify(sourceBody));
-  assert.equal(cachedSourceResponse.status, 200);
-  assert.equal(sourceBody.selectedTrend.sourceKey, 'DIRECT');
-  assert.equal(tongjiReportCalls.length, 5);
+  assert.equal(body.site.domain, 'gato.com.cn');
+  assert.equal(body.selectedSource.sourceKey, 'ALL');
+  assert.equal(retiredResponse.status, 404);
+  assert.equal(tongjiReportCalls.length, 6);
   assert.ok(tongjiReportCalls.every((call) => (
     call.siteId === '23412673' && call.device === 'pc'
   )));
@@ -549,11 +556,11 @@ test('pilot data route uses the separate Tongji token and explicitly bound site'
     tongjiReportCalls.filter((call) => call.kind === 'summary').map(
       (call) => call.reportKey
     ),
-    ['ALL', 'ENGINE']
+    ['ALL', 'ENGINE', 'ALL', 'ENGINE']
   );
   assert.deepEqual(
     tongjiReportCalls.filter((call) => call.kind === 'trend').map((call) => call.sourceKey),
-    ['ALL', 'ALL', 'DIRECT']
+    ['ALL', 'ALL']
   );
   assert.deepEqual(tongjiCredentials, [
     {
