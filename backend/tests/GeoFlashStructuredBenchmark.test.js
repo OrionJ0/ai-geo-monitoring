@@ -122,5 +122,8 @@ test('does not pass the formal completion gate with a smoke-sized sample', () =>
   });
 
   assert.match(report, /完成率门槛：FAIL/);
-  assert.match(report, /实体 span.*尚需至少 20 条扩展人工真值/);
+  // issue 013：真值覆盖与实体质量在真值不足时 NOT EVALUABLE
+  assert.match(report, /语义真值覆盖.*NOT EVALUABLE/);
+  assert.match(report, /实体与语义真值/);
+  assert.match(report, /NOT_EVALUABLE/);
 });

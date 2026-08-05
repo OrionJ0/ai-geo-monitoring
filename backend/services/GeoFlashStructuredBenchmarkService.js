@@ -128,6 +128,168 @@ function pairwiseDiff(left = [], right = []) {
   };
 }
 
+/**
+ * 字段级状态与阶段 2 降级率（issue 013）。
+ * 只统计 analysis_structure 提供的三轨与字段状态，不评价幸存样本，
+ * 明确报告 assessed 可用率、unresolved/invalid/not_applicable 分布与降级率。
+ */
+function fieldStatusDistribution(entries) {
+  const evaluated = [];
+  const targetSemanticsDistribution = {};
+  const recommendationDistribution = {};
+  const rankDistribution = {};
+  const sentimentDistribution = {};
+  const competitionDistribution = {};
+  let degradedCount = 0;
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    if (!entry?.ok || !entry.result?.analysis_structure) return;
+    const structure = entry.result.analysis_structure;
+    const semantics = structure.target_semantics || {};
+    const competition = structure.competition_analysis || {};
+    evaluated.push(entry);
+    targetSemanticsDistribution[semantics.status || 'unknown'] = (targetSemanticsDistribution[semantics.status || 'unknown'] || 0) + 1;
+    ['recommendation', 'rank', 'sentiment'].forEach((field) => {
+      const status = semantics[field]?.status || 'unknown';
+      const distribution = field === 'recommendation'
+        ? recommendationDistribution
+        : (field === 'rank' ? rankDistribution : sentimentDistribution);
+      distribution[status] = (distribution[status] || 0) + 1;
+    });
+    competitionDistribution[competition.status || 'unknown'] = (competitionDistribution[competition.status || 'unknown'] || 0) + 1;
+    const stages = Array.isArray(structure.diagnostics?.stages) ? structure.diagnostics.stages : [];
+    if (stages.some((stage) => stage?.degraded || stage?.stage === 'semantic_judge' && stage?.error_code)) {
+      degradedCount += 1;
+    }
+  });
+  // assessed 可用率 = target_semantics 总状态为 complete 的比例（三字段全已判断/不适用）
+  const assessedCount = evaluated.filter((entry) => {
+    const semantics = entry.result.analysis_structure.target_semantics || {};
+    return semantics.status === 'complete';
+  }).length;
+  return {
+    evaluated: evaluated.length,
+    degraded_count: degradedCount,
+    degradation_rate: evaluated.length ? degradedCount / evaluated.length : null,
+    assessed_rate: evaluated.length ? assessedCount / evaluated.length : null,
+    target_semantics_distribution: targetSemanticsDistribution,
+    recommendation_distribution: recommendationDistribution,
+    rank_distribution: rankDistribution,
+    sentiment_distribution: sentimentDistribution,
+    competition_distribution: competitionDistribution
+  };
+}
+
+/**
+ * 实体质量（issue 013）：在已复核真值上评估实体 precision/recall/micro-F1 与
+ * canonicalization。逐字可定位但把多个品牌合成一个实体、或无依据拆分的实体
+ * 必须计错，grounding 不能替代实体正确性。真值缺失或未复核时 NOT_EVALUABLE。
+ */
+function extractPredictedEntities(result = {}) {
+  const structure = result.analysis_structure;
+  if (!Array.isArray(structure?.entities)) return [];
+  return structure.entities.map((entity) => ({
+    name: String(entity?.name || '').trim(),
+    surface_forms: (Array.isArray(entity?.surface_forms) ? entity.surface_forms : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  })).filter((entity) => entity.name);
+}
+
+function entityQualityStats(entries, truthBySample = new Map()) {
+  const totals = { tp: 0, fp: 0, fn: 0, merged: 0, split: 0 };
+  let evaluatedSamples = 0;
+  let missingTruthSamples = 0;
+  let canonicalMatched = 0;
+  let canonicalEvaluated = 0;
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    if (!entry?.ok || !entry.result) return;
+    const predicted = extractPredictedEntities(entry.result);
+    const truth = truthBySample.get(entry.sample_id);
+    if (!truth || truth.review_status !== 'confirmed' || !Array.isArray(truth.entities)) {
+      if (predicted.length) missingTruthSamples += 1;
+      return;
+    }
+    evaluatedSamples += 1;
+    const expectedNames = truth.entities.map((entity) => String(entity.canonical_name || '').trim()).filter(Boolean);
+    const predictedNames = predicted.map((entity) => entity.name);
+    predictedNames.forEach((name) => {
+      if (expectedNames.includes(name)) {
+        totals.tp += 1;
+        const truthEntity = truth.entities.find((entity) => entity.canonical_name === name);
+        canonicalEvaluated += 1;
+        if (truthEntity && name === String(truthEntity.canonical_name || '').trim()) canonicalMatched += 1;
+      } else {
+        totals.fp += 1;
+      }
+    });
+    expectedNames.forEach((name) => {
+      if (!predictedNames.includes(name)) totals.fn += 1;
+    });
+    // 组合实体：一个预测实体覆盖多个真值实体（surface 词或 name 包含多个真值 canonical）
+    predicted.forEach((entity) => {
+      const hits = expectedNames.filter((name) => (
+        entity.name === name
+        || entity.surface_forms.some((surface) => surface.includes(name) || name.includes(surface))
+      ));
+      if (hits.length > 1) totals.merged += 1;
+    });
+    // 无依据拆分：一个真值 canonical 被多个预测实体覆盖
+    expectedNames.forEach((name) => {
+      const covering = predicted.filter((entity) => (
+        entity.name === name
+        || entity.surface_forms.some((surface) => surface.includes(name) || name.includes(surface))
+      ));
+      if (covering.length > 1) totals.split += 1;
+    });
+  });
+  if (!evaluatedSamples) {
+    return {
+      status: 'NOT_EVALUABLE',
+      evaluated_samples: 0,
+      reason: missingTruthSamples
+        ? `缺少已复核实体真值（${missingTruthSamples} 个样本有输出但无 confirmed 真值）`
+        : '无成功结果'
+    };
+  }
+  const precision = totals.tp + totals.fp > 0 ? totals.tp / (totals.tp + totals.fp) : null;
+  const recall = totals.tp + totals.fn > 0 ? totals.tp / (totals.tp + totals.fn) : null;
+  const microF1 = precision !== null && recall !== null && precision + recall > 0
+    ? (2 * precision * recall) / (precision + recall)
+    : null;
+  return {
+    status: 'EVALUATED',
+    evaluated_samples: evaluatedSamples,
+    tp: totals.tp,
+    fp: totals.fp,
+    fn: totals.fn,
+    precision,
+    recall,
+    micro_f1: microF1,
+    canonicalization_accuracy: canonicalEvaluated ? canonicalMatched / canonicalEvaluated : null,
+    merged_entity_count: totals.merged,
+    split_entity_count: totals.split
+  };
+}
+
+/**
+ * 语义真值覆盖（issue 013）：推荐/排名/情绪/已输出竞品关系各自至少 20 个
+ * 已复核可评估实例；不足时对应项 pass=false，benchmark 必须输出 NOT EVALUABLE。
+ */
+function semanticTruthCoverage(truthBySample = new Map()) {
+  const counts = { recommendation: 0, rank: 0, sentiment: 0, relations: 0 };
+  truthBySample.forEach((truth) => {
+    if (!truth || truth.review_status !== 'confirmed') return;
+    if (typeof truth.recommendation === 'boolean') counts.recommendation += 1;
+    if (truth.rank !== null && truth.rank !== undefined && truth.rank !== 'none') counts.rank += 1;
+    if (truth.sentiment && truth.sentiment !== 'none') counts.sentiment += 1;
+    if (Array.isArray(truth.relations) && truth.relations.length) counts.relations += 1;
+  });
+  return Object.fromEntries(Object.entries(counts).map(([key, count]) => [
+    key,
+    { count, pass: count >= 20 }
+  ]));
+}
+
 function summarizeArm(entries, labels = new Map()) {
   const normalizedEntries = Array.isArray(entries) ? entries : [];
   const completedEntries = normalizedEntries.filter((entry) => entry?.ok && entry.result);
@@ -168,9 +330,12 @@ function summarizeArm(entries, labels = new Map()) {
 module.exports = {
   competitionJaccard,
   distribution,
+  entityQualityStats,
+  fieldStatusDistribution,
   metricSignature,
   pairwiseDiff,
   percentile,
   precisionRecallF1,
+  semanticTruthCoverage,
   summarizeArm
 };

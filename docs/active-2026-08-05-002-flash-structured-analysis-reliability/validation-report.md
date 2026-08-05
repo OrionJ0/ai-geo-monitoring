@@ -286,3 +286,26 @@ S43（目标唯一命中，v1 下属 59.3% 降级样本）真实 `deepseek-v4-fl
 | r3 | resolved | complete | assessed(true) | assessed(positive) | partial | 8,193 ms |
 
 推荐与情绪与人工真值一致（S43 推荐 true、情绪 positive）。S55 映射歧义路径 3/3 无回归。本 issue 不改变正式入口或默认模型；010 仍由 015 全部门槛和人工批准解锁。
+
+---
+
+## 2026-08-05 issue 013：真值与评测合同审计（blocked，等待人工复核）
+
+### 审计结论
+
+- 旧 40 条目标级标注有全局 `human_review_confirmed: yes`（v3 时代标记），只覆盖旧语料本身。
+- 补充样本 S41–S55 目标级标注标记“待复核”，无独立人工确认记录；旧全局标记不能自动扩展。
+- **已输出竞品关系真值缺失**（LABELING.md 无 relations 标注，0 个实例）。
+- **实体级真值缺失**（truth.jsonl 不存在）：实体 precision/recall/canonicalization 无法评估。
+- 排名实例 20 个（旧 8 + 补充 12），但补充部分未复核。
+
+### 代码交付（已提交）
+
+- `GeoFlashStructuredBenchmarkService` 新增 `fieldStatusDistribution`（三轨/字段状态分布、assessed 可用率、阶段 2 降级率）、`entityQualityStats`（实体 precision/recall/micro-F1/canonicalization、组合实体与无依据拆分计错、真值不足 NOT_EVALUABLE）、`semanticTruthCoverage`（推荐/排名/情绪/已输出关系各 ≥20 已复核实例检查）。
+- benchmark 报告新增“字段状态与阶段 2 降级率”“实体与语义真值”部分；门禁说明增加语义真值覆盖 NOT EVALUABLE 判定。
+- 新增 5 个回归测试（字段分布、实体质量 EVALUATED、组合实体计错、真值缺失 NOT_EVALUABLE、语义覆盖），全部通过。
+- `work/geo-baseline-2026-07-28/truth.template.jsonl`：55 条全部 `pending_review` 的模板（entities/relations 空），人工填写后更名 `truth.jsonl` 即可启用评估。
+
+### 阻塞状态
+
+按用户约定，缺少真实人工确认不得冒充人工签字、不得关闭 013。具体复核条目（补充样本标注、已输出关系真值、实体级真值）见 [TRUTH-REVIEW-QUEUE.md](TRUTH-REVIEW-QUEUE.md)。013 保持 blocked，014 不启动，010 保持阻塞。

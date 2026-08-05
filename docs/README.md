@@ -59,7 +59,7 @@
 | 需求 | 当前主题 |
 | --- | --- |
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
-| [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 001–008 已完成；009 不批准硬切；011 目标映射歧义隔离已完成并关闭（S55 真实 Flash 3/3 保留目标事实，mapping=ambiguous 不再整条失败）；012 `semantic_evidence_v2` 双角色证据合同已完成并关闭（`three_track_partial_v2`，S43 真实 Flash 3/3 目标语义 complete）。013 真值审计、014 定向探针、015 独立全量门禁待执行；010 保持阻塞。正式入口仍走 v4，当前 DeepSeek 默认分析配置为 Pro；v5 显式候选固定 Flash。 |
+| [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 001–008 已完成；009 不批准硬切；011 目标映射歧义隔离已完成并关闭（S55 真实 Flash 3/3 保留目标事实）；012 `semantic_evidence_v2` 双角色证据合同已完成并关闭（`three_track_partial_v2`，S43 真实 Flash 3/3 目标语义 complete）；013 真值与评测合同审计代码完成但 blocked，等待人工复核补充样本标注与关系/实体真值（见 TRUTH-REVIEW-QUEUE.md）。014 定向探针、015 独立全量门禁待复核确认后执行；010 保持阻塞。正式入口仍走 v4，当前 DeepSeek 默认分析配置为 Pro；v5 显式候选固定 Flash。 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
 
 ## 草案需求

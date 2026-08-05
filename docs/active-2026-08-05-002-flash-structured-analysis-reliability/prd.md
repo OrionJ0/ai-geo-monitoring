@@ -279,6 +279,6 @@
 ## Handoff
 
 - PRD path: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/prd.md`
-- Current state: issue 001–008 已完成并提交；009 已执行 41×3 主语料和 15 条补充样本真实 Flash 对比，但目标核心稳定率和补充集完成率未过门槛，因此明确不批准硬切。issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。issue 012 `semantic_evidence_v2` 双角色证据合同已完成并关闭：`CONTRACT_REVISION=three_track_partial_v2`，S43 真实 Flash 3/3 目标语义 complete、推荐/情绪 assessed 且与真值一致。013 真值审计、014 定向探针、015 全量门禁待执行。当前正式入口仍使用 `ai_structured_v4 / geo_metric_input_v4`，默认 DeepSeek 分析配置为 `deepseek-v4-pro`；v5 只有显式候选路径固定使用 `deepseek-v4-flash`。010 保持阻塞，v4 运行时和现役文档尚未退役。
+- Current state: issue 001–008 已完成并提交；009 已执行 41×3 主语料和 15 条补充样本真实 Flash 对比，但目标核心稳定率和补充集完成率未过门槛，因此明确不批准硬切。issue 011 目标映射歧义隔离已完成并关闭：`target_fact` 与 `target_mapping` 独立，S55 真实 Flash 3/3 保留目标事实且不再整条失败。issue 012 `semantic_evidence_v2` 双角色证据合同已完成并关闭：`CONTRACT_REVISION=three_track_partial_v2`，S43 真实 Flash 3/3 目标语义 complete、推荐/情绪 assessed 且与真值一致。issue 013 真值与评测合同审计代码完成但**blocked**：补充样本 S41–S55 目标级标注待人工复核、已输出竞品关系与实体级真值缺失，复核条目见 [TRUTH-REVIEW-QUEUE.md](TRUTH-REVIEW-QUEUE.md)。014 定向探针、015 全量门禁待人工复核后执行。当前正式入口仍使用 `ai_structured_v4 / geo_metric_input_v4`，默认 DeepSeek 分析配置为 `deepseek-v4-pro`；v5 只有显式候选路径固定使用 `deepseek-v4-flash`。010 保持阻塞，v4 运行时和现役文档尚未退役。
 - Validation report: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/validation-report.md`
-- Recommended next step: 按 issue 013–015 依次完成真值审计、定向真实 Flash 探针和 `three_track_partial_v2` 全量门禁；015 全部通过并经人工批准后才可执行 010。
+- Recommended next step: 人工完成 TRUTH-REVIEW-QUEUE.md 列出的复核条目并确认 013 关闭后，按 issue 014–015 执行定向真实 Flash 探针和 `three_track_partial_v2` 全量门禁；015 全部通过并经人工批准后才可执行 010。

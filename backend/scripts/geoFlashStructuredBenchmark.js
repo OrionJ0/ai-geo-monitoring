@@ -57,6 +57,11 @@ function cacheIdentityFor(arm) {
   };
 }
 
+const {
+  entityQualityStats,
+  fieldStatusDistribution,
+  semanticTruthCoverage
+} = require('../services/GeoFlashStructuredBenchmarkService');
 const SUPPORTED_ARMS = new Set(['v4-current', 'v4-temperature-zero', 'v5-json']);
 const DEFAULT_BASELINE_DIR = path.resolve(__dirname, '../../work/geo-baseline-2026-07-28');
 const DEFAULT_OUTPUT_DIR = path.resolve(__dirname, '../../work/geo-flash-structured-2026-08-05');
@@ -106,6 +111,27 @@ function parseArgs(argv = process.argv.slice(2)) {
     outputDir: path.resolve(value('--out') || DEFAULT_OUTPUT_DIR),
     challengeArtifact: path.resolve(value('--challenge-artifact') || DEFAULT_CHALLENGE_ARTIFACT)
   };
+}
+
+/**
+ * issue 013：加载实体级人工真值 truth.jsonl（按样本、带 review_status）。
+ * 真值缺失或未复核时 benchmark 必须输出 NOT_EVALUABLE，不得冒充 PASS。
+ */
+function loadTruth(options) {
+  const truthPath = path.join(options.baselineDir, 'truth.jsonl');
+  if (!fs.existsSync(truthPath)) return new Map();
+  const truthBySample = new Map();
+  fs.readFileSync(truthPath, 'utf8')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.sample_id) truthBySample.set(entry.sample_id, entry);
+      } catch (_) { /* 忽略坏行，避免单个坏行破坏整份真值 */ }
+    });
+  return truthBySample;
 }
 
 function loadCorpus(options) {
@@ -368,7 +394,7 @@ function targetStatsForEntries(entries, labels) {
   return computeFieldStats(pairs).stats;
 }
 
-function buildReport({ options, samples, labels, entries, summaries }) {
+function buildReport({ options, samples, labels, entries, summaries, truthBySample = new Map() }) {
   const lines = [
     '# DeepSeek Flash 结构化分析真实对比报告',
     '',
@@ -401,17 +427,39 @@ function buildReport({ options, samples, labels, entries, summaries }) {
     lines.push(`- brand_rank：${stats.rank.exact}/${stats.rank.evaluated || 0}（${percentage(stats.rank.evaluated ? stats.rank.exact / stats.rank.evaluated : null)}）`);
     lines.push(`- sentiment：${stats.sentiment.correct}/${stats.sentiment.evaluated || 0}（${percentage(stats.sentiment.evaluated ? stats.sentiment.correct / stats.sentiment.evaluated : null)}）`, '');
   });
-  lines.push('## 门禁说明', '');
+  lines.push('## 字段状态与阶段 2 降级率（issue 013）', '');
+  options.arms.forEach((arm) => {
+    const stats = fieldStatusDistribution(entries.filter((entry) => entry.arm === arm));
+    lines.push(`### ${arm}`, '');
+    lines.push(`- 已评估：${stats.evaluated}；target_semantics 总状态：${JSON.stringify(stats.target_semantics_distribution)}`);
+    lines.push(`- 推荐字段：${JSON.stringify(stats.recommendation_distribution)}；排名：${JSON.stringify(stats.rank_distribution)}；情绪：${JSON.stringify(stats.sentiment_distribution)}`);
+    lines.push(`- 竞品轨：${JSON.stringify(stats.competition_distribution)}；assessed 可用率：${percentage(stats.assessed_rate)}；阶段 2 降级率：${percentage(stats.degradation_rate)}`);
+    lines.push('');
+  });
+  lines.push('## 实体与语义真值（issue 013）', '');
+  const coverage = semanticTruthCoverage(truthBySample);
+  lines.push(`- 已复核实例：推荐 ${coverage.recommendation.count}、排名 ${coverage.rank.count}、情绪 ${coverage.sentiment.count}、已输出竞品关系 ${coverage.relations.count}（各维度 ≥20 才算可评估）。`);
+  options.arms.forEach((arm) => {
+    const quality = entityQualityStats(entries.filter((entry) => entry.arm === arm), truthBySample);
+    if (quality.status === 'EVALUATED') {
+      lines.push(`- ${arm}：实体 precision=${percentage(quality.precision)}，recall=${percentage(quality.recall)}，micro-F1=${percentage(quality.micro_f1)}，canonicalization=${percentage(quality.canonicalization_accuracy)}；组合实体=${quality.merged_entity_count}，无依据拆分=${quality.split_entity_count}`);
+    } else {
+      lines.push(`- ${arm}：${quality.status} — ${quality.reason}`);
+    }
+  });
+  lines.push('', '## 门禁说明', '');
   const v5 = summaries['v5-json'];
   if (v5) {
     const completionPass = v5.total >= 120 && v5.completion_rate >= (118 / 120);
     const targetPass = v5.target_false_positives === 0 && v5.target_presence_accuracy === 1;
     const stabilityPass = v5.stability_rate !== null && v5.stability_rate >= 0.99;
+    const coveragePass = Object.values(coverage).every((item) => item.pass);
     lines.push(`- 完成率门槛：${completionPass ? 'PASS' : 'FAIL'}。`);
     lines.push(`- 目标品牌事实门槛：${targetPass ? 'PASS' : 'FAIL'}。`);
     lines.push(`- 目标核心稳定门槛：${stabilityPass ? 'PASS' : 'FAIL'}。`);
+    lines.push(`- 语义真值覆盖（推荐/排名/情绪/已输出关系各 ≥20 已复核实例）：${coveragePass ? 'PASS' : 'NOT EVALUABLE'}。`);
     lines.push('- 开放式竞品发现允许遗漏；竞品集合 Jaccard 作为诊断指标，不作为整条完成门槛。');
-    lines.push('- 实体 span、完整竞品关系、候选组 exact-match 尚需至少 20 条扩展人工真值；未满足前不得宣称完整语义门禁通过。');
+    lines.push('- 实体 precision/recall/canonicalization 只按已复核真值报告；真值不足时 NOT EVALUABLE，不得用 grounding 100% 或 assessed 幸存样本宣布语义门禁通过。');
   }
   const failures = entries.filter((entry) => !entry.ok);
   lines.push('', '## 失败明细', '');
@@ -461,13 +509,14 @@ async function main() {
     arm,
     summarizeArm(entries.filter((entry) => entry.arm === arm), corpus.labels)
   ]));
+  const truthBySample = loadTruth(options);
   fs.writeFileSync(
     path.join(options.outputDir, 'summary.json'),
     JSON.stringify({ generated_at: new Date().toISOString(), summaries }, null, 2)
   );
   fs.writeFileSync(
     path.join(options.outputDir, 'COMPARISON-REPORT.md'),
-    buildReport({ options, samples, labels: corpus.labels, entries, summaries })
+    buildReport({ options, samples, labels: corpus.labels, entries, summaries, truthBySample })
   );
   console.log(JSON.stringify({ output: options.outputDir, summaries }, null, 2));
   await require('../config/database').close();
