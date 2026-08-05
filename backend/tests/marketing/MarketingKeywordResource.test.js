@@ -163,6 +163,13 @@ test('keyword resource keeps exact full-filter summary across stable pages', asy
     clicks: '4',
     costAmountScaled: '13'
   });
+  assert.deepEqual(filtered.filter, {
+    from: '2026-07-02',
+    to: '2026-07-03',
+    query: '周界',
+    campaignId: 'campaign-1',
+    adGroupId: 'group-1'
+  });
   assert.deepEqual(filtered.items.map((item) => item.keywordId), ['keyword-b']);
   assert.equal('searchTerms' in filtered, false);
 

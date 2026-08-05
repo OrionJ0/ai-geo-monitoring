@@ -395,7 +395,17 @@ function keywordResourceFixture(requestUrl: string) {
     projectId: dashboard.projectId,
     revision: request.searchParams.get('revision'),
     coverage: dashboard.coverage,
-    filter: { from, to },
+    filter: {
+      from,
+      to,
+      ...(query ? { query } : {}),
+      ...(request.searchParams.has('campaignId')
+        ? { campaignId: request.searchParams.get('campaignId') as string }
+        : {}),
+      ...(request.searchParams.has('adGroupId')
+        ? { adGroupId: request.searchParams.get('adGroupId') as string }
+        : {})
+    },
     summary,
     items,
     pagination: {
@@ -568,10 +578,12 @@ test('confirmed keyword analysis visual keeps selection, donut, task filters, an
 
 test('keyword table pins one root revision and sends paging, query, and sort to the resource', async ({ page }) => {
   let dashboardRequests = 0;
+  const dashboardUrls: URL[] = [];
   const keywordRequests: URL[] = [];
   await page.unroute('**/api/marketing/projects/11/dashboard**');
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
     dashboardRequests += 1;
+    dashboardUrls.push(new URL(route.request().url()));
     return fulfillDashboardFixture(route);
   });
   await page.unroute('**/api/marketing/projects/11/keywords**');
@@ -584,12 +596,40 @@ test('keyword table pins one root revision and sends paging, query, and sort to 
   });
 
   await page.goto('/geo/keyword-analysis');
-  await expect(keywordMetric(page, '广告关键词数')).toContainText('302');
+  await expect(keywordMetric(page, '广告关键词数'))
+    .toContainText(/本期\s*302\s*上期\s*302/u);
+  await expect.poll(() => keywordRequests.length).toBe(2);
+  const currentPeriod = dashboardUrls.at(-1)!;
+  const currentRequest = keywordRequests.find((request) => (
+    request.searchParams.get('from') === currentPeriod.searchParams.get('from')
+    && request.searchParams.get('to') === currentPeriod.searchParams.get('to')
+  ));
+  expect(currentRequest).toBeDefined();
+  const previousRequest = keywordRequests.find((request) => request !== currentRequest)!;
+  expect(previousRequest.searchParams.get('page')).toBe('1');
+  expect(previousRequest.searchParams.get('pageSize')).toBe('1');
+  const currentFrom = Date.parse(`${currentRequest!.searchParams.get('from')}T00:00:00.000Z`);
+  const currentTo = Date.parse(`${currentRequest!.searchParams.get('to')}T00:00:00.000Z`);
+  const previousFrom = Date.parse(`${previousRequest.searchParams.get('from')}T00:00:00.000Z`);
+  const previousTo = Date.parse(`${previousRequest.searchParams.get('to')}T00:00:00.000Z`);
+  expect(previousTo + 86_400_000).toBe(currentFrom);
+  expect(previousTo - previousFrom).toBe(currentTo - currentFrom);
+
+  const summaryBeforePaging = await keywordMetric(page, '展现').textContent();
   await page.getByRole('listitem', { name: '2' }).click();
   await expect.poll(() => keywordRequests.some((request) => (
     request.searchParams.get('page') === '2'
     && request.searchParams.get('pageSize') === '10'
   ))).toBe(true);
+  expect(await keywordMetric(page, '展现').textContent()).toBe(summaryBeforePaging);
+  await page.locator('.ant-pagination-options-size-changer').click();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => keywordRequests.some((request) => (
+    request.searchParams.get('page') === '1'
+    && request.searchParams.get('pageSize') === '20'
+  ))).toBe(true);
+  expect(await keywordMetric(page, '展现').textContent()).toBe(summaryBeforePaging);
 
   await page.getByLabel('搜索投放关键词').fill('周界报警系统');
   await expect(page.getByRole('table', { name: '全部关键词明细表' }))
@@ -597,6 +637,29 @@ test('keyword table pins one root revision and sends paging, query, and sort to 
   await expect.poll(() => keywordRequests.some((request) => (
     request.searchParams.get('query') === '周界报警系统'
   ))).toBe(true);
+  await expect.poll(() => keywordRequests.filter((request) => (
+    request.searchParams.get('query') === '周界报警系统'
+  )).length).toBeGreaterThanOrEqual(2);
+  const matchingQueryRequests = keywordRequests.filter((request) => (
+    request.searchParams.get('query') === '周界报警系统'
+  ));
+  expect(matchingQueryRequests.at(-1)!.searchParams.get('pageSize')).toBe('1');
+  expect(matchingQueryRequests.at(-2)!.searchParams.get('query'))
+    .toBe(matchingQueryRequests.at(-1)!.searchParams.get('query'));
+
+  await page.getByLabel('推广单元').click({ force: true });
+  await page.getByText('周界系统 / 通用词', { exact: true }).last().click();
+  await expect.poll(() => keywordRequests.filter((request) => (
+    request.searchParams.get('query') === '周界报警系统'
+    && request.searchParams.has('adGroupId')
+  )).length).toBeGreaterThanOrEqual(2);
+  const matchingUnitRequests = keywordRequests.filter((request) => (
+    request.searchParams.get('query') === '周界报警系统'
+    && request.searchParams.has('adGroupId')
+  ));
+  expect(new Set(matchingUnitRequests.slice(-2).map((request) => (
+    request.searchParams.get('adGroupId')
+  ))).size).toBe(1);
 
   await page.getByRole('columnheader', { name: '展现' }).click();
   await expect.poll(() => keywordRequests.some((request) => (
@@ -605,6 +668,131 @@ test('keyword table pins one root revision and sends paging, query, and sort to 
   expect(dashboardRequests).toBe(3);
   expect(new Set(keywordRequests.map((request) => request.searchParams.get('revision'))))
     .toEqual(new Set(['keyword-analysis-fixture-revision']));
+});
+
+test('keyword comparison keeps factual zero distinct from unavailable data', async ({ page }) => {
+  let keywordRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/keywords**');
+  await page.route('**/api/marketing/projects/11/keywords**', (route) => {
+    keywordRequestCount += 1;
+    const body = keywordResourceFixture(route.request().url());
+    if (keywordRequestCount === 2) {
+      body.summary = {
+        impressions: '0',
+        clicks: '0',
+        costAmountScaled: '0'
+      };
+      body.items = [];
+      body.pagination.totalItems = 0;
+      body.pagination.totalPages = 0;
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  await expect(keywordMetric(page, '广告关键词数')).toContainText(/上期\s*0/u);
+  await expect(keywordMetric(page, '展现')).toContainText(/上期\s*0/u);
+  await expect(page.getByLabel('广告关键词数上期：暂无数据')).toHaveCount(0);
+});
+
+test('keyword comparison keeps current facts when the previous period is outside coverage', async ({ page }) => {
+  let keywordRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/keywords**');
+  await page.route('**/api/marketing/projects/11/keywords**', (route) => {
+    keywordRequestCount += 1;
+    if (keywordRequestCount === 2) {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'DASHBOARD_DATE_OUT_OF_RANGE',
+            message: '上一周期超出当前快照覆盖范围'
+          }
+        })
+      });
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(keywordResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  await expect(page.getByRole('table', { name: '全部关键词明细表' }))
+    .toContainText('电子围栏厂家');
+  const previous = page.getByLabel('广告关键词数上期：暂无数据');
+  await expect(previous).toBeVisible();
+  await previous.hover();
+  await expect(page.getByRole('tooltip'))
+    .toContainText('上一周期超出当前快照覆盖范围');
+});
+
+test('keyword comparison preserves retryable previous failure instead of calling it no data', async ({ page }) => {
+  let keywordRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/keywords**');
+  await page.route('**/api/marketing/projects/11/keywords**', (route) => {
+    keywordRequestCount += 1;
+    if (keywordRequestCount === 2) {
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'MARKETING_UPSTREAM_UNAVAILABLE',
+            message: '上一周期关键词上游暂时不可用'
+          }
+        })
+      });
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(keywordResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  const warning = page.getByRole('alert').filter({
+    hasText: '上一周期关键词比较读取失败'
+  });
+  await expect(warning).toContainText('上一周期关键词上游暂时不可用');
+  await expect(warning.getByRole('button', { name: /重\s*试/u })).toBeVisible();
+  await expect(page.getByRole('table', { name: '全部关键词明细表' }))
+    .toContainText('电子围栏厂家');
+});
+
+test('keyword comparison discards a late request generation after the date changes', async ({ page }) => {
+  let releaseFirstGeneration: (() => void) | undefined;
+  const firstGenerationGate = new Promise<void>((resolve) => {
+    releaseFirstGeneration = resolve;
+  });
+  let keywordRequestCount = 0;
+  await page.unroute('**/api/marketing/projects/11/keywords**');
+  await page.route('**/api/marketing/projects/11/keywords**', async (route) => {
+    keywordRequestCount += 1;
+    const requestNumber = keywordRequestCount;
+    const body = keywordResourceFixture(route.request().url());
+    body.summary.impressions = requestNumber <= 2 ? '700' : '1400';
+    if (requestNumber <= 2) await firstGenerationGate;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body)
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  await expect.poll(() => keywordRequestCount).toBe(2);
+  await page.locator('.ant-picker').first().click();
+  await page.getByText('最近 14 天', { exact: true }).last().click();
+  await expect.poll(() => keywordRequestCount).toBe(4);
+  await expect(keywordMetric(page, '展现')).toContainText(/本期\s*1,400/u);
+
+  releaseFirstGeneration?.();
+  await expect(keywordMetric(page, '展现')).toContainText(/本期\s*1,400/u);
+  await expect(keywordMetric(page, '展现')).not.toContainText(/本期\s*700/u);
 });
 
 test('keyword evidence opens scoped real search terms and invalid scope never expands to all rows', async ({ page }) => {

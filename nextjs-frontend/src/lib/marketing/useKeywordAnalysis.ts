@@ -10,12 +10,15 @@ import {
   adaptKeywordAnalysis,
   adaptMarketingKeywordResource,
   assertMarketingKeywordResourceResponse,
+  classifyKeywordPreviousError,
   type KeywordAnalysisModel,
   type KeywordAnalysisPayload,
+  type KeywordPreviousResourceResult,
   type MarketingKeywordResourceResponse
 } from '@/lib/marketing/keywordAnalysisAdapter';
 import {
   assertMarketingDashboardRootResponse,
+  buildAdPeriod,
   marketingSnapshotWarning
 } from '@/lib/marketing/adPerformanceAdapter';
 import { readMarketingDashboard } from './readMarketingDashboard';
@@ -64,6 +67,19 @@ export const KEYWORD_ANALYSIS_FIXTURE_ENABLED = (
   &&
   process.env.NEXT_PUBLIC_KEYWORD_ANALYSIS_FIXTURE === 'true'
 );
+
+function readErrorMessage(error: unknown): string | null {
+  const response = (
+    error && typeof error === 'object' && 'response' in error
+      ? (error as {
+          response?: { data?: { error?: { message?: unknown } } };
+        }).response
+      : undefined
+  );
+  return typeof response?.data?.error?.message === 'string'
+    ? response.data.error.message
+    : null;
+}
 
 export default function useKeywordAnalysis({
   projectId,
@@ -148,7 +164,8 @@ export default function useKeywordAnalysis({
         || response.data.filter?.to
         || response.data.coverage?.to;
       const revision = response.data.revision;
-      if (!from || !to || !revision) {
+      const coverage = response.data.coverage;
+      if (!from || !to || !revision || !coverage) {
         throw new TypeError('当前没有可用的广告关键词快照。');
       }
       if (response.effectiveDateRange) {
@@ -163,46 +180,87 @@ export default function useKeywordAnalysis({
       }
       setWarning(marketingSnapshotWarning(response.data));
       const endpoint = `/api/marketing/projects/${encodeURIComponent(projectId)}/keywords`;
-      const resourceResponse = await axios.get<MarketingKeywordResourceResponse>(
-        endpoint,
-        {
+      const period = buildAdPeriod(from, to);
+      const sharedParams = {
+        revision,
+        sortBy: resourceQuery.sortBy,
+        sortOrder: resourceQuery.sortOrder,
+        query: resourceQuery.query || undefined,
+        campaignId: resourceQuery.campaignId,
+        adGroupId: resourceQuery.adGroupId
+      };
+      const expectedBusinessFilter = {
+        query: resourceQuery.query || undefined,
+        campaignId: resourceQuery.campaignId,
+        adGroupId: resourceQuery.adGroupId
+      };
+      const [currentResult, previousResult] = await Promise.allSettled([
+        axios.get<MarketingKeywordResourceResponse>(endpoint, {
           params: {
-            revision: response.data.revision,
+            ...sharedParams,
             from,
             to,
             page: resourceQuery.page,
-            pageSize: resourceQuery.pageSize,
-            sortBy: resourceQuery.sortBy,
-            sortOrder: resourceQuery.sortOrder,
-            query: resourceQuery.query || undefined,
-            campaignId: resourceQuery.campaignId,
-            adGroupId: resourceQuery.adGroupId
+            pageSize: resourceQuery.pageSize
           },
           timeout: 10_000
-        }
-      );
+        }),
+        axios.get<MarketingKeywordResourceResponse>(endpoint, {
+          params: {
+            ...sharedParams,
+            from: period.previousFrom,
+            to: period.previousTo,
+            page: 1,
+            pageSize: 1
+          },
+          timeout: 10_000
+        })
+      ]);
       if (requestId !== requestSequence.current) return;
+      if (currentResult.status === 'rejected') throw currentResult.reason;
       assertMarketingKeywordResourceResponse(
-        resourceResponse.data,
+        currentResult.value.data,
         projectId,
         revision,
-        { from, to }
+        { from, to },
+        coverage,
+        expectedBusinessFilter
       );
+      let previous: KeywordPreviousResourceResult;
+      if (previousResult.status === 'rejected') {
+        previous = classifyKeywordPreviousError(previousResult.reason);
+      } else {
+        try {
+          assertMarketingKeywordResourceResponse(
+            previousResult.value.data,
+            projectId,
+            revision,
+            { from: period.previousFrom, to: period.previousTo },
+            coverage,
+            expectedBusinessFilter
+          );
+          previous = {
+            state: 'READY',
+            resource: previousResult.value.data,
+            reason: ''
+          };
+        } catch {
+          previous = {
+            state: 'ERROR',
+            resource: null,
+            reason: '上一周期关键词响应合同无效，请重试。'
+          };
+        }
+      }
       setData(adaptMarketingKeywordResource(
-        resourceResponse.data,
+        currentResult.value.data,
         response.data,
+        previous,
         projectName
       ));
     } catch (requestError: unknown) {
       if (requestId !== requestSequence.current) return;
-      const response = (
-        requestError && typeof requestError === 'object' && 'response' in requestError
-          ? (requestError as {
-              response?: { data?: { error?: { message?: unknown } } };
-            }).response
-          : undefined
-      );
-      const message = response?.data?.error?.message;
+      const message = readErrorMessage(requestError);
       setData(null);
       setWarning('');
       setError(

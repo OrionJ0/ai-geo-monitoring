@@ -175,6 +175,19 @@ test('唯一 OpenAPI 3.1 合同覆盖四个现役读取入口和生成式前端 
   for (const field of ['campaigns', 'adGroups', 'keywords', 'searchTerms']) {
     assert.equal(field in dashboard.properties, false);
   }
+  const keywordFilter = document.components.schemas.MarketingKeywordFilter;
+  assert.deepEqual(keywordFilter.required, ['from', 'to']);
+  assert.deepEqual(Object.keys(keywordFilter.properties), [
+    'from',
+    'to',
+    'query',
+    'campaignId',
+    'adGroupId'
+  ]);
+  assert.equal(
+    document.components.schemas.MarketingKeywordResponse.properties.filter.$ref,
+    '#/components/schemas/MarketingKeywordFilter'
+  );
   const generated = fs.readFileSync(path.resolve(
     __dirname,
     '../../../nextjs-frontend/src/lib/marketing/generated/marketingAdReadApi.ts'

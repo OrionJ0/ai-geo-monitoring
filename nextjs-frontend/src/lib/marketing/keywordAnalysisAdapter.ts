@@ -47,6 +47,14 @@ export type KeywordAnalysisModel = Omit<
     clicks: string;
     costAmountScaled: string;
   };
+  previousState: 'READY' | 'UNAVAILABLE' | 'ERROR';
+  previousSummary: {
+    impressions: string;
+    clicks: string;
+    costAmountScaled: string;
+  } | null;
+  previousTotalItems: number | null;
+  previousUnavailableReason: string;
   pagination: {
     page: number;
     pageSize: number;
@@ -56,6 +64,50 @@ export type KeywordAnalysisModel = Omit<
 };
 
 export type MarketingKeywordResourceResponse = MarketingKeywordResponse;
+
+export type KeywordPreviousResourceResult =
+  | {
+      state: 'READY';
+      resource: MarketingKeywordResourceResponse;
+      reason: '';
+    }
+  | {
+      state: 'UNAVAILABLE' | 'ERROR';
+      resource: null;
+      reason: string;
+    };
+
+export function classifyKeywordPreviousError(
+  error: unknown
+): KeywordPreviousResourceResult {
+  const response = (
+    error && typeof error === 'object' && 'response' in error
+      ? (error as {
+          response?: {
+            data?: { error?: { code?: unknown; message?: unknown } };
+          };
+        }).response
+      : undefined
+  );
+  const code = typeof response?.data?.error?.code === 'string'
+    ? response.data.error.code
+    : null;
+  const message = typeof response?.data?.error?.message === 'string'
+    ? response.data.error.message
+    : null;
+  if (code === 'DASHBOARD_DATE_OUT_OF_RANGE') {
+    return {
+      state: 'UNAVAILABLE',
+      resource: null,
+      reason: message || '上一周期超出关键词快照覆盖范围。'
+    };
+  }
+  return {
+    state: 'ERROR',
+    resource: null,
+    reason: message || '上一周期关键词数据读取失败，请重试。'
+  };
+}
 
 function invalidKeywordResource(): never {
   const error = new TypeError('广告关键词资源响应合同无效');
@@ -131,7 +183,13 @@ export function assertMarketingKeywordResourceResponse(
   value: unknown,
   expectedProjectId: string,
   expectedRevision: string,
-  expectedRange: { from: string; to: string }
+  expectedRange: { from: string; to: string },
+  expectedCoverage?: NonNullable<MarketingDashboardResponse['coverage']>,
+  expectedBusinessFilter: {
+    query?: string;
+    campaignId?: string;
+    adGroupId?: string;
+  } = {}
 ): asserts value is MarketingKeywordResourceResponse {
   if (!record(value)) invalidKeywordResource();
   const coverage = value.coverage;
@@ -157,9 +215,22 @@ export function assertMarketingKeywordResourceResponse(
     || !Number.isSafeInteger(coverage.costScale)
     || Number(coverage.costScale) < 0
     || Number(coverage.costScale) > 12
+    || (
+      expectedCoverage !== undefined
+      && (
+        coverage.from !== expectedCoverage.from
+        || coverage.to !== expectedCoverage.to
+        || coverage.currency !== expectedCoverage.currency
+        || coverage.costScale !== expectedCoverage.costScale
+        || coverage.lastSuccessfulAt !== expectedCoverage.lastSuccessfulAt
+      )
+    )
     || !record(filter)
     || filter.from !== expectedRange.from
     || filter.to !== expectedRange.to
+    || filter.query !== expectedBusinessFilter.query
+    || filter.campaignId !== expectedBusinessFilter.campaignId
+    || filter.adGroupId !== expectedBusinessFilter.adGroupId
     || !record(summary)
     || !decimalText(summary.impressions)
     || !decimalText(summary.clicks)
@@ -236,6 +307,10 @@ export function adaptKeywordAnalysis(
     coverage: buildKeywordCoverage(rows),
     scatter: buildKeywordScatter(rows) as KeywordScatter,
     summary: sumRows(rows),
+    previousState: 'UNAVAILABLE',
+    previousSummary: null,
+    previousTotalItems: null,
+    previousUnavailableReason: '开发数据未提供上一周期关键词。',
     pagination: {
       page: 1,
       pageSize: Math.max(rows.length, 1),
@@ -248,6 +323,7 @@ export function adaptKeywordAnalysis(
 export function adaptMarketingKeywordResource(
   resource: MarketingKeywordResourceResponse,
   dashboard: MarketingDashboardResponse,
+  previous: KeywordPreviousResourceResult,
   fallbackProjectName = '默认监控项目'
 ): KeywordAnalysisModel {
   const accountNames = new Map(
@@ -293,6 +369,20 @@ export function adaptMarketingKeywordResource(
       clicks: BigInt(resource.summary.clicks).toString(),
       costAmountScaled: BigInt(resource.summary.costAmountScaled).toString()
     },
+    previousState: previous.state,
+    previousSummary: previous.state === 'READY'
+      ? {
+          impressions: BigInt(previous.resource.summary.impressions).toString(),
+          clicks: BigInt(previous.resource.summary.clicks).toString(),
+          costAmountScaled: BigInt(
+            previous.resource.summary.costAmountScaled
+          ).toString()
+        }
+      : null,
+    previousTotalItems: previous.state === 'READY'
+      ? previous.resource.pagination.totalItems
+      : null,
+    previousUnavailableReason: previous.reason,
     pagination: resource.pagination
   };
 }
