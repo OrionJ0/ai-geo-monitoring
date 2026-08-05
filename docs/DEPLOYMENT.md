@@ -18,8 +18,8 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前公开运行 revision | 2026-08-05 13:23 CST，`/api/health`、`/api/frontend-health` 与服务器 `HEAD` 均为 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373`；`/api/ready` 为 `ready` |
-| 与审计时 `main` 的关系 | 2026-08-05 13:23 CST，同次本地核对时本地与 `origin/main` 均为 `2651d157329ad8f7ef8fe711b91288c125213298`，比公开生产多 1 个提交；后续须重新比较。服务器工作区干净；服务器 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629` 比服务器 `HEAD` 落后 28 个提交，不能把该旧远端跟踪引用当作生产运行真值 |
+| 当前公开运行 revision | 2026-08-05 13:58 CST，`/api/health` 与 `/api/frontend-health` 均为 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373`；`/api/ready` 为 `ready` |
+| 与审计时 `main` 的关系 | 2026-08-05 14:35 CST，本批文档提交前本地 `HEAD=e37b52813ba1b58276653764b64f295389e6967c`，GitHub `origin/main=98467f07f565db23bf2d87722e175c2b6837a0d4`，公开生产为 13:58 CST 已验证的 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373`：本地比远端多 1 个提交，远端比公开生产多 5 个提交。本次只复核 GitHub，没有重新请求公网或 SSH；最近一次服务器 `HEAD`、工作区和服务器远端跟踪引用证据仍是下方 13:23 CST 记录 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -36,6 +36,9 @@ ssh ubuntu@182.254.140.163 'cd /opt/ai-geo-monitoring && git status --short --br
 Token 应继续保留，但不得宣称在新域名上重新授权已经通过。
 
 ### 2026-08-05 公开运行态复核
+
+- 13:58 CST 再次只读请求三个公网接口：后端和前端 revision 仍一致为 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373`，`/api/ready` 仍为 `ready`，SQLite 仍为 WAL、`busy_timeout_ms=5000`、`synchronous=normal`，scheduler 已启动且没有错误。本次没有重新登录页面或 SSH 服务器。
+- 14:35 CST 再次只读查询 GitHub，`origin/main` 已前进到 `98467f07f565db23bf2d87722e175c2b6837a0d4`；本批文档提交前本地 `HEAD=e37b52813ba1b58276653764b64f295389e6967c`。`98467f0` 已推送但尚未部署，`e37b528` 仍只在本地；因此不能把本地提交、GitHub 已推送提交或公开生产 revision 互相混称为“已上线”。
 
 - 13:23 CST，`GET https://insight.guangtuo.com/api/health` 返回 HTTP 200，后端 revision 为 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373`。
 - `GET https://insight.guangtuo.com/api/frontend-health` 返回 HTTP 200，前端 revision 与后端一致。

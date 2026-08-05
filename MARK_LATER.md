@@ -31,7 +31,7 @@
   - 来源：
     - `docs/adr/0001-marketing-funnel-data-source-of-truth.md`
     - `docs/blocked-2026-07-31-001-market-monitoring-frontend-ia/issues/016-real-data-release-acceptance.md`
-  - 已完成前置：本地已实现独立官网聚合适配器、JWT 服务端缓存、响应校验、区间与最多 31 日逐日聚合、缓存回退、独立 API/迁移账本和首页展示；常规读取不包含联系人明细，2026-08-01 至 2026-08-04 的逐日合计已与同区间汇总完成真实只读对账。2026-08-05 前端新增官网模块 `DISABLED` 会话级跳过：生产凭据未配置时只发一次请求，页面挂载、10 分钟轮询与 visibilitychange 不再重复命中必然 503。
+  - 已完成前置：本地已实现独立官网聚合适配器、JWT 服务端缓存、响应校验、区间与最多 31 日逐日聚合、缓存回退、独立 API/迁移账本和首页展示；常规读取不包含联系人明细，2026-08-01 至 2026-08-04 的逐日合计已与同区间汇总完成真实只读对账。2026-08-05 提交 `98467f0` 新增官网模块 `DISABLED` 会话级跳过：生产凭据未配置时只发一次请求，页面挂载、10 分钟轮询与 visibilitychange 不再重复命中必然 503；该提交已推送到 GitHub，尚未部署或完成正式入口验收。
   - 等待：取得专用最小权限只读服务账号或专用 API 密钥（共享管理员身份不得作为生产临时方案）；官网生产源码/schema/迁移/测试与线上聚合合同对齐。
   - 恢复后：配置生产 `GATO_WEBSITE_FORM_*`（`PROJECT_ID=1`），执行独立官网迁移，部署，并从正式域名验收模块状态、区间与逐日真实接口和首页来源展示。
 
@@ -66,8 +66,8 @@
   - 结果：桥接提交已安装，正式 workflow `30876793311` 将业务 revision `f265bd3` 快进部署；后续 workflow `30900162256` 又通过同一 Git Bundle 正式链路发布 `6894789`。服务器源码未被直接编辑，systemd、迁移与公网健康均已恢复。
   - 验证：`/api/health` 与 `/api/frontend-health` 报告同一完整 revision，GitHub Actions 结论为 `success`；精确运行证据见 `docs/DEPLOYMENT.md#当前正式单机实例`。
 
-- [x] 2026-08-03：实现 GoodieAI 官网表单聚合适配器与首页本地接入
-  - 结果：新增独立 `backend/modules/websiteFormConsultations`、`/api/website-data`、官网数据迁移账本和前端 `src/lib/websiteData`；区间汇总和最多 31 日逐日接口只同步可归因成功提交会话，不读取联系人明细，不与百度或 53KF 数据混用。上游不能证明全部表单记录数时，记录总数、未归因数和归因率保持不可用。
+- [x] 2026-08-03：实现 GoodieAI 官网表单聚合适配器与首页本地接入（历史 v1，已由全部表单九键合同取代）
+  - 历史结果：当时新增独立 `backend/modules/websiteFormConsultations`、`/api/website-data`、官网数据迁移账本和前端 `src/lib/websiteData`，只统计可归因成功提交会话。2026-08-04 起该口径已由联系人列表全部表单记录与九键来源合同取代；当前总数、逐日和来源规则以 ADR 0001、API 文档和现役代码为准，不得继续执行或引用旧 v1 口径。
   - 验证：后端完整 994/994、营销 131/131、官网数据 28/28、咨询记录 35/35、前端单元 72/72、部署专项 26/26、Playwright 23/23，lint 与 Next.js 38 路由 production build 通过；2026-08-01 至 2026-08-04 的官网逐日合计 3 与同区间汇总 3 一致。代码随后已通过正式 Git Bundle 链路进入生产 revision，但生产凭据尚未注入，模块继续保持 `DISABLED`，不得描述为官网数据已生产接通。
 
 ## 已取消

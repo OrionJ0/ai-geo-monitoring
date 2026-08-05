@@ -1,13 +1,16 @@
 ---
 title: "DeepSeek Pro 离线基线与提示词校准"
-status: open
+status: closed
 type: HITL
+resolution: superseded
 blocked_reason:
   - "等待用户确认 SOV 聚合偏差轻微波动是否可接受"
   - "等待用户确认 12 条补充情绪 AI 预标为人工基线"
 ---
 
 # DeepSeek Pro 离线基线与提示词校准
+
+> 处置（2026-08-05）：取消把 DeepSeek Pro v4 的 SOV 轻微偏差与 12 条情绪预标确认作为未来发布门禁。当前正式分析仍是 v4，但已确认的 Flash 结构化失败由[Flash v5 可靠性改造](../../active-2026-08-05-002-flash-structured-analysis-reliability/prd.md)承接，并以冻结语料 A/B/C、分阶段事实抽取和正式入口硬切重新验收。下方未勾选项保留为历史结果，不代表已经达标。
 
 ## Parent
 
@@ -45,7 +48,7 @@ blocked_reason:
   - `work/geo-sentiment-baseline-2026-07-29/LABELING.md` 仍为 `human_review_confirmed: no`，等待用户确认。
 - v6 提示词只使用任务目标、概念边界、多样化示例和静默自检；没有企业名单、情绪词典、排名正则或固定句式运行规则。
 
-## Blocked by
+## Closure
 
-- 用户确认 SOV 聚合偏差从 -0.06pp 变为 -0.11pp 是否可接受。
-- 用户确认 `work/geo-sentiment-baseline-2026-07-29/LABELING.md` 的 12 条补充情绪标签。
+- 原阻塞项已取消，不再请求用户为旧 Pro v4 方案背书。
+- v4 仍是当前正式路径；在 v5 完成入口级硬切和旧运行时退役前，父需求目录继续保持 `blocked`。

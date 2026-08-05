@@ -1,5 +1,9 @@
 # AI 语义实体分析质量优化 PRD
 
+> 状态：阻塞（2026-08-05）。v4 已完成正式入口硬切，但旧 Pro 校准门禁已取消；当前生产仍使用 v4，已观测到的 Flash 结构化可靠性问题由[Flash v5 可靠性改造](../active-2026-08-05-002-flash-structured-analysis-reliability/prd.md)承接。在 v5 完成正式入口硬切并退役 v4 运行时前，本目录不得关闭。
+>
+> 执行边界：本目录全部 issue 已关闭，下文的“DeepSeek Pro 单请求”方案只保留为 v4 历史需求与验收记录，不再是可执行的当前方案。新的实现、评测和切流只能从后继 Flash v5 需求进入；不得重新启用旧 Pro 门禁，也不得把本目录与后继需求并行实现成两套正式路径。
+
 ## Problem Statement
 
 当前结构化分析已经能够从 AI 回答中提取企业实体、竞争关系、候选清单和目标品牌情绪，并据此计算回答内竞品提及占比（SOV）和品牌排名。但现有结果仍存在三类质量问题：
@@ -146,4 +150,5 @@
 ## Handoff
 
 - PRD path: `docs/blocked-2026-07-29-002-ai-semantic-analysis-quality/prd.md`
-- Current state: v4 实现、全量回归和技术入口验收已完成，等待 SOV 波动口径与补充情绪人工基线确认。
+- Current state: v4 实现和入口验收已完成且仍是当前正式路径；旧 Pro 校准门禁已取消，等待后继 v5 完成正式硬切并清理 v4 运行时后再关闭本目录。
+- Successor: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/prd.md`

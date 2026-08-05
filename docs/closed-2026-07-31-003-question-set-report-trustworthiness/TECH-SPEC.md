@@ -2,7 +2,7 @@
 title: 问题集运行控制与报告可信度修复技术方案
 date: 2026-07-31
 status: closed
-source: 2026-07-31 生产问题集运行 #3 诊断、docs/active-2026-07-23-004-question-set-run-reports/prd.md
+source: 2026-07-31 生产问题集运行 #3 诊断、docs/closed-2026-07-23-004-question-set-run-reports/prd.md
 scope: deep
 ---
 
