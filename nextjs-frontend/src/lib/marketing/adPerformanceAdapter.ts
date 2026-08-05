@@ -124,6 +124,23 @@ export type MarketingDashboardResponse = {
   } | null;
 };
 
+export type MarketingAdHierarchyResponse = {
+  schemaVersion: 'marketing_ad_hierarchy_v1';
+  projectId: string;
+  revision: string;
+  coverage: NonNullable<MarketingDashboardResponse['coverage']>;
+  filter: NonNullable<MarketingDashboardResponse['filter']>;
+  summary: AdExactMetrics;
+  campaigns: DashboardCampaign[];
+  adGroups: DashboardAdGroup[];
+  keywords: DashboardKeyword[];
+  hierarchyCounts: {
+    campaigns: number;
+    adGroups: number;
+    keywords: number;
+  };
+};
+
 const EMPTY_METRICS: AdExactMetrics = Object.freeze({
   costAmountScaled: '0',
   impressions: '0',
@@ -304,6 +321,105 @@ function dashboardSemanticsValid(value: MarketingDashboardResponse): boolean {
   return true;
 }
 
+function hierarchyItemTrendValid(
+  row: DashboardCampaign,
+  range: { from: string; to: string }
+): boolean {
+  if (!Array.isArray(row.trend) || !exactTrend(row.trend)) return false;
+  if (
+    new Set(row.trend.map((point) => point.date)).size !== row.trend.length
+    || row.trend.some((point) => point.date < range.from || point.date > range.to)
+  ) return false;
+  return metricsEqual(sumMetrics(row.trend as AdDailyMetrics[]), row);
+}
+
+export function assertMarketingAdHierarchyResponse(
+  value: unknown,
+  dashboard: MarketingDashboardResponse,
+  expectedRange: { from: string; to: string }
+): asserts value is MarketingAdHierarchyResponse {
+  if (!objectRecord(value)) invalidDashboard();
+  const coverage = value.coverage;
+  const filter = value.filter;
+  const summary = value.summary;
+  const campaigns = value.campaigns;
+  const adGroups = value.adGroups;
+  const keywords = value.keywords;
+  const counts = value.hierarchyCounts;
+  if (
+    value.schemaVersion !== 'marketing_ad_hierarchy_v1'
+    || value.projectId !== dashboard.projectId
+    || value.revision !== dashboard.revision
+    || 'searchTerms' in value
+    || !objectRecord(coverage)
+    || coverage.from !== dashboard.coverage?.from
+    || coverage.to !== dashboard.coverage?.to
+    || coverage.currency !== dashboard.coverage?.currency
+    || coverage.costScale !== dashboard.coverage?.costScale
+    || coverage.lastSuccessfulAt !== dashboard.coverage?.lastSuccessfulAt
+    || !objectRecord(filter)
+    || filter.from !== expectedRange.from
+    || filter.to !== expectedRange.to
+    || !exactMetrics(summary)
+    || !exactMetrics(dashboard.summary)
+    || !metricsEqual(summary, dashboard.summary as AdExactMetrics)
+    || !Array.isArray(campaigns) || !campaigns.every(dashboardCampaign)
+    || !Array.isArray(adGroups) || !adGroups.every(dashboardAdGroup)
+    || !Array.isArray(keywords) || !keywords.every(dashboardKeyword)
+    || !objectRecord(counts)
+    || counts.campaigns !== campaigns.length
+    || counts.adGroups !== adGroups.length
+    || counts.keywords !== keywords.length
+  ) invalidDashboard();
+  const verifiedCampaigns = campaigns as DashboardCampaign[];
+  const verifiedAdGroups = adGroups as DashboardAdGroup[];
+  const verifiedKeywords = keywords as DashboardKeyword[];
+  if (
+    ![...verifiedCampaigns, ...verifiedAdGroups, ...verifiedKeywords]
+      .every((row) => hierarchyItemTrendValid(row, expectedRange))
+    || !metricsEqual(sumMetrics(verifiedCampaigns), summary as AdExactMetrics)
+    || (
+      dashboard.states?.snapshotContentState === 'ZERO'
+      && (verifiedCampaigns.length > 0
+        || verifiedAdGroups.length > 0
+        || verifiedKeywords.length > 0)
+    )
+  ) invalidDashboard();
+  const accountIds = new Set((dashboard.bindings || []).map((row) => row.accountId));
+  const campaignMap = uniqueMap(
+    verifiedCampaigns,
+    (row) => identity(row.accountId, row.campaignId)
+  );
+  const adGroupMap = uniqueMap(
+    verifiedAdGroups,
+    (row) => identity(row.accountId, row.campaignId, row.adGroupId)
+  );
+  const keywordMap = uniqueMap(
+    verifiedKeywords,
+    (row) => identity(row.accountId, row.campaignId, row.adGroupId, row.keywordId)
+  );
+  if (!campaignMap || !adGroupMap || !keywordMap) invalidDashboard();
+  if (!verifiedCampaigns.every((row) => accountIds.has(row.accountId))) {
+    invalidDashboard();
+  }
+  for (const row of verifiedAdGroups) {
+    const parent = campaignMap.get(identity(row.accountId, row.campaignId));
+    if (!parent || parent.campaignName !== row.campaignName) invalidDashboard();
+  }
+  for (const row of verifiedKeywords) {
+    const parent = adGroupMap.get(identity(
+      row.accountId,
+      row.campaignId,
+      row.adGroupId
+    ));
+    if (
+      !parent
+      || parent.campaignName !== row.campaignName
+      || parent.adGroupName !== row.adGroupName
+    ) invalidDashboard();
+  }
+}
+
 export function assertMarketingDashboardResponse(
   value: unknown,
   expectedProjectId: string
@@ -434,6 +550,13 @@ export function assertMarketingDashboardRootResponse(
     || !dateText(coverage.to)
     || coverage.from > coverage.to
     || !text(coverage.currency, 16)
+    || (
+      coverage.lastSuccessfulAt !== undefined
+      && (
+        !text(coverage.lastSuccessfulAt, 64)
+        || !Number.isFinite(Date.parse(coverage.lastSuccessfulAt))
+      )
+    )
     || !Number.isSafeInteger(coverage.costScale)
     || Number(coverage.costScale) < 0
     || Number(coverage.costScale) > 12
@@ -456,6 +579,9 @@ export function assertMarketingDashboardRootResponse(
     || !value.bindings.every((row) => objectRecord(row)
       && text(row.accountId, 128) && text(row.accountName))
   ) invalidDashboard();
+  if (!metricsEqual(sumMetrics(value.trend as AdDailyMetrics[]), value.summary)) {
+    invalidDashboard();
+  }
   const hierarchyCounts = value.hierarchyCounts;
   if (
     !objectRecord(hierarchyCounts)
@@ -745,4 +871,19 @@ export function adaptMarketingDashboard(
     previousTrend: [],
     structure: [projectNode]
   };
+}
+
+export function adaptMarketingAdHierarchy(
+  dashboard: MarketingDashboardResponse,
+  hierarchy: MarketingAdHierarchyResponse | null,
+  fallbackProjectName = '默认监控项目'
+): AdPerformanceModel {
+  return adaptMarketingDashboard({
+    ...dashboard,
+    summary: hierarchy?.summary || dashboard.summary,
+    campaigns: hierarchy?.campaigns || [],
+    adGroups: hierarchy?.adGroups || [],
+    keywords: hierarchy?.keywords || [],
+    searchTerms: []
+  }, fallbackProjectName);
 }

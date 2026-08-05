@@ -108,6 +108,28 @@ function createMarketingDashboardRouter({
     }
   );
 
+  if (adResourceService) router.get(
+    '/projects/:projectId/ad-hierarchy',
+    async (req, res) => {
+      try {
+        await dashboardService.assertAccess({
+          projectId: req.params.projectId,
+          user: req.user
+        });
+        const result = await adResourceService.readAdHierarchy({
+          projectId: req.params.projectId,
+          revision: req.query.revision,
+          from: req.query.from,
+          to: req.query.to
+        });
+        res.set('Cache-Control', 'private, max-age=60');
+        return res.json(result);
+      } catch (error) {
+        return sendError(res, error);
+      }
+    }
+  );
+
   if (tongjiService) router.get(
     '/projects/:projectId/website-traffic-overview',
     async (req, res) => {

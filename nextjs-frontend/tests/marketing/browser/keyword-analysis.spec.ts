@@ -358,6 +358,42 @@ function keywordResourceFixture(requestUrl: string) {
   };
 }
 
+function adHierarchyResourceFixture(requestUrl: string) {
+  const request = new URL(requestUrl);
+  const dashboard = dashboardFixture();
+  const from = request.searchParams.get('from') || dashboard.coverage.from;
+  const to = request.searchParams.get('to') || dashboard.coverage.to;
+  const withTrend = <T extends {
+    impressions: string;
+    clicks: string;
+    costAmountScaled: string;
+  }>(item: T) => ({
+    ...item,
+    trend: [{
+      date: from,
+      impressions: item.impressions,
+      clicks: item.clicks,
+      costAmountScaled: item.costAmountScaled
+    }]
+  });
+  return {
+    schemaVersion: 'marketing_ad_hierarchy_v1',
+    projectId: dashboard.projectId,
+    revision: request.searchParams.get('revision'),
+    coverage: dashboard.coverage,
+    filter: { from, to },
+    summary: dashboard.summary,
+    campaigns: dashboard.campaigns.map(withTrend),
+    adGroups: dashboard.adGroups.map(withTrend),
+    keywords: dashboard.keywords.map(withTrend),
+    hierarchyCounts: {
+      campaigns: dashboard.campaigns.length,
+      adGroups: dashboard.adGroups.length,
+      keywords: dashboard.keywords.length
+    }
+  };
+}
+
 async function installRoutes(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('agd_token', 'playwright.keyword-analysis.signature');
@@ -410,6 +446,10 @@ async function installRoutes(page: Page) {
   await page.route('**/api/marketing/projects/11/keywords**', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify(keywordResourceFixture(route.request().url()))
+  }));
+  await page.route('**/api/marketing/projects/11/ad-hierarchy**', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(adHierarchyResourceFixture(route.request().url()))
   }));
 }
 
@@ -796,7 +836,33 @@ test('ad delivery detail defaults to campaigns and keeps unsupported lower-level
     .toBeGreaterThan(7);
 });
 
-test('keyword resource ignores legacy detail arrays while the old ad consumer still validates them', async ({ page }) => {
+test('advertising hierarchy pins the dashboard revision without reading legacy detail arrays', async ({ page }) => {
+  const dashboardRequests: string[] = [];
+  const hierarchyRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/marketing/projects/11/dashboard')) {
+      dashboardRequests.push(request.url());
+    }
+    if (request.url().includes('/api/marketing/projects/11/ad-hierarchy')) {
+      hierarchyRequests.push(request.url());
+    }
+  });
+
+  await page.goto('/geo/ad-performance');
+  await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
+  expect(dashboardRequests).toHaveLength(1);
+  expect(hierarchyRequests).toHaveLength(1);
+  const hierarchyUrl = new URL(hierarchyRequests[0]);
+  const dashboardUrl = new URL(dashboardRequests[0]);
+  expect(hierarchyUrl.searchParams.get('revision'))
+    .toBe('keyword-analysis-fixture-revision');
+  expect(hierarchyUrl.searchParams.get('from'))
+    .toBe(dashboardUrl.searchParams.get('from'));
+  expect(hierarchyUrl.searchParams.get('to'))
+    .toBe(dashboardUrl.searchParams.get('to'));
+});
+
+test('migrated detail pages ignore malformed legacy dashboard arrays', async ({ page }) => {
   await page.unroute('**/api/marketing/projects/11/dashboard**');
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
     const invalid = dashboardFixture();
@@ -810,6 +876,21 @@ test('keyword resource ignores legacy detail arrays while the old ad consumer st
   await page.goto('/geo/keyword-analysis');
   await expect(page.getByText('振动光纤价格').first()).toBeVisible();
 
+  await page.goto('/geo/ad-performance');
+  await expect(page.getByRole('heading', { name: '投放明细' })).toBeVisible();
+});
+
+test('advertising page rejects an orphan keyword from the hierarchy resource', async ({ page }) => {
+  await page.unroute('**/api/marketing/projects/11/ad-hierarchy**');
+  await page.route('**/api/marketing/projects/11/ad-hierarchy**', (route) => {
+    const invalid = adHierarchyResourceFixture(route.request().url());
+    invalid.adGroups = [];
+    invalid.hierarchyCounts.adGroups = 0;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(invalid)
+    });
+  });
   await page.goto('/geo/ad-performance');
   await expect(page.getByText('广告数据读取失败，请稍后重试。'))
     .toBeVisible();

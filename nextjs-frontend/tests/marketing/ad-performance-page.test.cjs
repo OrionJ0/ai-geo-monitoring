@@ -18,7 +18,7 @@ const dashboardReaderSource = read('src/lib/marketing/readMarketingDashboard.ts'
 const adapterSource = read('src/lib/marketing/adPerformanceAdapter.ts');
 const fixtureSource = read('src/fixtures/adPerformance.fixture.ts');
 
-test('advertising page uses the default project and the real read-only dashboard endpoint', () => {
+test('advertising page pins the hierarchy resource to the read-only dashboard root', () => {
   assert.match(pageSource, /useDefaultProjectContext/);
   assert.match(pageSource, /defaultContext\.project\?\.id/);
   assert.match(dashboardReaderSource, /\/dashboard/);
@@ -26,7 +26,12 @@ test('advertising page uses the default project and the real read-only dashboard
   assert.match(dashboardReaderSource, /DASHBOARD_DATE_OUT_OF_RANGE/);
   assert.match(dashboardReaderSource, /clampMarketingDateRange/);
   assert.match(hookSource, /onDateRangeAdjusted\?\.\(response\.effectiveDateRange\)/);
-  assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data, projectId\)/);
+  assert.match(hookSource, /\/ad-hierarchy/);
+  assert.match(hookSource, /revision: response\.data\.revision/);
+  assert.match(hookSource, /assertMarketingDashboardRootResponse\(response\.data, projectId\)/);
+  assert.match(hookSource, /assertMarketingAdHierarchyResponse/);
+  assert.match(hookSource, /adaptMarketingAdHierarchy/);
+  assert.doesNotMatch(hookSource, /assertMarketingDashboardResponse\(response\.data/);
   assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);
   assert.match(pageSource, /performance\.warning/);
   assert.match(adapterSource, /MARKETING_DASHBOARD_RESPONSE_INVALID/);
