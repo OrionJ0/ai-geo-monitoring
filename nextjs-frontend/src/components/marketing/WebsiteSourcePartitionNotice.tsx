@@ -37,6 +37,8 @@ export default function WebsiteSourcePartitionNotice({
 
   return (
     <Alert
+      role="status"
+      aria-live="polite"
       type={complete ? 'success' : 'warning'}
       showIcon
       title={complete ? '来源分类覆盖完整' : '来源分类覆盖不完整'}

@@ -27,7 +27,7 @@ const metricTotals: Record<string, [string, string]> = {
   averageVisitPages: ['2.88', '2.71']
 };
 
-let sourcePartitionMode: 'complete' | 'partial' = 'complete';
+let sourcePartitionMode: 'complete' | 'partial' | 'total-unavailable' = 'complete';
 
 const landingRows = Array.from({ length: 23 }, (_, index) => ({
   key: `baidu-page:${index + 1}`,
@@ -112,7 +112,12 @@ async function installRoutes(page: Page) {
     const trend = Array.from({ length: 30 }, (_, index) => ({
       date: date(index),
       previousDate: date(index, '2026-06-05'),
-      current: String(((currentTotal / 30) * ratio * (0.82 + ((index % 7) * 0.055))).toFixed(metric.includes('average') || metric === 'bounceRate' ? 2 : 0)),
+      current: sourcePartitionMode === 'total-unavailable'
+        && metric === 'visits'
+        && source === 'ALL'
+        && index === 0
+        ? null
+        : String(((currentTotal / 30) * ratio * (0.82 + ((index % 7) * 0.055))).toFixed(metric.includes('average') || metric === 'bounceRate' ? 2 : 0)),
       previous: String(((previousTotal / 30) * ratio * (0.86 + ((index % 6) * 0.045))).toFixed(metric.includes('average') || metric === 'bounceRate' ? 2 : 0))
     }));
     const sourceComparison = url.searchParams.get('includeSourceComparison') === 'true'
@@ -122,12 +127,18 @@ async function installRoutes(page: Page) {
           partition: {
             metric: 'visits',
             state: sourcePartitionMode === 'complete' ? 'COMPLETE' : 'PARTIAL',
-            totalVisits: sourcePartitionMode === 'complete' ? '61842' : '61843',
+            totalVisits: sourcePartitionMode === 'complete'
+              ? '61842'
+              : sourcePartitionMode === 'partial' ? '61843' : null,
             classifiedVisits: '61842',
-            unclassifiedVisits: sourcePartitionMode === 'complete' ? '0' : '1',
+            unclassifiedVisits: sourcePartitionMode === 'complete'
+              ? '0'
+              : sourcePartitionMode === 'partial' ? '1' : null,
             reasonCode: sourcePartitionMode === 'complete'
               ? null
-              : 'SOURCE_COVERAGE_INCOMPLETE'
+              : sourcePartitionMode === 'partial'
+                ? 'SOURCE_COVERAGE_INCOMPLETE'
+                : 'SOURCE_TOTAL_UNAVAILABLE'
           },
           rows: sourceRows.map((row) => ({
             sourceKey: row.sourceKey,
@@ -138,7 +149,9 @@ async function installRoutes(page: Page) {
               current: row.visits,
               previous: row.visits,
               changePercent: '0.0',
-              trafficShare: row.trafficShare
+              trafficShare: sourcePartitionMode === 'total-unavailable'
+                ? null
+                : row.trafficShare
             },
             trend: [{ date: from, visits: row.visits }]
           }))
@@ -165,9 +178,13 @@ async function installRoutes(page: Page) {
         dataState: 'DATA',
         summary: {
           visits: {
-            current: sourcePartitionMode === 'complete' ? '61842' : '61843',
+            current: sourcePartitionMode === 'complete'
+              ? '61842'
+              : sourcePartitionMode === 'partial' ? '61843' : null,
             previous: '57712',
-            changePercent: '7.2'
+            changePercent: sourcePartitionMode === 'total-unavailable'
+              ? null
+              : '7.2'
           },
           visitors: { current: '49618', previous: '46734', changePercent: '6.2' },
           pageviews: { current: '159420', previous: '146503', changePercent: '8.8' },
@@ -176,7 +193,15 @@ async function installRoutes(page: Page) {
           averageVisitPages: { current: '2.88', previous: '2.71', changePages: '0.17' }
         },
         trend,
-        sourceQuality: { allSiteBounceRate: '42.6', rows: sourceRows },
+        sourceQuality: {
+          allSiteBounceRate: '42.6',
+          rows: sourceRows.map((row) => ({
+            ...row,
+            trafficShare: sourcePartitionMode === 'total-unavailable'
+              ? null
+              : row.trafficShare
+          }))
+        },
         ...(sourceComparison ? { sourceComparison } : {}),
         capabilities: {
           trafficCounts: true,
@@ -454,7 +479,7 @@ test('shows 61843/61842 as PARTIAL without renormalizing visible source shares',
   sourcePartitionMode = 'partial';
   await page.goto('/geo/website-traffic');
 
-  const partition = page.getByRole('alert').filter({
+  const partition = page.getByRole('status').filter({
     hasText: '来源分类覆盖不完整'
   });
   await expect(partition).toContainText('全站访问 61,843');
@@ -463,6 +488,22 @@ test('shows 61843/61842 as PARTIAL without renormalizing visible source shares',
   await expect(partition).toContainText('不代表任何业务来源');
   await expect(page.getByRole('row', { name: /直接访问/ })).toContainText('30.1%');
   await expect(page.getByText(/未分类来源|未知来源/u)).toHaveCount(0);
+});
+
+test('missing all-site daily visits never render a partial sum as the period total', async ({ page }) => {
+  sourcePartitionMode = 'total-unavailable';
+  await page.goto('/geo/website-traffic');
+
+  await expect(page.getByRole('status').filter({
+    hasText: '来源分类覆盖不完整'
+  })).toContainText('全站访问 暂不可用');
+  const visitsSummary = page.getByRole('heading', { name: '访问次数' })
+    .locator('xpath=ancestor::div[contains(@class,"ant-card")][1]');
+  await expect(visitsSummary.getByRole('note', {
+    name: /访问次数本期：暂无数据/u
+  })).toBeVisible();
+  await expect(visitsSummary.getByText('61,842', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('row', { name: /直接访问/ })).toContainText('—');
 });
 
 test('switches page contracts, searches, sorts and paginates', async ({ page }) => {
@@ -498,15 +539,23 @@ test('switches page contracts, searches, sorts and paginates', async ({ page }) 
 
 test('keeps same-path page facts disambiguated across desktop, mobile and pagination', async ({ page }) => {
   await page.goto('/geo/website-traffic');
-  await expect(page.getByText('/solutions/shared-entry · 同路径记录 1/3')).toBeVisible();
-  await expect(page.getByText('/solutions/shared-entry · 同路径记录 2/3')).toBeVisible();
+  await expect(page.getByText('同路径记录 1/3', { exact: true })).toBeVisible();
+  await expect(page.getByText('同路径记录 2/3', { exact: true })).toBeVisible();
 
   await page.getByTitle('下一页').click();
-  await expect(page.getByText('/solutions/shared-entry · 同路径记录 3/3')).toBeVisible();
+  const badge = page.getByText('同路径记录 3/3', { exact: true });
+  await expect(badge).toBeVisible();
   await expect(page.getByText('共 23 条')).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByText('/solutions/shared-entry · 同路径记录 3/3')).toBeVisible();
+  await expect(badge).toBeVisible();
+  const badgeBox = await badge.boundingBox();
+  expect(badgeBox).not.toBeNull();
+  expect(badgeBox?.x).toBeGreaterThanOrEqual(0);
+  expect((badgeBox?.x || 0) + (badgeBox?.width || 0)).toBeLessThanOrEqual(390);
+  const path = page.getByLabel('完整路径：/solutions/shared-entry').first();
+  await path.focus();
+  await expect(page.getByRole('tooltip')).toContainText('/solutions/shared-entry');
 });
 
 test('keeps tables internally scrollable at narrow width and 400 percent zoom', async ({ page }) => {

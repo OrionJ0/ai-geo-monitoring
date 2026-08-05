@@ -84,14 +84,25 @@ function changeTone(value: string, lowerIsBetter = false) {
 }
 
 function PageName({ row }: { row: WebsitePageRow }) {
-  const pathLabel = row.pathCollision
+  const collisionLabel = row.pathCollision
     ? `${row.path} · 同路径记录 ${row.pathCollision.ordinal}/${row.pathCollision.count}`
     : row.path;
   return (
-    <div className={styles.pageNameCell}>
+    <div className={styles.pageNameCell} aria-label={collisionLabel}>
       <span className={styles.pageTitle}>{row.title || '—'}</span>
-      <Tooltip title={pathLabel} trigger={['hover']}>
-        <span className={styles.pagePath}>{pathLabel}</span>
+      {row.pathCollision ? (
+        <span className={styles.pathCollisionBadge}>
+          同路径记录 {row.pathCollision.ordinal}/{row.pathCollision.count}
+        </span>
+      ) : null}
+      <Tooltip title={row.path} trigger={['hover', 'focus']}>
+        <span
+          className={styles.pagePath}
+          tabIndex={0}
+          aria-label={`完整路径：${row.path}`}
+        >
+          {row.path}
+        </span>
       </Tooltip>
     </div>
   );

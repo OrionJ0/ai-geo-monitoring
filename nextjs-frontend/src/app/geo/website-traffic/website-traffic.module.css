@@ -391,6 +391,18 @@
   font-size: 12px;
 }
 
+.pathCollisionBadge {
+  flex: none;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #e8efff;
+  color: #1747a6;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
 .pageTable :global(.ant-pagination) {
   margin: 14px 20px 16px;
 }

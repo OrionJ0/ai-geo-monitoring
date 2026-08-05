@@ -1,6 +1,6 @@
 ---
 title: "发布并验收营销生产数据正确性"
-status: open
+status: active
 type: HITL
 blocked_by:
   - "002-deliver-ad-performance-period-comparison.md"
@@ -32,8 +32,8 @@ blocked_by:
 
 ## Acceptance criteria
 
-- [ ] Issue 002–005 全部通过各自自动化验收，聚焦与相关全量回归无阻断失败。
-- [ ] fixture、代码、日志和 Git diff 的秘密及个人信息扫描为零，人工复核确认没有生产 Token、原始报文或真实敏感业务明细。
+- [x] Issue 002–005 全部通过各自自动化验收，聚焦与相关全量回归无阻断失败。
+- [x] fixture、代码、日志和 Git diff 的秘密及个人信息扫描为零，人工复核确认没有生产 Token、原始报文或真实敏感业务明细。
 - [ ] 正式 backend/frontend revision 与目标 Git Bundle 一致，公开健康与 `/api/ready` 通过，部署未启动第二套服务。
 - [ ] 广告表现和关键词页面的 Network 均存在 current/previous 请求，两个周期日期等长相邻并使用同一 revision、currency 和 cost scale。
 - [ ] 可用上期显示真实比较；上期不可用显示不可用；精确零、null 和错误没有互相冒充。
@@ -51,3 +51,12 @@ blocked_by:
 - [Issue 003：交付关键词真实双周期比较](003-deliver-keyword-period-comparison.md)。
 - [Issue 004：交付百度统计来源分区完整性](004-deliver-tongji-source-partition.md)。
 - [Issue 005：交付百度统计同路径页面消歧](005-disambiguate-tongji-page-path-collisions.md)。
+
+## 发布前证据（2026-08-06）
+
+- 后端：营销测试 `231/231`，全后端测试 `994/994`。
+- 前端：单元/合同测试 `123/123`，ESLint、TypeScript 和 40 路由生产构建通过。
+- 真实 Chrome：营销全套 `56/56`；覆盖广告/关键词双周期、对象级上期身份缺失、来源 `COMPLETE/PARTIAL/INVALID`、全站逐日访问缺失、同路径消歧、响应式和键盘/无障碍树。
+- 对抗式复审：代码、现实证据、最小变更、API 和无障碍专项均为 P0/P1 零；保留一个不阻断发布的 P2——关键词翻页会重复读取不变的上期汇总，未在正确性需求中扩大修改范围。
+- 隐私：最终 diff 未包含生产 Token、Cookie、`.env`、数据库、原始百度响应或个人信息；命中的 `access-token-fixture` 是既有测试使用的显式合成占位值。
+- 当前正式入口仍为 `https://insight.guangtuo.com`，生产 revision 仍为上一版 `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22`；本节只证明发布候选，生产验收项保持未勾选。

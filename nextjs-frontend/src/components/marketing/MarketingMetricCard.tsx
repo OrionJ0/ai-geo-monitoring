@@ -17,9 +17,20 @@ function Value({
   label: string;
 }) {
   if (value !== null && value !== undefined && value !== '') return value;
+  const reasonText = typeof missingReason === 'string'
+    ? missingReason
+    : '当前没有可用数据。';
   return (
-    <Tooltip title={missingReason || '当前没有可用数据。'} trigger={['hover']}>
-      <span className={styles.missingValue} aria-label={`${label}：暂无数据`}>
+    <Tooltip
+      title={missingReason || reasonText}
+      trigger={['hover', 'focus']}
+    >
+      <span
+        className={styles.missingValue}
+        role="note"
+        aria-label={`${label}：暂无数据。${reasonText}`}
+        tabIndex={0}
+      >
         —
       </span>
     </Tooltip>

@@ -122,6 +122,7 @@ test('Tongji ratios use exact half-up rounding and reject impossible shares', ()
 test('Tongji snapshot rejects a source partition whose classified visits exceed the total', () => {
   const invalid = trafficSnapshot();
   invalid.allTrend = rows(100, 14, 10);
+  invalid.allTrend[1].visits = '0';
   assert.throws(
     () => buildSnapshotPayload(
       invalid,
@@ -142,6 +143,21 @@ test('Tongji snapshot keeps the existing exact pageview partition contract', () 
       'all'
     ),
     { code: 'TONGJI_SOURCE_RESPONSE_INVALID', status: 502 }
+  );
+});
+
+test('Tongji snapshot rejects a negative derived visits remainder with the partition code', () => {
+  const invalid = trafficSnapshot();
+  invalid.sourceSummaries = invalid.sourceSummaries.map((row) => (
+    row.source === 'searchOther' ? { ...row, visits: '2' } : row
+  ));
+  assert.throws(
+    () => buildSnapshotPayload(
+      invalid,
+      { from: '2026-07-29', to: '2026-07-30' },
+      'all'
+    ),
+    { code: 'TONGJI_SOURCE_PARTITION_INVALID', status: 502 }
   );
 });
 
@@ -959,6 +975,58 @@ test('website source comparison only accepts all-source visits requests', async 
   );
 });
 
+test('website source comparison maps only invalid visits fields to the partition code', async (t) => {
+  for (const invalidField of ['trendVisits', 'sourceVisits']) {
+    const { service } = await createService(t, {
+      capabilities: { sourceTraffic: true },
+      provider: {
+        async readTrafficSnapshot({ coverage }) {
+          const snapshot = rangeSnapshot(coverage);
+          if (invalidField === 'trendVisits') {
+            snapshot.allTrend[0].visits = '-1';
+          } else {
+            snapshot.sourceSummaries[0].visits = '1.5';
+          }
+          return { ...snapshot, sourceReportsIncluded: true };
+        }
+      }
+    });
+    await assert.rejects(
+      service.readProjectWebsiteTraffic('11', {
+        device: 'all',
+        from: '2026-07-29',
+        to: '2026-07-30',
+        source: 'ALL',
+        metric: 'visits',
+        includeSourceComparison: true
+      }),
+      { code: 'TONGJI_SOURCE_PARTITION_INVALID', status: 502 }
+    );
+  }
+
+  const { service } = await createService(t, {
+    capabilities: { sourceTraffic: true },
+    provider: {
+      async readTrafficSnapshot({ coverage }) {
+        const snapshot = rangeSnapshot(coverage);
+        snapshot.allTrend[0].pageviews = '-1';
+        return { ...snapshot, sourceReportsIncluded: true };
+      }
+    }
+  });
+  await assert.rejects(
+    service.readProjectWebsiteTraffic('11', {
+      device: 'all',
+      from: '2026-07-29',
+      to: '2026-07-30',
+      source: 'ALL',
+      metric: 'visits',
+      includeSourceComparison: true
+    }),
+    { code: 'TONGJI_RESPONSE_INVALID', status: 502 }
+  );
+});
+
 test('website source comparison returns every canonical source in one response', async (t) => {
   const sourceValues = {
     BAIDU_PAID: { pageviews: [0, 0], visits: [0, 0], visitors: [0, 0] },
@@ -1098,6 +1166,70 @@ test('website source comparison returns every canonical source in one response',
       { date: '2026-07-30', visits: '20' }
     ]
   });
+});
+
+test('website source partition stays partial when an all-site daily visit is missing', async (t) => {
+  const { service } = await createService(t, {
+    capabilities: { sourceTraffic: true },
+    provider: {
+      async readTrafficSnapshot({ coverage }) {
+        const snapshot = rangeSnapshot(coverage);
+        return {
+          ...snapshot,
+          allTrend: snapshot.allTrend.map((row, index) => ({
+            ...row,
+            visits: (
+              (coverage.from === '2026-07-29' && index === 1)
+              || (coverage.from !== '2026-07-29' && index === 0)
+            )
+              ? null
+              : row.visits
+          })),
+          sourceReportsIncluded: true
+        };
+      },
+      async readSourceTrend({ coverage, sourceKey }) {
+        return {
+          site: trafficSnapshot().site,
+          sourceKey,
+          rows: rangeRows(coverage, {
+            pageviews: [0, 0],
+            visits: [0, 0],
+            visitors: [0, 0]
+          })
+        };
+      }
+    }
+  });
+
+  const result = await service.readProjectWebsiteTraffic('11', {
+    device: 'all',
+    from: '2026-07-29',
+    to: '2026-07-30',
+    source: 'ALL',
+    metric: 'visits',
+    includeSourceComparison: true
+  });
+
+  assert.deepEqual(result.sourceComparison.partition, {
+    metric: 'visits',
+    state: 'PARTIAL',
+    totalVisits: null,
+    classifiedVisits: '100',
+    unclassifiedVisits: null,
+    reasonCode: 'SOURCE_TOTAL_UNAVAILABLE'
+  });
+  assert.ok(result.sourceComparison.rows.every(
+    (row) => row.summary.trafficShare === null
+  ));
+  assert.deepEqual(result.summary.visits, {
+    current: null,
+    previous: null,
+    changePercent: null
+  });
+  assert.ok(result.sourceQuality.rows.every(
+    (row) => row.trafficShare === null
+  ));
 });
 
 test('website source comparison isolates one failed source and limits concurrency', async (t) => {

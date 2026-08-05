@@ -37,6 +37,10 @@ import type {
   AdHierarchyLevel,
   AdHierarchyNode
 } from '@/lib/marketing/adPerformanceAdapter';
+import {
+  periodDaySlot,
+  shiftIsoDate
+} from '@/lib/marketing/adPerformanceAdapter';
 import MarketingPageFilters from '@/components/marketing/MarketingPageFilters';
 import { useMarketingFilters } from '@/components/marketing/MarketingFiltersContext';
 import MarketingMetricCard, {
@@ -527,20 +531,37 @@ export default function AdPerformancePage() {
   const previousPeriodLabel = performance.data
     ? `较前 ${performance.data.period.days} 天`
     : '上一周期';
+  const previousReady = performance.data?.previousState === 'READY'
+    && (!selectedNode || selectedNode.previousState === 'READY');
+  const trendPreviousUnavailableReason = performance.data?.previousState === 'READY'
+    && selectedNode?.previousState === 'UNAVAILABLE'
+    ? '所选对象在上一周期没有可匹配事实。'
+    : previousUnavailableReason;
+  const trendAriaLabel = `${selectedNode?.name || '总体'}${
+    TREND_OPTIONS.find((item) => item.value === trendMetric)?.label || ''
+  }每日趋势，${currentPeriodLabel}${previousReady
+    ? `与${previousPeriodLabel}`
+    : `；仅展示本期，上期不可用：${trendPreviousUnavailableReason}`}`;
   const chartData = useMemo(() => {
     if (!performance.data) return [];
     const createRows = (
       rows: AdDailyMetrics[],
-      period: string
-    ) => rows.flatMap((row, index) => {
+      period: string,
+      periodFrom: string
+    ) => rows.flatMap((row) => {
       const value = chartMetricValue(
         row,
         trendMetric,
         performance.data?.costScale || 2
       );
-      if (value == null || !Number.isFinite(value)) return [];
+      const slot = periodDaySlot(
+        row.date,
+        periodFrom,
+        performance.data?.period.days || 0
+      );
+      if (value == null || !Number.isFinite(value) || slot === null) return [];
       return [{
-        slot: index,
+        slot,
         actualDate: row.date,
         value,
         displayValue: formatChartValue(
@@ -552,14 +573,23 @@ export default function AdPerformancePage() {
       }];
     });
     return [
-      ...createRows(currentTrend, currentPeriodLabel),
-      ...createRows(previousTrend, previousPeriodLabel)
+      ...createRows(
+        currentTrend,
+        currentPeriodLabel,
+        performance.data.period.currentFrom
+      ),
+      ...(previousReady ? createRows(
+        previousTrend,
+        previousPeriodLabel,
+        performance.data.period.previousFrom
+      ) : [])
     ];
   }, [
     currentPeriodLabel,
     currentTrend,
     performance.data,
     previousPeriodLabel,
+    previousReady,
     previousTrend,
     trendMetric
   ]);
@@ -914,7 +944,7 @@ export default function AdPerformancePage() {
               <div
                 className={styles.chartRegion}
                 role="img"
-                aria-label={`${selectedNode?.name || '总体'}${TREND_OPTIONS.find((item) => item.value === trendMetric)?.label || ''}每日趋势，${currentPeriodLabel}与${previousPeriodLabel}`}
+                aria-label={trendAriaLabel}
               >
                 <Line
                   data={chartData}
@@ -926,13 +956,20 @@ export default function AdPerformancePage() {
                   scale={{
                     x: {
                       domainMin: 0,
-                      domainMax: Math.max(currentTrend.length - 1, 0),
+                      domainMax: Math.max(
+                        (performance.data?.period.days || 1) - 1,
+                        0
+                      ),
                       tickCount: 8
                     },
                     y: { domainMin: 0 },
                     color: {
-                      domain: [currentPeriodLabel, previousPeriodLabel],
-                      range: ['#2f6bff', '#94a3b8']
+                      domain: previousReady
+                        ? [currentPeriodLabel, previousPeriodLabel]
+                        : [currentPeriodLabel],
+                      range: previousReady
+                        ? ['#2f6bff', '#94a3b8']
+                        : ['#2f6bff']
                     }
                   }}
                   axis={{
@@ -941,8 +978,10 @@ export default function AdPerformancePage() {
                       tick: false,
                       labelAutoRotate: false,
                       labelFormatter: (value: string) => (
-                        currentTrend[Math.round(Number(value))]?.date.slice(5)
-                        || ''
+                        shiftIsoDate(
+                          performance.data?.period.currentFrom || '',
+                          Math.round(Number(value))
+                        ).slice(5)
                       )
                     },
                     y: {
@@ -955,12 +994,12 @@ export default function AdPerformancePage() {
                       )
                     }
                   }}
-                  legend={{
+                  legend={previousReady ? {
                     color: {
                       position: 'bottom',
                       layout: { justifyContent: 'center' }
                     }
-                  }}
+                  } : false}
                   point={{ size: 3 }}
                   style={{
                     lineWidth: 2,

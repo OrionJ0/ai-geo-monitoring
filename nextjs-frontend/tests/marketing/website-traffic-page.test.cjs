@@ -109,7 +109,8 @@ test('page views replace columns and support search, sorting and server paginati
   assert.match(source, /onSearch/);
   assert.match(source, /sortBy/);
   assert.match(source, /total: pages\.data\.pagination\.totalItems/);
-  assert.match(source, /Tooltip title=\{pathLabel\} trigger=\{\['hover'\]\}/);
+  assert.match(source, /pathCollisionBadge/);
+  assert.match(source, /Tooltip title=\{row\.path\} trigger=\{\['hover', 'focus'\]\}/);
   assert.match(source, /同路径记录/);
   assert.doesNotMatch(source, /className=\{styles\.pagePath\} tabIndex=\{0\}/);
 });

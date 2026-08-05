@@ -210,6 +210,15 @@ function comparison(value: unknown, changeKey: string): boolean {
     && metric(value[changeKey]);
 }
 
+function completeTrend(
+  rows: unknown,
+  field: 'current' | 'previous'
+): boolean {
+  return Array.isArray(rows)
+    && rows.length > 0
+    && rows.every((row) => record(row) && row[field] !== null);
+}
+
 const WEBSITE_TRAFFIC_SOURCE_KEYS = [
   'BAIDU_PAID',
   'DIRECT',
@@ -302,6 +311,11 @@ function sourceComparison(
       partition.state !== 'PARTIAL'
       || partition.unclassifiedVisits !== null
       || partition.reasonCode !== 'SOURCE_TOTAL_UNAVAILABLE'
+      || rows.some((row) => (
+        record(row)
+        && record(row.summary)
+        && row.summary.trafficShare !== null
+      ))
     ) return false;
   } else {
     const total = BigInt(String(partition.totalVisits));
@@ -367,6 +381,16 @@ export function assertWebsiteTrafficOverview(
   const selectedSource = value.selectedSource;
   const sourceQuality = value.sourceQuality;
   const responseCapabilities = value.capabilities;
+  const exactPartitionTotal = completeTrend(value.trend, 'current')
+    && record(summary)
+    && record(summary.visits)
+    ? summary.visits.current
+    : null;
+  const exactPreviousVisits = completeTrend(value.trend, 'previous')
+    && record(summary)
+    && record(summary.visits)
+    ? summary.visits.previous
+    : null;
   if (
     String(value.projectId) !== query.projectId
     || value.source !== 'BAIDU_TONGJI'
@@ -397,14 +421,14 @@ export function assertWebsiteTrafficOverview(
             value.sourceComparison,
             query.from,
             query.to,
-            record(summary.visits) ? summary.visits.current : null
+            exactPartitionTotal
           )
         : value.sourceComparison !== undefined
           && !sourceComparison(
             value.sourceComparison,
             query.from,
             query.to,
-            record(summary.visits) ? summary.visits.current : null
+            exactPartitionTotal
           )
     )
     || !capabilities(responseCapabilities)
@@ -412,6 +436,19 @@ export function assertWebsiteTrafficOverview(
     || !['HIT', 'REFRESHED', 'FALLBACK'].includes(String(value.cache.state))
   ) invalidWebsiteTraffic();
   if (!record(responseCapabilities)) invalidWebsiteTraffic();
+  if (
+    query.includeSourceComparison === true
+    && (
+      !record(summary)
+      || !record(summary.visits)
+      || summary.visits.current !== exactPartitionTotal
+      || summary.visits.previous !== exactPreviousVisits
+      || (
+        (exactPartitionTotal === null || exactPreviousVisits === null)
+        && summary.visits.changePercent !== null
+      )
+    )
+  ) invalidWebsiteTraffic();
   const typedSummary = summary as WebsiteTrafficOverview['summary'];
   const typedSourceQuality = sourceQuality as WebsiteTrafficOverview['sourceQuality'];
   if (

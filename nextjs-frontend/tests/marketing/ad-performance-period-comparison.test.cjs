@@ -84,6 +84,46 @@ test('广告模型保留真实上期 summary 和逐层趋势而不修改本期�
   assert.equal(model.structure[0].children[0].previousTrend.length > 0, true);
 });
 
+test('对象级上期身份缺失保持 UNAVAILABLE 而不冒充真实零', () => {
+  const adapter = loadAdapter();
+  const ready = fixture('ad-periods-ready.json');
+  const previousHierarchy = {
+    ...ready.previous.adHierarchy,
+    campaigns: ready.previous.adHierarchy.campaigns.map((row) => ({
+      ...row,
+      campaignId: `${row.campaignId}-previous`
+    })),
+    adGroups: ready.previous.adHierarchy.adGroups.map((row) => ({
+      ...row,
+      campaignId: `${row.campaignId}-previous`
+    })),
+    keywords: ready.previous.adHierarchy.keywords.map((row) => ({
+      ...row,
+      campaignId: `${row.campaignId}-previous`
+    }))
+  };
+  adapter.assertMarketingAdHierarchyResponse(
+    previousHierarchy,
+    ready.dashboard,
+    ready.previous.range,
+    { requireDashboardSummary: false }
+  );
+  const model = adapter.adaptMarketingAdHierarchy(
+    ready.dashboard,
+    ready.current.adHierarchy,
+    {
+      state: 'READY',
+      hierarchy: previousHierarchy,
+      reason: ''
+    },
+    '虚构项目'
+  );
+
+  assert.equal(model.previousState, 'READY');
+  assert.equal(model.structure[0].children[0].previousState, 'UNAVAILABLE');
+  assert.deepEqual(model.structure[0].children[0].previousTrend, []);
+});
+
 test('上期不可用与可重试错误保持独立状态且不清空本期', () => {
   const adapter = loadAdapter();
   const ready = fixture('ad-periods-ready.json');
@@ -174,4 +214,12 @@ test('双周期闭区间按 UTC 日历生成等长紧邻范围', () => {
     previousTo: '2026-02-28',
     days: 7
   });
+});
+
+test('稀疏双周期趋势按真实日期映射到周期槽位', () => {
+  const adapter = loadAdapter();
+  assert.equal(adapter.periodDaySlot('2026-03-02', '2026-03-01', 7), 1);
+  assert.equal(adapter.periodDaySlot('2026-02-27', '2026-02-22', 7), 5);
+  assert.equal(adapter.periodDaySlot('2026-02-21', '2026-02-22', 7), null);
+  assert.equal(adapter.periodDaySlot('2026-03-01', '2026-02-22', 7), null);
 });
