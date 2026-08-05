@@ -111,7 +111,7 @@ async read(input) {
 - `FAILED` → 停轮询（保留 STALE 旧数据与现有失败提示）。
 - 卸载时清理计时器。
 
-`activeRun` 为可选字段，`assertMarketingDashboardResponse` 不强校验（已确认现有 adapter 不要求）。
+`activeRun` 在生成的 `MarketingDashboardResponse` 中为显式可空字段，由 `assertMarketingDashboardRootResponse` 校验。
 
 ## 4. 文档与待办更新
 

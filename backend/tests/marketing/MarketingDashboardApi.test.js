@@ -12,6 +12,9 @@ const {
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
+const openApi = require(
+  '../../modules/marketing/contracts/goodieai-marketing-ad-read.openapi.json'
+);
 
 test('dashboard returns one revision and exact aggregates without provider calls', async (t) => {
   const database = await createMarketingTestDatabase();
@@ -62,12 +65,19 @@ test('dashboard returns one revision and exact aggregates without provider calls
     sequelize: database.sequelize,
     clock: () => Date.parse('2026-07-30T04:05:00.000Z')
   });
+  const dashboardQueries = [];
+  const originalQuery = database.sequelize.query.bind(database.sequelize);
+  database.sequelize.query = (sql, options) => {
+    dashboardQueries.push(String(sql));
+    return originalQuery(sql, options);
+  };
   const dashboard = await dashboardService.read({
     projectId: 11,
     from: '2026-07-28',
     to: '2026-07-29'
   });
   assert.equal(providerCalls, 1, 'dashboard GET must not call the provider');
+  assert.equal(dashboard.schemaVersion, 'marketing_dashboard_v2');
   assert.equal(dashboard.revision, run.runId);
   assert.equal(dashboard.states.snapshotContentState, 'DATA');
   assert.equal(dashboard.states.snapshotFreshnessState, 'FRESH');
@@ -77,11 +87,31 @@ test('dashboard returns one revision and exact aggregates without provider calls
     costAmountScaled: '3000003'
   });
   assert.equal(dashboard.trend.length, 2);
-  assert.equal(dashboard.campaigns.length, 1);
-  assert.equal(
-    dashboard.campaigns[0].campaignId,
-    'campaign-0009007199254740993123'
+  assert.deepEqual(dashboard.hierarchyCounts, {
+    campaigns: 1,
+    adGroups: 0,
+    keywords: 0,
+    searchTerms: 0
+  });
+  for (const field of ['campaigns', 'adGroups', 'keywords', 'searchTerms']) {
+    assert.equal(field in dashboard, false, `dashboard must omit ${field}`);
+  }
+  assert.deepEqual(
+    Object.keys(dashboard).sort(),
+    [...openApi.components.schemas.MarketingDashboardResponse.required].sort(),
+    '实际 Dashboard 顶层字段必须与 OpenAPI 3.1 合同一致'
   );
+  for (const table of [
+    'baidu_ad_group_daily_metrics',
+    'baidu_keyword_daily_metrics',
+    'baidu_search_term_daily_metrics'
+  ]) {
+    const reads = dashboardQueries.filter((sql) => sql.includes(table));
+    assert.equal(reads.length, 1, `${table} should only be counted once`);
+    assert.match(reads[0], /SELECT COUNT\(\*\) AS total/u);
+    assert.match(reads[0], /GROUP BY/u);
+    assert.doesNotMatch(reads[0], /SELECT \*/u);
+  }
 });
 
 test('dashboard rejects filters outside the saved coverage', async (t) => {

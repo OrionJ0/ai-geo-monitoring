@@ -23,8 +23,9 @@ const sharedCssPath = path.resolve(
 test('overview hook owns only the dashboard while range traffic uses the shared hook', () => {
   const source = fs.readFileSync(hookPath, 'utf8');
 
-  assert.match(source, /assertMarketingDashboardResponse/);
-  assert.match(source, /assertMarketingDashboardResponse\(value, projectId\)/);
+  assert.match(source, /assertMarketingDashboardRootResponse/);
+  assert.match(source, /assertMarketingDashboardRootResponse\(value, projectId\)/);
+  assert.doesNotMatch(source, /assertMarketingDashboardResponse/);
   assert.match(source, /\/dashboard/);
   assert.match(source, /ad:\s*SourceSlot/);
   assert.doesNotMatch(source, /traffic:\s*SourceSlot/);

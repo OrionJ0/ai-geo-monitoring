@@ -352,7 +352,11 @@ Authorization: Bearer <token>
 营销模块默认关闭；未知或越级使用的契约会 fail-closed。所有外部 ID 和指标均以十进制或不透明字符串返回。
 
 - `GET /api/marketing/status`：读取模块状态，不探测百度网络；授权试点返回 `PILOT_READY`，真实数据只读试点返回 `PILOT_DATA_READY`。
-- `GET /api/marketing/projects/:projectId/dashboard`：读取同一百度广告快照 revision；可同时传 `from`、`to` 筛选当前本地覆盖范围。响应分别包含范围汇总 `summary`、逐日 `trend`、`campaigns`、`adGroups`、`keywords`、`searchTerms` 和 `hierarchyCounts`。前三组用账户/计划/单元/关键词 ID 形成严格层级；`searchTerms` 不返回 `keywordId`，因为百度搜索词报告没有该字段，不得由名称补造。
+- `GET /api/marketing/projects/:projectId/dashboard`：读取轻量百度广告快照根；可同时传 `from`、`to` 筛选当前本地覆盖范围。响应包含 revision、状态、绑定、coverage、filter、范围汇总、逐日趋势、四类计数和刷新状态，不返回四类明细数组。
+- `GET /api/marketing/projects/:projectId/ad-hierarchy`：按 Dashboard 返回的同一 `revision` 读取计划、单元、关键词三层结构及完整筛选范围 summary；不返回搜索词。
+- `GET /api/marketing/projects/:projectId/keywords`：按同一 `revision` 服务端筛选、排序和分页关键词，返回与当前页无关的完整筛选范围 summary。
+- `GET /api/marketing/projects/:projectId/search-terms`：按同一 `revision` 服务端筛选、排序和分页搜索词；搜索词不返回 `keywordId`，不得由名称补造。
+- 上述四个 GoodieAI 内部读取接口的唯一机器可读合同是 [`backend/modules/marketing/contracts/goodieai-marketing-ad-read.openapi.json`](../backend/modules/marketing/contracts/goodieai-marketing-ad-read.openapi.json)。本节只保留人工摘要；请求、响应、空值、错误、缓存、数据源和“读取不调用百度上游”的精确定义以 OpenAPI 3.1 为准。前端 wire type 通过 `npm run generate:marketing-api-contract` 生成，并用 `npm run check:marketing-api-contract` 校验同步。
 - `GET /api/marketing/projects/:projectId/website-traffic-overview?device=all|pc|mobile&from=YYYY-MM-DD&to=YYYY-MM-DD&source=ALL|BAIDU_PAID|DIRECT|BAIDU_SEARCH|BING_SEARCH|GOOGLE_SEARCH|OTHER_SEARCH|EXTERNAL_REFERRAL&metric=visits|visitors|pageviews|bounceRate|averageVisitTime|averageVisitPages&includeSourceComparison=true|false`：网站流量和市场总览共用的正式区间合同，返回当前/上一周期汇总、单一渠道/指标趋势和来源质量。仅 `source=ALL&metric=visits` 可以启用 `includeSourceComparison=true`；此时额外返回七个固定渠道的本期汇总、占比、周期变化和逐日访问趋势，单渠道读取失败时按行返回 `UNAVAILABLE`，不会抹掉其他渠道。渠道目录固定为百度推广、直接访问、百度搜索、必应搜索、Google 搜索、其他搜索和外部引荐；没有访问也保留渠道行。`device=all` 表示不向百度添加设备过滤；当前/上一周期必须是等长、连续的自然日。响应用 `capabilities`、`selectedMetricState` 和来源比较状态区分已验证真实数据、无数据与未开放能力。百度推广行的站内访问只来自百度统计 `BAIDU_PAID`，不得用 Dashboard 广告点击数代替。
 - `GET /api/marketing/projects/:projectId/website-traffic-pages?device=all|pc|mobile&from=YYYY-MM-DD&to=YYYY-MM-DD&view=landing|visited&page=1&pageSize=20&sortBy=...&sortOrder=ascend|descend&query=...`：网站流量页入口页面/受访页面的独立分页合同。服务端显式遍历百度上游分页；页面稳定键使用上游 `pageId`，百度没有返回页面标题时 `title=null`，不得把 URL 冒充标题。只展示与项目绑定站点同域的 URL，`dataQuality.excludedCrossDomainRows` 返回被排除的本机或跨域污染行数；公开分页总数是经过域名与查询过滤后的可展示行数。
 - `POST /api/marketing/projects/:projectId/refresh-runs`：请求体只接受 `triggerType`；固定读取最近 30 个上海自然日。

@@ -61,7 +61,7 @@
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
 | [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 已定义目标事实/目标语义/开放竞品三轨合同、scoped SOV，以及“阶段 1 开放发现 → 模型外竞品注册表归一 → 阶段 2 无身份先验判断”的安全边界；S05 真实 Flash 定向复测 3/3 通过，但注册表 resolver/快照、不变性测试、自我修复清理、状态消费者和 41×3 新合同重跑尚未完成，暂不硬切，当前生产仍使用 v4 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
-| [营销广告快照 API 资源化](active-2026-08-05-006-marketing-api-resourceization/prd.md) | Issue 005 与 R1 additive 已关闭并部署；广告表现、关键词和搜索词详情页已使用三个 revision 钉扎资源。下一门禁是 Issue 006 的轻量 Dashboard R2 硬切，同时交付唯一 OpenAPI 3.1 合同；旧四数组、adapter、fallback、测试和现役文档尚未退役 |
+| [营销广告快照 API 资源化](active-2026-08-05-006-marketing-api-resourceization/prd.md) | Issue 006 已在本地完成轻量 Dashboard 硬切、唯一 OpenAPI 3.1 合同与旧四数组代码退役；当前生产仍是 R1 完整 Dashboard。下一门禁是 Issue 007 对抗式审查、独立 R2 Git Bundle 发布、正式 Network/响应预算与旧调用归零验收 |
 
 ## 草案需求
 

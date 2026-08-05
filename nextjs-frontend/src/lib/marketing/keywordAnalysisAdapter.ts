@@ -13,11 +13,12 @@ import {
   explicitKeywordTagStrategy
 } from '@/utils/keywordAnalysis.cjs';
 import type {
-  AdDailyMetrics,
-  DashboardKeyword,
-  DashboardSearchTerm,
-  MarketingDashboardResponse
-} from '@/lib/marketing/adPerformanceAdapter';
+  MarketingAdKeyword,
+  MarketingAdSearchTerm,
+  MarketingDailyMetrics,
+  MarketingDashboardResponse,
+  MarketingKeywordResponse
+} from '@/lib/marketing/generated/marketingAdReadApi';
 
 export type KeywordAnalysisPayload = {
   source: 'keyword-report' | 'development-fixture';
@@ -30,7 +31,7 @@ export type KeywordAnalysisPayload = {
   availableFrom: string;
   availableTo: string;
   facts: KeywordDailyFact[];
-  searchTerms?: DashboardSearchTerm[];
+  searchTerms?: MarketingAdSearchTerm[];
 };
 
 export type KeywordAnalysisModel = Omit<
@@ -54,31 +55,7 @@ export type KeywordAnalysisModel = Omit<
   };
 };
 
-export type MarketingKeywordResourceResponse = {
-  schemaVersion: 'marketing_keywords_v1';
-  projectId: string;
-  revision: string;
-  coverage: {
-    from: string;
-    to: string;
-    lastSuccessfulAt?: string;
-    currency: string;
-    costScale: number;
-  };
-  filter: { from: string; to: string };
-  summary: {
-    impressions: string;
-    clicks: string;
-    costAmountScaled: string;
-  };
-  items: Array<Omit<DashboardKeyword, 'trend'> & { trend: AdDailyMetrics[] }>;
-  pagination: {
-    page: number;
-    pageSize: number;
-    totalItems: number;
-    totalPages: number;
-  };
-};
+export type MarketingKeywordResourceResponse = MarketingKeywordResponse;
 
 function invalidKeywordResource(): never {
   const error = new TypeError('广告关键词资源响应合同无效');
@@ -111,7 +88,7 @@ function decimalText(value: unknown): value is string {
 function keywordItem(
   value: unknown,
   range: { from: string; to: string }
-): value is Omit<DashboardKeyword, 'trend'> & { trend: AdDailyMetrics[] } {
+): value is MarketingAdKeyword {
   if (!record(value)) return false;
   const valid = text(value.accountId)
     && text(value.campaignId)
@@ -134,7 +111,7 @@ function keywordItem(
       && decimalText(point.clicks)
       && decimalText(point.costAmountScaled));
   if (!valid) return false;
-  const trend = value.trend as AdDailyMetrics[];
+  const trend = value.trend as MarketingDailyMetrics[];
   if (new Set(trend.map((point) => point.date)).size !== trend.length) return false;
   const total = trend.reduce((sum, point) => ({
     impressions: sum.impressions + BigInt(point.impressions),
@@ -318,60 +295,4 @@ export function adaptMarketingKeywordResource(
     },
     pagination: resource.pagination
   };
-}
-
-export function adaptMarketingDashboardKeywords(
-  dashboard: MarketingDashboardResponse,
-  fallbackProjectName = '默认监控项目',
-  requestedRange?: { from: string; to: string }
-): KeywordAnalysisModel {
-  const today = new Date().toISOString().slice(0, 10);
-  const coverage = dashboard.coverage;
-  const range = {
-    from: dashboard.filter?.from
-      || coverage?.from
-      || requestedRange?.from
-      || today,
-    to: dashboard.filter?.to
-      || coverage?.to
-      || requestedRange?.to
-      || today
-  };
-  const accountNames = new Map(
-    (dashboard.bindings || []).map((binding) => [
-      binding.accountId,
-      binding.accountName
-    ])
-  );
-  const projectName = dashboard.projectName || fallbackProjectName;
-  return adaptKeywordAnalysis({
-    source: 'keyword-report',
-    dataState: (dashboard.keywords || []).length ? 'ready' : 'empty',
-    projectId: String(dashboard.projectId),
-    projectName,
-    currency: coverage?.currency || 'CNY',
-    costScale: coverage?.costScale ?? 2,
-    availableFrom: coverage?.from || range.from,
-    availableTo: coverage?.to || range.to,
-    facts: (dashboard.keywords || []).map((keyword) => ({
-      // Dashboard keyword rows are already aggregated for this exact range.
-      // The range start is an internal bucket key, not a fabricated daily fact.
-      date: range.from,
-      accountId: keyword.accountId,
-      accountName: accountNames.get(keyword.accountId) || keyword.accountId,
-      projectId: String(dashboard.projectId),
-      projectName,
-      schemeId: keyword.campaignId,
-      schemeName: keyword.campaignName,
-      unitId: keyword.adGroupId,
-      unitName: keyword.adGroupName,
-      keywordId: keyword.keywordId,
-      keyword: keyword.keywordName,
-      tag: null,
-      costAmountScaled: keyword.costAmountScaled,
-      impressions: keyword.impressions,
-      clicks: keyword.clicks
-    })),
-    searchTerms: dashboard.searchTerms || []
-  }, range);
 }

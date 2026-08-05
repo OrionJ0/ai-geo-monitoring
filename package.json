@@ -8,6 +8,8 @@
     "web:login": "npm --prefix backend run web:login --",
     "build": "npm --prefix nextjs-frontend run build",
     "lint": "npm --prefix nextjs-frontend run lint",
+    "generate:marketing-api-contract": "node scripts/generate-marketing-ad-read-types.mjs",
+    "check:marketing-api-contract": "node scripts/generate-marketing-ad-read-types.mjs --check",
     "deploy": "node scripts/deploy.mjs",
     "deploy:check": "node scripts/deploy.mjs --check",
     "prod:start": "node scripts/production.mjs start",

@@ -34,6 +34,7 @@ function dashboard(options: {
 } = {}) {
   const content = options.content || 'DATA';
   return {
+    schemaVersion: 'marketing_dashboard_v2',
     projectId: '11',
     projectName: '上海广拓',
     revision: content === 'NONE' ? null : 'market-overview-visual-fixture',
@@ -63,25 +64,15 @@ function dashboard(options: {
       currency: 'CNY',
       costScale: 6
     },
-    filter: { from: '2026-07-05', to: '2026-08-03' },
+    filter: content === 'NONE'
+      ? null
+      : { from: '2026-07-05', to: '2026-08-03' },
     summary: {
       impressions: content === 'DATA' ? sum('impressions') : '0',
       clicks: content === 'DATA' ? sum('clicks') : '0',
       costAmountScaled: content === 'DATA' ? sum('costAmountScaled') : '0'
     },
     trend: content === 'DATA' ? trend : [],
-    campaigns: content === 'DATA' ? [{
-      accountId: 'baidu-search-1',
-      campaignId: 'campaign-1',
-      campaignName: '广拓品牌推广',
-      impressions: sum('impressions'),
-      clicks: sum('clicks'),
-      costAmountScaled: sum('costAmountScaled'),
-      trend
-    }] : [],
-    adGroups: [],
-    keywords: [],
-    searchTerms: [],
     hierarchyCounts: {
       campaigns: content === 'DATA' ? 1 : 0,
       adGroups: 0,

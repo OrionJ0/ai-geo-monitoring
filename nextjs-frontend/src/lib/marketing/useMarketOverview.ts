@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from '@/lib/axiosConfig';
 import {
-  assertMarketingDashboardResponse,
-  marketingSnapshotWarning,
-  type MarketingDashboardResponse
+  assertMarketingDashboardRootResponse,
+  marketingSnapshotWarning
 } from './adPerformanceAdapter';
+import type {
+  MarketingDashboardResponse
+} from './generated/marketingAdReadApi';
 
 type SourceSlotState =
   | 'IDLE'
@@ -89,7 +91,7 @@ function fulfilledAdSlot(
   projectId: string
 ): SourceSlot<MarketingDashboardResponse> {
   try {
-    assertMarketingDashboardResponse(value, projectId);
+    assertMarketingDashboardRootResponse(value, projectId);
     return adSlot(value, readAt);
   } catch (error) {
     return rejectedSlot(error, '广告快照响应合同无效');

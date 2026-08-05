@@ -160,7 +160,7 @@ test('更新统计用户名后立即刷新被后端暂停的项目绑定', async
   await expect(page.getByText('已暂停', { exact: true })).toBeVisible();
   await expect(page.getByText('TONGJI_CONTEXT_CHANGED', { exact: false })).toBeVisible();
   expect(bindingReads).toBeGreaterThanOrEqual(2);
-  releaseInitialBinding?.();
+  (releaseInitialBinding as unknown as (() => void) | null)?.();
   await page.waitForTimeout(100);
   await expect(page.getByText('已暂停', { exact: true })).toBeVisible();
   await expect(page.getByText('活动', { exact: true })).toHaveCount(0);

@@ -3,9 +3,11 @@ import {
   clampMarketingDateRange
 } from '@/components/marketing/MarketingFiltersContext';
 import {
-  assertMarketingDashboardRootResponse,
-  type MarketingDashboardResponse
+  assertMarketingDashboardRootResponse
 } from './adPerformanceAdapter';
+import type {
+  MarketingDashboardResponse
+} from './generated/marketingAdReadApi';
 
 type DateRange = [string, string] | null;
 
