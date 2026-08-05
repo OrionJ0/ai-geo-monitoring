@@ -215,6 +215,75 @@ test('stops frontend before backend through privileged systemd control', async (
   assert.equal(status.frontend.running, false);
 });
 
+test('attempts both stops and reports the remaining unit state after a partial failure', async () => {
+  const unitState = {
+    'ai-geo-backend.service': 'active',
+    'ai-geo-frontend.service': 'active',
+  };
+  const calls = [];
+  const manager = createSystemdProcessManager({
+    runSystemctl: async (args, options = {}) => {
+      calls.push({ args, privileged: options.privileged === true });
+      if (args[0] === 'stop') {
+        if (args[1] === 'ai-geo-frontend.service') {
+          throw new Error('frontend stop failed');
+        }
+        unitState[args[1]] = 'inactive';
+        return { stdout: '' };
+      }
+      const unit = args[1];
+      const active = unitState[unit] === 'active';
+      return {
+        stdout: [
+          'LoadState=loaded',
+          `ActiveState=${active ? 'active' : 'inactive'}`,
+          `SubState=${active ? 'running' : 'dead'}`,
+          `MainPID=${active ? 6201 : 0}`,
+          'User=ubuntu',
+          '',
+        ].join('\n'),
+      };
+    },
+  });
+
+  await assert.rejects(
+    manager.stop(),
+    (error) => (
+      error instanceof AggregateError
+      && error.message.includes('frontend=active/running')
+      && error.message.includes('backend=inactive/dead')
+    )
+  );
+  assert.deepEqual(
+    calls.filter(({ args }) => args[0] === 'stop').map(({ args }) => args[1]),
+    ['ai-geo-frontend.service', 'ai-geo-backend.service']
+  );
+});
+
+test('rejects a successful stop command when a production unit remains active', async () => {
+  const manager = createSystemdProcessManager({
+    runSystemctl: async (args) => {
+      if (args[0] === 'stop') return { stdout: '' };
+      const frontend = args[1] === 'ai-geo-frontend.service';
+      return {
+        stdout: [
+          'LoadState=loaded',
+          `ActiveState=${frontend ? 'active' : 'inactive'}`,
+          `SubState=${frontend ? 'running' : 'dead'}`,
+          `MainPID=${frontend ? 6201 : 0}`,
+          'User=ubuntu',
+          '',
+        ].join('\n'),
+      };
+    },
+  });
+
+  await assert.rejects(
+    manager.stop(),
+    /frontend=active\/running.*MainPID=6201/u
+  );
+});
+
 test('rolls back both units when startup readiness fails', async () => {
   const calls = [];
   const manager = createSystemdProcessManager({

@@ -109,14 +109,38 @@ function createSystemdProcessManager({
   }
 
   async function stopUnits() {
-    await runSystemctl(['stop', units.frontend], { privileged: true });
-    await runSystemctl(['stop', units.backend], { privileged: true });
+    const failures = [];
+    for (const name of ['frontend', 'backend']) {
+      try {
+        await runSystemctl(['stop', units[name]], { privileged: true });
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    const current = await status();
+    for (const name of ['frontend', 'backend']) {
+      if (current[name].running) {
+        failures.push(new Error(
+          `${name} systemd unit 停止后仍在运行: ${current[name].unit}`
+        ));
+      }
+    }
+    if (failures.length) {
+      const state = ['frontend', 'backend'].map((name) => (
+        `${name}=${current[name].activeState}/${current[name].subState}`
+        + ` MainPID=${current[name].pid || 0}`
+      )).join('；');
+      throw new AggregateError(
+        failures,
+        `systemd 停服未完整成功；${state}`
+      );
+    }
+    return current;
   }
 
   async function stop() {
     requireLoaded(await status());
-    await stopUnits();
-    return status();
+    return stopUnits();
   }
 
   return { start, status, stop };
