@@ -4,7 +4,7 @@ status: open
 type: HITL
 blocked_by:
   - "003 完成 A2、正式入口验收并关闭"
-  - "../../draft-2026-08-05-006-marketing-api-resourceization/issues/007-release-r2-and-retire-large-dashboard.md"
+  - "../../active-2026-08-05-006-marketing-api-resourceization/issues/007-release-r2-and-retire-large-dashboard.md"
 ---
 
 # 冻结 006 后合同并建立脱敏回归基线
@@ -39,4 +39,4 @@ blocked_by:
 ## Blocked by
 
 - 003 完成 A2、正式入口验收并关闭。
-- [006 Issue 007：发布 R2 并正式退役 Dashboard 大响应](../../draft-2026-08-05-006-marketing-api-resourceization/issues/007-release-r2-and-retire-large-dashboard.md)。
+- [006 Issue 007：发布 R2 并正式退役 Dashboard 大响应](../../active-2026-08-05-006-marketing-api-resourceization/issues/007-release-r2-and-retire-large-dashboard.md)。

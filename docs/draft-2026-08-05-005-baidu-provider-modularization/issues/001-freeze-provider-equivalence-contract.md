@@ -4,7 +4,7 @@ status: open
 type: AFK
 blocked_by:
   - "003 完成 A2 并关闭"
-  - "../../draft-2026-08-05-006-marketing-api-resourceization/issues/007-release-r2-and-retire-large-dashboard.md"
+  - "../../active-2026-08-05-006-marketing-api-resourceization/issues/007-release-r2-and-retire-large-dashboard.md"
   - "../../draft-2026-08-05-007-marketing-production-data-correctness/prd.md"
 ---
 
@@ -39,5 +39,5 @@ blocked_by:
 ## Blocked by
 
 - 003 完成 A2、正式入口验收并关闭。
-- [006 Issue 007：R2 正式切换并退役旧大响应](../../draft-2026-08-05-006-marketing-api-resourceization/issues/007-release-r2-and-retire-large-dashboard.md)。
+- [006 Issue 007：R2 正式切换并退役旧大响应](../../active-2026-08-05-006-marketing-api-resourceization/issues/007-release-r2-and-retire-large-dashboard.md)。
 - [007：营销生产数据正确性与双周期回归](../../draft-2026-08-05-007-marketing-production-data-correctness/prd.md)完成正式入口验收并关闭。

@@ -1,7 +1,7 @@
 ---
 title: 营销广告快照 API 资源化 PRD
 date: 2026-08-05
-status: draft
+status: active
 source: 2026-08-05 用户确认与 Claude CLI 两轮独立评估
 scope: product
 ---
@@ -222,16 +222,16 @@ R1、R2 都是完整 Git Bundle 发布。出现阻断回归时使用后代 rever
 
 ## Open Questions
 
-实现前需要用当前生产账号测量并在 Tech Spec 固定：
+Issue 001 已用当前生产快照测量并固定：
 
-1. Dashboard 实际响应字节与 P95 读取耗时；
-2. 关键词和搜索词页面最合适的默认/最大 page size；
-3. 现役 UI 真正使用的排序和筛选字段允许列表。
+1. Dashboard 未压缩 1,066,452 B、gzip 71,178 B；30 次原始读取 P95 为 153.53 ms，20 次正式 HTTPS gzip 请求 P95 为 297.63 ms；
+2. 生产完整范围为 898 个关键词和 350 个搜索词，默认/最大 page size 冻结为 50/200；
+3. 现役 UI 的排序、文本查询、父级和搜索词状态筛选已冻结，完整证据见 [production-baseline.md](production-baseline.md)。
 
 这些参数影响实现配置，不改变“轻量根 + 三个资源 + revision 钉扎”的产品方向。
 
 ## Handoff
 
-- PRD path: `docs/draft-2026-08-05-006-marketing-api-resourceization/prd.md`
-- Current state: 设计草案；不改变当前 Dashboard、页面或生产接口。
-- Recommended next step: 按现有 issues 在 003 关闭后实施 R1/R2；006 关闭后进入 007，007 关闭后再进入 005。
+- PRD path: `docs/active-2026-08-05-006-marketing-api-resourceization/prd.md`
+- Current state: `active`；003 已关闭，Issue 001 已完成只读生产基线与合同冻结，Dashboard、页面和生产接口未改变。
+- Recommended next step: Issue 001 验收并提交后进入 Issue 002；006 关闭后进入 007，007 关闭后再进入 005。
