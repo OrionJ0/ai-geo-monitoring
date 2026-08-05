@@ -48,4 +48,4 @@ blocked_by:
 - 前端聚焦合同 16/16、前端全量营销 112/112、后端营销 224/224 通过；ESLint、TypeScript 与 Next.js 生产构建通过，共生成 40 条路由。
 - 正式 Chrome 的本地生产构建回归 22/22 通过；其中验证两次同 revision 请求和等长相邻范围、上期 422 保留本期树、上期 503 保持错误、7 天迟到响应不能覆盖已切换的 14 天状态。
 - 代码搜索与 diff 复核确认页面没有读取 Dashboard 明细数组，没有新增 compare RPC、feature flag、旧 Dashboard fallback、Provider/数据库/API/生产配置修改。
-- 本 issue 尚未发布；当前生产仍运行 `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22` 的 006 R2 路径，本地双周期行为要到 007 发布 issue 后才在正式入口生效。
+- 本 issue 的实现已随 007 revision `17214184f9c0ec2c9508080cb571f6b8b45923c4` 正式发布；生产广告表现页已实际请求等长相邻本期/上期，并使用同一快照 revision、币种和 cost scale。

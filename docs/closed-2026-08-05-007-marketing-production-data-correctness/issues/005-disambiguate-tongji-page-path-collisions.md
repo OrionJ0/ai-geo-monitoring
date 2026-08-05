@@ -43,7 +43,7 @@ blocked_by:
 - 真实浏览器：生产构建下运行网站流量 Chrome 用例 8 项通过；同一路径三条事实在桌面第一页显示 `1/3`、`2/3`，第二页及 390px 视口显示 `3/3`。
 - 身份与排序：数字 ID 使用 `BigInt` 数值升序；不透明 ID 使用 Unicode code-point 升序，并覆盖会与 UTF-16 code-unit 顺序不同的字符样本。
 - 数据边界：只增加 `pathCollision`，未合并、去重或重算任何浏览量、比率与平均值；无碰撞明确返回 `null`。
-- 正式路径：仍由 `/api/marketing/projects/:projectId/website-traffic-pages` 服务网站流量页；本 issue 尚未发布，生产仍运行上一正式 revision。
+- 正式路径：`/api/marketing/projects/:projectId/website-traffic-pages` 的事实身份和碰撞 ordinal 已随 007 revision 正式发布；生产首屏观测到一组两行同路径事实并稳定消歧，没有合并指标。
 
 ## Blocked by
 

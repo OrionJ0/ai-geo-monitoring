@@ -3,7 +3,7 @@
 ## 边界
 
 - 核对时间：2026-08-05（Asia/Shanghai）。
-- 正式入口：`https://insight.guangtuo.com`；正式 revision 为 `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22`。
+- 正式入口：`https://insight.guangtuo.com`；本文初始基线采自 006 R2 revision `d9b0688e28ba9b3a33fcfb061fe7d7235388ec22`，007 已随 revision `17214184f9c0ec2c9508080cb571f6b8b45923c4` 正式修复并验收。
 - 生产核对只在服务器内存中使用短期应用会话，读取 GoodieAI 已规范化的内部 API；未输出或保存会话凭据，未复制百度 Token、数据库、`.env`、Cookie、统计用户名、原始百度响应或业务明细。
 - Git fixture 是按观察到的结构手工重建的虚构响应，不是生产响应副本；所有项目、revision、账户、页面和词项身份均为 `synthetic-*` 或固定虚构值。
 
@@ -42,4 +42,4 @@
 
 后端测试以 006 OpenAPI 和现役错误合同验证规范化响应形状；前端测试直接编译并执行现役 TypeScript decoder，验证可接受形状并把三处已知缺口固定为后续 issue 的红灯依据。自动扫描拒绝 Bearer/JWT、秘密字段、邮件、手机号、IP、统计用户名、会话标识和原始响应键。
 
-Issue 001 不修改运行代码、API、数据库、Provider 或生产配置；fixture 只证明本地可重现生产边界，不代表本地连接生产数据。
+Issue 001 不修改运行代码、API、数据库、Provider 或生产配置；fixture 只证明本地可重现生产边界，不代表本地连接生产数据。Issue 006 的生产验收记录见[发布并验收营销生产数据正确性](issues/006-release-and-verify-production-correctness.md)。

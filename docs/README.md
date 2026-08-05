@@ -20,12 +20,12 @@
 本节只保留帮助读者判断文档状态所需的最小快照；完整运行证据以[部署与运维](DEPLOYMENT.md#当前正式单机实例)为准。
 
 - 唯一支持的正式入口是 `https://insight.guangtuo.com`；历史域名和直接 IP 不是支持入口。
-- 2026-08-05 A2 与审查加固均已通过独立 Git Bundle 正式发布，迁移 015 删除了生产数据库三个旧统计凭据列；统一 OAuth 是搜索推广与百度统计唯一正式凭据路径，003 已关闭。2026-08-06 006 R2 已发布：市场总览使用轻量 Dashboard，三个广告详情页使用同 revision 资源，旧四数组与兼容实现已退役，006 已关闭。精确 revision、数据库、网络和浏览器证据见[部署与运维](DEPLOYMENT.md#当前正式单机实例)。
+- 2026-08-05 A2 与审查加固均已通过独立 Git Bundle 正式发布，迁移 015 删除了生产数据库三个旧统计凭据列；统一 OAuth 是搜索推广与百度统计唯一正式凭据路径，003 已关闭。2026-08-06 006 R2 和 007 正确性已依次发布：市场总览使用轻量 Dashboard，广告详情使用同 revision 资源和真实双周期，旧四数组已退役；百度统计来源分区和同路径消歧已成为默认合同。003、006、007 均已关闭。
 - 百度营销、百度统计和既有 AI/GEO 数据已有生产真实数据证据。官网九键统计与脱敏咨询代码已部署，但生产仍缺专用官网项目和只读账号凭据，因此模块保持 `DISABLED`；代码已部署不等于官网数据已生产接通。53KF、线索池和销售订单仍未接入。
 
 ## 当前前端页面实施状态
 
-下表区分“代码进入生产 revision”和“真实来源已生产接通”。2026-08-05 本次整理重新核验了公开健康与 revision，并在现有登录态完成关键词到搜索词精确下钻及全量搜索词页验收；其他需要登录的页面数据沿用 2026-08-04 已记录的验收证据。
+下表区分“代码进入生产 revision”和“真实来源已生产接通”。2026-08-06 已重新核验公开健康、服务器 revision、真实 Chrome 页面和营销 Network；广告、关键词、搜索词双周期、来源分区及入口页碰撞均有生产证据。
 
 | 页面 / 入口 | 实现与部署状态 | 当前数据边界 |
 | --- | --- | --- |
@@ -61,7 +61,6 @@
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
 | [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 已定义目标事实/目标语义/开放竞品三轨合同、scoped SOV，以及“阶段 1 开放发现 → 模型外竞品注册表归一 → 阶段 2 无身份先验判断”的安全边界；S05 真实 Flash 定向复测 3/3 通过，但注册表 resolver/快照、不变性测试、自我修复清理、状态消费者和 41×3 新合同重跑尚未完成，暂不硬切，当前生产仍使用 v4 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
-| [营销生产数据正确性与双周期回归](active-2026-08-05-007-marketing-production-data-correctness/prd.md) | 003、006 已关闭；当前按 issue 修复广告/关键词真实上期、百度统计来源分区和同路径页面消歧，007 关闭前不开始 005 |
 
 ## 草案需求
 
@@ -98,6 +97,7 @@
 | SEO 响应可信度与风控 | [PRD](closed-2026-07-30-001-seo-audit-response-safety/prd.md) |
 | 单品牌与平台运行范围 | [PRD](closed-2026-07-31-002-single-brand-platform-runtime/prd.md) |
 | 问题集报告可信度 | [Tech Spec](closed-2026-07-31-003-question-set-report-trustworthiness/TECH-SPEC.md) |
+| 营销生产数据正确性与双周期回归 | [PRD](closed-2026-08-05-007-marketing-production-data-correctness/prd.md) |
 | 市场总览渠道对比与真实数据修复 | [PRD](closed-2026-08-05-001-market-overview-channel-comparison/prd.md) |
 | 百度统一 OAuth 凭据与营销 API 架构 | [PRD](closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) |
 | 营销广告快照 API 资源化 | [PRD](closed-2026-08-05-006-marketing-api-resourceization/prd.md) |
