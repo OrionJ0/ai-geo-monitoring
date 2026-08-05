@@ -21,7 +21,7 @@
 本节只保留帮助读者判断文档状态所需的最小快照；完整运行证据以[部署与运维](DEPLOYMENT.md#当前正式单机实例)为准。
 
 - 唯一支持的正式入口是 `https://insight.guangtuo.com`；历史域名和直接 IP 不是支持入口。
-- 2026-08-05 21:06 CST 已重新核验公开健康与前后端 revision；A1 统一 OAuth 已正式生效，精确 revision、本地/远端/生产的版本关系及未核验项统一见[部署与运维](DEPLOYMENT.md#当前正式单机实例)。
+- 2026-08-05 A2 与审查加固均已通过独立 Git Bundle 正式发布，迁移 015 删除了生产数据库三个旧统计凭据列；统一 OAuth 是搜索推广与百度统计唯一正式凭据路径，003 已关闭。精确 revision、只读双产品复验、数据库和浏览器证据见[部署与运维](DEPLOYMENT.md#当前正式单机实例)。
 - 百度营销、百度统计和既有 AI/GEO 数据已有生产真实数据证据。官网九键统计与脱敏咨询代码已部署，但生产仍缺专用官网项目和只读账号凭据，因此模块保持 `DISABLED`；代码已部署不等于官网数据已生产接通。53KF、线索池和销售订单仍未接入。
 
 ## 当前前端页面实施状态
@@ -62,7 +62,6 @@
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
 | [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 001–008 已完成；009 不批准硬切；011–012 已关闭；013 评测合同两轮返工完成（严格 truth schema、关系 span 对齐计分、type enum、阶段 1 失败降级、编号列表不推导排名、竞品 occurrence 计数）且 AI 内容裁决已应用为 pending_review，唯一剩余阻塞是数据所有者确认签字（见 TRUTH-REVIEW-QUEUE.md、AI-TRUTH-ADJUDICATION.md）。014/015 未启动，010 保持阻塞。正式入口仍走 v4，当前 DeepSeek 默认分析配置为 Pro；v5 显式候选固定 Flash。 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
-| [百度统一 OAuth 凭据与营销 API 架构](active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) | Issue 001–005 已完成：A1 已正式发布并完成真实刷新后双产品复验；独立 A2 候选已交付迁移 015、SQLite/PostgreSQL 门禁、失败回滚和备份恢复测试，但生产尚未应用 015，下一步执行 A2 停服备份、正式发布与关闭 |
 
 ## 草案需求
 
@@ -102,6 +101,7 @@
 | 单品牌与平台运行范围 | [PRD](closed-2026-07-31-002-single-brand-platform-runtime/prd.md) |
 | 问题集报告可信度 | [Tech Spec](closed-2026-07-31-003-question-set-report-trustworthiness/TECH-SPEC.md) |
 | 市场总览渠道对比与真实数据修复 | [PRD](closed-2026-08-05-001-market-overview-channel-comparison/prd.md) |
+| 百度统一 OAuth 凭据与营销 API 架构 | [PRD](closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) |
 
 ## 决策与已验证解法
 

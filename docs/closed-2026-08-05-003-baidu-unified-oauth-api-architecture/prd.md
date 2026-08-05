@@ -1,7 +1,7 @@
 ---
 title: 百度统一 OAuth 凭据与营销 API 边界整理 PRD
 date: 2026-08-05
-status: active
+status: closed
 source: 2026-08-05 用户确认的统一凭据要求与 Claude CLI 对抗式评审
 scope: product
 ---
@@ -253,7 +253,7 @@ A1 和 A2 必须是两个不同 Git Bundle 发布。A1 迁移命令必须声明�
 
 ## Handoff
 
-- PRD path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
-- Tech Spec path: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Current state: Issue 001–005 已完成。A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41` 已正式运行并完成真实 OAuth 刷新和当前版本双产品复验；独立 A2 候选已新增带强门禁的迁移 015、SQLite/PostgreSQL contract 与恢复测试，并删除运行测试和探针对旧列的依赖。生产尚未发布 A2，三个旧列仍在生产数据库中但运行时零读写。
-- Recommended next step: 执行 Issue 006：停服前再次即时复验当前 Token 版本，停止正式 backend、创建 A2 专用数据库备份，以独立 Git Bundle 快进并用最高版本 015 应用迁移，再启动和验收正式入口。父需求继续为 `active`，不得在 A2 完成前宣称旧字段已生产退役。后续顺序仍为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。
+- PRD path: `docs/closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
+- Tech Spec path: `docs/closed-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
+- Current state: `closed`。A1 revision `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41` 完成真实 OAuth 刷新与双产品复验；独立 A2 revision `9be1d7672ee639ceca82ce1428c284e86740054d` 应用迁移 015 并删除生产旧列；审查加固 revision `58469e29214ccc28e989f07d54af873d9c0ba801` 已通过桥接后的正式 launcher 发布，刷新、绑定、迁移和管理页竞态加固均在生产入口复验通过。
+- Recommended next step: 按依赖开始 006 Issue 001；后续顺序固定为 006 → 007 → 005。

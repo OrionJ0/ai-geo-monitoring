@@ -1,8 +1,8 @@
 ---
 title: 百度统一 OAuth 凭据与营销 API 边界整理技术方案
 date: 2026-08-05
-status: active
-source: docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md
+status: closed
+source: docs/closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md
 scope: deep
 ---
 
@@ -889,9 +889,9 @@ A2 至少保存：
 
 ## 19. Handoff
 
-- PRD: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
-- Tech Spec: `docs/active-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
-- Status: `active`；U1–U4 已在生产通过，U5 / Issue 005 的 A2 候选已交付。迁移 015 具备活动绑定、统一用户名、双产品当前版本、refresh claim 和重授权门禁，并通过 SQLite/PostgreSQL、失败回滚、备份恢复和正式部署顺序测试。生产仍运行 A1，尚未停止服务或应用 015。
-- First issue: Issue 006 的 A2 正式发布与关闭；必须先即时复验当前 Token 版本，再停 backend、备份、用独立 Git Bundle 快进、以最高版本 015 迁移并完成正式入口验收。
+- PRD: `docs/closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
+- Tech Spec: `docs/closed-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
+- Status: `closed`；A1、A2 和发布桥接均保持独立 revision/Bundle。审查加固 revision `58469e29214ccc28e989f07d54af873d9c0ba801` 已由桥接后的 launcher 正式发布，生产双产品只读探针、迁移 `001`–`015`、旧列清零、systemd 单实例、公开精确 revision 与正式 Chrome 八入口全部通过。
+- First issue: 006 Issue 001；在独立资源路由上建立 additive 合同，003 正式入口与统一 Access Context 保持不变。
 - Completion condition: U1–U5 通过、A2 正式入口验收完成、旧实现与旧文档删除。
 - Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件。003 与 006 可独立实现但生产发布/观察窗口互斥；007 的统计正确性切片可独立、广告双周期等待 006；003、006、007 全部关闭后才进入 005。

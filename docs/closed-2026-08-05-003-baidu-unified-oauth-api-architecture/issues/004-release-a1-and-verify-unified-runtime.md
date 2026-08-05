@@ -55,4 +55,4 @@ A1 后旧数据库字段暂时存在，但运行时读写必须为零，需求�
 - 搜索推广快照：最新成功刷新序号为 46，覆盖 `2026-07-06` 至 `2026-08-04`，同一脱敏 revision 哈希 `89f873aa30a27165` 下计划 768、单元 1765、关键词 4739、搜索词 748 行；四类事实各自只有一个 revision，证明仍为同次原子快照。
 - 正式 Chrome：服务器 `/usr/bin/google-chrome` 从唯一正式域名依次验收市场总览、广告表现、关键词、搜索词、网站流量和管理页，页面均为 200 且对应营销 API 为 200。管理页显示搜索推广和百度统计两个 `VERIFIED`；打开“更新统计用户名”弹窗后只有一个用户名文本框、零密码框，并显示统一 OAuth Token 说明。截图只保存在服务器 `output/playwright/a1-production-e8de9d5/`，浏览器凭据未离开服务器内存。
 - 旧路径与秘密：现役后端模块、路由和前端代码搜索对三个旧列、`BaiduTongjiCredentialService`、内联 resolver 和 `tongji-credential` 为零；一次显式退役 canary 证明旧路由返回 404，正式页面 Network 没有调用它。A1 发布后的 systemd 日志未匹配 error、fatal、Token 或 Secret 泄漏；Git diff 检查和新增内容人工复核未发现真实凭据或原始授权响应。
-- 当前正式路径：搜索推广与百度统计都从同一连接的版本化 Access Context 读取；新实现已经是默认且无双 Token fallback。旧数据库列仅为 A1 恢复窗口保留，尚未完成不可逆退役，因此父需求继续为 `active`，下一门禁是 Issue 005 的迁移 015。
+- A1 历史正式路径：搜索推广与百度统计都从同一连接的版本化 Access Context 读取；新实现当时已是默认且无双 Token fallback。旧数据库列仅为 A1 恢复窗口保留，因此该阶段父需求继续为 `active`，下一门禁是 Issue 005 的迁移 015；现役关闭状态见 Issue 006 和 `docs/DEPLOYMENT.md`。

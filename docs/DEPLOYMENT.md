@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-05 A1 正式 Git Bundle 已部署 `e8de9d56619a69b5de98f8bee5e9bc5d42d69e41`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-05 A2 审查加固 Git Bundle 已部署 `58469e29214ccc28e989f07d54af873d9c0ba801`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -64,6 +64,33 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 - 现役连接服务已在服务器内存中完成一次真实 OAuth 刷新，Token 版本从 5 增至 6；刷新后搜索推广账户目录、百度统计站点目录和最小趋势请求均通过，两个产品状态均为当前版本 `VERIFIED`。Token、Cookie、数据库和原始百度响应未复制到本地或写入证据。
 - `/usr/bin/google-chrome` 从 `https://insight.guangtuo.com` 验收市场总览、广告表现、关键词、搜索词、网站流量和管理页；页面与营销 API 均为 200。管理页仅展示统一 OAuth 和必要统计用户名，旧统计凭据路由返回 404。服务器截图位于 `output/playwright/a1-production-e8de9d5/`。
 - 当前正式路径已经硬切为搜索推广和百度统计共用版本化 Access Context；不存在双 Token fallback。旧数据库列只是 A1 观察期恢复边界，不再有现役代码读写；在 A2 正式发布前不得宣称旧字段已完成不可逆退役。
+
+### 2026-08-05 百度统一 OAuth A2 正式发布与验收
+
+- 独立 A2 Git Bundle 将服务器只快进到 `9be1d7672ee639ceca82ce1428c284e86740054d`，Bundle SHA-256 为 `e3ee9cd548b740845ac772e248a91ba6bb2ea66d12eee4a38c73c045f6a1f15e`，与 A1 的 revision 和 Bundle 明确分离；发布树不含并行的 0805-002 工作。
+- 停服前当前 Token 版本 6 再次只读验证搜索推广四类报告与百度统计站点/最小趋势均成功；停服后创建 `/opt/ai-geo-monitoring/backend/releases/database.pre-9be1d7672ee639ceca82ce1428c284e86740054d.sqlite`（权限 600），再以 `--expected-latest=015-drop-legacy-tongji-credentials` 应用迁移。迁移账本 checksum 为 `284173897caac7410509e16a24178884acd6f036538252412b99a516b2b05fee`，无 pending。
+- 正式 `baidu_marketing_connections` 已删除 `tongji_account_name`、`tongji_access_token_ciphertext`、`tongji_credential_updated_at` 三列；现役代码、路由、UI 和生产工作树不存在旧统计 Token、旧 service、兼容 fallback 或双 Token 配置。A2 前备份仍保留旧列，仅用于已批准的灾难恢复边界。
+- 正式部署通过后端完整回归、营销 190 项、官网 31 项、咨询 35 项、前端 104 项、lint、TypeScript/生产构建 40 路由和 Playwright 40 项。前后端只由 `ai-geo-backend.service` 与 `ai-geo-frontend.service` 运行；公开 `/api/health` 与 `/api/frontend-health` 返回 A2 revision，`/api/ready` 返回 `status=ready`。
+- A2 后只读探针仍为 Token 版本 6；搜索推广计划 32、单元 74、关键词 183、搜索词 14，百度统计站点 1、趋势行 1，两个产品均为当前版本 `VERIFIED/HAS_DATA` 且探针前后业务状态不变。探针没有刷新 Token、重新授权、暂停绑定或写业务数据，也未复制 Token、Cookie、数据库或原始响应。
+- 生产 Chrome 从 `https://insight.guangtuo.com` 验收市场总览、广告表现、关键词、搜索词、网站流量、咨询、订单和设置页；对应正式 API 状态符合真实连接边界。管理页只有统一 OAuth 和一个非秘密统计用户名输入，零密码输入，两个产品分别显示 `VERIFIED`；截图仅保存在服务器 `output/playwright/a2-production-9be1d76/`。
+- A2 对抗式审查当时发现发布器停机顺序、瞬时刷新错误状态和 PostgreSQL 迁移并发门禁需要加固，因此原始 A2 发布后 003 暂时保持 `active`。这些问题随后已由桥接与审查加固发布解决；当前关闭证据以下方最新发布记录为准。
+
+### 2026-08-05 A2 发布桥接正式发布与验收
+
+- 独立桥接 Git Bundle 将服务器快进到 `5d11cbc69f56743f3b0a57d6436d4ec895fb0486`，Bundle SHA-256 为 `5000a653e642879a3eba1612056240a90acf5464d2923929c725167a9923af9a`。该提交只包含 Git Bundle workflow、发布器、systemd 管理器及测试，不含应用运行时、schema 或迁移变化。
+- 桥接使后续发布在生产 systemd 服务确认完全停止后才快进服务器工作树；任一服务仍活动、PID 非空、停服部分失败或返回状态畸形时，服务器 `HEAD` 保持不变并停止发布。正式域名健康、ready 与前后端精确 revision 也成为发布门禁。
+- 正式部署通过后端完整回归、营销 190 项、官网 31 项、咨询 35 项、前端 104 项、lint、TypeScript/40 路由生产构建和真实 Chrome 40 项；营销迁移 audit 为 001–015 全部应用且无 pending。
+- 发布后服务器 `HEAD` 与公开 `/api/health`、`/api/frontend-health` 均为 `5d11cbc69f56743f3b0a57d6436d4ec895fb0486`，`/api/ready` 为 `ready`；两个正式 systemd 单元各只有一个主进程。下一业务发布将首次由这套桥接后的 launcher 执行“停服确认 → 快进 → 测试/迁移 → 启动/正式域名验收”。
+- OAuth 瞬时刷新冷却、主体不一致终态、PostgreSQL 015 锁与管理页晚到请求隔离仍只在后续候选中，本桥接发布不代表这些运行时加固已上线。
+
+### 2026-08-05 A2 审查加固正式发布与验收
+
+- 正式 Git Bundle 将服务器从发布桥接 revision 快进到 `58469e29214ccc28e989f07d54af873d9c0ba801`，Bundle SHA-256 为 `f7de3d0af29fd6540a3fa3c8d1390660b2a9336367afd8ea7834945adf124e91`；桥接后的 launcher 先确认两个 systemd 服务完全停止，再快进工作树和执行候选部署器。备份为 `/opt/ai-geo-monitoring/backend/releases/database.pre-58469e29214ccc28e989f07d54af873d9c0ba801.sqlite`。
+- 正式部署通过后端完整回归 994 项、营销 200 项、官网 31 项、咨询 35 项、前端 104 项、lint、TypeScript/40 路由生产构建和真实 Chrome 41 项。营销迁移 `001`–`015` 全部应用且无 pending，三个旧统计凭据列仍为零。
+- 发布后服务器 `HEAD`、公开 `/api/health` 与 `/api/frontend-health` 均精确为 `58469e29214ccc28e989f07d54af873d9c0ba801`，工作区干净，`/api/ready` 为 `ready`；`ai-geo-backend.service` 与 `ai-geo-frontend.service` 各只有一个主进程。
+- 生产只读探针在 Token 版本 6 上再次返回搜索推广计划 32、单元 74、关键词 183、搜索词 14，以及百度统计站点 1、趋势行 1；两个产品均为 `VERIFIED/HAS_DATA`，前后业务状态为 `UNCHANGED`，未刷新 Token、重新授权、暂停绑定或写业务数据。
+- `/usr/bin/google-chrome` 从唯一正式域名验收市场总览、广告表现、关键词、搜索词、网站流量、咨询、订单和管理设置页。八个入口均为 200；管理页分别显示两个 `VERIFIED`，更新弹窗只有一个非秘密用户名文本框、零密码框和统一 OAuth 说明。截图仅保存在服务器 `output/playwright/a2-hardening-production-58469e2/`。
+- 当前正式路径已使用统一 Access Context、刷新租约与冷却、绑定验证上下文栅栏和管理页晚到请求隔离；旧统计 Token、旧路由、旧 service、fallback、feature flag 和现役双 Token 文档均不存在。003 已满足关闭条件，下一实施门禁为 006。
 
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`
