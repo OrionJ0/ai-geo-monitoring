@@ -1,12 +1,15 @@
 ---
 title: "按真实需求重新评估百度信息流"
-status: open
+status: closed
 type: HITL
+resolution: cancelled
 blocked_by:
   - "009-production-baidu-acceptance.md"
 ---
 
 # 按真实需求重新评估百度信息流
+
+> 处置（2026-08-05）：取消该占位需求。当前没有已确认的信息流业务、账户和只读权限，不继续把“也许以后会做”保留为现役 issue。若出现真实需求，应新建独立 PRD/Tech Spec，并重新验证合同，不从搜索推广实现类推。
 
 ## Parent
 
@@ -51,8 +54,7 @@ git diff --check
 
 在本 issue 仍为 Later 时，上述搜索结果应为空或仅存在明确的“未支持”文案；不得存在可执行 FEED 代码、迁移字段或隐藏开关。
 
-## Blocked by
+## Closure
 
-- `009-production-baidu-acceptance.md`
-- 真实信息流业务需求。
-- 获批信息流只读权限。
+- 不实现 FEED，不修改当前搜索推广 schema、API 或导航。
+- 后续若重新立项，不复用本 issue 的完成状态或未验证假设。

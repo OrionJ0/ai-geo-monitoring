@@ -46,7 +46,7 @@ flowchart LR
 - 2026-08-04 已从正式入口复核市场总览、广告表现、关键词分析、网站流量、咨询数据（含原始咨询记录）、订单结果及 AI/GEO/SEO 页面。百度与既有 AI/GEO 数据 live verified；官网模块、53KF 与销售数据按各自真实状态显示缺失。完整逐页状态以[文档总览中的前端页面实施状态](docs/README.md#当前前端页面实施状态)为准。
 - 系统始终只读；当前与未来的业务调整都在来源系统完成。
 
-产品需求、技术边界和实施状态见[营销监控系统 PRD](docs/active-2026-07-29-001-marketing-monitoring/prd.md)与[第一期技术方案](docs/active-2026-07-29-001-marketing-monitoring/TECH-SPEC.md)，统一术语见[项目上下文](CONTEXT.md)。营销漏斗的唯一主数据源、指标语义和官网无侵入接入红线见[ADR 0001](docs/adr/0001-marketing-funnel-data-source-of-truth.md)，未完成事项见[MARK_LATER.md](MARK_LATER.md)。
+产品需求、技术边界和实施状态见[营销监控系统 PRD](docs/blocked-2026-07-29-001-marketing-monitoring/prd.md)与[第一期技术方案](docs/blocked-2026-07-29-001-marketing-monitoring/TECH-SPEC.md)，统一术语见[项目上下文](CONTEXT.md)。营销漏斗的唯一主数据源、指标语义和官网无侵入接入红线见[ADR 0001](docs/adr/0001-marketing-funnel-data-source-of-truth.md)，未完成事项见[MARK_LATER.md](MARK_LATER.md)。
 
 ## 系统演示
 

@@ -1,6 +1,6 @@
 ---
 title: "广告搜索词独立下钻与真实 Dashboard 接入"
-status: open
+status: closed
 depends_on:
   - "003-ad-performance-page"
   - "013-page-data-interface-inventory"
@@ -28,7 +28,17 @@ depends_on:
 - [x] 前端 89 条单元/合同测试、lint 和 39 路由 production build 通过。
 - [x] 本地 production build 下使用严格 API fixture 的关键词/搜索词回归 14/14 通过，覆盖精确下钻、显式全量切换、跨版本拒绝比较、错误周期拒绝、慢上期不阻塞、跨期改名和 axe；该证据不代表本地真实上游或生产验收。
 - [x] 后端 994、营销 150、官网 28、咨询 35、部署脚本 26 条本地测试，以及营销页 API fixture Playwright 34/34 通过。
-- [ ] 正式 Git Bundle 部署后，从正式域名验证真实搜索词页面且未启用 fixture。
+- [x] 正式 Git Bundle 部署后，从正式域名验证真实搜索词页面且未启用 fixture。
+
+## 生产验收证据（2026-08-05）
+
+- 11:36 CST 的 `/api/health` 与 `/api/frontend-health` 均报告 revision `6894789199afac645c007721d1e70e99a7caca6c`；该 revision 已包含广告搜索词下钻提交。
+- 在 `https://insight.guangtuo.com/geo/keyword-analysis` 的现有登录态中，页面显示“百度推广 · 真实数据”，关键词明细提供“查看命中的广告搜索词”链接。
+- 从“广拓”的唯一证据链接进入精确下钻 URL 后，页面保持同一正式域名，显示 1 条搜索词及匹配方式、添加状态、消费、展现、点击、CTR 和平均 CPC；没有伪造关键词层级。
+- 直接进入 `/geo/keyword-analysis/search-terms?view=all`，页面显示“百度推广 · 真实数据”、本期 61 条搜索词，并提供推广单元、命中广告关键词、添加状态和匹配方式筛选。
+- 生产构建只在 `NODE_ENV !== 'production' && NEXT_PUBLIC_KEYWORD_ANALYSIS_FIXTURE === 'true'` 时允许关键词/搜索词 fixture；本次页面来源标签为真实 Dashboard，不是 `development-fixture`。
+- 证据截图保存在工作区忽略目录：`output/playwright/production-search-terms-20260805/search-terms-all.jpg`、`output/playwright/production-search-terms-20260805/search-term-drilldown-guangtuo.jpg`。截图不进入 Git。
+- 本 issue 只关闭搜索词页面生产验收；服务器日志敏感信息扫描随后已由 [Issue 016](016-real-data-release-acceptance.md) 完成并关闭。
 
 ## 回滚边界
 

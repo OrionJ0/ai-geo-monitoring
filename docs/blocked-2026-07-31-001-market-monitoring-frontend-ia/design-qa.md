@@ -17,7 +17,7 @@
 
 ## 验收对象
 
-- 视觉真值：`docs/active-2026-07-31-001-market-monitoring-frontend-ia/assets/market-overview-home-final-2026-08-03.png`
+- 视觉真值：`docs/blocked-2026-07-31-001-market-monitoring-frontend-ia/assets/market-overview-home-final-2026-08-03.png`
 - 正式页面入口：`/geo/market-overview`
 - 实现截图：`output/playwright/market-overview-fixture/market-overview-desktop-1440x1024.png`
 - 浏览器与运行态：Chrome channel；Next.js production build；`1440×1024` CSS 视口；device scale factor 1。

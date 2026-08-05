@@ -1,8 +1,8 @@
 ---
 title: 市场数据监控前端信息架构与市场总览技术方案
 date: 2026-07-31
-status: active
-source: docs/active-2026-07-31-001-market-monitoring-frontend-ia/prd.md
+status: blocked
+source: docs/blocked-2026-07-31-001-market-monitoring-frontend-ia/prd.md
 scope: deep
 ---
 
@@ -20,7 +20,7 @@ scope: deep
 
 新版目标按内置渠道展示“广告投入 / 展现 → 百度统计访问 → 官网表单咨询 / 在线客服咨询 → 线索入池 → 成交订单”，官网表单与 53KF 在线客服是独立事实。百度推广行的广告投入/展现来自百度营销，访问来自百度统计付费搜索；广告点击不得冒充访问。成交订单同时提供订单数和订单金额。CPA、成交率和整体转化率使用成交订单数，ROAS 使用成交订单金额。只有可信来源键或确认映射成立时，下游记录才进入同一渠道链路。
 
-当前仓库已完成并部署新版页面视觉、交互、状态、响应式与无障碍实现，包含百度推广行、CPC、百度统计来源行和趋势，以及独立官网表单区间/逐日接口与“官网表单咨询”列。官网模块使用 `/api/website-data`、独立配置/服务/缓存仓储/迁移账本和前端 hook；百度继续使用 `/api/marketing`。2026-08-04 已进入 `main` 的九键版本硬切为分页读取联系人列表并统计全部表单记录，原始 `referrer`、UTM 和付费标识统一归入九键，缺失来源进入 `UNKNOWN`；统计快照不保存联系人或原始 URL。`/api/consultations` 继续按需提供脱敏列表/详情，不参与统计计算。2026-07-05 至 2026-08-04 已使用独立只读凭据对账 21 条记录：`DIRECT=3`、`BING_SEARCH=1`、`UNKNOWN=17`，逐日合计一致。九键版本尚未部署，官网生产仍缺专用项目与只读账号凭据并保持 `DISABLED`。53KF、客服转线索、订单结果接口合同仍缺失，ROAS/CPL/CPA 仍为诚实缺失状态。
+当前仓库已完成并部署新版页面视觉、交互、状态、响应式与无障碍实现，包含百度推广行、CPC、百度统计来源行和趋势，以及独立官网表单区间/逐日接口与“官网表单咨询”列。官网模块使用 `/api/website-data`、独立配置/服务/缓存仓储/迁移账本和前端 hook；百度继续使用 `/api/marketing`。九键版本已硬切为分页读取联系人列表并统计全部表单记录，原始 `referrer`、UTM 和付费标识统一归入九键，缺失来源进入 `UNKNOWN`；统计快照不保存联系人或原始 URL。`/api/consultations` 继续按需提供脱敏列表/详情，不参与统计计算。2026-07-05 至 2026-08-04 已使用独立只读凭据对账 21 条记录：`DIRECT=3`、`BING_SEARCH=1`、`UNKNOWN=17`，逐日合计一致。该代码已随生产 revision `6894789` 部署，但官网生产仍缺专用项目与只读账号凭据并保持 `DISABLED`，因此没有真实官网数据页面验收。53KF、客服转线索、订单结果接口合同仍缺失，ROAS/CPL/CPA 仍为诚实缺失状态。
 
 同次盘点确认广告表现、关键词分析、网站流量、咨询数据和订单结果均已有本地设计实现。咨询数据页消费严格的 `consultation_records_v1` 浏览器合同，其中“原始咨询”仍是领域事实名称；配置完整时官网 adapter 为 `AVAILABLE/FULL`，失败时与 53KF 独立降级，53KF adapter 固定为 `NOT_CONNECTED`。订单结果没有网络客户端，生产数据源固定为 `UNAVAILABLE`，完整数据仅能在 `NODE_ENV !== 'production'` 时显式启用 fixture。逐页状态统一见 `../README.md#当前前端页面实施状态`。
 
@@ -650,7 +650,7 @@ evidenceKeys
 - `README.md`
 - `CONTEXT.md`
 - `docs/README.md`
-- `docs/active-2026-07-29-001-marketing-monitoring/prd.md`
+- `docs/blocked-2026-07-29-001-marketing-monitoring/prd.md`
 
 **方案：**
 

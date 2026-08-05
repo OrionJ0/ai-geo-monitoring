@@ -18,7 +18,8 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-04 Git Bundle workflow `30876793311` 已部署 `f265bd365e563e828a82dca51028f3d3d4dc40dc`；是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前公开运行 revision | 2026-08-05 13:23 CST，`/api/health`、`/api/frontend-health` 与服务器 `HEAD` 均为 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373`；`/api/ready` 为 `ready` |
+| 与审计时 `main` 的关系 | 2026-08-05 13:23 CST，同次本地核对时本地与 `origin/main` 均为 `2651d157329ad8f7ef8fe711b91288c125213298`，比公开生产多 1 个提交；后续须重新比较。服务器工作区干净；服务器 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629` 比服务器 `HEAD` 落后 28 个提交，不能把该旧远端跟踪引用当作生产运行真值 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -33,6 +34,17 @@ ssh ubuntu@182.254.140.163 'cd /opt/ai-geo-monitoring && git status --short --br
 百度开发者控制台中的 callback 属于外部人工配置。截至本次文档收敛，服务器
 环境已经切换，但控制台新地址尚未得到人工确认；完成确认前，现有服务器密文
 Token 应继续保留，但不得宣称在新域名上重新授权已经通过。
+
+### 2026-08-05 公开运行态复核
+
+- 13:23 CST，`GET https://insight.guangtuo.com/api/health` 返回 HTTP 200，后端 revision 为 `ba0b1eb3a76ae59847594a7647e68e35eb7bd373`。
+- `GET https://insight.guangtuo.com/api/frontend-health` 返回 HTTP 200，前端 revision 与后端一致。
+- `GET https://insight.guangtuo.com/api/ready` 返回 `ready`；SQLite 为 WAL、`busy_timeout_ms=5000`、`synchronous=normal`，scheduler 已启动且当次响应没有错误。
+- SSH 现场确认服务器 `HEAD` 与公开 revision 一致、工作区变更数为 0；服务器 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629` 比 `HEAD` 落后 28 个提交。两个正式 systemd service 分别于 12:17:56 和 12:17:58 CST 启动并保持 `active`，没有从 SSH 或第二套进程启动应用。
+- 12:17:50–13:23:46 CST 的 systemd journal、Nginx access/error 和 `logs/deployments.log` 已完成只输出计数的敏感信息审计：Token/JWT、OAuth 敏感参数、邮箱、境内手机号、联系人字段和完整上游响应标识均为零命中；Nginx 活动配置不记录请求体、Authorization 或上游响应体。
+- 同一窗口内现役 Dashboard 请求 5 次且全部 HTTP 200，旧营销页面和旧报表路由请求均为 0；生产数据库有 2 次成功 `ON_DEMAND` 刷新。最近一次脱敏 run 在同一 `refresh_run_id` 下同时写入计划 768、单元 1765、关键词 4739、搜索词 748 条，证明正式请求链使用四报告实现且未执行旧 provider、fixture 或 fallback。
+- 该 revision 继续包含官网九键来源统计、脱敏咨询、独立广告搜索词下钻和营销 AI 分析路由。官网生产凭据仍未配置，模块保持 `DISABLED`；营销 AI 报告后端尚未实现。代码已部署不能表述为这些数据源或报告能力已生产接通。
+- 正式营销进程仍为 `MARKETING_MONITORING_PILOT_MODE=true`。本次日志审计只关闭市场工作台 Issue 016，不表示百度模块已从 `PILOT_DATA_READY` 提升为 `READY`；后者继续由营销监控系统的生产准入需求维护。
 
 ### 2026-08-04 Git Bundle 正式发布与验收
 

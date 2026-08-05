@@ -1,11 +1,11 @@
-> 历史方案（2026-08-03 标注）：本文保留早期探索过程，不再作为现行订单指标、来源链路或首页设计的依据。当前口径以 `../../CONTEXT.md`、`../visual-design-spec.md` 和 `../active-2026-07-31-001-market-monitoring-frontend-ia/prd.md` 为准。
+> 历史方案（2026-08-03 标注）：本文保留早期探索过程，不再作为现行订单指标、来源链路或首页设计的依据。当前口径以 `../../CONTEXT.md`、`../visual-design-spec.md` 和 `../blocked-2026-07-31-001-market-monitoring-frontend-ia/prd.md` 为准。
 
 # 营销监控系统一页方案
 
 - 状态：已确认
 - 确认日期：2026-07-29
 - 当前阶段：白名单真实数据试点已实现，等待币种/时区、Refresh Token 轮换和完整生产验收
-- 当前权威实现方案：`../active-2026-07-29-001-marketing-monitoring/TECH-SPEC.md`
+- 当前权威实现方案：`../blocked-2026-07-29-001-marketing-monitoring/TECH-SPEC.md`
 
 ## 一句话定义
 

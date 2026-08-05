@@ -1,7 +1,7 @@
 ---
 title: 市场数据监控前端信息架构与市场总览 PRD
 date: 2026-08-03
-status: active
+status: blocked
 source: 2026-08-03 用户确认；docs/visual-design-spec.md
 scope: product
 ---
@@ -11,6 +11,8 @@ scope: product
 ## 1. 文档状态与裁决
 
 本版自 2026-08-03 起取代该需求目录中旧版首页口径。现行全局视觉与组件标准以 `../visual-design-spec.md` 为准，最终设计参考图为 `assets/market-overview-home-final-2026-08-03.png`。
+
+> 2026-08-05 收尾状态：Issue 016 的生产日志审计和 Issue 017 的正式搜索词页面验收均已完成；原 Issue 010 已在百度 `READY` 责任移交“营销监控系统”后删除。当前目录仅因 Issue 015 的 53KF 外部接入条件而处于 `blocked`；页面、默认入口和已部署真实数据不会因此回退。
 
 必须区分以下状态：
 
