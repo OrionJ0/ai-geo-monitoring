@@ -137,12 +137,18 @@ function previousCoverage(coverage) {
   };
 }
 
-function exactMetric(value, { allowNull = true } = {}) {
+function exactMetric(
+  value,
+  {
+    allowNull = true,
+    errorCode = 'TONGJI_RESPONSE_INVALID'
+  } = {}
+) {
   if (value == null && allowNull) return null;
   if (typeof value !== 'string' || !/^\d+$/u.test(value)) {
     throw new BaiduTongjiError(
       '百度统计指标无效',
-      'TONGJI_RESPONSE_INVALID',
+      errorCode,
       502
     );
   }
@@ -223,7 +229,9 @@ function normalizeRows(rows) {
     return {
       date: row.date,
       pageviews: exactMetric(row.pageviews),
-      visits: exactMetric(row.visits),
+      visits: exactMetric(row.visits, {
+        errorCode: 'TONGJI_SOURCE_PARTITION_INVALID'
+      }),
       visitors: exactMetric(row.visitors)
     };
   }).sort((left, right) => left.date.localeCompare(right.date));
@@ -327,7 +335,9 @@ function normalizeSummaryRows(rows) {
       source,
       engineId,
       pageviews: exactMetric(row.pageviews),
-      visits: exactMetric(row.visits),
+      visits: exactMetric(row.visits, {
+        errorCode: 'TONGJI_SOURCE_PARTITION_INVALID'
+      }),
       visitors: exactMetric(row.visitors)
     };
   });
@@ -364,7 +374,11 @@ function normalizeSummary(summary, errorCode = 'TONGJI_SOURCE_RESPONSE_INVALID')
   }
   return Object.fromEntries(METRICS.map((metric) => [
     metric,
-    exactMetric(summary[metric])
+    exactMetric(summary[metric], {
+      errorCode: metric === 'visits'
+        ? 'TONGJI_SOURCE_PARTITION_INVALID'
+        : errorCode
+    })
   ]));
 }
 
@@ -399,6 +413,61 @@ function buildRemainderSummary({ total, excluded }) {
   return summary;
 }
 
+function sourcePartitionInvalid() {
+  return new BaiduTongjiError(
+    '百度统计来源 visits 分区无效',
+    'TONGJI_SOURCE_PARTITION_INVALID',
+    502
+  );
+}
+
+function partitionMetric(value) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !/^\d+$/u.test(value)) {
+    throw sourcePartitionInvalid();
+  }
+  return BigInt(value).toString();
+}
+
+function buildSourcePartition(totalVisits, rows) {
+  if (!Array.isArray(rows)) throw sourcePartitionInvalid();
+  const normalizedTotal = partitionMetric(totalVisits);
+  const values = rows.map((row) => partitionMetric(row?.summary?.current));
+  const hasMissingSource = values.some((value) => value === null);
+  const classified = values.reduce(
+    (sum, value) => sum + BigInt(value || '0'),
+    0n
+  );
+  if (normalizedTotal === null) {
+    return {
+      metric: 'visits',
+      state: 'PARTIAL',
+      totalVisits: null,
+      classifiedVisits: classified.toString(),
+      unclassifiedVisits: null,
+      reasonCode: 'SOURCE_TOTAL_UNAVAILABLE'
+    };
+  }
+  const total = BigInt(normalizedTotal);
+  if (classified > total) throw sourcePartitionInvalid();
+  const residual = (total - classified).toString();
+  const state = !hasMissingSource && residual === '0'
+    ? 'COMPLETE'
+    : 'PARTIAL';
+  return {
+    metric: 'visits',
+    state,
+    totalVisits: normalizedTotal,
+    classifiedVisits: classified.toString(),
+    unclassifiedVisits: residual,
+    reasonCode: state === 'COMPLETE'
+      ? null
+      : hasMissingSource
+        ? 'SOURCE_METRIC_MISSING'
+        : 'SOURCE_COVERAGE_INCOMPLETE'
+  };
+}
+
 function assertSourcePartition(trend, sources) {
   const total = summarizeRows(trend);
   for (const metric of ['pageviews', 'visits']) {
@@ -410,7 +479,11 @@ function assertSourcePartition(trend, sources) {
       (sum, value) => sum + BigInt(exactMetric(value)),
       0n
     );
-    if (sourceTotal !== BigInt(exactMetric(total[metric]))) {
+    const totalMetric = BigInt(exactMetric(total[metric]));
+    if (metric === 'visits' && sourceTotal > totalMetric) {
+      throw sourcePartitionInvalid();
+    }
+    if (metric !== 'visits' && sourceTotal !== totalMetric) {
       throw new BaiduTongjiError(
         '百度统计来源汇总与全站汇总不一致',
         'TONGJI_SOURCE_RESPONSE_INVALID',
@@ -1920,6 +1993,10 @@ class BaiduTongjiService {
         state: rows.some((row) => row.trendState === 'UNAVAILABLE')
           ? 'PARTIAL'
           : 'COMPLETE',
+        partition: buildSourcePartition(
+          currentSnapshot.summary.visits,
+          rows
+        ),
         rows
       },
       cacheStates: results
@@ -2333,6 +2410,7 @@ class BaiduTongjiService {
 module.exports = {
   BaiduTongjiError,
   BaiduTongjiService,
+  buildSourcePartition,
   buildSnapshotPayload,
   comparisonValue,
   normalizeStoredPayload,

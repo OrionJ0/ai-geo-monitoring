@@ -46,6 +46,14 @@
     "sourceComparison": {
       "metric": "visits",
       "state": "COMPLETE",
+      "partition": {
+        "metric": "visits",
+        "state": "PARTIAL",
+        "totalVisits": "83",
+        "classifiedVisits": "82",
+        "unclassifiedVisits": "1",
+        "reasonCode": "SOURCE_COVERAGE_INCOMPLETE"
+      },
       "rows": [
         { "sourceKey": "BAIDU_PAID", "sourceLabel": "百度推广", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "5", "previous": "4", "changePercent": "25.0", "trafficShare": "6.0" }, "trend": [{ "date": "2026-08-01", "visits": "5" }] },
         { "sourceKey": "DIRECT", "sourceLabel": "直接访问", "summaryState": "DATA", "trendState": "DATA", "summary": { "current": "20", "previous": "18", "changePercent": "11.1", "trafficShare": "24.1" }, "trend": [{ "date": "2026-08-01", "visits": "20" }] },

@@ -49,6 +49,7 @@ import { useMarketingFilters } from '@/components/marketing/MarketingFiltersCont
 import MarketingMetricCard, {
   MarketingMetricGrid
 } from '@/components/marketing/MarketingMetricCard';
+import WebsiteSourcePartitionNotice from '@/components/marketing/WebsiteSourcePartitionNotice';
 import styles from './website-traffic.module.css';
 
 const METRIC_OPTIONS: Array<{ value: WebsiteMetric; label: string }> = [
@@ -145,7 +146,8 @@ export default function WebsiteTrafficPage() {
     from,
     to,
     source,
-    metric
+    metric,
+    includeSourceComparison: source === 'ALL' && metric === 'visits'
   }), [device, enabled, from, metric, projectId, source, to]);
   const pageQuery = useMemo(() => ({
     projectId,
@@ -375,6 +377,9 @@ export default function WebsiteTrafficPage() {
       ) : null}
 
       <div className={styles.moduleStack} aria-busy={overview.loading}>
+        <WebsiteSourcePartitionNotice
+          partition={overview.data?.sourceComparison?.partition}
+        />
         <section aria-labelledby="period-summary-heading">
           <h2 className={styles.visuallyHidden} id="period-summary-heading">周期汇总</h2>
           <MarketingMetricGrid ariaLabel="网站流量周期汇总指标">

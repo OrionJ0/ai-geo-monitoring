@@ -306,30 +306,49 @@ function websiteTrafficOverview(url: string) {
       dataState: 'DATA'
     };
   });
+  const comparisonRows = trafficSources.sources.map((source) => {
+    const key = source.sourceKey as keyof typeof sourceWeights;
+    const current = sourceTotalForDates(currentDates, key);
+    const previousTotal = sourceTotalForDates(previousDates, key);
+    return {
+      sourceKey: key,
+      sourceLabel: source.sourceLabel,
+      summaryState: 'DATA',
+      trendState: 'DATA',
+      summary: {
+        current,
+        previous: previousTotal,
+        changePercent: previousTotal === '0' ? null : '5.0',
+        trafficShare: `${sourceWeights[key]}.0`
+      },
+      trend: currentDates.map((date) => ({
+        date,
+        visits: sourceVisits(date, key)
+      }))
+    };
+  });
+  const totalVisits = totalForDates(currentDates, 'visits');
+  const classifiedVisits = comparisonRows.reduce(
+    (sum, row) => sum + BigInt(row.summary.current),
+    BigInt(0)
+  ).toString();
+  const unclassifiedVisits = (
+    BigInt(totalVisits) - BigInt(classifiedVisits)
+  ).toString();
   const sourceComparison = {
     metric: 'visits',
     state: 'COMPLETE',
-    rows: trafficSources.sources.map((source) => {
-      const key = source.sourceKey as keyof typeof sourceWeights;
-      const current = sourceTotalForDates(currentDates, key);
-      const previousTotal = sourceTotalForDates(previousDates, key);
-      return {
-        sourceKey: key,
-        sourceLabel: source.sourceLabel,
-        summaryState: 'DATA',
-        trendState: 'DATA',
-        summary: {
-          current,
-          previous: previousTotal,
-          changePercent: previousTotal === '0' ? null : '5.0',
-          trafficShare: `${sourceWeights[key]}.0`
-        },
-        trend: currentDates.map((date) => ({
-          date,
-          visits: sourceVisits(date, key)
-        }))
-      };
-    })
+    partition: {
+      metric: 'visits',
+      state: unclassifiedVisits === '0' ? 'COMPLETE' : 'PARTIAL',
+      totalVisits,
+      classifiedVisits,
+      unclassifiedVisits,
+      reasonCode: unclassifiedVisits === '0'
+        ? null
+        : 'SOURCE_COVERAGE_INCOMPLETE'
+    },
+    rows: comparisonRows
   };
   return {
     projectId: '11',
@@ -551,6 +570,9 @@ test('desktop layout matches the final structure and is keyboard/axe clean', asy
   await expect(page.getByRole('heading', { name: '投放效率' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '全链路数据' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '每日趋势' })).toBeVisible();
+  await expect(page.getByRole('alert').filter({
+    hasText: '来源分类覆盖不完整'
+  })).toContainText('差额仅表示当前分类未覆盖');
   await expect(page.getByText('CPC', { exact: true })).toBeVisible();
   await expect(page.locator('.ant-skeleton')).toHaveCount(0);
 
@@ -784,6 +806,14 @@ test('empty data keeps the table contract without zero-shaped attribution', asyn
         sourceComparison: base.sourceComparison ? {
           metric: 'visits',
           state: 'COMPLETE',
+          partition: {
+            metric: 'visits',
+            state: 'PARTIAL',
+            totalVisits: null,
+            classifiedVisits: '0',
+            unclassifiedVisits: null,
+            reasonCode: 'SOURCE_TOTAL_UNAVAILABLE'
+          },
           rows: base.sourceComparison.rows.map((source) => ({
             ...source,
             summaryState: 'NO_DATA',
