@@ -35,7 +35,7 @@ function loadTypeScriptModule(relativePath, replacements = []) {
   return loaded.exports;
 }
 
-test('广告 fixture 通过现役 decoder 并精确暴露广告上期尚未接线的缺口', () => {
+test('广告 fixture 通过现役 decoder 并冻结真实双周期合同', () => {
   const ready = fixture('ad-periods-ready.json');
   const ad = loadTypeScriptModule('lib/marketing/adPerformanceAdapter.ts');
   const keywords = loadTypeScriptModule(
@@ -64,14 +64,11 @@ test('广告 fixture 通过现役 decoder 并精确暴露广告上期尚未接�
     ready.dashboard.revision,
     ready.previous.range
   );
-  assert.throws(
-    () => ad.assertMarketingAdHierarchyResponse(
-      ready.previous.adHierarchy,
-      ready.dashboard,
-      ready.previous.range
-    ),
-    { code: 'MARKETING_DASHBOARD_RESPONSE_INVALID' },
-    '现役层级 decoder 把任意范围 summary 错绑到 Dashboard 本期 summary'
+  ad.assertMarketingAdHierarchyResponse(
+    ready.previous.adHierarchy,
+    ready.dashboard,
+    ready.previous.range,
+    { requireDashboardSummary: false }
   );
 });
 

@@ -213,4 +213,4 @@ fixture 不得包含 Token、Secret、统计用户名、真实关键词、真实
 - PRD path: `docs/active-2026-08-05-007-marketing-production-data-correctness/prd.md`
 - Current state: active；003 与 006 已关闭，按 issues 顺序实施。
 - Execution order: `003 → 006 → 007 → 005`。
-- Recommended next step: Issue 001 已关闭，按顺序实施 Issue 002 广告表现双周期。
+- Recommended next step: Issues 001–002 已关闭，按顺序实施 Issue 003 关键词双周期。

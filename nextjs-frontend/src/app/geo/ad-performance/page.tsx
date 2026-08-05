@@ -140,14 +140,6 @@ function calculateCpc(
   return `${symbol}${fixedDecimal(cents, 2)}`;
 }
 
-function sumTrendMetrics(rows: AdDailyMetrics[]): AdExactMetrics {
-  return rows.reduce<AdExactMetrics>((totals, row) => ({
-    costAmountScaled: (BigInt(totals.costAmountScaled) + BigInt(row.costAmountScaled)).toString(),
-    impressions: (BigInt(totals.impressions) + BigInt(row.impressions)).toString(),
-    clicks: (BigInt(totals.clicks) + BigInt(row.clicks)).toString()
-  }), { costAmountScaled: '0', impressions: '0', clicks: '0' });
-}
-
 function formatExactChange(current: string, previous: string): string | null {
   const currentValue = BigInt(current);
   const previousValue = BigInt(previous);
@@ -519,14 +511,16 @@ export default function AdPerformancePage() {
   const previousTrend = useMemo(() => (
     selectedNode?.previousTrend || performance.data?.previousTrend || []
   ), [performance.data?.previousTrend, selectedNode]);
-  const currentOverviewMetrics = useMemo(
-    () => sumTrendMetrics(performance.data?.currentTrend || []),
-    [performance.data?.currentTrend]
-  );
-  const previousOverviewMetrics = useMemo(
-    () => sumTrendMetrics(performance.data?.previousTrend || []),
-    [performance.data?.previousTrend]
-  );
+  const currentOverviewMetrics = performance.data?.summary || {
+    costAmountScaled: '0',
+    impressions: '0',
+    clicks: '0'
+  };
+  const previousOverviewMetrics = performance.data?.previousSummary || null;
+  const previousUnavailableReason = performance.data?.previousState === 'READY'
+    ? ''
+    : performance.data?.previousUnavailableReason
+      || '上一周期广告数据不可用。';
   const currentPeriodLabel = performance.data
     ? `近 ${performance.data.period.days} 天`
     : '当前周期';
@@ -784,6 +778,20 @@ export default function AdPerformancePage() {
         />
       ) : null}
 
+      {!pageError && performance.data?.previousState === 'ERROR' ? (
+        <Alert
+          className={styles.pageAlert}
+          type="warning"
+          showIcon
+          title={`上一周期比较读取失败：${performance.data.previousUnavailableReason}`}
+          action={(
+            <Button size="small" onClick={() => void performance.reload()}>
+              重试
+            </Button>
+          )}
+        />
+      ) : null}
+
       {shellLoading || performance.loading || !performance.data ? (
         pageError ? (
           <MarketingMetricPlaceholderGrid
@@ -799,37 +807,66 @@ export default function AdPerformancePage() {
               {
                 title: '总消费', key: 'cost', metricKey: undefined,
                 current: formatMoney(currentOverviewMetrics.costAmountScaled, performance.data.costScale, 0, performance.data.currency),
-                previous: formatMoney(previousOverviewMetrics.costAmountScaled, performance.data.costScale, 0, performance.data.currency),
-                change: formatExactChange(currentOverviewMetrics.costAmountScaled, previousOverviewMetrics.costAmountScaled),
+                previous: previousOverviewMetrics
+                  ? formatMoney(previousOverviewMetrics.costAmountScaled, performance.data.costScale, 0, performance.data.currency)
+                  : null,
+                change: previousOverviewMetrics
+                  ? formatExactChange(currentOverviewMetrics.costAmountScaled, previousOverviewMetrics.costAmountScaled)
+                  : null,
                 lowerIsBetter: true,
-                info: '所选周期的百度推广消费。'
+                info: '所选周期的百度推广消费。',
+                previousMissingReason: previousUnavailableReason,
+                changeMissingReason: previousUnavailableReason
+                  || '上一周期为 0，无法计算变化率。'
               },
               {
                 title: '总展现', key: 'impressions', metricKey: undefined,
                 current: groupDigits(currentOverviewMetrics.impressions),
-                previous: groupDigits(previousOverviewMetrics.impressions),
-                change: formatExactChange(currentOverviewMetrics.impressions, previousOverviewMetrics.impressions),
-                info: '所选周期的百度推广展现数。'
+                previous: previousOverviewMetrics
+                  ? groupDigits(previousOverviewMetrics.impressions)
+                  : null,
+                change: previousOverviewMetrics
+                  ? formatExactChange(currentOverviewMetrics.impressions, previousOverviewMetrics.impressions)
+                  : null,
+                info: '所选周期的百度推广展现数。',
+                previousMissingReason: previousUnavailableReason,
+                changeMissingReason: previousUnavailableReason
+                  || '上一周期为 0，无法计算变化率。'
               },
               {
                 title: '总点击', key: 'clicks', metricKey: undefined,
                 current: groupDigits(currentOverviewMetrics.clicks),
-                previous: groupDigits(previousOverviewMetrics.clicks),
-                change: formatExactChange(currentOverviewMetrics.clicks, previousOverviewMetrics.clicks),
-                info: '百度推广点击数，不等于站内访问数。'
+                previous: previousOverviewMetrics
+                  ? groupDigits(previousOverviewMetrics.clicks)
+                  : null,
+                change: previousOverviewMetrics
+                  ? formatExactChange(currentOverviewMetrics.clicks, previousOverviewMetrics.clicks)
+                  : null,
+                info: '百度推广点击数，不等于站内访问数。',
+                previousMissingReason: previousUnavailableReason,
+                changeMissingReason: previousUnavailableReason
+                  || '上一周期为 0，无法计算变化率。'
               },
               {
                 title: '平均点击成本', key: 'cpc', metricKey: 'CPC',
                 current: calculateCpc(currentOverviewMetrics, performance.data.costScale, performance.data.currency),
-                previous: calculateCpc(previousOverviewMetrics, performance.data.costScale, performance.data.currency),
-                change: formatRatioChange(
-                  currentOverviewMetrics.costAmountScaled,
-                  currentOverviewMetrics.clicks,
-                  previousOverviewMetrics.costAmountScaled,
-                  previousOverviewMetrics.clicks
-                ),
+                previous: previousOverviewMetrics
+                  ? calculateCpc(previousOverviewMetrics, performance.data.costScale, performance.data.currency)
+                  : null,
+                change: previousOverviewMetrics
+                  ? formatRatioChange(
+                      currentOverviewMetrics.costAmountScaled,
+                      currentOverviewMetrics.clicks,
+                      previousOverviewMetrics.costAmountScaled,
+                      previousOverviewMetrics.clicks
+                    )
+                  : null,
                 lowerIsBetter: true,
-                info: '广告消费 ÷ 广告点击数，越低越好。'
+                info: '广告消费 ÷ 广告点击数，越低越好。',
+                previousMissingReason: previousUnavailableReason
+                  || '上一周期点击数为 0，无法计算平均点击成本。',
+                changeMissingReason: previousUnavailableReason
+                  || '本期或上期缺少可比较的平均点击成本基准。'
               }
             ].map((item) => (
               <MarketingMetricCard
@@ -841,6 +878,8 @@ export default function AdPerformancePage() {
                 change={item.change}
                 tone={comparisonTone(item.change, item.lowerIsBetter)}
                 info={item.info}
+                previousMissingReason={item.previousMissingReason}
+                changeMissingReason={item.changeMissingReason}
               />
             ))}
           </MarketingMetricGrid>
@@ -875,7 +914,7 @@ export default function AdPerformancePage() {
               <div
                 className={styles.chartRegion}
                 role="img"
-                aria-label={`${selectedNode?.name || '总体'}${TREND_OPTIONS.find((item) => item.value === trendMetric)?.label || ''}每日趋势`}
+                aria-label={`${selectedNode?.name || '总体'}${TREND_OPTIONS.find((item) => item.value === trendMetric)?.label || ''}每日趋势，${currentPeriodLabel}与${previousPeriodLabel}`}
               >
                 <Line
                   data={chartData}

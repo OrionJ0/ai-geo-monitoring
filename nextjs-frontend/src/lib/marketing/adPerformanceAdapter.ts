@@ -60,10 +60,57 @@ export type AdPerformanceModel = {
   availableTo: string;
   period: AdPeriod;
   summary: AdExactMetrics;
+  previousState: 'READY' | 'UNAVAILABLE' | 'ERROR';
+  previousSummary: AdExactMetrics | null;
+  previousUnavailableReason: string;
   currentTrend: AdDailyMetrics[];
   previousTrend: AdDailyMetrics[];
   structure: AdHierarchyNode[];
 };
+
+export type AdPreviousHierarchyResult =
+  | {
+      state: 'READY';
+      hierarchy: MarketingAdHierarchyResponse;
+      reason: '';
+    }
+  | {
+      state: 'UNAVAILABLE' | 'ERROR';
+      hierarchy: null;
+      reason: string;
+    };
+
+export function classifyAdPreviousHierarchyError(
+  error: unknown
+): AdPreviousHierarchyResult {
+  const response = (
+    error && typeof error === 'object' && 'response' in error
+      ? (error as {
+          response?: {
+            data?: { error?: { code?: unknown; message?: unknown } };
+          };
+        }).response
+      : undefined
+  );
+  const code = typeof response?.data?.error?.code === 'string'
+    ? response.data.error.code
+    : null;
+  const message = typeof response?.data?.error?.message === 'string'
+    ? response.data.error.message
+    : null;
+  if (code === 'DASHBOARD_DATE_OUT_OF_RANGE') {
+    return {
+      state: 'UNAVAILABLE',
+      hierarchy: null,
+      reason: message || '上一周期超出广告快照覆盖范围。'
+    };
+  }
+  return {
+    state: 'ERROR',
+    hierarchy: null,
+    reason: message || '上一周期广告数据读取失败，请重试。'
+  };
+}
 
 const EMPTY_METRICS: AdExactMetrics = Object.freeze({
   costAmountScaled: '0',
@@ -193,7 +240,8 @@ function hierarchyItemTrendValid(
 export function assertMarketingAdHierarchyResponse(
   value: unknown,
   dashboard: MarketingDashboardResponse,
-  expectedRange: { from: string; to: string }
+  expectedRange: { from: string; to: string },
+  options: { requireDashboardSummary?: boolean } = {}
 ): asserts value is MarketingAdHierarchyResponse {
   if (!objectRecord(value)) invalidDashboard();
   const coverage = value.coverage;
@@ -219,7 +267,10 @@ export function assertMarketingAdHierarchyResponse(
     || filter.to !== expectedRange.to
     || !exactMetrics(summary)
     || !exactMetrics(dashboard.summary)
-    || !metricsEqual(summary, dashboard.summary as AdExactMetrics)
+    || (
+      options.requireDashboardSummary !== false
+      && !metricsEqual(summary, dashboard.summary as AdExactMetrics)
+    )
     || !Array.isArray(campaigns) || !campaigns.every(dashboardCampaign)
     || !Array.isArray(adGroups) || !adGroups.every(dashboardAdGroup)
     || !Array.isArray(keywords) || !keywords.every(dashboardKeyword)
@@ -453,6 +504,21 @@ function normalizeTrend(
   }));
 }
 
+function sumCampaignTrends(
+  campaigns: MarketingAdCampaign[]
+): AdDailyMetrics[] {
+  const totals = new Map<string, AdExactMetrics>();
+  for (const campaign of campaigns) {
+    for (const row of normalizeTrend(campaign.trend)) {
+      const previous = totals.get(row.date) || EMPTY_METRICS;
+      totals.set(row.date, sumAdMetrics([previous, row]));
+    }
+  }
+  return [...totals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, metrics]) => ({ date, ...metrics }));
+}
+
 function hierarchyKey(...parts: string[]): string {
   return parts.join('\u0000');
 }
@@ -487,7 +553,8 @@ function emptyModel(
   dashboard: MarketingDashboardResponse,
   projectName: string,
   from: string,
-  to: string
+  to: string,
+  previous: AdPreviousHierarchyResult
 ): AdPerformanceModel {
   const coverage = dashboard.coverage;
   return {
@@ -501,8 +568,15 @@ function emptyModel(
     availableTo: coverage?.to || to,
     period: buildAdPeriod(from, to),
     summary: { ...EMPTY_METRICS },
+    previousState: previous.state,
+    previousSummary: previous.state === 'READY'
+      ? normalizeMetrics(previous.hierarchy.summary)
+      : null,
+    previousUnavailableReason: previous.reason,
     currentTrend: [],
-    previousTrend: [],
+    previousTrend: previous.state === 'READY'
+      ? sumCampaignTrends(previous.hierarchy.campaigns)
+      : [],
     structure: []
   };
 }
@@ -510,6 +584,7 @@ function emptyModel(
 export function adaptMarketingAdHierarchy(
   dashboard: MarketingDashboardResponse,
   hierarchy: MarketingAdHierarchyResponse | null,
+  previous: AdPreviousHierarchyResult,
   fallbackProjectName = '默认监控项目'
 ): AdPerformanceModel {
   const projectName = dashboard.projectName || fallbackProjectName;
@@ -524,10 +599,27 @@ export function adaptMarketingAdHierarchy(
     !coverage
     || dashboard.states?.snapshotContentState === 'NONE'
   ) {
-    return emptyModel(dashboard, projectName, from, to);
+    return emptyModel(dashboard, projectName, from, to, previous);
   }
 
   const currentTrend = normalizeTrend(dashboard.trend);
+  const previousHierarchy = previous.state === 'READY'
+    ? previous.hierarchy
+    : null;
+  const previousCampaigns = new Map((previousHierarchy?.campaigns || []).map(
+    (row) => [hierarchyKey(row.accountId, row.campaignId), row]
+  ));
+  const previousAdGroups = new Map((previousHierarchy?.adGroups || []).map(
+    (row) => [hierarchyKey(row.accountId, row.campaignId, row.adGroupId), row]
+  ));
+  const previousKeywords = new Map((previousHierarchy?.keywords || []).map(
+    (row) => [hierarchyKey(
+      row.accountId,
+      row.campaignId,
+      row.adGroupId,
+      row.keywordId
+    ), row]
+  ));
   const campaigns = hierarchy?.campaigns || [];
   const adGroups = hierarchy?.adGroups || [];
   const keywords = hierarchy?.keywords || [];
@@ -570,26 +662,35 @@ export function adaptMarketingAdHierarchy(
       );
       const keywordNodes: AdHierarchyNode[] = (
         keywordsByAdGroup.get(adGroupKey) || []
-      ).map((keyword) => ({
-        key: `keyword:${keyword.accountId}:${keyword.campaignId}:${keyword.adGroupId}:${keyword.keywordId}`,
-        id: String(keyword.keywordId),
-        name: keyword.keywordName,
-        level: 'keyword',
-        status: 'unknown',
-        budgetAmountScaled: null,
-        metrics: normalizeMetrics(keyword),
-        currentTrend: normalizeTrend(keyword.trend),
-        previousTrend: [],
-        details: [
-          { label: '关键词 ID', value: String(keyword.keywordId) },
-          { label: '所属单元', value: keyword.adGroupName },
-          {
-            label: '定向类型',
-            value: targetingTypeLabel(keyword.targetingType)
-          },
-          { label: '投放状态', value: '—', status: 'unknown' }
-        ]
-      }));
+      ).map((keyword) => {
+        const previousKeyword = previousKeywords.get(hierarchyKey(
+          keyword.accountId,
+          keyword.campaignId,
+          keyword.adGroupId,
+          keyword.keywordId
+        ));
+        return {
+          key: `keyword:${keyword.accountId}:${keyword.campaignId}:${keyword.adGroupId}:${keyword.keywordId}`,
+          id: String(keyword.keywordId),
+          name: keyword.keywordName,
+          level: 'keyword',
+          status: 'unknown',
+          budgetAmountScaled: null,
+          metrics: normalizeMetrics(keyword),
+          currentTrend: normalizeTrend(keyword.trend),
+          previousTrend: normalizeTrend(previousKeyword?.trend),
+          details: [
+            { label: '关键词 ID', value: String(keyword.keywordId) },
+            { label: '所属单元', value: keyword.adGroupName },
+            {
+              label: '定向类型',
+              value: targetingTypeLabel(keyword.targetingType)
+            },
+            { label: '投放状态', value: '—', status: 'unknown' }
+          ]
+        };
+      });
+      const previousAdGroup = previousAdGroups.get(adGroupKey);
       return {
         key: `unit:${adGroup.accountId}:${adGroup.campaignId}:${adGroup.adGroupId}`,
         id: String(adGroup.adGroupId),
@@ -599,7 +700,7 @@ export function adaptMarketingAdHierarchy(
         budgetAmountScaled: null,
         metrics: normalizeMetrics(adGroup),
         currentTrend: normalizeTrend(adGroup.trend),
-        previousTrend: [],
+        previousTrend: normalizeTrend(previousAdGroup?.trend),
         details: [
           { label: '单元 ID', value: String(adGroup.adGroupId) },
           { label: '所属计划', value: campaign.campaignName },
@@ -609,6 +710,7 @@ export function adaptMarketingAdHierarchy(
         children: keywordNodes
       };
     });
+    const previousCampaign = previousCampaigns.get(campaignKey);
     return {
       key: `scheme:${campaign.accountId}:${campaign.campaignId}`,
       id: String(campaign.campaignId),
@@ -618,7 +720,7 @@ export function adaptMarketingAdHierarchy(
       budgetAmountScaled: null,
       metrics: normalizeMetrics(campaign),
       currentTrend: normalizeTrend(campaign.trend),
-      previousTrend: [],
+      previousTrend: normalizeTrend(previousCampaign?.trend),
       details: [
         { label: '计划 ID', value: String(campaign.campaignId) },
         { label: '所属项目', value: projectName },
@@ -633,6 +735,12 @@ export function adaptMarketingAdHierarchy(
     };
   });
   const summary = normalizeMetrics(hierarchy?.summary || dashboard.summary);
+  const previousSummary = previousHierarchy
+    ? normalizeMetrics(previousHierarchy.summary)
+    : null;
+  const previousTrend = previousHierarchy
+    ? sumCampaignTrends(previousHierarchy.campaigns)
+    : [];
   const projectNode: AdHierarchyNode = {
     key: `project:${dashboard.projectId}`,
     id: String(dashboard.projectId),
@@ -642,7 +750,7 @@ export function adaptMarketingAdHierarchy(
     budgetAmountScaled: null,
     metrics: summary,
     currentTrend,
-    previousTrend: [],
+    previousTrend,
     details: [
       { label: '项目 ID', value: String(dashboard.projectId) },
       { label: '项目状态', value: projectStateLabel },
@@ -673,8 +781,11 @@ export function adaptMarketingAdHierarchy(
     availableTo: coverage.to,
     period: buildAdPeriod(from, to),
     summary,
+    previousState: previous.state,
+    previousSummary,
+    previousUnavailableReason: previous.reason,
     currentTrend,
-    previousTrend: [],
+    previousTrend,
     structure: [projectNode]
   };
 }
