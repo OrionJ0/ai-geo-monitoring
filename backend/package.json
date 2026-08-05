@@ -13,6 +13,7 @@
     "test:postgres:scheduler": "node --test tests/integration/ScheduledExecutionPostgres.test.js",
     "audit:marketing": "node scripts/migrateMarketing.js",
     "migrate:marketing": "node scripts/migrateMarketing.js --apply",
+    "preflight:baidu-unified-oauth": "node scripts/verifyBaiduUnifiedOAuth.js",
     "audit:website-data": "node scripts/migrateWebsiteData.js",
     "migrate:website-data": "node scripts/migrateWebsiteData.js --apply",
     "audit:consultation-records": "node scripts/migrateConsultationRecords.js",
