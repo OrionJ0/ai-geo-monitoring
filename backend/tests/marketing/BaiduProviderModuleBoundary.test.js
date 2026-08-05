@@ -28,7 +28,7 @@ function createClient(transport = async () => ({})) {
   return new facadeExports.BaiduMarketingClient({
     manifest,
     appId: 'synthetic-app',
-    secretKey: '0123456789abcdef-synthetic-secret',
+    secretKey: '0000000000000000-synthetic-only',
     scope: 'synthetic-scope',
     redirectUri: 'https://example.test/oauth/callback',
     timeoutMs: 10000,
@@ -36,91 +36,17 @@ function createClient(transport = async () => ({})) {
   });
 }
 
-test('facade owns one shared HTTP kernel and keeps the Secret only in OAuth', () => {
+test('facade keeps its composed clients private', () => {
   const client = createClient();
 
-  assert.equal(client.httpKernel instanceof BaiduHttpKernel, true);
-  assert.equal(client.oauthClient instanceof BaiduOAuthClient, true);
-  assert.equal(client.searchAdsClient instanceof BaiduSearchAdsClient, true);
-  assert.equal(client.tongjiClient instanceof BaiduTongjiClient, true);
-  assert.equal(client.oauthClient.httpKernel, client.httpKernel);
-  assert.equal(client.searchAdsClient.httpKernel, client.httpKernel);
-  assert.equal(client.tongjiClient.httpKernel, client.httpKernel);
+  assert.deepEqual(Object.keys(client), ['timeoutMs']);
   assert.equal(Object.hasOwn(client, 'secretKey'), false);
   assert.equal(Object.hasOwn(client, 'transport'), false);
   assert.equal(Object.hasOwn(client, 'allowlist'), false);
-  assert.equal(client.oauthClient.secretKey, '0123456789abcdef-synthetic-secret');
-  assert.equal(Object.hasOwn(client.searchAdsClient, 'secretKey'), false);
-  assert.equal(Object.hasOwn(client.tongjiClient, 'secretKey'), false);
-});
-
-test('facade delegates every SEARCH method to the one search client', async () => {
-  const client = createClient();
-  const calls = [];
-  for (const method of [
-    'createSearchReportBudget',
-    'acquireSearchReportSlot',
-    'fetchConfiguredSearchReport',
-    'fetchSearchReport',
-    'fetchSearchAdGroupReport',
-    'fetchSearchKeywordReport',
-    'fetchSearchTermReport',
-    'fetchSearchReports'
-  ]) {
-    client.searchAdsClient[method] = async (...args) => {
-      calls.push({ method, args });
-      return method;
-    };
-  }
-
-  assert.equal(await client.createSearchReportBudget(), 'createSearchReportBudget');
-  assert.equal(await client.acquireSearchReportSlot('slot'), 'acquireSearchReportSlot');
-  assert.equal(await client.fetchConfiguredSearchReport('configured'), 'fetchConfiguredSearchReport');
-  assert.equal(await client.fetchSearchReport('campaign'), 'fetchSearchReport');
-  assert.equal(await client.fetchSearchAdGroupReport('group'), 'fetchSearchAdGroupReport');
-  assert.equal(await client.fetchSearchKeywordReport('keyword'), 'fetchSearchKeywordReport');
-  assert.equal(await client.fetchSearchTermReport('term'), 'fetchSearchTermReport');
-  assert.equal(await client.fetchSearchReports('all'), 'fetchSearchReports');
-  assert.deepEqual(calls.map(({ method }) => method), [
-    'createSearchReportBudget',
-    'acquireSearchReportSlot',
-    'fetchConfiguredSearchReport',
-    'fetchSearchReport',
-    'fetchSearchAdGroupReport',
-    'fetchSearchKeywordReport',
-    'fetchSearchTermReport',
-    'fetchSearchReports'
-  ]);
-});
-
-test('facade delegates every Tongji method to the one Tongji client', async () => {
-  const client = createClient();
-  const calls = [];
-  for (const method of [
-    'listTongjiSites',
-    'fetchTongjiTrend',
-    'fetchTongjiQualityTrend',
-    'fetchTongjiPageReport',
-    'fetchTongjiSourceSummary'
-  ]) {
-    client.tongjiClient[method] = async (...args) => {
-      calls.push({ method, args });
-      return method;
-    };
-  }
-
-  assert.equal(await client.listTongjiSites('sites'), 'listTongjiSites');
-  assert.equal(await client.fetchTongjiTrend('trend'), 'fetchTongjiTrend');
-  assert.equal(await client.fetchTongjiQualityTrend('quality'), 'fetchTongjiQualityTrend');
-  assert.equal(await client.fetchTongjiPageReport('pages'), 'fetchTongjiPageReport');
-  assert.equal(await client.fetchTongjiSourceSummary('sources'), 'fetchTongjiSourceSummary');
-  assert.deepEqual(calls.map(({ method }) => method), [
-    'listTongjiSites',
-    'fetchTongjiTrend',
-    'fetchTongjiQualityTrend',
-    'fetchTongjiPageReport',
-    'fetchTongjiSourceSummary'
-  ]);
+  assert.equal(Object.hasOwn(client, 'httpKernel'), false);
+  assert.equal(Object.hasOwn(client, 'oauthClient'), false);
+  assert.equal(Object.hasOwn(client, 'searchAdsClient'), false);
+  assert.equal(Object.hasOwn(client, 'tongjiClient'), false);
 });
 
 test('facade re-exports the one shared error class identity', () => {
@@ -175,4 +101,54 @@ test('facade contains composition and delegation but no product implementation',
   );
   assert.doesNotMatch(facadeSource, /\b(?:for|while)\s*\(/u);
   assert.equal((facadeSource.match(/class BaiduMarketingClient/gu) || []).length, 1);
+  for (const dependency of [
+    'BaiduHttpKernel',
+    'BaiduOAuthClient',
+    'BaiduSearchAdsClient',
+    'BaiduTongjiClient'
+  ]) {
+    assert.equal(
+      (facadeSource.match(new RegExp(`new ${dependency}\\(`, 'gu')) || []).length,
+      1
+    );
+  }
+  assert.equal(
+    (facadeSource.match(/httpKernel: this\.#httpKernel/gu) || []).length,
+    3
+  );
+  for (const [client, methods] of Object.entries({
+    httpKernel: ['assertAllowed', 'requestJson'],
+    oauthClient: [
+      'buildAuthorizationUrl',
+      'verifyCallbackSignature',
+      'exchangeAuthorizationCode',
+      'refreshAccessToken',
+      'listAccounts'
+    ],
+    searchAdsClient: [
+      'createSearchReportBudget',
+      'acquireSearchReportSlot',
+      'fetchConfiguredSearchReport',
+      'fetchSearchReport',
+      'fetchSearchAdGroupReport',
+      'fetchSearchKeywordReport',
+      'fetchSearchTermReport',
+      'fetchSearchReports'
+    ],
+    tongjiClient: [
+      'listTongjiSites',
+      'fetchTongjiTrend',
+      'fetchTongjiQualityTrend',
+      'fetchTongjiPageReport',
+      'fetchTongjiSourceSummary'
+    ]
+  })) {
+    for (const method of methods) {
+      assert.equal(
+        facadeSource.includes(`this.#${client}.${method}(`),
+        true,
+        `${method} must delegate to ${client}`
+      );
+    }
+  }
 });

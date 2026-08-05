@@ -154,6 +154,10 @@ async function run() {
         'ACTIVE', 0, NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )`
     );
+    await createMarketingMigrationRunner({
+      sequelize: database,
+      migrations: migrations.slice(0, 15)
+    }).apply();
     const result = await createMarketingMigrationRunner({
       sequelize: database
     }).apply({

@@ -4,6 +4,7 @@ const {
 } = require('./BaiduErrors');
 
 const ONE_MEBIBYTE = 1024 * 1024;
+const MAX_RESPONSE_BYTES = 8 * ONE_MEBIBYTE;
 const RAW_RESPONSE_BYTES = Symbol('baiduRawResponseBytes');
 
 function documentedAllowlist(manifest) {
@@ -145,15 +146,19 @@ async function defaultTransport({
 }
 
 class BaiduHttpKernel {
+  #allowlist;
+
+  #timeoutMs;
+
+  #transport;
+
   constructor({ manifest, timeoutMs = 10000, transport = defaultTransport }) {
-    this.allowlist = new Set(documentedAllowlist(manifest));
-    this.timeoutMs = Number(timeoutMs);
-    this.transport = transport;
+    const normalizedTimeoutMs = Number(timeoutMs);
     if (
-      !Number.isInteger(this.timeoutMs)
-      || this.timeoutMs < 100
-      || this.timeoutMs > 60000
-      || typeof this.transport !== 'function'
+      !Number.isInteger(normalizedTimeoutMs)
+      || normalizedTimeoutMs < 100
+      || normalizedTimeoutMs > 60000
+      || typeof transport !== 'function'
     ) {
       throw new BaiduMarketingError(
         '百度营销客户端配置无效',
@@ -161,6 +166,13 @@ class BaiduHttpKernel {
         500
       );
     }
+    this.#allowlist = new Set(documentedAllowlist(manifest));
+    this.#timeoutMs = normalizedTimeoutMs;
+    this.#transport = transport;
+  }
+
+  get timeoutMs() {
+    return this.#timeoutMs;
   }
 
   assertAllowed(method, url) {
@@ -172,7 +184,7 @@ class BaiduHttpKernel {
       || parsed.password
       || parsed.search
       || parsed.hash
-      || !this.allowlist.has(key)
+      || !this.#allowlist.has(key)
     ) {
       throw new BaiduMarketingError(
         '百度出站请求不在契约白名单内',
@@ -187,10 +199,24 @@ class BaiduHttpKernel {
     url,
     json,
     maxResponseBytes = ONE_MEBIBYTE,
-    timeoutMs = this.timeoutMs
+    timeoutMs = this.#timeoutMs
   }) {
     this.assertAllowed(method, url);
-    return this.transport({
+    if (
+      !Number.isInteger(timeoutMs)
+      || timeoutMs < 1
+      || timeoutMs > this.#timeoutMs
+      || !Number.isInteger(maxResponseBytes)
+      || maxResponseBytes < 1
+      || maxResponseBytes > MAX_RESPONSE_BYTES
+    ) {
+      throw new BaiduMarketingError(
+        '百度营销客户端配置无效',
+        'BAIDU_CLIENT_CONFIG_INVALID',
+        500
+      );
+    }
+    return this.#transport({
       method,
       url,
       headers: {
