@@ -53,6 +53,7 @@
 - 页面只能调用 GoodieAI 内部 API，不得从浏览器直接调用百度。详情资源只读取已落库完整快照并钉扎同一 `revision`，不得各自触发百度上游请求；快照过期检查和刷新仍由唯一后端协调路径合并，同一项目请求突发不得按页面数重复刷新四份报告。
 - API 治理的验收顺序固定为：口径正确 → 不重复调用上游 → 页面最小返回体。接口命名或抽象整洁不能压过市场负责人看到正确、可解释数据的目标。
 - 003 统一 OAuth、006 广告读 API 资源化、007 数据正确性和 005 Provider 模块化是不同事实面。006 的代码与 003 没有强技术依赖，但生产发布/观察窗口不得重叠；007 的广告双周期依赖 006，百度统计来源分区和页面消歧不依赖 006；005 必须在正确性工作关闭后最后实施。
+- 2026-08-06 005 已完成正式硬切。当前唯一百度 Provider 路径为 `backend/modules/marketing/index.js → BaiduMarketingClient facade → {BaiduOAuthClient, BaiduSearchAdsClient, BaiduTongjiClient} → 同一 BaiduHttpKernel`；公开 facade 与 composition root 保持不变，旧单体产品逻辑、重复安全网络实现、双 Provider、feature flag 和 runtime fallback 已退役。
 
 ## 市场首页与视觉标准
 

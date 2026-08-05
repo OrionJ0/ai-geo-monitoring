@@ -1,7 +1,7 @@
 ---
 title: 百度 Provider 模块化重构 PRD
 date: 2026-08-05
-status: active
+status: closed
 source: 003 统一 OAuth 后续架构工作与 2026-08-05 用户确认
 scope: product
 ---
@@ -169,6 +169,7 @@ scope: product
 
 ## Handoff
 
-- PRD path: `docs/active-2026-08-05-005-baidu-provider-modularization/prd.md`
-- Current state: active；Issues 001–004 已关闭，候选实现已有唯一安全 HTTP 内核、OAuth、搜索推广与百度统计客户端，facade 内旧单体产品实现已删除，且中间态未发布。
-- Recommended next step: 严格进入 Issue 005，完成对抗式审查、全量等价和生产门禁后，以一个完整 revision 正式硬切并从受支持域名完成真实验收。
+- PRD path: `docs/closed-2026-08-05-005-baidu-provider-modularization/prd.md`
+- Current state: closed；Issues 001–005 已关闭，模块化 Provider 已随 revision `2c6a36e4018d36d926a44a1ad2fc8825b7320635` 从正式 Git Bundle 硬切上线。
+- Formal path: `marketing/index.js → BaiduMarketingClient facade → {BaiduOAuthClient, BaiduSearchAdsClient, BaiduTongjiClient} → BaiduHttpKernel`。新结构是默认且唯一正式路径；旧单体产品逻辑、重复安全实现、双 Provider、feature flag 和 runtime fallback 已删除。
+- Production evidence: 同一 Token 的 OAuth/四报表/统计扩展只读探针、正式刷新、同 revision 资源、原子快照、七个正式营销页面、公开健康和目标 revision 日志均通过；完整证据见 Issue 005 与 `docs/DEPLOYMENT.md`。

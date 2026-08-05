@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-06 营销生产数据正确性 Git Bundle 已部署 `17214184f9c0ec2c9508080cb571f6b8b45923c4`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-06 百度 Provider 模块化 Git Bundle 已部署 `2c6a36e4018d36d926a44a1ad2fc8825b7320635`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -120,6 +120,16 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 - 网站流量在生产当次缺少可靠全站访问分母时返回 `PARTIAL / SOURCE_TOTAL_UNAVAILABLE`，总访问与 residual 保持 `null`，页面没有把已分类合计伪造成总量或渠道。入口页同路径组在刷新、切换升序、分页和 `390×844` 响应式操作中保持合法稳定 ordinal；历史 `83/82 → PARTIAL` 由脱敏生产形状合同与 Chrome 回归覆盖，不通过修改生产范围或猜测来源制造该样本。
 - 浏览器中的营销响应全部成功；唯一 503 是既有 `DISABLED` 官网区间/逐日接口。咨询页继续显示官网模块不可用和 53KF 未完成，订单页继续显示销售系统未接入，线索/成交依赖指标保持缺失；营销 AI 正式页明确未启用且不会读取来源数据。营销正确性路径没有新增旧 Dashboard fallback、第二套 API 或隐藏 feature flag。
 - 验收使用仅存在于服务器进程和浏览器内存的短期应用 JWT，未输出、落盘或复制 Cookie/Token；它验证正式前端、API、鉴权和生产数据，但不把密码登录流程描述为本次验收范围。完整证据见[007 Issue 006](closed-2026-08-05-007-marketing-production-data-correctness/issues/006-release-and-verify-production-correctness.md)。
+
+### 2026-08-06 百度 Provider 模块化正式硬切与验收
+
+- 正式 Git Bundle 将服务器从正确性 revision `17214184f9c0ec2c9508080cb571f6b8b45923c4` 快进到 `2c6a36e4018d36d926a44a1ad2fc8825b7320635`，SHA-256 为 `ce76b5515a575d3386701d65ea31ae87e98aba46d16d9799e760557f4172cf1a`。部署器完成 Bundle 校验、停服、`database.pre-2c6a36e4018d36d926a44a1ad2fc8825b7320635.sqlite` 备份、快进、测试、迁移、构建、systemd 启动与上传 Bundle 删除；发布树没有并行 0805-002 工作，也没有直接编辑服务器源码。
+- 部署通过后端 994 项、营销 243 项、官网 31 项、咨询 35 项、前端 123 项、lint、TypeScript、40 路由生产构建和真实 Chrome 56 项；营销迁移 001–016 全 applied 且无 pending。服务器 `main/HEAD`、公开 `/api/health` 与 `/api/frontend-health` 都为目标 revision，工作区干净、部署锁不存在，`/api/ready` 为 ready；两个正式 systemd 单元各一个 MainPID。
+- 当前唯一 Provider 路径是 `backend/modules/marketing/index.js → BaiduMarketingClient facade → {BaiduOAuthClient, BaiduSearchAdsClient, BaiduTongjiClient} → 同一 BaiduHttpKernel`。composition root、公开 facade、API、数据库和页面合同未变；旧 facade 内的单体产品逻辑、重复 transport/allowlist、双 Provider、feature flag 和 runtime fallback 均不存在。
+- 生产只读统一 OAuth 探针在 Token 版本 6 上以同一 Access Context 验证推广计划 32、单元 74、关键词 183、搜索词 14，以及百度统计站点 1、趋势 1；两个产品均为 `VERIFIED/HAS_DATA`，前后状态 `UNCHANGED`。扩展只读探针进一步验证站点 5、趋势 1、质量 1、全来源 5、搜索引擎 4、入口页 27、受访页 46，前后状态仍为 `UNCHANGED`；探针未刷新 Token、写缓存或复制敏感响应。
+- 正式 API 手动刷新返回 `202 → SUCCEEDED`，覆盖 `2026-07-07` 至 `2026-08-05`。轻量 Dashboard 和三个详情资源全部 200 并钉扎同一 revision；关键词 921、搜索词 345。数据库只读审计确认成功运行序号 55 的四张事实表分别有 766、1757、4662、706 条日事实，全部只关联同一个保留的 `refresh_run_id`。
+- `/usr/bin/google-chrome` 从唯一支持域名打开市场总览、广告表现、关键词、全量搜索词、网站流量、咨询和订单；七页文档与目标根节点均为 200，无页面异常或登录回退。百度营销、百度统计和默认项目 API 全部 200；官网表单四个 503 继续准确反映既有 `DISABLED` 配置，不是 Provider 回归。
+- 目标 revision 发布后的 117 行服务日志中，错误模式、秘密模式、刷新失败和旧 Provider/fallback 模式均为 0。若后续发生阻断性回归，只允许创建后代 revert revision 并用正式 Git Bundle 快进恢复；本次无 schema 变化，不恢复数据库，也不增加隐藏旧路径。完整证据见[005 Issue 005](closed-2026-08-05-005-baidu-provider-modularization/issues/005-production-hard-cut-and-equivalence-closeout.md)。
 
 ## 前提条件
 - 已安装 `Node.js >= 20.9` 与 `npm >= 9`
