@@ -51,7 +51,10 @@ test('marketing migration CLI applies and audits all immutable migrations', () =
   const databasePath = path.join(directory, 'marketing.sqlite');
 
   try {
-    const apply = runMigration(['--apply'], {
+    const apply = runMigration([
+      '--apply',
+      '--expected-latest=014-unified-oauth-context'
+    ], {
       DB_STORAGE: databasePath,
       MARKETING_MONITORING_ENABLED: 'false'
     });
@@ -81,10 +84,33 @@ test('marketing migration CLI applies and audits all immutable migrations', () =
         '010-search-hierarchy-snapshots',
         '011-tongji-cache-pruning-indexes',
         '012-tongji-snapshot-capabilities',
-        '013-tongji-page-report-snapshots'
+        '013-tongji-page-report-snapshots',
+        '014-unified-oauth-context'
       ],
       pendingVersions: []
     });
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('marketing migration CLI rejects a repository boundary mismatch before apply', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-gate-'));
+  const databasePath = path.join(directory, 'marketing.sqlite');
+
+  try {
+    const execution = runMigration([
+      '--apply',
+      '--expected-latest=013-tongji-page-report-snapshots'
+    ], {
+      DB_STORAGE: databasePath,
+      MARKETING_MONITORING_ENABLED: 'false'
+    });
+    assert.notEqual(execution.status, 0);
+    assert.equal(
+      JSON.parse(execution.stderr).errorCode,
+      'MARKETING_MIGRATION_EXPECTED_LATEST_MISMATCH'
+    );
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

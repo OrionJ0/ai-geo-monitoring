@@ -2,8 +2,10 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const express = require('express');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const { once } = require('node:events');
 const test = require('node:test');
 
 const databaseDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'baidu-auth-api-'));
@@ -98,13 +100,18 @@ test.before(async () => {
       }
     })
   );
-  server = app.listen(0, '127.0.0.1');
-  await new Promise((resolve) => server.once('listening', resolve));
+  server = http.createServer(app);
+  const listening = once(server, 'listening');
+  server.listen(0, '127.0.0.1');
+  await listening;
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
 
 test.after(async () => {
-  await new Promise((resolve) => server.close(resolve));
+  await new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections?.();
+  });
   await sequelize.close();
   fs.rmSync(databaseDirectory, { recursive: true, force: true });
 });
@@ -196,11 +203,45 @@ test('administrator completes one-time authorization without exposing credential
   assert.match(connections[0].refresh_token_ciphertext, /^v1:/u);
   assert.ok(connections[0].refresh_token_expires_at);
   assert.doesNotMatch(JSON.stringify(connections), /access-token-canary|refresh-token-canary/iu);
+
+  const directoryResponse = await fetch(
+    `${baseUrl}/api/admin/marketing/baidu/connections`
+  );
+  assert.equal(directoryResponse.status, 200);
+  const directory = await directoryResponse.json();
+  assert.equal(Array.isArray(directory), true);
+  assert.deepEqual(directory[0].products, {
+    marketing: {
+      state: 'UNKNOWN',
+      checkedAt: null,
+      lastErrorCode: null
+    },
+    tongji: {
+      state: 'UNKNOWN',
+      checkedAt: null,
+      lastErrorCode: null
+    }
+  });
+  assert.equal('authGeneration' in directory[0], false);
+  assert.equal('tokenVersion' in directory[0], false);
+  assert.equal('tongjiCredentialConfigured' in directory[0], false);
+  assert.doesNotMatch(
+    JSON.stringify(directory),
+    /ciphertext|"(?:accessToken|refreshToken|scope|authGeneration|tokenVersion)"\s*:/iu
+  );
   await sequelize.query(
     `UPDATE baidu_marketing_connections
      SET tongji_account_name = '统计账户',
          tongji_access_token_ciphertext = 'v1:encrypted-tongji-fixture',
-         tongji_credential_updated_at = CURRENT_TIMESTAMP
+         tongji_credential_updated_at = CURRENT_TIMESTAMP,
+         tongji_user_name = 'verified-user',
+         tongji_user_name_verified_at = CURRENT_TIMESTAMP,
+         marketing_access_state = 'VERIFIED',
+         marketing_observed_auth_generation = auth_generation,
+         marketing_observed_token_version = token_version,
+         tongji_access_state = 'VERIFIED',
+         tongji_observed_auth_generation = auth_generation,
+         tongji_observed_token_version = token_version
      WHERE id = :connectionId`,
     { replacements: { connectionId: connections[0].id } }
   );
@@ -221,14 +262,23 @@ test('administrator completes one-time authorization without exposing credential
   const [disconnectedRows] = await sequelize.query(
     `SELECT status, access_token_ciphertext, refresh_token_ciphertext,
             tongji_account_name, tongji_access_token_ciphertext,
+            tongji_user_name, tongji_user_name_verified_at,
+            marketing_access_state, tongji_access_state,
             auth_generation
      FROM baidu_marketing_connections`
   );
   assert.equal(disconnectedRows[0].status, 'DISCONNECTED');
   assert.equal(disconnectedRows[0].access_token_ciphertext, null);
   assert.equal(disconnectedRows[0].refresh_token_ciphertext, null);
-  assert.equal(disconnectedRows[0].tongji_account_name, null);
-  assert.equal(disconnectedRows[0].tongji_access_token_ciphertext, null);
+  assert.equal(disconnectedRows[0].tongji_account_name, '统计账户');
+  assert.equal(
+    disconnectedRows[0].tongji_access_token_ciphertext,
+    'v1:encrypted-tongji-fixture'
+  );
+  assert.equal(disconnectedRows[0].tongji_user_name, null);
+  assert.equal(disconnectedRows[0].tongji_user_name_verified_at, null);
+  assert.equal(disconnectedRows[0].marketing_access_state, 'UNKNOWN');
+  assert.equal(disconnectedRows[0].tongji_access_state, 'UNKNOWN');
   assert.equal(disconnectedRows[0].auth_generation, 1);
 });
 

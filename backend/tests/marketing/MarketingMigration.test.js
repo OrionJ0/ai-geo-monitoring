@@ -75,7 +75,8 @@ test('marketing ships immutable domain migrations in order', () => {
       '010-search-hierarchy-snapshots',
       '011-tongji-cache-pruning-indexes',
       '012-tongji-snapshot-capabilities',
-      '013-tongji-page-report-snapshots'
+      '013-tongji-page-report-snapshots',
+      '014-unified-oauth-context'
     ]
   );
 });
@@ -115,7 +116,8 @@ test('marketing migration audit is read-only and applies its source tables idemp
       '010-search-hierarchy-snapshots',
       '011-tongji-cache-pruning-indexes',
       '012-tongji-snapshot-capabilities',
-      '013-tongji-page-report-snapshots'
+      '013-tongji-page-report-snapshots',
+      '014-unified-oauth-context'
     ]
   });
   assert.deepEqual(await database.getQueryInterface().showAllTables(), []);
@@ -149,6 +151,18 @@ test('marketing migration audit is read-only and applies its source tables idemp
   assert.ok(columns.tongji_account_name);
   assert.ok(columns.tongji_access_token_ciphertext);
   assert.ok(columns.tongji_credential_updated_at);
+  assert.ok(columns.tongji_user_name);
+  assert.ok(columns.tongji_user_name_verified_at);
+  assert.ok(columns.marketing_access_state);
+  assert.ok(columns.marketing_observed_auth_generation);
+  assert.ok(columns.marketing_observed_token_version);
+  assert.ok(columns.marketing_checked_at);
+  assert.ok(columns.marketing_last_error_code);
+  assert.ok(columns.tongji_access_state);
+  assert.ok(columns.tongji_observed_auth_generation);
+  assert.ok(columns.tongji_observed_token_version);
+  assert.ok(columns.tongji_checked_at);
+  assert.ok(columns.tongji_last_error_code);
   const bindingColumns = await database.getQueryInterface().describeTable(
     'baidu_project_bindings'
   );
@@ -209,6 +223,75 @@ test('marketing migration audit is read-only and applies its source tables idemp
     )?.fields.map((field) => field.attribute),
     ['refreshed_at']
   );
+});
+
+test('014 copies only the legacy user name as an unverified candidate', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-014-'));
+  const database = createDatabase(path.join(directory, 'migration.sqlite'));
+  t.after(async () => {
+    await database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  await database.query(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY,
+      role TEXT NOT NULL,
+      status TEXT NOT NULL
+    )
+  `);
+  await database.query(`
+    CREATE TABLE brand_projects (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL
+    )
+  `);
+  await database.query(
+    "INSERT INTO users (id, role, status) VALUES (1, 'admin', 'active')"
+  );
+
+  const migrations = loadMarketingMigrations();
+  await createMarketingMigrationRunner({
+    sequelize: database,
+    migrations: migrations.slice(0, -1)
+  }).apply();
+  await database.query(
+    `INSERT INTO baidu_marketing_connections (
+      id, status, authorized_principal_id,
+      access_token_ciphertext, refresh_token_ciphertext,
+      access_token_expires_at, auth_generation, token_version,
+      refresh_claim_token, refresh_claim_until, created_by_user_id,
+      tongji_account_name, tongji_access_token_ciphertext,
+      tongji_credential_updated_at, created_at, updated_at
+    ) VALUES (
+      'connection-014', 'CONNECTED', 'principal-014',
+      'v1:oauth-ciphertext', 'v1:refresh-ciphertext',
+      NULL, 0, 1, NULL, NULL, 1,
+      'legacy-user', 'v1:legacy-tongji-canary', CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    )`
+  );
+
+  await createMarketingMigrationRunner({ sequelize: database }).apply();
+  const [rows] = await database.query(
+    `SELECT tongji_account_name, tongji_access_token_ciphertext,
+            tongji_user_name, tongji_user_name_verified_at,
+            marketing_access_state, marketing_observed_auth_generation,
+            tongji_access_state, tongji_observed_token_version
+     FROM baidu_marketing_connections
+     WHERE id = 'connection-014'`
+  );
+  assert.deepEqual(rows[0], {
+    tongji_account_name: 'legacy-user',
+    tongji_access_token_ciphertext: 'v1:legacy-tongji-canary',
+    tongji_user_name: 'legacy-user',
+    tongji_user_name_verified_at: null,
+    marketing_access_state: 'UNKNOWN',
+    marketing_observed_auth_generation: null,
+    tongji_access_state: 'UNKNOWN',
+    tongji_observed_token_version: null
+  });
 });
 
 test('concurrent SQLite runners serialize and apply a migration once', async (t) => {
