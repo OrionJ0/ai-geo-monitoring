@@ -86,9 +86,9 @@ scope: product
 
 ### Later
 
-- 在独立需求中评估 `BaiduMarketingClient` 的产品客户端拆分；
-- 在独立需求中评估 Dashboard 资源化、公开 API 版本和消费者迁移；
-- 多统计用户名或一个 OAuth 连接跨多个统计账号的场景；
+- [005 百度 Provider 模块化重构](../draft-2026-08-05-005-baidu-provider-modularization/prd.md)：在 003、006、007 关闭后拆分 OAuth、搜索推广和百度统计客户端；
+- [007 营销生产数据正确性与双周期回归](../draft-2026-08-05-007-marketing-production-data-correctness/prd.md)：在 006 最终资源合同上修正双周期、来源对账和页面消歧；
+- [006 营销广告快照 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/prd.md)：在 003 关闭后实施轻量 Dashboard、广告层级、关键词和搜索词资源，不增加 URL 版本；
 - 有真实需求后再建设持久化异步能力验证任务；
 - 53KF、销售系统和可信跨系统归因。
 
@@ -232,7 +232,7 @@ A1 和 A2 必须是两个不同 Git Bundle 发布。A1 迁移命令必须声明�
 - A2 删除列后没有自动 down migration；回滚需要先恢复 A2 前数据库备份，再通过 A2 后代的 revert 提交快进到不含 015 的恢复 revision；
 - 保留现有 provider、公开 API、快照和缓存合同；
 - 不把上游超时、无数据和权限不足混为同一状态；
-- 当前仅设计一个连接对应一个统计用户名，不提前解决未观测的多账号场景。
+- 本系统只支持一个连接对应一个统计用户名，不规划多账号、多统计用户名或跨账号站点扩展。
 
 ## Open Questions
 
@@ -256,4 +256,4 @@ A1 和 A2 必须是两个不同 Git Bundle 发布。A1 迁移命令必须声明�
 - PRD path: `docs/draft-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md`
 - Tech Spec path: `docs/draft-2026-08-05-003-baidu-unified-oauth-api-architecture/TECH-SPEC.md`
 - Current state: 已按第一性原理收敛产品范围，尚未执行生产预检、代码修改或生产切换。
-- Recommended next step: 先完成 Tech Spec 对抗式复审，再将生产预检拆为第一个 issue。
+- Recommended next step: 先以 U1 tooling-only 探针完成生产无状态只读验证；后续顺序为 006 → 007 → 005，三者均不属于 003 的实施或关闭条件。

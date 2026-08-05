@@ -69,6 +69,9 @@
 | 需求 | 当前主题 |
 | --- | --- |
 | [百度统一 OAuth 凭据与营销 API 架构](draft-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md) | 拟在真实双产品验证后统一凭据并硬切退役旧统计凭据；当前仍执行两套凭据和独立产品边界 |
+| [百度 Provider 模块化重构](draft-2026-08-05-005-baidu-provider-modularization/prd.md) | 003、006、007 关闭后拆分 OAuth、搜索推广和百度统计客户端，共用唯一安全 HTTP 内核并证明修正后行为等价 |
+| [营销广告快照 API 资源化](draft-2026-08-05-006-marketing-api-resourceization/prd.md) | 003 关闭后实施轻量 Dashboard、广告层级、关键词和搜索词资源；先 additive 迁移，再硬切删除旧大响应并为 007 提供汇总合同 |
+| [营销生产数据正确性与双周期回归](draft-2026-08-05-007-marketing-production-data-correctness/prd.md) | 003、006 关闭后修复广告/关键词上期、百度统计来源对账和同路径页面消歧，再解除 005 的等价重构门禁 |
 
 ## 阻塞需求
 

@@ -66,9 +66,8 @@ BaiduConnectionService
 
 ### 2.3 延后事项
 
-- 产品客户端物理拆分；
-- Dashboard 资源化和公开 API 版本迁移；
-- 多统计用户名；
+- [005 百度 Provider 模块化重构](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)；
+- [006 营销广告快照 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)，不增加 URL 版本；
 - 异步能力验证；
 - OAuth scope 的真实响应建模。
 
@@ -618,7 +617,7 @@ revert revision 必须是 A2 后代，不能把服务器 HEAD 非快进退回 A1
 | `refresh-runs` | 搜索推广原子刷新 | 百度统计和官网刷新 |
 | `/api/website-data` | 官网表单咨询 | 百度流量和销售事实 |
 
-当前接口名不完美不构成此次生产切换的必要条件。Dashboard 资源化和客户端拆分另立需求，不让它们扩大本次凭据迁移的失败面。
+当前接口名不完美不构成此次生产切换的必要条件。Dashboard 资源化由 006 承接，数据正确性由 007 承接，客户端拆分由 005 承接；三者都不扩大本次凭据迁移的失败面，也不属于 003 的关闭条件。
 
 ## 11. 关键技术决策
 
@@ -847,7 +846,7 @@ A2 至少保存：
 
 ### R7：大型重构扩大失败面
 
-缓解：不拆 provider、不改公开 API、不建任务系统；后续另立需求。
+缓解：不拆 provider、不改公开 API、不改数据后处理、不建任务系统；后续分别由 006、007、005 独立承接。
 
 ## 16. 被拒绝的替代方案
 
@@ -880,7 +879,7 @@ A2 至少保存：
 3. 一个用户名是否覆盖当前目标站点？
 4. A1 运行中的真实 Refresh Token 是否轮换，刷新后两个产品是否继续可用？
 
-如果答案要求多用户名、跨主体映射或继续双 Token，则本方案不扩张，需求转 `blocked` 并重新做产品决策。
+如果生产证据表明必须使用多用户名、跨主体映射或继续双 Token，本系统不在 003 内扩张为该模型；需求转 `blocked` 并重新做产品决策。
 
 ## 18. Official References
 
@@ -895,4 +894,4 @@ A2 至少保存：
 - Status: `draft`；已收敛为最小统一凭据方案，尚未实施。
 - First issue: U1 tooling-only 探针发布与生产无状态只读验证。
 - Completion condition: U1–U5 通过、A2 正式入口验收完成、旧实现与旧文档删除。
-- Deferred architecture work: provider 拆分和公开 API 资源化另立需求，不属于本目录关闭条件。
+- Deferred architecture work: [006 营销 API 资源化](../draft-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md)、[007 营销生产数据正确性](../draft-2026-08-05-007-marketing-production-data-correctness/TECH-SPEC.md)与[005 Provider 模块化](../draft-2026-08-05-005-baidu-provider-modularization/TECH-SPEC.md)已独立建档，不属于本目录关闭条件；默认顺序为 003 → 006 → 007 → 005。
