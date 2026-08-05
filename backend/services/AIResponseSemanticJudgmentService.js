@@ -420,3 +420,4 @@ module.exports.AISemanticJudgmentError = AISemanticJudgmentError;
 module.exports.SEMANTIC_PROMPT_REVISION = SEMANTIC_PROMPT_REVISION;
 module.exports.SEMANTIC_MAX_ATTEMPTS = SEMANTIC_MAX_ATTEMPTS;
 module.exports.parseSemanticOutput = parseSemanticOutput;
+module.exports.buildSemanticPrompt = buildSemanticPrompt;

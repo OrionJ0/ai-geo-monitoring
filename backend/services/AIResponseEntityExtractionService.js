@@ -339,6 +339,7 @@ module.exports.ENTITY_PROMPT_REVISION = ENTITY_PROMPT_REVISION;
 module.exports.ENTITY_MAX_ATTEMPTS = ENTITY_MAX_ATTEMPTS;
 module.exports.FIXED_REQUEST_OPTIONS = FIXED_REQUEST_OPTIONS;
 module.exports.parseEntityOutput = parseEntityOutput;
+module.exports.buildEntityPrompt = buildEntityPrompt;
 module.exports.assertFlashPlatform = assertFlashPlatform;
 module.exports.effectiveRequestOptions = effectiveRequestOptions;
 module.exports.ANALYSIS_TIMEOUT_SECONDS = ANALYSIS_TIMEOUT_SECONDS;

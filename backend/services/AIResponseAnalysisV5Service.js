@@ -5,9 +5,14 @@ const { buildEntityCatalog } = require('./AIEntityCatalogService');
 const { ENTITY_PROMPT_REVISION } = require('./AIResponseEntityExtractionService');
 const { SEMANTIC_PROMPT_REVISION } = require('./AIResponseSemanticJudgmentService');
 const { CURRENT_METRIC_SEMANTICS } = require('./GeoMetricSemanticsService');
+const {
+  buildRegistrySnapshot,
+  withRegistryMatches
+} = require('./AICompetitorRegistryResolverService');
 
 const ANALYSIS_METHOD = 'ai_structured_v5';
 const STRUCTURE_VERSION = 'geo_metric_input_v5';
+const CONTRACT_REVISION = 'three_track_partial_v1';
 
 class AIResponseAnalysisV5Error extends Error {
   constructor(message, code = 'invalid_analysis_output', details = {}) {
@@ -101,7 +106,7 @@ function targetRank({ sourceMap, targetEntity, semantic, targetEntityId }) {
   return null;
 }
 
-function calculate({ sourceMap, catalog, semantic, diagnostics }) {
+function calculate({ sourceMap, catalog, semantic, diagnostics, registrySnapshot = null }) {
   const entityById = new Map(catalog.entities.map((entity) => [entity.entity_id, entity]));
   const targetEntity = catalog.target_entity_id
     ? entityById.get(catalog.target_entity_id) || null
@@ -154,15 +159,25 @@ function calculate({ sourceMap, catalog, semantic, diagnostics }) {
     ? semantic.sentiment.label
     : 'neutral';
   const stages = diagnostics.filter(Boolean);
+  const snapshotMeta = registrySnapshot
+    ? {
+        version: registrySnapshot.version,
+        sha256: registrySnapshot.sha256,
+        entry_count: registrySnapshot.entry_count
+      }
+    : { version: 'competitor_registry_snapshot_v1', sha256: null, entry_count: 0 };
   const analysisStructure = {
     schema_version: STRUCTURE_VERSION,
+    contract_revision: CONTRACT_REVISION,
     source_map_version: SOURCE_MAP_VERSION,
     answer_sha256: sourceMap.answer_sha256,
+    competitor_registry_snapshot: snapshotMeta,
     entities: catalog.entities.map((entity) => ({
       entity_id: entity.entity_id,
       name: entity.name,
       type: entity.type,
-      surface_forms: entity.surface_forms
+      surface_forms: entity.surface_forms,
+      registry_match: entity.registry_match || null
     })),
     mentions: catalog.entities.flatMap((entity) => entity.mentions.map((mention) => ({
       entity_id: entity.entity_id,
@@ -224,7 +239,7 @@ class AIResponseAnalysisV5Service {
       || AIResponseSemanticJudgmentService;
   }
 
-  async analyze({ question, responseText, brand }) {
+  async analyze({ question, responseText, brand, competitors }) {
     const normalizedQuestion = String(question || '').trim();
     const answer = String(responseText || '');
     if (!normalizedQuestion || !answer.trim()) {
@@ -235,6 +250,9 @@ class AIResponseAnalysisV5Service {
     }
     const sourceMap = createSourceMap(answer);
     const targetBrand = targetBrandInput(brand);
+    // 竞品注册表快照在阶段 1 之后、阶段 2 之前做纯程序身份归一；
+    // 阶段 1 请求不接收注册表，匹配不改变 occurrence，也不增加模型调用。
+    const registrySnapshot = buildRegistrySnapshot(competitors);
     let extracted;
     let semanticResult;
     try {
@@ -254,16 +272,20 @@ class AIResponseAnalysisV5Service {
         extractedMentions: extracted.mentions,
         targetBrand
       });
+      const registryCatalog = withRegistryMatches(catalog, registrySnapshot);
       semanticResult = await this.semanticJudgmentService.judge({
         question: normalizedQuestion,
         sourceMap,
-        catalog
+        // 阶段 2 使用匹配前的 grounded 投影；buildSemanticPrompt 只取
+        // entity_id/name/type/surface_forms/source_ids，不含注册表身份
+        catalog: registryCatalog
       });
       const calculated = calculate({
         sourceMap,
-        catalog,
+        catalog: registryCatalog,
         semantic: semanticResult.structured,
-        diagnostics: [extracted.diagnostics, semanticResult.diagnostics]
+        diagnostics: [extracted.diagnostics, semanticResult.diagnostics],
+        registrySnapshot
       });
       const model = extracted.diagnostics?.model
         || semanticResult.diagnostics?.model
@@ -297,4 +319,5 @@ module.exports.AIResponseAnalysisV5Service = AIResponseAnalysisV5Service;
 module.exports.AIResponseAnalysisV5Error = AIResponseAnalysisV5Error;
 module.exports.ANALYSIS_METHOD = ANALYSIS_METHOD;
 module.exports.STRUCTURE_VERSION = STRUCTURE_VERSION;
+module.exports.CONTRACT_REVISION = CONTRACT_REVISION;
 module.exports.calculate = calculate;
