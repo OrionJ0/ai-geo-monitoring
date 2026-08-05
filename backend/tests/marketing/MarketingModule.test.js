@@ -461,8 +461,6 @@ test('pilot data route uses the unified OAuth token and explicitly bound site', 
      SET access_token_ciphertext = :ciphertext,
          tongji_user_name = 'shb-广拓信息',
          tongji_user_name_verified_at = '2099-01-01T00:00:00.000Z',
-         tongji_account_name = 'legacy-account-canary',
-         tongji_access_token_ciphertext = 'not-a-valid-legacy-ciphertext',
          access_token_expires_at = '2099-01-01T00:00:00.000Z'
      WHERE id = 'connection-1'`,
     {
@@ -571,15 +569,13 @@ test('pilot data route uses the unified OAuth token and explicitly bound site', 
   ]);
 });
 
-test('marketing runtime has no legacy Tongji credential service or resolver', () => {
+test('marketing runtime has one unified Tongji context resolver', () => {
   const moduleSource = fs.readFileSync(
     path.resolve(__dirname, '../../modules/marketing/index.js'),
     'utf8'
   );
-  assert.doesNotMatch(moduleSource, /BaiduTongjiCredentialService/u);
   assert.doesNotMatch(moduleSource, /tongjiCredentialService/u);
   assert.doesNotMatch(moduleSource, /getCredential/u);
-  assert.doesNotMatch(moduleSource, /tongji_access_token_ciphertext/u);
   assert.doesNotMatch(moduleSource, /resolveBoundContext/u);
   assert.equal((moduleSource.match(/withBoundContext/gu) || []).length, 3);
 });

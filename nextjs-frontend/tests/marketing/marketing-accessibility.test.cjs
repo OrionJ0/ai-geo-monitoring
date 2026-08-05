@@ -57,7 +57,6 @@ test('administrator UI exposes the complete account binding lifecycle', () => {
   assert.match(marketingSettings, /tongji-context/);
   assert.match(marketingSettings, /验证并保存用户名/);
   assert.match(marketingSettings, /统一 OAuth Token/);
-  assert.doesNotMatch(marketingSettings, /tongji-credential/);
   assert.doesNotMatch(marketingSettings, /Data API Token/);
   assert.doesNotMatch(marketingSettings, /tongjiAccessToken/);
   assert.match(marketingSettings, /绑定搜索账户和统计站点/);

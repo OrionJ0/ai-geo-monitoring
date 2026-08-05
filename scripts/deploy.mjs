@@ -36,7 +36,7 @@ const marketingMigrationScript = path.join(
   'scripts',
   'migrateMarketing.js'
 );
-const marketingExpectedLatest = '014-unified-oauth-context';
+const marketingExpectedLatest = '015-drop-legacy-tongji-credentials';
 const websiteDataMigrationScript = path.join(
   backendDirectory,
   'scripts',

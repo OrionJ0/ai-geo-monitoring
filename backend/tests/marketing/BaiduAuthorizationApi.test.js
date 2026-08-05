@@ -231,10 +231,7 @@ test('administrator completes one-time authorization without exposing credential
   );
   await sequelize.query(
     `UPDATE baidu_marketing_connections
-     SET tongji_account_name = '统计账户',
-         tongji_access_token_ciphertext = 'v1:encrypted-tongji-fixture',
-         tongji_credential_updated_at = CURRENT_TIMESTAMP,
-         tongji_user_name = 'verified-user',
+     SET tongji_user_name = 'verified-user',
          tongji_user_name_verified_at = CURRENT_TIMESTAMP,
          marketing_access_state = 'VERIFIED',
          marketing_observed_auth_generation = auth_generation,
@@ -261,7 +258,6 @@ test('administrator completes one-time authorization without exposing credential
   assert.equal((await disconnect.json()).status, 'DISCONNECTED');
   const [disconnectedRows] = await sequelize.query(
     `SELECT status, access_token_ciphertext, refresh_token_ciphertext,
-            tongji_account_name, tongji_access_token_ciphertext,
             tongji_user_name, tongji_user_name_verified_at,
             marketing_access_state, tongji_access_state,
             auth_generation
@@ -270,11 +266,6 @@ test('administrator completes one-time authorization without exposing credential
   assert.equal(disconnectedRows[0].status, 'DISCONNECTED');
   assert.equal(disconnectedRows[0].access_token_ciphertext, null);
   assert.equal(disconnectedRows[0].refresh_token_ciphertext, null);
-  assert.equal(disconnectedRows[0].tongji_account_name, '统计账户');
-  assert.equal(
-    disconnectedRows[0].tongji_access_token_ciphertext,
-    'v1:encrypted-tongji-fixture'
-  );
   assert.equal(disconnectedRows[0].tongji_user_name, null);
   assert.equal(disconnectedRows[0].tongji_user_name_verified_at, null);
   assert.equal(disconnectedRows[0].marketing_access_state, 'UNKNOWN');

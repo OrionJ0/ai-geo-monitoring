@@ -117,6 +117,20 @@ function createMarketingMigrationRunner({
     }
   }
 
+  function assertExpectedPending(snapshotResult, expectedLatest) {
+    if (expectedLatest === undefined || expectedLatest === null) return;
+    const pending = snapshotResult.pendingVersions;
+    if (
+      pending.length > 1
+      || (pending.length === 1 && pending[0] !== expectedLatest)
+    ) {
+      throw migrationError(
+        '营销迁移待执行历史超出本次发布边界',
+        'MARKETING_MIGRATION_UNEXPECTED_PENDING'
+      );
+    }
+  }
+
   function snapshot(rows, present = true) {
     const appliedVersions = rows.map((row) => row.version);
     const applied = new Set(appliedVersions);
@@ -202,7 +216,7 @@ function createMarketingMigrationRunner({
     }
 
     if (expectedLatest !== undefined && expectedLatest !== null) {
-      await audit();
+      assertExpectedPending(await audit(), expectedLatest);
     }
 
     if (dialect === 'sqlite') {
