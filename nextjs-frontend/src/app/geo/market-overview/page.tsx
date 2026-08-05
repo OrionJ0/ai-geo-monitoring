@@ -1272,12 +1272,20 @@ export default function MarketOverviewPage() {
                       ? (trafficData?.trend || []).map((row) => (
                           <tr key={row.date}>
                             <th scope="row">{row.date}</th>
-                            <td>{groupDigits(row.current)}</td>
+                            <td>{trendValue(
+                              row.current,
+                              selectedMetric,
+                              selectedTrendCoverage
+                            )}</td>
                             {sourceComparisonRows.map((source) => (
                               <td key={source.sourceKey}>
-                                {groupDigits(source.trend.find(
-                                  (point) => point.date === row.date
-                                )?.visits ?? null)}
+                                {trendValue(
+                                  source.trend.find(
+                                    (point) => point.date === row.date
+                                  )?.visits ?? null,
+                                  selectedMetric,
+                                  selectedTrendCoverage
+                                )}
                               </td>
                             ))}
                           </tr>

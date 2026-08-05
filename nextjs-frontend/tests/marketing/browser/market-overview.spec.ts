@@ -826,6 +826,35 @@ test('partial source error stays local instead of becoming a market action item'
   await page.screenshot({ path: artifact('market-overview-partial-error-1440x1024.png') });
 });
 
+test('partial source trends keep missing daily cells honest without crashing', async ({ page }) => {
+  await installDashboard(page, dashboard());
+  await page.route('**/api/marketing/projects/11/website-traffic-overview**', (route) => {
+    const base = websiteTrafficOverview(route.request().url());
+    const sourceComparison = base.sourceComparison;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ...base,
+        sourceComparison: sourceComparison ? {
+          ...sourceComparison,
+          state: 'PARTIAL',
+          rows: sourceComparison.rows.map((source) => (
+            source.sourceKey === 'GOOGLE_SEARCH'
+              ? { ...source, trendState: 'UNAVAILABLE', trend: [] }
+              : source
+          ))
+        } : undefined
+      })
+    });
+  });
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await page.goto('/geo/market-overview');
+
+  await expect(page.getByRole('heading', { name: '市场总览' })).toBeVisible();
+  await page.getByText('查看每日趋势等价数据表').click();
+  await expect(page.getByRole('table', { name: '每日趋势等价数据表' })).toContainText('—');
+});
+
 test('stale snapshot preserves data with a local freshness label', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installDashboard(page, dashboard({ freshness: 'STALE' }));
