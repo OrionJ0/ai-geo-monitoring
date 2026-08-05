@@ -36,6 +36,12 @@ const {
   MarketingDashboardService
 } = require('./services/MarketingDashboardService');
 const {
+  MarketingAdResourceService
+} = require('./services/MarketingAdResourceService');
+const {
+  MarketingSnapshotSelector
+} = require('./services/MarketingSnapshotSelector');
+const {
   MarketingRefreshService
 } = require('./services/MarketingRefreshService');
 const {
@@ -540,6 +546,11 @@ function createMarketingModule({
         allowedProjectIds: env.MARKETING_MONITORING_ALLOWED_PROJECT_IDS,
         moduleState: configuredOperationalState
       });
+      const snapshotSelector = new MarketingSnapshotSelector({ sequelize });
+      const adResourceService = new MarketingAdResourceService({
+        sequelize,
+        snapshotSelector
+      });
       const refreshService = new MarketingRefreshService({
         sequelize,
         reportProvider,
@@ -579,6 +590,7 @@ function createMarketingModule({
       }));
       router.use(createMarketingDashboardRouter({
         dashboardService,
+        adResourceService,
         refreshService,
         tongjiService,
         enqueue: (runId) => executor.enqueue(runId)

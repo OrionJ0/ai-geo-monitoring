@@ -8,25 +8,27 @@ import {
 } from '@/fixtures/keywordAnalysis.fixture.cjs';
 import {
   adaptAdSearchTermPayload,
-  adaptMarketingDashboardSearchTerms
+  adaptMarketingSearchTermResource,
+  assertMarketingSearchTermResourceResponse,
+  type MarketingSearchTermResourceResponse
 } from '@/lib/marketing/adSearchTermAdapter';
 import type {
   AdKeywordScope,
-  AdSearchTermAnalysisModel
+  AdSearchTermAnalysisModel,
+  AdSearchTermResourceQuery
 } from '@/lib/marketing/adSearchTermTypes';
 import {
   assertMarketingDashboardResponse,
   buildAdPeriod,
   marketingSnapshotWarning,
-  type DashboardSearchTerm,
-  type MarketingDashboardResponse
+  type DashboardSearchTerm
 } from '@/lib/marketing/adPerformanceAdapter';
 import type { KeywordAnalysisPayload } from '@/lib/marketing/keywordAnalysisAdapter';
 import { KEYWORD_ANALYSIS_FIXTURE_ENABLED } from '@/lib/marketing/useKeywordAnalysis';
 import { readMarketingDashboard } from '@/lib/marketing/readMarketingDashboard';
 import {
   dashboardFilterMatchesRange,
-  sameMarketingDashboardRevision
+  resolveAdKeywordScope
 } from '@/utils/adSearchTerms.cjs';
 
 export type AdSearchTermFixtureState = 'ready' | 'loading' | 'empty' | 'error';
@@ -38,6 +40,7 @@ type UseAdSearchTermsOptions = {
   dateRange: [string, string] | null;
   fixtureEnabled?: boolean;
   fixtureState?: AdSearchTermFixtureState;
+  resourceQuery: AdSearchTermResourceQuery;
   onDateRangeAdjusted?: (range: [string, string]) => void;
 };
 
@@ -76,6 +79,21 @@ function fixtureKeywords(payload: KeywordAnalysisPayload): AdKeywordScope[] {
   }));
 }
 
+function evidenceParts(value: string): {
+  accountId: string;
+  campaignId: string;
+  adGroupId: string;
+  keywordName: string;
+} | null {
+  if (!value || value === 'all') return null;
+  const [accountId, campaignId, adGroupId, keywordName, ...extra] =
+    value.split('\u0000');
+  if (extra.length || !accountId || !campaignId || !adGroupId || !keywordName) {
+    return null;
+  }
+  return { accountId, campaignId, adGroupId, keywordName };
+}
+
 export default function useAdSearchTerms({
   projectId,
   projectName,
@@ -83,6 +101,7 @@ export default function useAdSearchTerms({
   dateRange,
   fixtureEnabled = AD_SEARCH_TERMS_FIXTURE_ENABLED,
   fixtureState = 'ready',
+  resourceQuery,
   onDateRangeAdjusted
 }: UseAdSearchTermsOptions): UseAdSearchTermsState {
   const [data, setData] = useState<AdSearchTermAnalysisModel | null>(null);
@@ -91,8 +110,12 @@ export default function useAdSearchTerms({
   const [warning, setWarning] = useState('');
   const requestSequence = useRef(0);
   const skipAutomaticRangeReload = useRef('');
+  const dashboardCache = useRef<{
+    keys: string[];
+    result: Awaited<ReturnType<typeof readMarketingDashboard>>;
+  } | null>(null);
 
-  const reload = useCallback(async () => {
+  const load = useCallback(async (refreshRoot = false) => {
     const requestId = ++requestSequence.current;
     if (!fixtureEnabled && (!enabled || !projectId)) {
       setData(null);
@@ -152,8 +175,21 @@ export default function useAdSearchTerms({
         return;
       }
 
-      const endpoint = `/api/marketing/projects/${encodeURIComponent(projectId)}/dashboard`;
-      const currentResult = await readMarketingDashboard({ projectId, dateRange });
+      const requestedDashboardKey = `${projectId}:${dateRange?.join(':') || 'default'}`;
+      let currentResult = !refreshRoot
+        && dashboardCache.current?.keys.includes(requestedDashboardKey)
+        ? dashboardCache.current.result
+        : null;
+      if (!currentResult) {
+        currentResult = await readMarketingDashboard({ projectId, dateRange });
+        const effectiveKey = currentResult.effectiveDateRange
+          ? `${projectId}:${currentResult.effectiveDateRange.join(':')}`
+          : requestedDashboardKey;
+        dashboardCache.current = {
+          keys: [...new Set([requestedDashboardKey, effectiveKey])],
+          result: currentResult
+        };
+      }
       if (requestId !== requestSequence.current) return;
       assertMarketingDashboardResponse(currentResult.data, projectId);
       if (currentResult.effectiveDateRange) {
@@ -184,10 +220,88 @@ export default function useAdSearchTerms({
         to: period.previousTo
       };
       setWarning(marketingSnapshotWarning(currentResult.data));
-      const current = adaptMarketingDashboardSearchTerms(
-        currentResult.data,
-        projectName,
+      const revision = currentResult.data.revision;
+      if (!revision) {
+        throw new TypeError('当前没有可用的广告搜索词快照。');
+      }
+      const scope = resolveAdKeywordScope(
+        currentResult.data.keywords || [],
+        resourceQuery.scopeAccountId,
+        resourceQuery.scopeKeywordId
+      );
+      if (resourceQuery.scopeRequired && !scope) {
+        const emptyResource: MarketingSearchTermResourceResponse = {
+          schemaVersion: 'marketing_search_terms_v1',
+          projectId,
+          revision,
+          coverage: currentResult.data.coverage!,
+          filter: { from, to },
+          summary: {
+            impressions: '0',
+            clicks: '0',
+            costAmountScaled: '0'
+          },
+          items: [],
+          pagination: {
+            page: resourceQuery.page,
+            pageSize: resourceQuery.pageSize,
+            totalItems: 0,
+            totalPages: 0
+          }
+        };
+        setData({
+          current: adaptMarketingSearchTermResource(
+            emptyResource,
+            currentResult.data,
+            projectName
+          ),
+          previous: null,
+          previousRange,
+          previousUnavailableReason: '当前下钻范围无效，未读取上一周期。'
+        });
+        return;
+      }
+      const selectedEvidence = scope || evidenceParts(resourceQuery.keywordEvidence);
+      const commonParams = {
+        revision: currentResult.data.revision,
+        page: resourceQuery.page,
+        pageSize: resourceQuery.pageSize,
+        sortBy: resourceQuery.sortBy,
+        sortOrder: resourceQuery.sortOrder,
+        query: resourceQuery.query || undefined,
+        accountId: selectedEvidence?.accountId,
+        campaignId: selectedEvidence?.campaignId,
+        adGroupId: selectedEvidence?.adGroupId
+          || (resourceQuery.adGroupId === 'all'
+            ? undefined
+            : resourceQuery.adGroupId),
+        keywordName: selectedEvidence?.keywordName,
+        queryStatus: resourceQuery.queryStatus === 'all'
+          ? undefined
+          : resourceQuery.queryStatus,
+        matchType: resourceQuery.matchType === 'all'
+          ? undefined
+          : resourceQuery.matchType
+      };
+      const resourceEndpoint = `/api/marketing/projects/${encodeURIComponent(projectId)}/search-terms`;
+      const currentResponse = await axios.get<MarketingSearchTermResourceResponse>(
+        resourceEndpoint,
+        {
+          params: { ...commonParams, from, to },
+          timeout: 10_000
+        }
+      );
+      if (requestId !== requestSequence.current) return;
+      assertMarketingSearchTermResourceResponse(
+        currentResponse.data,
+        projectId,
+        revision,
         { from, to }
+      );
+      const current = adaptMarketingSearchTermResource(
+        currentResponse.data,
+        currentResult.data,
+        projectName
       );
       setData({
         current,
@@ -197,8 +311,14 @@ export default function useAdSearchTerms({
       });
       setLoading(false);
       const previousResult = await Promise.allSettled([
-        axios.get<MarketingDashboardResponse>(endpoint, {
-          params: previousRange,
+        axios.get<MarketingSearchTermResourceResponse>(resourceEndpoint, {
+          params: {
+            ...commonParams,
+            page: 1,
+            pageSize: 1,
+            from: previousRange.from,
+            to: previousRange.to
+          },
           timeout: 10_000
         })
       ]).then(([result]) => result);
@@ -207,33 +327,17 @@ export default function useAdSearchTerms({
       let previousUnavailableReason = '';
       if (previousResult.status === 'fulfilled') {
         try {
-          assertMarketingDashboardResponse(previousResult.value.data, projectId);
-          const previousDashboard = previousResult.value.data;
-          if (!dashboardFilterMatchesRange(previousDashboard, previousRange)) {
-            previousUnavailableReason = '上一周期广告搜索词响应范围与请求不一致，无法进行周期比较。';
-          } else if (!sameMarketingDashboardRevision(
-            currentResult.data.revision,
-            previousDashboard.revision
-          )) {
-            previousUnavailableReason = '本期与上期广告快照版本不一致，无法进行周期比较。';
-          } else if (
-            currentResult.data.coverage?.currency
-              !== previousDashboard.coverage?.currency
-            || currentResult.data.coverage?.costScale
-              !== previousDashboard.coverage?.costScale
-          ) {
-            previousUnavailableReason = '本期与上期广告计量单位不一致，无法进行周期比较。';
-          } else if (
-            previousDashboard.states?.snapshotContentState === 'NONE'
-          ) {
-            previousUnavailableReason = '上一周期没有完整的广告搜索词快照。';
-          } else {
-            previous = adaptMarketingDashboardSearchTerms(
-              previousDashboard,
-              projectName,
-              previousRange
-            );
-          }
+          assertMarketingSearchTermResourceResponse(
+            previousResult.value.data,
+            projectId,
+            revision,
+            previousRange
+          );
+          previous = adaptMarketingSearchTermResource(
+            previousResult.value.data,
+            currentResult.data,
+            projectName
+          );
         } catch (previousError) {
           previousUnavailableReason = readErrorMessage(
             previousError,
@@ -270,8 +374,22 @@ export default function useAdSearchTerms({
     fixtureState,
     onDateRangeAdjusted,
     projectId,
-    projectName
+    projectName,
+    resourceQuery.adGroupId,
+    resourceQuery.keywordEvidence,
+    resourceQuery.matchType,
+    resourceQuery.page,
+    resourceQuery.pageSize,
+    resourceQuery.query,
+    resourceQuery.queryStatus,
+    resourceQuery.scopeAccountId,
+    resourceQuery.scopeKeywordId,
+    resourceQuery.scopeRequired,
+    resourceQuery.sortBy,
+    resourceQuery.sortOrder
   ]);
+
+  const reload = useCallback(() => load(true), [load]);
 
   useEffect(() => {
     const rangeKey = dateRange?.join(':') || '';
@@ -279,8 +397,8 @@ export default function useAdSearchTerms({
       skipAutomaticRangeReload.current = '';
       return;
     }
-    void reload();
-  }, [dateRange, reload]);
+    void load();
+  }, [dateRange, load]);
 
   return {
     data,

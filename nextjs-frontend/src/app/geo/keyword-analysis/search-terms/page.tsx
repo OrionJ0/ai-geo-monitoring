@@ -35,6 +35,7 @@ import useMarketingCapabilities from '@/lib/useMarketingCapabilities';
 import type {
   AdSearchTermFilter,
   AdSearchTermRow,
+  AdSearchTermResourceSort,
   AdSearchTermStatus
 } from '@/lib/marketing/adSearchTermTypes';
 import useAdSearchTerms, {
@@ -118,18 +119,6 @@ function formatPercent(value: number | null): string {
   return value == null || !Number.isFinite(value) ? '—' : `${value.toFixed(2)}%`;
 }
 
-function compareExact(left: string, right: string): number {
-  const difference = BigInt(left) - BigInt(right);
-  return difference < BigInt(0) ? -1 : difference > BigInt(0) ? 1 : 0;
-}
-
-function compareOptional(left: number | null, right: number | null): number {
-  if (left == null && right == null) return 0;
-  if (left == null) return -1;
-  if (right == null) return 1;
-  return left - right;
-}
-
 function changeTone(value: string | null): 'good' | 'bad' | 'neutral' {
   if (value?.startsWith('+')) return 'good';
   if (value?.startsWith('-')) return 'bad';
@@ -170,6 +159,8 @@ function AdSearchTermsContent() {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [sortBy, setSortBy] = useState<AdSearchTermResourceSort>('costAmountScaled');
+  const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('descend');
 
   useEffect(() => setFixtureState(fixtureStateFromLocation()), []);
 
@@ -179,6 +170,36 @@ function AdSearchTermsContent() {
   const enabled = fixtureEnabled || (
     Boolean(projectId) && marketing.capabilities.adsRead
   );
+  const accountId = searchParams.get('accountId');
+  const keywordId = searchParams.get('keywordId');
+  const allRequested = searchParams.get('view') === 'all';
+  const resourceQuery = useMemo(() => ({
+    page,
+    pageSize,
+    sortBy,
+    sortOrder,
+    query,
+    adGroupId,
+    keywordEvidence,
+    queryStatus,
+    matchType,
+    scopeAccountId: accountId,
+    scopeKeywordId: keywordId,
+    scopeRequired: !allRequested
+  }), [
+    accountId,
+    adGroupId,
+    allRequested,
+    keywordEvidence,
+    keywordId,
+    matchType,
+    page,
+    pageSize,
+    query,
+    queryStatus,
+    sortBy,
+    sortOrder
+  ]);
   const analysis = useAdSearchTerms({
     projectId,
     projectName: defaultContext.project?.name,
@@ -186,13 +207,11 @@ function AdSearchTermsContent() {
     dateRange,
     fixtureEnabled,
     fixtureState,
+    resourceQuery,
     onDateRangeAdjusted: setDateRange
   });
   const model = analysis.data;
   const current = model?.current || null;
-  const accountId = searchParams.get('accountId');
-  const keywordId = searchParams.get('keywordId');
-  const allRequested = searchParams.get('view') === 'all';
   const resolvedScope = useMemo(() => resolveAdKeywordScope(
     current?.keywords || [],
     accountId,
@@ -200,17 +219,6 @@ function AdSearchTermsContent() {
   ), [accountId, current?.keywords, keywordId]);
   const scopeEvidence = resolvedScope ? keywordEvidenceKey(resolvedScope) : null;
   const invalidScope = !allRequested && !resolvedScope;
-  const previousResolvedScope = resolvedScope && model?.previous
-    ? resolveAdKeywordScope(
-        model.previous.keywords,
-        resolvedScope.accountId,
-        resolvedScope.keywordId
-      )
-    : null;
-  const previousScopeEvidence = previousResolvedScope
-    ? keywordEvidenceKey(previousResolvedScope)
-    : null;
-
   const filters = useMemo<AdSearchTermFilter>(() => ({
     keywordEvidence: scopeEvidence || keywordEvidence,
     adGroupId,
@@ -219,53 +227,39 @@ function AdSearchTermsContent() {
     query
   }), [adGroupId, keywordEvidence, matchType, query, queryStatus, scopeEvidence]);
 
-  const filteredRows = useMemo(
-    () => invalidScope ? [] : filterAdSearchTermRows(current?.rows || [], filters),
-    [current?.rows, filters, invalidScope]
-  );
-  const previousRows = useMemo(
-    () => invalidScope || (resolvedScope && model?.previous && !previousResolvedScope)
+  const visibleRows = useMemo(
+    () => invalidScope
       ? []
-      : filterAdSearchTermRows(model?.previous?.rows || [], {
-          ...filters,
-          keywordEvidence: resolvedScope
-            ? previousScopeEvidence || 'unresolvable-previous-keyword'
-            : filters.keywordEvidence
-        }),
-    [
-      filters,
-      invalidScope,
-      model?.previous,
-      previousResolvedScope,
-      previousScopeEvidence,
-      resolvedScope
-    ]
+      : current?.source === 'development-fixture'
+        ? filterAdSearchTermRows(current.rows, filters)
+        : current?.rows || [],
+    [current, filters, invalidScope]
   );
   const currentSummary = useMemo(
-    () => buildAdSearchTermSummary(filteredRows),
-    [filteredRows]
+    () => current?.source === 'development-fixture'
+      ? buildAdSearchTermSummary(visibleRows)
+      : current?.summary || buildAdSearchTermSummary([]),
+    [current, visibleRows]
   );
   const previousSummary = useMemo(
-    () => model?.previous && (!resolvedScope || previousResolvedScope)
-      ? buildAdSearchTermSummary(previousRows)
-      : null,
-    [model?.previous, previousResolvedScope, previousRows, resolvedScope]
+    () => model?.previous?.summary || null,
+    [model?.previous]
   );
 
   const adGroupOptions = useMemo(() => {
     const groups = new Map<string, string>();
-    for (const row of current?.rows || []) groups.set(row.adGroupId, row.adGroupName);
+    for (const row of current?.filterRows || []) groups.set(row.adGroupId, row.adGroupName);
     return [
       { value: 'all', label: '全部推广单元' },
       ...[...groups.entries()]
         .sort((left, right) => left[1].localeCompare(right[1], 'zh-CN'))
         .map(([value, label]) => ({ value, label }))
     ];
-  }, [current?.rows]);
+  }, [current?.filterRows]);
 
   const keywordOptions = useMemo(() => {
     const keywords = new Map<string, string>();
-    for (const row of current?.rows || []) {
+    for (const row of current?.filterRows || []) {
       keywords.set(
         keywordEvidenceKey(row),
         `${row.keywordName} · ${row.adGroupName}`
@@ -277,10 +271,10 @@ function AdSearchTermsContent() {
         .sort((left, right) => left[1].localeCompare(right[1], 'zh-CN'))
         .map(([value, label]) => ({ value, label }))
     ];
-  }, [current?.rows]);
+  }, [current?.filterRows]);
 
   const matchTypeOptions = useMemo(() => {
-    const values = new Set((current?.rows || []).map((row) => row.matchType));
+    const values = new Set((current?.filterRows || []).map((row) => row.matchType));
     return [
       { value: 'all', label: '全部匹配方式' },
       ...[...values]
@@ -290,7 +284,7 @@ function AdSearchTermsContent() {
           label: MATCH_TYPE_LABELS[value] || value
         }))
     ];
-  }, [current?.rows]);
+  }, [current?.filterRows]);
 
   useEffect(() => {
     setPage(1);
@@ -301,7 +295,7 @@ function AdSearchTermsContent() {
     if (!tableBody) return;
     tableBody.tabIndex = 0;
     tableBody.setAttribute('aria-label', '广告搜索词明细，可横向和纵向滚动');
-  }, [analysis.loading, filteredRows.length, pageSize]);
+  }, [analysis.loading, pageSize, visibleRows.length]);
 
   const resetFilters = () => {
     setAdGroupId('all');
@@ -325,6 +319,8 @@ function AdSearchTermsContent() {
         key: 'searchTerm',
         fixed: 'left',
         width: 224,
+        sorter: true,
+        sortOrder: sortBy === 'searchTerm' ? sortOrder : null,
         render: (value: string) => <strong className={styles.searchTerm}>{value}</strong>
       },
       {
@@ -336,6 +332,8 @@ function AdSearchTermsContent() {
         dataIndex: 'keywordName',
         key: 'keywordName',
         width: 190,
+        sorter: true,
+        sortOrder: sortBy === 'keywordName' ? sortOrder : null,
         render: (value: string) => <span className={styles.keywordName}>{value}</span>
       },
       {
@@ -365,11 +363,11 @@ function AdSearchTermsContent() {
       {
         title: '消费',
         dataIndex: 'costAmountScaled',
-        key: 'cost',
+        key: 'costAmountScaled',
         width: 136,
         align: 'right',
-        sorter: (left, right) => compareExact(left.costAmountScaled, right.costAmountScaled),
-        defaultSortOrder: 'descend',
+        sorter: true,
+        sortOrder: sortBy === 'costAmountScaled' ? sortOrder : null,
         render: (value: string) => (
           <strong className={styles.primaryMetric}>
             {formatMoney(value, current.costScale, 2, current.currency)}
@@ -382,7 +380,8 @@ function AdSearchTermsContent() {
         key: 'impressions',
         width: 112,
         align: 'right',
-        sorter: (left, right) => compareExact(left.impressions, right.impressions),
+        sorter: true,
+        sortOrder: sortBy === 'impressions' ? sortOrder : null,
         render: (value: string) => groupDigits(value)
       },
       {
@@ -391,7 +390,8 @@ function AdSearchTermsContent() {
         key: 'clicks',
         width: 104,
         align: 'right',
-        sorter: (left, right) => compareExact(left.clicks, right.clicks),
+        sorter: true,
+        sortOrder: sortBy === 'clicks' ? sortOrder : null,
         render: (value: string) => groupDigits(value)
       },
       {
@@ -400,7 +400,8 @@ function AdSearchTermsContent() {
         key: 'ctr',
         width: 108,
         align: 'right',
-        sorter: (left, right) => compareOptional(left.ctrPercent, right.ctrPercent),
+        sorter: true,
+        sortOrder: sortBy === 'ctr' ? sortOrder : null,
         render: (value: number | null) => formatPercent(value)
       },
       {
@@ -409,13 +410,14 @@ function AdSearchTermsContent() {
         key: 'averageCpc',
         width: 128,
         align: 'right',
-        sorter: (left, right) => compareOptional(left.averageCpc, right.averageCpc),
+        sorter: true,
+        sortOrder: sortBy === 'averageCpc' ? sortOrder : null,
         render: (value: number | null) => value == null
           ? '—'
           : `${current.currency === 'CNY' ? '¥' : `${current.currency} `}${value.toFixed(2)}`
       }
     ];
-  }, [current]);
+  }, [current, sortBy, sortOrder]);
 
   const sourceMeta = current
     ? `百度推广 · ${current.source === 'development-fixture' ? '开发数据' : '真实数据'} · ${
@@ -431,12 +433,8 @@ function AdSearchTermsContent() {
         ? '广告搜索词数据尚未开放。'
         : analysis.error)
     : analysis.error;
-  const previousMissingReason = resolvedScope
-    && model?.previous
-    && !previousResolvedScope
-    ? '上一周期未找到同一广告关键词 ID，无法进行范围比较。'
-    : model?.previousUnavailableReason
-      || '上一周期没有可用的广告搜索词数据。';
+  const previousMissingReason = model?.previousUnavailableReason
+    || '上一周期没有可用的广告搜索词数据。';
 
   const summaryCards = current ? [
     {
@@ -669,7 +667,11 @@ function AdSearchTermsContent() {
             <div className={styles.tableToolbar}>
               <div>
                 <h2>{resolvedScope ? '命中该广告关键词的搜索词' : '全部广告搜索词'}</h2>
-                <span>共 {groupDigits(String(filteredRows.length))} 条</span>
+                <span>共 {groupDigits(String(
+                  current.source === 'development-fixture'
+                    ? visibleRows.length
+                    : current.pagination.totalItems
+                ))} 条</span>
               </div>
               <p>搜索词是用户真实搜索内容；命中广告关键词是百度报告返回的名称证据。</p>
             </div>
@@ -677,7 +679,7 @@ function AdSearchTermsContent() {
               className={styles.searchTermsTable}
               rowKey="key"
               columns={columns}
-              dataSource={filteredRows}
+              dataSource={visibleRows}
               scroll={{ x: 1414, y: 560 }}
               locale={{
                 emptyText: (
@@ -692,13 +694,27 @@ function AdSearchTermsContent() {
               pagination={{
                 current: page,
                 pageSize,
-                total: filteredRows.length,
+                total: current.source === 'development-fixture'
+                  ? visibleRows.length
+                  : current.pagination.totalItems,
                 showSizeChanger: true,
                 pageSizeOptions: [20, 50, 100],
-                showTotal: (total) => `共 ${total} 条`,
-                onChange: (nextPage, nextPageSize) => {
-                  setPage(nextPageSize === pageSize ? nextPage : 1);
-                  setPageSize(nextPageSize);
+                showTotal: (total) => `共 ${total} 条`
+              }}
+              onChange={(pagination, _filters, sorter, extra) => {
+                const selectedSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+                const nextPageSize = pagination.pageSize || pageSize;
+                setPageSize(nextPageSize);
+                setPage(nextPageSize === pageSize ? pagination.current || 1 : 1);
+                if (
+                  extra.action === 'sort'
+                  &&
+                  selectedSorter?.order
+                  && typeof selectedSorter.columnKey === 'string'
+                ) {
+                  setSortBy(selectedSorter.columnKey as AdSearchTermResourceSort);
+                  setSortOrder(selectedSorter.order);
+                  setPage(1);
                 }
               }}
             />

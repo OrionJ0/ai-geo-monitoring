@@ -55,8 +55,39 @@ export type AdSearchTermRangeModel = {
   availableTo: string;
   range: { from: string; to: string };
   rows: AdSearchTermRow[];
+  filterRows: AdSearchTermRow[];
   keywords: AdKeywordScope[];
   summary: AdSearchTermSummary;
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+};
+
+export type AdSearchTermResourceSort =
+  | 'searchTerm'
+  | 'keywordName'
+  | 'impressions'
+  | 'clicks'
+  | 'costAmountScaled'
+  | 'ctr'
+  | 'averageCpc';
+
+export type AdSearchTermResourceQuery = {
+  page: number;
+  pageSize: number;
+  sortBy: AdSearchTermResourceSort;
+  sortOrder: 'ascend' | 'descend';
+  query: string;
+  adGroupId: string;
+  keywordEvidence: string;
+  queryStatus: 'all' | AdSearchTermStatus;
+  matchType: string;
+  scopeAccountId: string | null;
+  scopeKeywordId: string | null;
+  scopeRequired: boolean;
 };
 
 export type AdSearchTermAnalysisModel = {
