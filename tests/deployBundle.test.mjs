@@ -9,7 +9,11 @@ import { promisify } from 'node:util';
 
 import * as bundleDeployment from '../scripts/deploy-from-bundle.mjs';
 
-const { prepareBundleRelease } = bundleDeployment;
+const {
+  prepareBundleRelease,
+  fastForwardPreparedRelease,
+  activatePreparedRelease,
+} = bundleDeployment;
 
 const execFileAsync = promisify(execFile);
 
@@ -63,6 +67,141 @@ test('verified bundle fast-forwards a clean main checkout without contacting ori
   assert.equal(result.revision, secondRevision);
   assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), secondRevision);
   assert.equal(fs.readFileSync(path.join(server, 'version.txt'), 'utf8'), 'two\n');
+});
+
+test('verified bundle can defer the worktree fast-forward until production is stopped', async (t) => {
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-deferred-source-'));
+  const server = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-deferred-server-'));
+  const bundlePath = path.join(os.tmpdir(), `ai-geo-deferred-${process.pid}-${Date.now()}.bundle`);
+  t.after(() => {
+    fs.rmSync(source, { recursive: true, force: true });
+    fs.rmSync(server, { recursive: true, force: true });
+    fs.rmSync(bundlePath, { force: true });
+  });
+
+  await git(source, ['init', '-b', 'main']);
+  fs.writeFileSync(path.join(source, 'version.txt'), 'one\n');
+  await git(source, ['add', 'version.txt']);
+  await git(source, [
+    '-c', 'user.name=Bundle Test',
+    '-c', 'user.email=bundle-test@example.com',
+    'commit', '-m', 'version one'
+  ]);
+  const firstRevision = (await git(source, ['rev-parse', 'HEAD'])).stdout.trim();
+  fs.writeFileSync(path.join(source, 'version.txt'), 'two\n');
+  await git(source, ['add', 'version.txt']);
+  await git(source, [
+    '-c', 'user.name=Bundle Test',
+    '-c', 'user.email=bundle-test@example.com',
+    'commit', '-m', 'version two'
+  ]);
+  const secondRevision = (await git(source, ['rev-parse', 'HEAD'])).stdout.trim();
+  await git(source, ['bundle', 'create', bundlePath, 'main']);
+
+  await git(server, ['init', '-b', 'main']);
+  await git(server, ['fetch', source, firstRevision]);
+  await git(server, ['reset', '--hard', firstRevision]);
+  const prepared = await prepareBundleRelease({
+    projectRoot: server,
+    bundlePath,
+    expectedRevision: secondRevision,
+    expectedSha256: createHash('sha256').update(fs.readFileSync(bundlePath)).digest('hex'),
+    deferFastForward: true
+  });
+
+  assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), firstRevision);
+
+  await assert.rejects(
+    activatePreparedRelease({
+      projectRoot: server,
+      prepared,
+      stopProduction: async () => ({}),
+      loadDeploy: async () => async () => {}
+    }),
+    /停服状态无效/u
+  );
+  assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), firstRevision);
+  await fastForwardPreparedRelease({ projectRoot: server, ...prepared });
+  assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), secondRevision);
+});
+
+test('activation keeps HEAD unchanged on stop failure and deploys only after a verified stop', async (t) => {
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-activate-source-'));
+  const server = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-activate-server-'));
+  const bundlePath = path.join(os.tmpdir(), `ai-geo-activate-${process.pid}-${Date.now()}.bundle`);
+  t.after(() => {
+    fs.rmSync(source, { recursive: true, force: true });
+    fs.rmSync(server, { recursive: true, force: true });
+    fs.rmSync(bundlePath, { force: true });
+  });
+
+  await git(source, ['init', '-b', 'main']);
+  fs.writeFileSync(path.join(source, 'version.txt'), 'one\n');
+  await git(source, ['add', 'version.txt']);
+  await git(source, [
+    '-c', 'user.name=Bundle Test',
+    '-c', 'user.email=bundle-test@example.com',
+    'commit', '-m', 'version one'
+  ]);
+  const firstRevision = (await git(source, ['rev-parse', 'HEAD'])).stdout.trim();
+  fs.writeFileSync(path.join(source, 'version.txt'), 'two\n');
+  await git(source, ['add', 'version.txt']);
+  await git(source, [
+    '-c', 'user.name=Bundle Test',
+    '-c', 'user.email=bundle-test@example.com',
+    'commit', '-m', 'version two'
+  ]);
+  const secondRevision = (await git(source, ['rev-parse', 'HEAD'])).stdout.trim();
+  await git(source, ['bundle', 'create', bundlePath, 'main']);
+  await git(server, ['init', '-b', 'main']);
+  await git(server, ['fetch', source, firstRevision]);
+  await git(server, ['reset', '--hard', firstRevision]);
+  const prepared = await prepareBundleRelease({
+    projectRoot: server,
+    bundlePath,
+    expectedRevision: secondRevision,
+    expectedSha256: createHash('sha256').update(fs.readFileSync(bundlePath)).digest('hex'),
+    deferFastForward: true
+  });
+
+  await assert.rejects(
+    activatePreparedRelease({
+      projectRoot: server,
+      prepared,
+      stopProduction: async () => ({
+        backend: { running: true, pid: 6201 },
+        frontend: { running: false, pid: null }
+      }),
+      loadDeploy: async () => async () => {}
+    }),
+    /生产进程未完全停止/u
+  );
+  assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), firstRevision);
+
+  const events = [];
+  await activatePreparedRelease({
+    projectRoot: server,
+    prepared,
+    stopProduction: async () => {
+      events.push('stop');
+      return {
+        backend: { running: false, pid: null },
+        frontend: { running: false, pid: null }
+      };
+    },
+    loadDeploy: async () => {
+      events.push('load');
+      return async (revision, options) => {
+        events.push(`deploy:${revision}:${options.lockAlreadyAcquired}`);
+      };
+    }
+  });
+  assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), secondRevision);
+  assert.deepEqual(events, [
+    'stop',
+    'load',
+    `deploy:${secondRevision}:true`
+  ]);
 });
 
 test('bundle deployment loads the candidate deploy module after fast-forward', async (t) => {
@@ -153,6 +292,7 @@ test('production workflow transfers a verified bundle instead of pulling GitHub 
   const artifactUploadIndex = workflow.indexOf('actions/upload-artifact@');
   const deployJobIndex = workflow.indexOf('\n  deploy:');
   const artifactDownloadIndex = workflow.indexOf('actions/download-artifact@');
+  const publicGateIndex = workflow.indexOf('验证唯一正式公网入口');
   assert.ok(deploymentConfigIndex >= 0);
   assert.ok(backendTestIndex >= 0);
   assert.ok(frontendBuildIndex > backendTestIndex);
@@ -161,6 +301,7 @@ test('production workflow transfers a verified bundle instead of pulling GitHub 
   assert.ok(deployJobIndex > artifactUploadIndex);
   assert.ok(artifactDownloadIndex > deployJobIndex);
   assert.ok(deploymentConfigIndex > artifactDownloadIndex);
+  assert.ok(publicGateIndex > workflow.indexOf('deploy-from-bundle.mjs'));
   assert.match(workflow, /\n  verify:\n[\s\S]*?runs-on: ubuntu-latest/);
   assert.match(workflow, /\n  deploy:\n\s+needs: verify\n[\s\S]*?environment: production/);
   assert.match(workflow, /actions\/upload-artifact@[a-f0-9]{40}/);
@@ -191,6 +332,17 @@ test('production workflow transfers a verified bundle instead of pulling GitHub 
   assert.doesNotMatch(workflow, /scp -O[^\n]*scripts\//);
   assert.match(workflow, /--revision=/);
   assert.match(workflow, /--sha256=/);
+  assert.match(workflow, /const baseUrl = 'https:\/\/insight\.guangtuo\.com'/);
+  assert.match(workflow, /readJson\('\/api\/health'\)/);
+  assert.match(workflow, /readJson\('\/api\/ready'\)/);
+  assert.match(workflow, /readJson\('\/api\/frontend-health'\)/);
+  assert.match(workflow, /health\.revision !== expectedRevision/);
+  assert.match(workflow, /ready\.status !== 'ready'/);
+  assert.match(workflow, /frontend\.revision !== expectedRevision/);
+  assert.match(workflow, /signal: AbortSignal\.timeout\(/);
+  assert.match(workflow, /redirect: 'error'/);
+  assert.match(workflow, /cache: 'no-store'/);
+  assert.match(workflow, /new URL\(response\.url\)\.origin !== baseUrl/);
   assert.doesNotMatch(workflow, /git pull/);
 });
 

@@ -174,3 +174,56 @@ jobs:
             -i "$RUNNER_TEMP/ai_geo_deploy" \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "cd /opt/ai-geo-monitoring && node scripts/deploy-from-bundle.mjs --bundle=/tmp/ai-geo-release-${GITHUB_SHA}.bundle --revision=${GITHUB_SHA} --sha256=${CHECKSUM}"
+
+      - name: 验证唯一正式公网入口
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const baseUrl = 'https://insight.guangtuo.com';
+          const expectedRevision = process.env.EXPECTED_REVISION;
+
+          async function readJson(pathname) {
+            const response = await fetch(`${baseUrl}${pathname}`, {
+              signal: AbortSignal.timeout(10_000),
+              redirect: 'error',
+              cache: 'no-store',
+            });
+            if (new URL(response.url).origin !== baseUrl) {
+              throw new Error(`${pathname} returned an unexpected origin`);
+            }
+            if (!response.ok) {
+              throw new Error(`${pathname} returned HTTP ${response.status}`);
+            }
+            return response.json();
+          }
+
+          let lastError;
+          for (let attempt = 1; attempt <= 20; attempt += 1) {
+            try {
+              const [health, ready, frontend] = await Promise.all([
+                readJson('/api/health'),
+                readJson('/api/ready'),
+                readJson('/api/frontend-health'),
+              ]);
+              if (health.revision !== expectedRevision) {
+                throw new Error('backend public revision mismatch');
+              }
+              if (ready.status !== 'ready') {
+                throw new Error('public readiness failed');
+              }
+              if (frontend.revision !== expectedRevision) {
+                throw new Error('frontend public revision mismatch');
+              }
+              process.exit(0);
+            } catch (error) {
+              lastError = error;
+              if (attempt < 20) {
+                await new Promise((resolve) => setTimeout(resolve, 3000));
+              }
+            }
+          }
+          throw lastError;
+          NODE

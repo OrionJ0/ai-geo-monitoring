@@ -48,7 +48,8 @@ export async function prepareBundleRelease({
   projectRoot,
   bundlePath,
   expectedRevision,
-  expectedSha256
+  expectedSha256,
+  deferFastForward = false
 }) {
   const revision = fullCommit(expectedRevision, '预期版本');
   const checksum = sha256Value(expectedSha256);
@@ -83,11 +84,32 @@ export async function prepareBundleRelease({
   } catch {
     throw new Error('Bundle 版本不是当前 main 的快进更新，拒绝部署');
   }
-  await git(projectRoot, ['merge', '--ff-only', revision]);
-  const actualRevision = await git(projectRoot, ['rev-parse', 'HEAD']);
-  if (actualRevision !== revision) throw new Error('Bundle 快进后 HEAD 校验失败');
+  const prepared = { previousRevision, revision };
+  if (!deferFastForward) {
+    await fastForwardPreparedRelease({ projectRoot, ...prepared });
+  }
+  return prepared;
+}
 
-  return { previousRevision, revision };
+export async function fastForwardPreparedRelease({
+  projectRoot,
+  previousRevision,
+  revision
+}) {
+  const expectedPrevious = fullCommit(previousRevision, '快进前版本');
+  const expectedRevision = fullCommit(revision, '快进目标版本');
+  if (await git(projectRoot, ['status', '--porcelain'])) {
+    throw new Error('停服后工作区发生变化，拒绝快进 Bundle');
+  }
+  const actualPrevious = await git(projectRoot, ['rev-parse', 'HEAD']);
+  if (actualPrevious !== expectedPrevious) {
+    throw new Error('停服后 HEAD 发生变化，拒绝快进 Bundle');
+  }
+  await git(projectRoot, ['merge', '--ff-only', expectedRevision]);
+  const actualRevision = await git(projectRoot, ['rev-parse', 'HEAD']);
+  if (actualRevision !== expectedRevision) {
+    throw new Error('Bundle 快进后 HEAD 校验失败');
+  }
 }
 
 export async function loadPreparedDeploy({ projectRoot, revision }) {
@@ -101,6 +123,50 @@ export async function loadPreparedDeploy({ projectRoot, revision }) {
     throw new Error('候选版本缺少正式 deploy() 入口');
   }
   return candidateModule.deploy;
+}
+
+async function stopProductionServices({ projectRoot }) {
+  const productionScript = path.join(projectRoot, 'scripts', 'production.mjs');
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [productionScript, 'stop', '--json'],
+    { cwd: projectRoot, maxBuffer: 10 * 1024 * 1024 }
+  );
+  return JSON.parse(stdout.trim().split(/\r?\n/u).at(-1));
+}
+
+export async function activatePreparedRelease({
+  projectRoot,
+  prepared,
+  stopProduction = stopProductionServices,
+  fastForward = fastForwardPreparedRelease,
+  loadDeploy = loadPreparedDeploy
+}) {
+  const stopped = await stopProduction({ projectRoot });
+  const validStoppedState = (service) => (
+    service?.running === false
+    && (service.pid === null || service.pid === 0)
+  );
+  if (
+    !validStoppedState(stopped?.backend)
+    || !validStoppedState(stopped?.frontend)
+  ) {
+    if (
+      typeof stopped?.backend?.running !== 'boolean'
+      || typeof stopped?.frontend?.running !== 'boolean'
+      || !Object.hasOwn(stopped.backend, 'pid')
+      || !Object.hasOwn(stopped.frontend, 'pid')
+    ) {
+      throw new Error('生产停服状态无效，拒绝快进 Bundle');
+    }
+    throw new Error('生产进程未完全停止，拒绝快进 Bundle');
+  }
+  await fastForward({ projectRoot, ...prepared });
+  const candidateDeploy = await loadDeploy({
+    projectRoot,
+    revision: prepared.revision
+  });
+  await candidateDeploy(prepared.revision, { lockAlreadyAcquired: true });
 }
 
 function argument(name) {
@@ -137,15 +203,12 @@ async function main() {
       projectRoot,
       bundlePath,
       expectedRevision: argument('revision'),
-      expectedSha256: argument('sha256')
+      expectedSha256: argument('sha256'),
+      deferFastForward: true
     });
     // main 已快进后必须绕过启动器加载阶段的 ESM 缓存，执行候选版本本身的
     // 部署器；否则旧启动器可能跳过候选版本新增的迁移和发布校验。
-    const candidateDeploy = await loadPreparedDeploy({
-      projectRoot,
-      revision: prepared.revision
-    });
-    await candidateDeploy(prepared.revision, { lockAlreadyAcquired: true });
+    await activatePreparedRelease({ projectRoot, prepared });
   } finally {
     await bootstrapDeployment.releaseDeploymentLock();
     await fs.promises.rm(bundlePath, { force: true });
