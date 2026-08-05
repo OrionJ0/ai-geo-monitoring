@@ -1,8 +1,8 @@
 ---
 title: 营销广告快照 API 资源化技术方案
 date: 2026-08-05
-status: active
-source: docs/active-2026-08-05-006-marketing-api-resourceization/prd.md
+status: closed
+source: docs/closed-2026-08-05-006-marketing-api-resourceization/prd.md
 scope: deep
 ---
 
@@ -697,8 +697,8 @@ R2 阻断失败同样使用后代 revert revision 快进恢复到完整 R1 合�
 
 ## 17. Handoff
 
-- PRD: `docs/active-2026-08-05-006-marketing-api-resourceization/prd.md`
-- Tech Spec: `docs/active-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md`
+- PRD: `docs/closed-2026-08-05-006-marketing-api-resourceization/prd.md`
+- Tech Spec: `docs/closed-2026-08-05-006-marketing-api-resourceization/TECH-SPEC.md`
 - Status: `active`；003 已完成正式关闭，006 Issue 001–005 与 R1 已完成；Issue 006 已在本地硬切轻量 Dashboard 并清除旧四数组合同，等待 Issue 007 独立 R2 正式发布与关闭。
 - First implementation gate: 已通过；003 closed revision、006 R1 revision 与生产证据见 `docs/DEPLOYMENT.md`。
 - Next gate: Issue 007 先完成对抗式审查和发布前实时核对，再以独立 Git Bundle 发布 R2；正式入口验证通过前不得把本地轻量合同描述为生产默认。

@@ -96,3 +96,19 @@
 真实 Chrome 默认七日页面请求为：市场总览完整 Dashboard 1,061,845 B；广告表现 Dashboard 318,325 B + 广告层级 289,132 B；关键词 Dashboard 318,325 B + 关键词 10 行 5,947 B；全量搜索词 Dashboard 318,325 B + 本期 20 行 9,220 B + 上期 1 行 1,136 B。搜索词从基线两份完整 Dashboard 的 648,003 B 降至 328,681 B；关键词在 R1 兼容期约为 324,272 B；广告表现在 R1 兼容期暂增至 607,457 B。R1 的目标是证明消费者迁移，完整 Dashboard 仍因市场总览兼容而返回旧数组；最终节省必须在 R2 硬切后重新测量。
 
 所有详情请求携带并回显同一快照 revision，`items <= pageSize`。详细页面生产 hook/page 不再读取 Dashboard 的 `campaigns`、`adGroups`、`keywords` 或 `searchTerms`；市场总览继续只消费根状态、summary 和 trend。Nginx 留存窗口中的四类请求全部来自 Chrome User-Agent。测量没有触发刷新、百度上游请求或业务写入，也没有保存 Token、Cookie、数据库、业务明细或原始响应。
+
+## R2 硬切发布后测量（2026-08-06）
+
+- 正式应用 revision：`d9b0688e28ba9b3a33fcfb061fe7d7235388ec22`；快照 coverage 为 2026-07-07 至 2026-08-05，计划 / 单元 / 关键词 / 搜索词为 45 / 191 / 921 / 345。
+- Dashboard 解码 JSON 为 2,869 B，不含四个旧明细数组；广告层级 889,563 B，关键词第一页 50/921、67,692 B，搜索词第一页 50/345、39,271 B。三个详情资源与根使用同一 revision、日期和来源，详情响应均包含 `Vary: Authorization`。
+
+| 资源 | 30 次 HTTPS P50 | 30 次 HTTPS P95 | 最大值 |
+| --- | ---: | ---: | ---: |
+| 轻量 Dashboard | 30.75 ms | 47.61 ms | 48.19 ms |
+| 广告层级 | 150.40 ms | 181.04 ms | 233.52 ms |
+| 关键词 | 122.71 ms | 140.26 ms | 154.95 ms |
+| 搜索词 | 44.45 ms | 54.05 ms | 58.24 ms |
+
+真实 Chrome 默认七日页面请求为：市场总览轻量 Dashboard 2,869 B；广告表现轻量 Dashboard 1,420 B + 广告层级 289,132 B；关键词轻量 Dashboard 1,420 B + 关键词 10 行 5,947 B；全量搜索词轻量 Dashboard 1,420 B + 本期 20 行 9,220 B + 上期 1 行 1,136 B。相对 R1，市场总览从 1,061,845 B 降至 2,869 B，广告表现从 607,457 B 降至 290,552 B，关键词从约 324,272 B 降至 7,367 B，搜索词从 328,681 B 降至 11,776 B。
+
+生产 `/usr/bin/google-chrome` 验证四个正式页面根节点和表格均可见，营销请求全部为 200；Network 没有兼容 query。观察窗中结构化日志成功 140、失败 0、秘密标记 0、服务错误 0；Nginx Dashboard / 层级 / 关键词 / 搜索词分别为 39 / 33 / 33 / 37，旧 `view/includeDetails` 查询为 0。SQLite 查询计划命中关键词和搜索词的 `refresh_run_id` 索引，数据库保留两个成功 revision 的事实。
