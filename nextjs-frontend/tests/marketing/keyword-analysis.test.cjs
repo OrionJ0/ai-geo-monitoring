@@ -261,7 +261,10 @@ test('keyword analysis page implements the confirmed task-focused visual and int
     path.join(frontendRoot, 'src/lib/marketing/readMarketingDashboard.ts'),
     'utf8'
   );
-  assert.match(hookSource, /assertMarketingDashboardResponse\(response\.data, projectId\)/);
+  assert.match(hookSource, /assertMarketingDashboardRootResponse\(response\.data, projectId\)/);
+  assert.match(hookSource, /\/keywords/);
+  assert.match(hookSource, /revision:\s*response\.data\.revision/);
+  assert.match(hookSource, /assertMarketingKeywordResourceResponse/);
   assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);
   assert.match(pageSource, /analysis\.warning/);
   assert.match(pageSource, /!pageError && analysis\.warning/);
@@ -273,7 +276,8 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(dashboardReaderSource, /\/dashboard/);
   assert.match(dashboardReaderSource, /DASHBOARD_DATE_OUT_OF_RANGE/);
   assert.match(hookSource, /onDateRangeAdjusted\?\.\(response\.effectiveDateRange\)/);
-  assert.match(hookSource, /adaptMarketingDashboardKeywords/);
+  assert.doesNotMatch(hookSource, /adaptMarketingDashboardKeywords/);
+  assert.doesNotMatch(hookSource, /response\.data\.searchTerms/);
   assert.doesNotMatch(hookSource + dashboardReaderSource, /axios\.(?:post|put|patch|delete)\(/);
   assert.match(pageSource, /useDefaultProjectContext/);
   assert.match(pageSource, /useMarketingCapabilities/);
@@ -282,16 +286,20 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(pageSource, /广告关键词/);
   assert.doesNotMatch(pageSource, /搜索词分析|SearchTermAnalysis|searchTermAnalysis/);
   assert.doesNotMatch(pageSource, /当前真实百度数据只到推广计划|关键词数据尚未接入/);
-  assert.match(pageSource, /有展现关键词/);
-  assert.match(pageSource, /有点击关键词/);
-  assert.match(pageSource, /点击覆盖率/);
-  assert.match(pageSource, /未获点击/);
+  assert.match(pageSource, /广告关键词数/);
+  assert.match(pageSource, /model\.summary\.impressions/);
+  assert.match(pageSource, /model\.summary\.clicks/);
+  assert.match(pageSource, /model\.summary\.costAmountScaled/);
+  assert.match(pageSource, /完整筛选范围/);
+  assert.match(pageSource, /仅筛选当前页/);
   assert.match(pageSource, /推广单元/);
   assert.match(pageSource, /优化标签/);
   assert.match(pageSource, /消费区间/);
   assert.match(pageSource, /CTR\/CPC 异常/);
   assert.match(pageSource, /搜索投放关键词/);
   assert.match(pageSource, /关键词效率分布/);
+  assert.match(pageSource, /model\.pagination\.totalItems/);
+  assert.match(pageSource, /setSortBy/);
   assert.match(pageSource, /当前数据中位数/);
   assert.match(pageSource, /账户平均值/);
   assert.match(pageSource, /散点/);

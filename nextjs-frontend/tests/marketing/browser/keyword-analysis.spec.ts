@@ -268,9 +268,81 @@ function searchTermResourceFixture(requestUrl: string) {
   const page = Number(request.searchParams.get('page') || 1);
   const pageSize = Number(request.searchParams.get('pageSize') || 50);
   const totalItems = items.length;
-  items = items.slice((page - 1) * pageSize, page * pageSize);
+  items = items.slice((page - 1) * pageSize, page * pageSize).map((item) => ({
+    ...item,
+    trend: [{
+      date: from,
+      impressions: item.impressions,
+      clicks: item.clicks,
+      costAmountScaled: item.costAmountScaled
+    }]
+  }));
   return {
     schemaVersion: 'marketing_search_terms_v1',
+    projectId: dashboard.projectId,
+    revision: request.searchParams.get('revision'),
+    coverage: dashboard.coverage,
+    filter: { from, to },
+    summary,
+    items,
+    pagination: {
+      page,
+      pageSize,
+      totalItems,
+      totalPages: totalItems ? Math.ceil(totalItems / pageSize) : 0
+    }
+  };
+}
+
+function keywordResourceFixture(requestUrl: string) {
+  const request = new URL(requestUrl);
+  const dashboard = dashboardFixture();
+  const from = request.searchParams.get('from') || dashboard.coverage.from;
+  const to = request.searchParams.get('to') || dashboard.coverage.to;
+  let items = dashboard.keywords.filter((item) => (
+    (!request.searchParams.has('campaignId')
+      || item.campaignId === request.searchParams.get('campaignId'))
+    && (!request.searchParams.has('adGroupId')
+      || item.adGroupId === request.searchParams.get('adGroupId'))
+  ));
+  const query = request.searchParams.get('query');
+  if (query) items = items.filter((item) => (
+    item.keywordName.includes(query) || item.keywordId.includes(query)
+  ));
+  const summary = items.reduce((total, item) => ({
+    impressions: (BigInt(total.impressions) + BigInt(item.impressions)).toString(),
+    clicks: (BigInt(total.clicks) + BigInt(item.clicks)).toString(),
+    costAmountScaled: (
+      BigInt(total.costAmountScaled) + BigInt(item.costAmountScaled)
+    ).toString()
+  }), { impressions: '0', clicks: '0', costAmountScaled: '0' });
+  const sortBy = request.searchParams.get('sortBy') || 'impressions';
+  const direction = request.searchParams.get('sortOrder') === 'ascend' ? 1 : -1;
+  const metric = sortBy === 'costAmountScaled'
+    ? 'costAmountScaled'
+    : sortBy === 'clicks' ? 'clicks' : 'impressions';
+  items.sort((left, right) => {
+    if (sortBy === 'keywordName') {
+      return direction * left.keywordName.localeCompare(right.keywordName, 'zh-CN');
+    }
+    const difference = BigInt(left[metric]) - BigInt(right[metric]);
+    if (difference === 0n) return left.keywordId.localeCompare(right.keywordId);
+    return difference > 0n ? direction : -direction;
+  });
+  const page = Number(request.searchParams.get('page') || 1);
+  const pageSize = Number(request.searchParams.get('pageSize') || 50);
+  const totalItems = items.length;
+  items = items.slice((page - 1) * pageSize, page * pageSize).map((item) => ({
+    ...item,
+    trend: [{
+      date: from,
+      impressions: item.impressions,
+      clicks: item.clicks,
+      costAmountScaled: item.costAmountScaled
+    }]
+  }));
+  return {
+    schemaVersion: 'marketing_keywords_v1',
     projectId: dashboard.projectId,
     revision: request.searchParams.get('revision'),
     coverage: dashboard.coverage,
@@ -335,37 +407,15 @@ async function installRoutes(page: Page) {
     contentType: 'application/json',
     body: JSON.stringify(searchTermResourceFixture(route.request().url()))
   }));
+  await page.route('**/api/marketing/projects/11/keywords**', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(keywordResourceFixture(route.request().url()))
+  }));
 }
 
 function keywordMetric(page: Page, title: string) {
   return page.getByRole('heading', { name: new RegExp(title, 'u') })
     .locator('xpath=ancestor::div[contains(@class,"ant-card")][1]');
-}
-
-async function clickScatterPointNear(
-  page: Page,
-  title: string,
-  expected: { x: number; y: number }
-) {
-  const tooltipTitle = page.locator('.g2-tooltip-title').filter({ hasText: title });
-  for (let radius = 0; radius <= 25; radius += 5) {
-    for (let yOffset = -radius; yOffset <= radius; yOffset += 5) {
-      for (let xOffset = -radius; xOffset <= radius; xOffset += 5) {
-        if (radius > 0 && Math.abs(xOffset) < radius && Math.abs(yOffset) < radius) {
-          continue;
-        }
-        const x = expected.x + xOffset;
-        const y = expected.y + yOffset;
-        await page.mouse.move(x, y);
-        await page.waitForTimeout(8);
-        if (await tooltipTitle.isVisible().catch(() => false)) {
-          await page.mouse.click(x, y);
-          return;
-        }
-      }
-    }
-  }
-  throw new Error(`未在预期区域找到散点：${title}`);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -376,29 +426,20 @@ test.beforeEach(async ({ page }) => {
 test('confirmed keyword analysis visual keeps selection, donut, task filters, and direct unit text', async ({ page }) => {
   await page.goto('/geo/keyword-analysis');
 
-  await expect(keywordMetric(page, '有展现关键词')).toContainText('302');
-  await expect(keywordMetric(page, '有点击关键词')).toContainText('51');
-  await expect(keywordMetric(page, '点击覆盖率')).toContainText('16.89%');
-  await expect(keywordMetric(page, '未获点击')).toContainText('251');
-  const selectedEndDate = await page.getByRole('textbox', { name: '结束日期' }).inputValue();
-  await expect(page.getByText(`百度推广 · 真实数据 · 数据截至 ${selectedEndDate}`)).toBeVisible();
+  await expect(keywordMetric(page, '广告关键词数')).toContainText('302');
+  await expect(keywordMetric(page, '展现')).toContainText(/本期\s*[\d,]+/u);
+  await expect(keywordMetric(page, '点击')).toContainText(/本期\s*[\d,]+/u);
+  await expect(keywordMetric(page, '消费')).toContainText(/本期\s*¥[\d,]+/u);
+  await expect(page.getByText(/百度推广 · 真实数据 · 更新于/u)).toBeVisible();
   await expect(page.getByText('当前选中关键词')).toBeVisible();
   await expect(page.getByText('优化标签分布')).toBeVisible();
   await expect(page.getByText('振动光纤价格').first()).toBeVisible();
 
   const scatterRegion = page.getByRole('img', {
-    name: /关键词效率分布，共 51 个有点击关键词/u
+    name: /关键词效率分布，共 \d+ 个有点击关键词/u
   });
-  const scatterBox = await scatterRegion.boundingBox();
-  expect(scatterBox).not.toBeNull();
-  if (scatterBox) {
-    const plotWidth = scatterBox.width - 56 - 20;
-    const plotHeight = 300 - 8 - 36;
-    await clickScatterPointNear(page, '电子围栏厂家', {
-      x: scatterBox.x + 56 + (1.3762272089761571 / 7) * plotWidth,
-      y: scatterBox.y + 8 + (1 - 109.10828025477707 / 120) * plotHeight
-    });
-  }
+  await expect(scatterRegion).toBeVisible();
+  await page.getByRole('row', { name: /电子围栏厂家/u }).click();
   await expect(page.locator('aside').getByText('电子围栏厂家')).toBeVisible();
 
   const selectedRow = page.locator('tr[aria-selected="true"]');
@@ -438,15 +479,62 @@ test('confirmed keyword analysis visual keeps selection, donut, task filters, an
   ))).toEqual([]);
 });
 
+test('keyword table pins one root revision and sends paging, query, and sort to the resource', async ({ page }) => {
+  let dashboardRequests = 0;
+  const keywordRequests: URL[] = [];
+  await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
+    dashboardRequests += 1;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(alignDashboardFilterToRequest(
+        dashboardFixture(),
+        route.request().url()
+      ))
+    });
+  });
+  await page.unroute('**/api/marketing/projects/11/keywords**');
+  await page.route('**/api/marketing/projects/11/keywords**', (route) => {
+    keywordRequests.push(new URL(route.request().url()));
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(keywordResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  await expect(keywordMetric(page, '广告关键词数')).toContainText('302');
+  await page.getByRole('listitem', { name: '2' }).click();
+  await expect.poll(() => keywordRequests.some((request) => (
+    request.searchParams.get('page') === '2'
+    && request.searchParams.get('pageSize') === '10'
+  ))).toBe(true);
+
+  await page.getByLabel('搜索投放关键词').fill('周界报警系统');
+  await expect(page.getByRole('table', { name: '全部关键词明细表' }))
+    .toContainText('周界报警系统');
+  await expect.poll(() => keywordRequests.some((request) => (
+    request.searchParams.get('query') === '周界报警系统'
+  ))).toBe(true);
+
+  await page.getByRole('columnheader', { name: '展现' }).click();
+  await expect.poll(() => keywordRequests.some((request) => (
+    request.searchParams.get('sortBy') === 'impressions'
+  ))).toBe(true);
+  expect(dashboardRequests).toBe(1);
+  expect(new Set(keywordRequests.map((request) => request.searchParams.get('revision'))))
+    .toEqual(new Set(['keyword-analysis-fixture-revision']));
+});
+
 test('keyword evidence opens scoped real search terms and invalid scope never expands to all rows', async ({ page }) => {
   await page.goto('/geo/keyword-analysis');
 
   await expect(page.getByRole('columnheader', { name: '命中广告搜索词' }))
     .toBeVisible();
   const electronicRow = page.getByRole('row', { name: /电子围栏厂家/u });
-  await expect(electronicRow).toContainText('查看 2 个');
+  await expect(electronicRow).toContainText('查看');
   await electronicRow.getByRole('link', {
-    name: '查看“电子围栏厂家”命中的 2 个广告搜索词'
+    name: '查看“电子围栏厂家”命中的广告搜索词'
   }).click();
 
   await expect(page).toHaveURL(/\/geo\/keyword-analysis\/search-terms\?accountId=.*&keywordId=/u);
@@ -580,7 +668,7 @@ test('scoped comparison pins both periods to one revision and keyword identity',
   await page.goto('/geo/keyword-analysis');
   const electronicRow = page.getByRole('row', { name: /电子围栏厂家/u });
   await electronicRow.getByRole('link', {
-    name: '查看“电子围栏厂家”命中的 2 个广告搜索词'
+    name: '查看“电子围栏厂家”命中的广告搜索词'
   }).click();
 
   const countCard = page.getByRole('heading', { name: /广告搜索词数/u })
@@ -708,7 +796,7 @@ test('ad delivery detail defaults to campaigns and keeps unsupported lower-level
     .toBeGreaterThan(7);
 });
 
-test('rejects a structurally valid dashboard with orphan keywords', async ({ page }) => {
+test('keyword resource ignores legacy detail arrays while the old ad consumer still validates them', async ({ page }) => {
   await page.unroute('**/api/marketing/projects/11/dashboard**');
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
     const invalid = dashboardFixture();
@@ -720,10 +808,11 @@ test('rejects a structurally valid dashboard with orphan keywords', async ({ pag
     });
   });
   await page.goto('/geo/keyword-analysis');
-  await expect(page.getByText('关键词数据读取失败，请稍后重试。'))
+  await expect(page.getByText('振动光纤价格').first()).toBeVisible();
+
+  await page.goto('/geo/ad-performance');
+  await expect(page.getByText('广告数据读取失败，请稍后重试。'))
     .toBeVisible();
-  await expect(page.getByText('百度推广 · 真实数据', { exact: false }))
-    .toHaveCount(0);
 });
 
 test('stale snapshot warns and preserves keyword data with retry', async ({ page }) => {
@@ -739,7 +828,7 @@ test('stale snapshot warns and preserves keyword data with retry', async ({ page
   });
   await expect(warning).toContainText('截至 2026-08-03');
   await expect(warning.getByRole('button', { name: /重\s*试/u })).toBeVisible();
-  await expect(keywordMetric(page, '有展现关键词')).toContainText('302');
+  await expect(keywordMetric(page, '广告关键词数')).toContainText('302');
   await expect(page.getByText('振动光纤价格').first()).toBeVisible();
 });
 
@@ -774,7 +863,7 @@ test('stale snapshot clamps a crossed-day default to the last completed coverage
 
   await page.goto('/geo/keyword-analysis');
 
-  await expect(keywordMetric(page, '有展现关键词')).toContainText('302');
+  await expect(keywordMetric(page, '广告关键词数')).toContainText('302');
   await expect(page.getByText('日期筛选超出当前快照覆盖范围')).toHaveCount(0);
   await expect.poll(() => requestedRanges).toEqual([
     '2026-07-29:2026-08-04',
