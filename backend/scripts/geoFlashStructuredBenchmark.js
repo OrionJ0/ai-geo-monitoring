@@ -32,14 +32,14 @@ const {
 const { buildCacheKey } = require('./geoFlashStructuredCorpus');
 const { summarizeArm } = require('../services/GeoFlashStructuredBenchmarkService');
 const { ENTITY_PROMPT_REVISION } = require('../services/AIResponseEntityExtractionService');
-const { SEMANTIC_PROMPT_REVISION, SEMANTIC_PROMPT_REVISION_REV1 } = require('../services/AIResponseSemanticJudgmentService');
+const { SEMANTIC_PROMPT_REVISION, SEMANTIC_PROMPT_REVISION_REV2 } = require('../services/AIResponseSemanticJudgmentService');
 
 const EXPERIMENT_REVISION = 'three_track_partial_v1';
 
 function cacheIdentityFor(arm) {
-  if (arm === 'v5-json' || arm === 'v5-json-rev1') {
+  if (arm === 'v5-json' || arm === 'v5-json-rev2') {
     return {
-      promptRevision: `${ENTITY_PROMPT_REVISION}+${arm === 'v5-json-rev1' ? SEMANTIC_PROMPT_REVISION_REV1 : SEMANTIC_PROMPT_REVISION}`,
+      promptRevision: `${ENTITY_PROMPT_REVISION}+${arm === 'v5-json-rev2' ? SEMANTIC_PROMPT_REVISION_REV2 : SEMANTIC_PROMPT_REVISION}`,
       model: 'deepseek-v4-flash',
       requestPolicy: { temperature: 0, thinking: 'disabled', response_format: 'json_object' },
       experimentRevision: EXPERIMENT_REVISION
@@ -64,9 +64,10 @@ const {
   semanticTruthCoverage,
   validateTruthEntry
 } = require('../services/GeoFlashStructuredBenchmarkService');
-// v5-json-rev1：014 第 2 轮 A/B 修订臂，阶段 2 提示词仅补三条规则
-// （推荐语义/情绪口径/repair 明确 target_entity_id），其余管线与 v5-json 完全一致。
-const SUPPORTED_ARMS = new Set(['v4-current', 'v4-temperature-zero', 'v5-json', 'v5-json-rev1']);
+// v5-json-rev2：014 最后一轮 A/B 修订臂，阶段 2 提示词仅改情绪规则
+// （推荐与情绪独立、肯定性描述判 positive、组合示例；删除 rev1 的"综合性较强"孤立示例），
+// 其余管线与 v5-json 完全一致。此为该系列最后一轮，不再有 rev3/rev4。
+const SUPPORTED_ARMS = new Set(['v4-current', 'v4-temperature-zero', 'v5-json', 'v5-json-rev2']);
 const DEFAULT_BASELINE_DIR = path.resolve(__dirname, '../../work/geo-baseline-2026-07-28');
 const DEFAULT_OUTPUT_DIR = path.resolve(__dirname, '../../work/geo-flash-structured-2026-08-05');
 const DEFAULT_CHALLENGE_ARTIFACT = path.resolve(
@@ -249,7 +250,7 @@ function createAnalyzer({ arm, basePlatform, calls }) {
   const platform = armPlatform(basePlatform, arm);
   const configService = { getAnalysisPlatform: async () => platform };
   const requestService = createCapturingRequestService(calls);
-  if (arm === 'v5-json' || arm === 'v5-json-rev1') {
+  if (arm === 'v5-json' || arm === 'v5-json-rev2') {
     return new AIResponseAnalysisV5Service({
       entityExtractionService: new AIResponseEntityExtractionService({
         configService,
@@ -258,7 +259,7 @@ function createAnalyzer({ arm, basePlatform, calls }) {
       semanticJudgmentService: new AIResponseSemanticJudgmentService({
         configService,
         requestService,
-        promptRevision: arm === 'v5-json-rev1' ? 'rev1' : null
+        promptRevision: arm === 'v5-json-rev2' ? 'rev2' : null
       })
     });
   }
