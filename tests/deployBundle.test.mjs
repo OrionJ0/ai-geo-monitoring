@@ -431,6 +431,9 @@ test('production workflow transfers a verified bundle instead of pulling GitHub 
   assert.match(workflow, /actions\/upload-artifact@[a-f0-9]{40}/);
   assert.match(workflow, /actions\/download-artifact@[a-f0-9]{40}/);
   assert.match(workflow, /git bundle create .*refs\/heads\/main/);
+  assert.match(workflow, /timeout-minutes:\s*360/);
+  assert.match(workflow, /ServerAliveInterval=30/);
+  assert.match(workflow, /ServerAliveCountMax=12/);
   assert.match(workflow, /sha256sum/);
   assert.match(workflow, /scp -O[\s\S]*?"\$BUNDLE"/);
   assert.match(workflow, /npm run test:deployment/);

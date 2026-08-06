@@ -168,6 +168,8 @@ jobs:
           scp -O -F /dev/null \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=12 \
             -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
             -i "$RUNNER_TEMP/ai_geo_deploy" \
@@ -185,7 +187,7 @@ jobs:
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=10 \
+            -o ServerAliveCountMax=12 \
             -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
             -i "$RUNNER_TEMP/ai_geo_deploy" \
