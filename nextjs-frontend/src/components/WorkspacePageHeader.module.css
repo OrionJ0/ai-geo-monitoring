@@ -12,6 +12,11 @@
   line-height: 20px;
 }
 
+.header :global(.ant-breadcrumb-link),
+.header :global(.ant-breadcrumb-separator) {
+  color: #4b5563;
+}
+
 .actions {
   display: flex;
   min-width: 0;

@@ -167,6 +167,19 @@ h1 {
   color: #4b5563 !important;
 }
 
+.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #0958d9 !important;
+}
+
+.v5-platform-modal .ant-form-item-extra {
+  color: #595959;
+}
+
+.v5-platform-modal .ant-btn-primary,
+.v5-platform-modal .ant-switch-checked {
+  background: #0958d9;
+}
+
 a:focus-visible,
 button:focus-visible,
 .ant-menu-item:focus-visible,

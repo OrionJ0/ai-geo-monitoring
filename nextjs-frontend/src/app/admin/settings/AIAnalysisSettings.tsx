@@ -300,7 +300,11 @@ export default function AIAnalysisSettings() {
           </React.Fragment>
         ))}
         {!promptDefinition?.stages?.length ? (
-          <Input.TextArea readOnly value={promptDefinition?.template || '提示词加载中…'} />
+          <Input.TextArea
+            readOnly
+            aria-label="当前分析提示词"
+            value={promptDefinition?.template || '提示词加载中…'}
+          />
         ) : null}
       </Card>
 

@@ -736,6 +736,7 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       />
 
       <Modal
+        rootClassName="v5-platform-modal"
         title={lockedBuiltinDeepSeek
           ? '配置官方 DeepSeek'
           : (editing ? `编辑平台：${editing.name}` : '新增 AI 平台')}
