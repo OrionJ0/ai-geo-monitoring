@@ -175,6 +175,7 @@ export default function AdminSettingsPage() {
   return (
     <Card extra={<Button onClick={refreshAll}>刷新全部设置</Button>}>
       <Tabs
+        className="v5-admin-settings-tabs"
         activeKey={activeTab}
         onChange={(key) => {
           setActiveTab(key);

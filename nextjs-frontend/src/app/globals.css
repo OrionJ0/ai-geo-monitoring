@@ -167,7 +167,7 @@ h1 {
   color: #4b5563 !important;
 }
 
-.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+.v5-admin-settings-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
   color: #0958d9 !important;
 }
 

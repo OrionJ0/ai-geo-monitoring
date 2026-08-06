@@ -215,8 +215,23 @@ test('two-stage analysis prompts and fallback stay named at narrow zoom width', 
   expect(await page.evaluate(() => (
     document.documentElement.scrollWidth <= window.innerWidth + 1
   ))).toBe(true);
+  const analysisTab = page.getByRole('tab', { name: 'AI 分析 API' });
+  await expect(analysisTab).toHaveAttribute('aria-selected', 'true');
+  await analysisTab.focus();
+  await page.keyboard.press('ArrowLeft');
+  const platformTab = page.getByRole('tab', { name: 'AI 平台' });
+  await expect(platformTab).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(platformTab).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowRight');
+  await expect(analysisTab).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(analysisTab).toHaveAttribute('aria-selected', 'true');
+  // Ant Design renders its labelled overflow button inside the tablist at this
+  // width. Keep the whole navigation in scope and waive only that library
+  // structure rule; keyboard state and every other serious rule remain tested.
   expect(seriousViolations(await new AxeBuilder({ page })
-    .exclude('.ant-tabs-nav')
+    .disableRules(['aria-required-children'])
     .analyze())).toEqual([]);
   await page.screenshot({
     path: path.join(artifactDirectory, 'analysis-prompts-400-percent.png'),
