@@ -257,20 +257,65 @@ export function buildV5SnapshotAuditArguments(databaseType, databasePath = '') {
   return ['--require-ready'];
 }
 
+let activeDeploymentSignal = null;
+let activeDeploymentDeadline = null;
+
 function run(command, args, options = {}) {
+  const signal = options.signal || activeDeploymentSignal;
+  const deadline = Number(options.deadline) || activeDeploymentDeadline;
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  if (deadline && Date.now() >= deadline) {
+    return Promise.reject(new Error('部署超过服务器侧 345 分钟总 deadline'));
+  }
   return new Promise((resolve, reject) => {
+    const detached = process.platform !== 'win32';
     const child = spawn(command, args, {
       cwd: options.cwd || projectRoot,
       env: options.env || process.env,
       stdio: 'inherit',
+      detached,
     });
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolve();
+    let settled = false;
+    let interruptionReason = null;
+    let killTimer = null;
+    const signalTree = (killSignal) => {
+      try {
+        if (detached && child.pid) process.kill(-child.pid, killSignal);
+        else child.kill(killSignal);
+      } catch (_) {}
+    };
+    const interrupt = (error) => {
+      if (interruptionReason) return;
+      interruptionReason = error instanceof Error ? error : new Error('部署被中断');
+      signalTree('SIGTERM');
+      killTimer = setTimeout(() => signalTree('SIGKILL'), 5_000);
+      killTimer.unref?.();
+    };
+    const onAbort = () => interrupt(signal.reason);
+    const deadlineTimer = deadline
+      ? setTimeout(() => interrupt(new Error('部署超过服务器侧 345 分钟总 deadline')), Math.max(1, deadline - Date.now()))
+      : null;
+    deadlineTimer?.unref?.();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      if (killTimer) clearTimeout(killTimer);
+      signal?.removeEventListener('abort', onAbort);
+      callback(value);
+    };
+    child.once('error', (error) => finish(reject, error));
+    child.once('exit', (code, exitSignal) => {
+      if (interruptionReason) {
+        signalTree('SIGKILL');
+        finish(reject, interruptionReason);
+      } else if (code === 0) finish(resolve);
       else {
-        reject(
+        finish(
+          reject,
           new Error(
-            `${options.label || command}失败${signal ? `，信号 ${signal}` : `，退出码 ${code}`}`
+            `${options.label || command}失败${exitSignal ? `，信号 ${exitSignal}` : `，退出码 ${code}`}`
           )
         );
       }
@@ -329,11 +374,19 @@ async function installDeploymentGate() {
   }
 }
 
-export async function deploy(preparedRevision = '', { lockAlreadyAcquired = false } = {}) {
+export async function deploy(preparedRevision = '', {
+  lockAlreadyAcquired = false,
+  deadline = null,
+  signal = null,
+  dependenciesPreflighted = false,
+  servicesAlreadyStopped = false
+} = {}) {
+  activeDeploymentSignal = signal;
+  activeDeploymentDeadline = Number(deadline) || null;
   const initial = await checkPreconditions();
   assertPreparedRevision(preparedRevision, initial.revision);
   if (!lockAlreadyAcquired) await acquireDeploymentLock();
-  let servicesStopped = false;
+  let servicesStopped = servicesAlreadyStopped;
   let databaseBackupReference = '';
   let databaseBackupManifest = '';
 
@@ -357,11 +410,15 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     const checked = await checkPreconditions();
     await installDeploymentGate();
 
-    console.log('2/13 停止受管生产进程');
-    await run(process.execPath, [productionScript, 'stop'], {
-      label: '停止生产进程',
-    });
-    servicesStopped = true;
+    if (!servicesAlreadyStopped) {
+      console.log('2/13 停止受管生产进程');
+      await run(process.execPath, [productionScript, 'stop'], {
+        label: '停止生产进程',
+      });
+      servicesStopped = true;
+    } else {
+      console.log('2/13 生产进程已由 Bundle 启动器停止');
+    }
 
     if (checked.databaseType === 'sqlite') {
       console.log('3/13 创建不可覆盖的 release 备份并更新 SQLite 最新备份');
@@ -419,7 +476,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     }
 
     console.log('4/13 安装后端依赖');
-    await run('npm', ['ci', '--include=dev'], {
+    await run('npm', ['ci', ...(dependenciesPreflighted ? ['--offline'] : []), '--include=dev'], {
       cwd: backendDirectory,
       label: '后端 npm ci',
     });
@@ -438,7 +495,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '后端原始咨询测试',
     });
     console.log('6/13 安装并静态检查前端依赖');
-    await run('npm', ['ci', '--include=dev'], {
+    await run('npm', ['ci', ...(dependenciesPreflighted ? ['--offline'] : []), '--include=dev'], {
       cwd: frontendDirectory,
       label: '前端 npm ci',
     });
@@ -590,6 +647,8 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     throw error;
   } finally {
     if (!lockAlreadyAcquired) await releaseDeploymentLock();
+    activeDeploymentSignal = null;
+    activeDeploymentDeadline = null;
   }
 
   return initial;
@@ -615,6 +674,8 @@ async function main() {
 export async function isGeo010ContractChanged() {
   return false;
 }
+
+export const LAUNCHER_ONLY_BRIDGE = true;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   main().catch((error) => {

@@ -90,7 +90,7 @@ jobs:
     if: vars.AI_GEO_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 20
+    timeout-minutes: 360
     steps:
       - name: 下载已验证发布产物
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -153,6 +153,8 @@ jobs:
           scp -O -F /dev/null \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=12 \
             -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
             -i "$RUNNER_TEMP/ai_geo_deploy" \
@@ -169,6 +171,8 @@ jobs:
           ssh -F /dev/null \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=12 \
             -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
             -i "$RUNNER_TEMP/ai_geo_deploy" \

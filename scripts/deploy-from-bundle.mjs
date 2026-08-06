@@ -321,6 +321,7 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
       signal,
       deadline
     });
+    const launcherOnlyBridge = candidateDeploy.LAUNCHER_ONLY_BRIDGE === true;
     await runManagedCommand('npm', ['ci', '--include=dev'], {
       cwd: path.join(checkout, 'backend'),
       signal,
@@ -331,7 +332,7 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
       signal,
       deadline
     });
-    if (!contractChanged && !releaseState.recovery) {
+    if (!contractChanged && (!releaseState.recovery || launcherOnlyBridge)) {
       return { requireGeo010Acceptance: false, dependenciesPreflighted: true };
     }
 
