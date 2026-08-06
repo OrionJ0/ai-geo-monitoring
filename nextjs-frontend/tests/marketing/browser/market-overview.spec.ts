@@ -620,10 +620,14 @@ test('desktop layout matches the final structure and is keyboard/axe clean', asy
   const selectedSourceRequest = page.waitForRequest((request) => (
     new URL(request.url()).searchParams.get('source') === 'BAIDU_SEARCH'
   ));
+  const selectedSourceResponse = page.waitForResponse((response) => (
+    new URL(response.url()).searchParams.get('source') === 'BAIDU_SEARCH'
+  ));
   await page.getByRole('option', { name: '百度自然搜索' }).click();
   expect(
     new URL((await selectedSourceRequest).url()).searchParams.get('device')
   ).toBe('pc');
+  expect((await selectedSourceResponse).ok()).toBe(true);
   await expect(page.getByRole('img', { name: /访问每日趋势/u })).toBeVisible();
   await page.getByRole('button', { name: '选择访问作为趋势指标' }).click();
   await expect(trendSourceControl).toContainText('百度自然搜索');
