@@ -8,12 +8,15 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import * as bundleDeployment from '../scripts/deploy-from-bundle.mjs';
+import { isGeo010ContractChanged } from '../scripts/deploy.mjs';
 
 const {
   prepareBundleRelease,
   fastForwardPreparedRelease,
   activatePreparedRelease,
   resolveCurrentReleaseState,
+  runManagedCommand,
+  assertActivationBudget,
 } = bundleDeployment;
 
 const execFileAsync = promisify(execFile);
@@ -21,6 +24,10 @@ const execFileAsync = promisify(execFile);
 async function git(cwd, args) {
   return execFileAsync('git', args, { cwd });
 }
+
+test('dynamic-budget bridge explicitly keeps the v4 runtime contract unchanged', async () => {
+  assert.equal(await isGeo010ContractChanged(), false);
+});
 
 test('verified bundle fast-forwards a clean main checkout without contacting origin', async (t) => {
   const source = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-bundle-source-'));
@@ -267,6 +274,58 @@ test('bundle activation keeps services stopped when fast-forward fails', async (
   assert.deepEqual(events, ['preflight', 'stop', 'fast-forward', 'stop']);
 });
 
+test('expired Bundle deadline rejects before spawning a child process', async () => {
+  await assert.rejects(
+    runManagedCommand(process.execPath, ['-e', 'process.exit(91)'], {
+      deadline: Date.now() - 1
+    }),
+    /345 分钟总 deadline/u
+  );
+});
+
+test('activation refuses to stop production without the 70 minute reserve', async () => {
+  assert.throws(() => assertActivationBudget(4_100_000, 0), /至少 70 分钟/u);
+  assert.equal(assertActivationBudget(4_200_000, 0), 4_200_000);
+});
+
+test('activation keeps production running when dynamic acceptance budget was consumed', async () => {
+  let stopped = false;
+  await assert.rejects(
+    activatePreparedRelease({
+      projectRoot: process.cwd(),
+      prepared: { previousRevision: 'a'.repeat(40), revision: 'b'.repeat(40) },
+      preflight: async () => ({ requiredAcceptanceMs: 20 * 60 * 1000 }),
+      stopProduction: async () => { stopped = true; },
+      deadline: Date.now() + 80 * 60 * 1000
+    }),
+    /四入口验收预算/u
+  );
+  assert.equal(stopped, false);
+});
+
+test('activation reports both the release failure and cleanup stop failure', async () => {
+  let stopCalls = 0;
+  await assert.rejects(
+    activatePreparedRelease({
+      projectRoot: process.cwd(),
+      prepared: { previousRevision: 'a'.repeat(40), revision: 'b'.repeat(40) },
+      preflight: async () => ({}),
+      stopProduction: async () => {
+        stopCalls += 1;
+        if (stopCalls === 2) throw new Error('cleanup stop failed');
+      },
+      fastForward: async () => { throw new Error('fast-forward failed'); },
+      loadDeploy: async () => async () => {}
+    }),
+    (error) => {
+      assert.equal(error instanceof AggregateError, true);
+      assert.match(error.message, /fast-forward failed/u);
+      assert.match(error.message, /cleanup stop failed/u);
+      return true;
+    }
+  );
+});
+
 test('bundle deployment loads the candidate deploy module after fast-forward', async (t) => {
   const source = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-candidate-source-'));
   const server = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-candidate-server-'));
@@ -421,7 +480,7 @@ test('bundle deployment checks the current server before fast-forwarding main', 
   assert.ok(prepareIndex > preflightIndex);
 });
 
-test('changed candidate preflight warms backend and frontend dependencies before acceptance', () => {
+test('candidate preflight always warms backend and frontend dependencies before activation', () => {
   const source = fs.readFileSync(
     path.join(path.resolve(import.meta.dirname, '..'), 'scripts', 'deploy-from-bundle.mjs'),
     'utf8'
@@ -440,6 +499,10 @@ test('changed candidate preflight warms backend and frontend dependencies before
 
   assert.ok(backendDependencyIndex >= 0);
   assert.ok(frontendDependencyIndex > backendDependencyIndex);
+  const unchangedReturnIndex = preflight.indexOf(
+    'return { requireGeo010Acceptance: false, dependenciesPreflighted: true }'
+  );
+  assert.ok(unchangedReturnIndex > frontendDependencyIndex);
   assert.ok(acceptanceIndex > frontendDependencyIndex);
   assert.equal(stopIndex, -1);
 });

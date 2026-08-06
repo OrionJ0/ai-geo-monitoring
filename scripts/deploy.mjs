@@ -609,6 +609,13 @@ async function main() {
   await deploy(preparedRevision);
 }
 
+// 本 revision 只升级 Bundle 启动器，不包含 GEO 运行时代码。现役启动器会
+// 从候选 revision 调用本函数，因此桥接提交必须明确声明自身不触发业务硬切；
+// 后续统一候选自带完整、不可伪造的运行合同指纹实现。
+export async function isGeo010ContractChanged() {
+  return false;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   main().catch((error) => {
     console.error(error.message);
