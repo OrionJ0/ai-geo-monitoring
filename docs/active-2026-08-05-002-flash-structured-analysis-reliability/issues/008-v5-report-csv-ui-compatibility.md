@@ -29,6 +29,7 @@ blocked_by:
 - [x] 页面明确展示 `observed_only / open_discovery / not_proven`、未解决数和隔离数，不把开放 SOV 描述为完整市场份额。前端报告页面识别 `observed_competitor_mentions` 并标注"开放发现 SOV（仅基于本次已发现实体）"；`competition_analysis` 透传 unresolved/quarantined。
 - [x] matched、unmatched、ambiguous 使用中性身份文案并保持相同关系展示资格，不改变推荐、排名或排序。`registry_match` 随 `analysis_structure.entities` 透传（issue 003），不改变顶层业务值。
 - [x] v5 CSV 导出再导入结构相等，完整保留实体 ID、source ID、快照版本/哈希、匹配状态和有界诊断；表外实体不会在往返中丢失。CSV `parseCsv/buildCsv` 接受 scoped 版本并保留 `competition_entities[].entity_id`（测试验证）。
+- [x] 服务端导出的 CSV 以版本化信封和文件级 HMAC 覆盖来源项目、源完整性状态、表头、行数及有序完整行集合，项目配置变化不会重解释历史，跨项目重放、整行复制、删除、重排或改单元格均会失效；密钥环支持新增专用根、编码历史根和旧 raw JWT 根。无签名 v5 原子拒绝；无签名历史文件保持可读但始终为 `unverified_import`，服务端 KPI 全部为 unavailable/null、页面隐藏核心指标，引用显示为 `legacy_unverified`。`missing_records`、`snapshot_only` 和未终态运行禁止签名。
 - [x] 未知实体 ID、证据哈希或快照身份不一致的 v5 CSV 被明确拒绝；历史 v4 CSV 仍可读取。缺失 name 的竞品实体被 `INVALID_COMPETITION_ENTITY` 拒绝；v1 往返测试证明历史 CSV 仍可读。
 - [x] 报告页面在桌面和移动端可读，长诊断有界，不暴露密钥、完整无效模型输出或服务器绝对路径。现有响应式报告页面保持；后端诊断有界截断（300 字符），不保存密钥/完整无效输出。
 

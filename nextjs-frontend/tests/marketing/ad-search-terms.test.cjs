@@ -182,6 +182,9 @@ test('advertising search-term page is a read-only nested dashboard consumer', ()
   assert.match(hookSource, /\/search-terms/);
   assert.match(hookSource, /revision:\s*currentResult\.data\.revision/);
   assert.match(hookSource, /assertMarketingSearchTermResourceResponse/);
+  assert.match(hookSource, /const responseFilter = \{/);
+  assert.match(hookSource, /\{ from, to, \.\.\.responseFilter \}/);
+  assert.match(hookSource, /\{ \.\.\.previousRange, \.\.\.responseFilter \}/);
   assert.match(hookSource, /marketingSnapshotWarning/);
   assert.match(hookSource, /assertMarketingDashboardRootResponse\([^,]+, projectId\)/);
   assert.match(hookSource, /dashboardFilterMatchesRange/);

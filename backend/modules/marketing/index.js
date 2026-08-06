@@ -641,7 +641,13 @@ function createMarketingModule({
   };
 }
 
+function setMarketingPrivateCache(_req, res, next) {
+  res.set('Cache-Control', 'private, no-store');
+  next();
+}
+
 module.exports = {
   createConcurrencyGate,
-  createMarketingModule
+  createMarketingModule,
+  setMarketingPrivateCache
 };

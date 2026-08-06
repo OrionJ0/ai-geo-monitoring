@@ -15,6 +15,7 @@ const ajv = new Ajv2020({
 addFormats(ajv);
 
 const validators = new Map();
+const headerValidators = new Map();
 
 function rewriteSchemaRefs(value) {
   if (Array.isArray(value)) return value.map(rewriteSchemaRefs);
@@ -61,17 +62,56 @@ function compileResponseValidator(path, status) {
   return validator;
 }
 
-function assertMarketingOpenApiResponse({ path, status, payload }) {
+function headerValue(headers, name) {
+  if (typeof headers?.get === 'function') return headers.get(name);
+  const entry = Object.entries(headers || {}).find(([key]) => (
+    key.toLowerCase() === name.toLowerCase()
+  ));
+  return entry ? String(entry[1]) : null;
+}
+
+function assertResponseHeaders({ path, status, headers }) {
+  if (headers === undefined) return;
+  const operation = openApi.paths[path]?.get;
+  const response = resolveResponse(operation?.responses?.[String(status)]);
+  for (const [name, declaration] of Object.entries(response?.headers || {})) {
+    const value = headerValue(headers, name);
+    if (value === null) {
+      if (declaration.required === false) continue;
+      throw new assert.AssertionError({
+        message: `OpenAPI 响应头不匹配：${path} ${status}：缺少 ${name}`,
+        actual: headers,
+        expected: declaration
+      });
+    }
+    const cacheKey = `${path}#${status}#${name}`;
+    if (!headerValidators.has(cacheKey)) {
+      headerValidators.set(cacheKey, ajv.compile(rewriteSchemaRefs(declaration.schema)));
+    }
+    const validator = headerValidators.get(cacheKey);
+    if (!validator(value)) {
+      throw new assert.AssertionError({
+        message: `OpenAPI 响应头不匹配：${path} ${status}：${name}`,
+        actual: value,
+        expected: declaration.schema
+      });
+    }
+  }
+}
+
+function assertMarketingOpenApiResponse({ path, status, payload, headers }) {
   const validator = compileResponseValidator(path, status);
-  if (validator(payload)) return;
-  const details = validator.errors.map((error) => (
-    `${error.instancePath || '/'} ${error.message}`
-  )).join('; ');
-  throw new assert.AssertionError({
-    message: `OpenAPI 响应不匹配：${path} ${status}：${details}`,
-    actual: payload,
-    expected: '符合 goodieai-marketing-ad-read.openapi.json'
-  });
+  if (!validator(payload)) {
+    const details = validator.errors.map((error) => (
+      `${error.instancePath || '/'} ${error.message}`
+    )).join('; ');
+    throw new assert.AssertionError({
+      message: `OpenAPI 响应不匹配：${path} ${status}：${details}`,
+      actual: payload,
+      expected: '符合 goodieai-marketing-ad-read.openapi.json'
+    });
+  }
+  assertResponseHeaders({ path, status, headers });
 }
 
 module.exports = {

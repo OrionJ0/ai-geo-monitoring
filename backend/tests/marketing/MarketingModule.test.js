@@ -692,7 +692,7 @@ test('the application mounts marketing through its facade without changing globa
   assert.match(appSource, /createMarketingModule/);
   assert.match(
     appSource,
-    /app\.use\('\/api\/marketing',\s*authRequired,\s*marketingModule\.router\)/
+    /app\.use\('\/api\/marketing',\s*setMarketingPrivateCache,\s*authRequired,\s*marketingModule\.router\)/
   );
   assert.match(
     appSource,

@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
+const http = require('node:http');
 const test = require('node:test');
 const { QueryTypes } = require('sequelize');
+const express = require('express');
 
 const {
   MarketingDashboardService
@@ -18,9 +20,15 @@ const {
   BaiduBindingService
 } = require('../../modules/marketing/services/BaiduBindingService');
 const {
+  createMarketingDashboardRouter
+} = require('../../modules/marketing/routes/marketingDashboardRoutes');
+const {
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
+const {
+  assertMarketingOpenApiResponse
+} = require('./helpers/assertMarketingOpenApiResponse');
 
 function completeReportSet(binding, campaignName = '计划甲') {
   const common = {
@@ -55,6 +63,122 @@ function completeReportSet(binding, campaignName = '计划甲') {
     }]
   };
 }
+
+test('四个正式 GET 以真实服务和 SQLite 响应通过同一 OpenAPI HTTP 校验', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-http-openapi-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize, { accountId: '1234' });
+  let providerCalls = 0;
+  const clock = () => Date.parse('2026-07-30T04:00:00.000Z');
+  const refresh = new MarketingRefreshService({
+    sequelize: database.sequelize,
+    reportProvider: {
+      async fetchSearchReports({ binding }) {
+        providerCalls += 1;
+        return completeReportSet(binding);
+      }
+    },
+    contractVersion: 'fixture-contract-v1',
+    currencyCode: 'CNY',
+    costScale: 2,
+    clock
+  });
+  const run = await refresh.createRun({
+    projectId: 11,
+    triggerType: 'MANUAL',
+    userId: 2
+  });
+  await refresh.executeRun(run.runId);
+  const dashboardService = new MarketingDashboardService({
+    sequelize: database.sequelize,
+    clock
+  });
+  const adResourceService = new MarketingAdResourceService({
+    sequelize: database.sequelize,
+    snapshotSelector: new MarketingSnapshotSelector({
+      sequelize: database.sequelize
+    })
+  });
+  const app = express();
+  app.use((req, _res, next) => {
+    req.user = { id: 2, role: 'user' };
+    next();
+  });
+  app.use('/api/marketing', createMarketingDashboardRouter({
+    dashboardService,
+    adResourceService,
+    refreshService: refresh,
+    enqueue() {}
+  }));
+  const server = http.createServer(app);
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const dashboardResponse = await fetch(
+    `${baseUrl}/api/marketing/projects/11/dashboard`
+  );
+  const dashboard = await dashboardResponse.json();
+  assert.equal(dashboardResponse.status, 200);
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 200,
+    payload: dashboard,
+    headers: dashboardResponse.headers
+  });
+  assert.equal(dashboard.revision, run.runId);
+
+  const common = new URLSearchParams({
+    revision: dashboard.revision,
+    from: dashboard.coverage.from,
+    to: dashboard.coverage.to
+  });
+  const searchTermFilters = new URLSearchParams({
+    ...Object.fromEntries(common),
+    query: '厂家',
+    accountId: '1234',
+    campaignId: '101',
+    adGroupId: '201',
+    keywordName: '周界报警系统',
+    queryStatus: 'NOT_ADDED',
+    matchType: 'PHRASE'
+  });
+  for (const [resource, pathName, params] of [
+    ['ad-hierarchy', '/api/marketing/projects/{projectId}/ad-hierarchy', common],
+    ['keywords', '/api/marketing/projects/{projectId}/keywords', common],
+    ['search-terms', '/api/marketing/projects/{projectId}/search-terms', searchTermFilters]
+  ]) {
+    const response = await fetch(
+      `${baseUrl}/api/marketing/projects/11/${resource}?${params}`
+    );
+    const payload = await response.json();
+    assert.equal(response.status, 200, resource);
+    assertMarketingOpenApiResponse({
+      path: pathName,
+      status: 200,
+      payload,
+      headers: response.headers
+    });
+    assert.equal(payload.revision, dashboard.revision);
+    if (resource === 'search-terms') {
+      assert.deepEqual(payload.filter, {
+        from: dashboard.coverage.from,
+        to: dashboard.coverage.to,
+        query: '厂家',
+        accountId: '1234',
+        campaignId: '101',
+        adGroupId: '201',
+        keywordName: '周界报警系统',
+        queryStatus: 'NOT_ADDED',
+        matchType: 'PHRASE'
+      });
+    }
+  }
+  assert.equal(providerCalls, 1, '四个 GET 不得重复调用百度上游');
+});
 
 test('one refresh commits campaign, ad group, keyword and search-term facts atomically', async (t) => {
   const database = await createMarketingTestDatabase('marketing-hierarchy-refresh-');

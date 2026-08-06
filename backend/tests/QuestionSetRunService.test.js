@@ -6,6 +6,8 @@ const path = require('node:path');
 
 const databaseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'geo-question-set-runs-'));
 process.env.DB_STORAGE = path.join(databaseDir, 'test.sqlite');
+const TEST_JWT_SECRET = 'question-set-run-csv-integrity-test-secret-with-non-32-byte-length';
+process.env.JWT_SECRET = TEST_JWT_SECRET;
 delete process.env.DATABASE_URL;
 
 const QuestionSetRunService = require('../services/QuestionSetRunService');
@@ -537,6 +539,14 @@ test('单问题报告返回 v5 排名、SOV 和可复核语义证据', async () 
     report.rows[0].competition_entities
   );
   assert.equal(Object.hasOwn(restored.rows[0], 'share_of_voice'), false);
+  await assert.rejects(
+    QuestionSetRunService.importCsv({
+      project,
+      user,
+      csv: QuestionSetRunCsvService.buildCsv(report)
+    }),
+    (error) => error?.code === 'CSV_SIGNATURE_REQUIRED'
+  );
   await imported.destroy();
   await run.destroy();
 });
@@ -693,6 +703,12 @@ test('DeepSeek Web 报告保留平台、模型、分角色来源、Web 证据及
   assert.equal(report.rows[0].web_capture.artifact_owner_record_id, record.id);
   assert.equal(report.rows[0].web_capture.capture_mode.name, 'web_search');
 
+  const reconciliation = await QuestionSetRunService.reconcileNativeRun({
+    projectId: project.id,
+    runId: run.id
+  });
+  assert.equal(reconciliation.ok, true);
+  assert.equal(reconciliation.reconciled, true);
   const csv = await QuestionSetRunService.exportCsv({
     projectId: project.id,
     runId: run.id
@@ -878,6 +894,10 @@ test('问题集报告在品牌分析失败时仍统计独立保存的显式引�
     parsing_status: 'completed'
   });
   const run = await createNativeRun(1);
+  await run.update({
+    analysis_contract_version: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped'
+  });
   await record.update({ question_set_run_id: run.id, run_slot_index: 0 });
 
   const report = await QuestionSetRunService.getReport({
@@ -894,6 +914,13 @@ test('问题集报告在品牌分析失败时仍统计独立保存的显式引�
   assert.equal(report.summary.owned_citation_rate, 100);
   assert.equal(report.rows[0].citation_evidence_status, 'explicit');
   assert.equal(report.rows[0].citation_count, 1);
+  const restored = QuestionSetRunCsvService.parseCsv(
+    QuestionSetRunCsvService.buildCsv(report)
+  );
+  assert.equal(restored.analysisContractVersion, 'ai_structured_v5');
+  assert.equal(restored.rows[0].status, 'failed');
+  assert.equal(restored.rows[0].has_metrics, false);
+  assert.equal(restored.rows[0].analysis_method, 'legacy_rules_v1');
 
   await run.destroy();
   await record.destroy();
@@ -975,6 +1002,310 @@ test('标准 CSV 导出后可以重新导入为内容等价的只读历史报告
   assert.equal(restored.summary.brand_mention_rate, original.summary.brand_mention_rate);
   assert.equal(restored.summary.owned_citation_rate, original.summary.owned_citation_rate);
   assert.equal(restored.summary.total_owned_citations, original.summary.total_owned_citations);
+});
+
+test('无签名导入引用降级为未验证证据且签名导出不依赖当前项目配置', async () => {
+  const nativeRun = await QuestionSetRun.findOne({
+    where: { project_id: project.id, source: 'native' },
+    order: [['id', 'DESC']]
+  });
+  const report = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: nativeRun.id
+  });
+  const explicitIndex = report.rows.findIndex((row) => (
+    row.citation_evidence_status === 'explicit'
+    && row.citation_sources.length > 0
+  ));
+  assert.notEqual(explicitIndex, -1, '测试基线必须包含显式引用来源');
+  const signedCsv = await QuestionSetRunService.exportCsv({
+    projectId: project.id,
+    runId: nativeRun.id
+  });
+
+  const forgedCsv = ({ source, ownedCount, competitorCount }) => {
+    const rows = report.rows.map((row, index) => index === explicitIndex
+      ? {
+          ...row,
+          citation_count: 1,
+          owned_citation_count: ownedCount,
+          competitor_citation_count: competitorCount,
+          citation_sources: [source]
+        }
+      : row);
+    return QuestionSetRunCsvService.buildCsv({ ...report, rows });
+  };
+
+  const untrustedOwnershipCsvs = [
+    forgedCsv({
+      source: {
+        url: 'https://evil.example/report',
+        domain: 'evil.example',
+        owned: true,
+        competitor_owned: false
+      },
+      ownedCount: 1,
+      competitorCount: 0
+    }),
+    forgedCsv({
+      source: {
+        url: 'https://evil.example/report',
+        domain: 'evil.example',
+        owned: false,
+        competitor_owned: true
+      },
+      ownedCount: 0,
+      competitorCount: 1
+    })
+  ];
+  const originalWebsite = project.website;
+  await project.update({ website: 'https://changed.example.com' });
+  try {
+    process.env.CSV_REPORT_INTEGRITY_KEY = Buffer.alloc(32, 7).toString('base64');
+    const signedImported = await QuestionSetRunService.importCsv({ project, user, csv: signedCsv });
+    delete process.env.CSV_REPORT_INTEGRITY_KEY;
+    const signedRestored = await QuestionSetRunService.getReport({
+      projectId: project.id,
+      runId: signedImported.id
+    });
+    assert.equal(signedRestored.rows[explicitIndex].citation_evidence_status, 'explicit');
+    assert.equal(signedRestored.rows[explicitIndex].citation_count, 1);
+    await signedImported.destroy();
+
+    for (const csv of untrustedOwnershipCsvs) {
+      const imported = await QuestionSetRunService.importCsv({ project, user, csv });
+      const restored = await QuestionSetRunService.getReport({
+        projectId: project.id,
+        runId: imported.id
+      });
+      assert.equal(restored.rows[explicitIndex].citation_evidence_status, 'legacy_unverified');
+      assert.equal(restored.integrity.status, 'unverified_import');
+      assert.equal(restored.rows[explicitIndex].has_metrics, false);
+      assert.equal(restored.rows[explicitIndex].brand_mentioned, false);
+      assert.equal(restored.summary.brand_mentioned_answers, null);
+      assert.equal(restored.rows[explicitIndex].citation_count, 0);
+      assert.equal(restored.rows[explicitIndex].owned_citation_count, 0);
+      assert.equal(restored.rows[explicitIndex].competitor_citation_count, 0);
+      assert.equal(restored.rows[explicitIndex].legacy_citation_sources.length, 1);
+      const resignedCsv = await QuestionSetRunService.exportCsv({
+        projectId: project.id,
+        runId: imported.id
+      });
+      const resignedImported = await QuestionSetRunService.importCsv({
+        project,
+        user,
+        csv: resignedCsv
+      });
+      const resignedRestored = await QuestionSetRunService.getReport({
+        projectId: project.id,
+        runId: resignedImported.id
+      });
+      assert.equal(resignedRestored.integrity.status, 'unverified_import');
+      assert.equal(resignedRestored.rows[explicitIndex].has_metrics, false);
+      assert.equal(resignedRestored.summary.business_metrics_status, 'unavailable');
+      assert.equal(resignedRestored.summary.brand_mention_rate, null);
+      assert.equal(resignedRestored.summary.recommendation_rate, null);
+      assert.equal(resignedRestored.summary.avg_share_of_voice, null);
+      await resignedImported.destroy();
+      await imported.destroy();
+    }
+  } finally {
+    delete process.env.CSV_REPORT_INTEGRITY_KEY;
+    await project.update({ website: originalWebsite });
+  }
+
+  const otherProject = await BrandProject.create({
+    user_id: user.id,
+    name: '其他项目',
+    aliases: [],
+    primary_keywords: [],
+    platforms: ['deepseek'],
+    status: 'active'
+  });
+  await assert.rejects(
+    QuestionSetRunService.importCsv({ project: otherProject, user, csv: signedCsv }),
+    (error) => error?.code === 'CSV_PROJECT_MISMATCH'
+  );
+  await otherProject.destroy();
+
+  process.env.JWT_SECRET = 'rotated-question-set-run-csv-integrity-test-secret';
+  process.env.CSV_REPORT_INTEGRITY_PREVIOUS_KEYS = JSON.stringify([{
+    type: 'raw_utf8',
+    value: TEST_JWT_SECRET
+  }]);
+  try {
+    const jwtRotatedImported = await QuestionSetRunService.importCsv({
+      project,
+      user,
+      csv: signedCsv
+    });
+    assert.ok(jwtRotatedImported.id);
+    await jwtRotatedImported.destroy();
+  } finally {
+    process.env.JWT_SECRET = TEST_JWT_SECRET;
+    delete process.env.CSV_REPORT_INTEGRITY_PREVIOUS_KEYS;
+  }
+
+  const oldConfigKey = Buffer.alloc(32, 8).toString('base64');
+  const newConfigKey = Buffer.alloc(32, 9).toString('base64');
+  process.env.CONFIG_ENCRYPTION_KEY = oldConfigKey;
+  const rotatingKeyCsv = await QuestionSetRunService.exportCsv({
+    projectId: project.id,
+    runId: nativeRun.id
+  });
+  process.env.CONFIG_ENCRYPTION_KEY = newConfigKey;
+  process.env.CSV_REPORT_INTEGRITY_PREVIOUS_KEYS = JSON.stringify([oldConfigKey]);
+  try {
+    const rotatedImported = await QuestionSetRunService.importCsv({
+      project,
+      user,
+      csv: rotatingKeyCsv
+    });
+    assert.ok(rotatedImported.id);
+    await rotatedImported.destroy();
+  } finally {
+    delete process.env.CONFIG_ENCRYPTION_KEY;
+    delete process.env.CSV_REPORT_INTEGRITY_PREVIOUS_KEYS;
+  }
+
+  const originalSource = report.rows[explicitIndex].citation_sources[0];
+  const tamperedSignedCsv = signedCsv
+    .replaceAll(originalSource.url, 'https://evil.example/report')
+    .replaceAll(originalSource.domain, 'evil.example');
+  await assert.rejects(
+    QuestionSetRunService.importCsv({ project, user, csv: tamperedSignedCsv }),
+    (error) => error?.code === 'INVALID_CSV_SIGNATURE'
+  );
+
+  const signedLines = signedCsv.split('\n');
+  assert.ok(signedLines.length >= 3, '签名篡改测试需要至少两条数据行');
+  const signedHeader = signedLines[0];
+  const signedRows = signedLines.slice(1);
+  for (const tamperedCsv of [
+    [signedHeader, ...signedRows, signedRows[0]].join('\n'),
+    [signedHeader, ...signedRows.slice(1)].join('\n'),
+    [signedHeader, ...signedRows.toReversed()].join('\n')
+  ]) {
+    await assert.rejects(
+      QuestionSetRunService.importCsv({ project, user, csv: tamperedCsv }),
+      (error) => error?.code === 'INVALID_CSV_SIGNATURE'
+    );
+  }
+
+  const conflictingDomainCsv = forgedCsv({
+    source: {
+      url: 'https://gato.com.cn/report',
+      domain: 'evil.example',
+      owned: true,
+      competitor_owned: false
+    },
+    ownedCount: 1,
+    competitorCount: 0
+  });
+  await assert.rejects(
+    QuestionSetRunService.importCsv({ project, user, csv: conflictingDomainCsv }),
+    (error) => error?.code === 'INVALID_CITATION_EVIDENCE'
+  );
+
+  const failedUnsignedRow = {
+    ...report.rows[explicitIndex],
+    status: 'failed',
+    has_metrics: false,
+    brand_mentioned: false,
+    brand_mentions: 0,
+    brand_rank: null,
+    brand_recommended: false,
+    sentiment: '',
+    share_of_voice: null,
+    answer_competitor_share: null,
+    sov_numerator: null,
+    sov_denominator: null,
+    competitor_mentions: [],
+    competition_entities: [],
+    analysis_method: 'legacy_rules_v1',
+    analysis_structure: {
+      citations: {
+        semantics_version: 'explicit-citation-v2',
+        evidence_status: 'explicit'
+      }
+    },
+    analysis_evidence: {}
+  };
+  const failedUnsignedCsv = QuestionSetRunCsvService.buildCsv({
+    ...report,
+    rows: [failedUnsignedRow]
+  });
+  const failedImported = await QuestionSetRunService.importCsv({
+    project,
+    user,
+    csv: failedUnsignedCsv
+  });
+  const failedRestored = await QuestionSetRunService.getReport({
+    projectId: project.id,
+    runId: failedImported.id
+  });
+  assert.equal(failedRestored.rows[0].citation_evidence_status, 'legacy_unverified');
+  assert.equal(failedRestored.rows[0].legacy_citation_sources.length, 1);
+  await failedImported.destroy();
+
+  process.env.CSV_REPORT_INTEGRITY_KEY = 'weak-password';
+  try {
+    await assert.rejects(
+      QuestionSetRunService.exportCsv({ projectId: project.id, runId: nativeRun.id }),
+      (error) => (
+        error?.code === 'CSV_EXPORT_INTEGRITY_UNAVAILABLE'
+        && error?.status === 503
+        && /CSV 报告完整性配置不可用/.test(error.message)
+        && /CSV_REPORT_INTEGRITY_KEY 必须是 32 字节/.test(error.cause?.message || '')
+      )
+    );
+  } finally {
+    delete process.env.CSV_REPORT_INTEGRITY_KEY;
+  }
+
+  const incompleteRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: null,
+    question_set_name: '不完整运行不得签名',
+    source: 'native',
+    schema_version: 'question_set_run_v1',
+    planned_record_count: 2,
+    integrity_status: 'missing_records',
+    integrity_missing_record_count: 1,
+    integrity_error_code: 'question_set_run_records_missing',
+    imported_rows: [report.rows[explicitIndex]],
+    started_at: new Date(),
+    completed_at: new Date()
+  });
+  await assert.rejects(
+    QuestionSetRunService.exportCsv({ projectId: project.id, runId: incompleteRun.id }),
+    (error) => (
+      error?.code === 'CSV_EXPORT_NOT_ALLOWED'
+      && error?.status === 409
+      && /只有终态且记录完整/.test(error.message)
+    )
+  );
+  await incompleteRun.destroy();
+
+  const unreconciledRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_id: null,
+    question_set_name: '尚未收敛的缺记录运行',
+    source: 'native',
+    schema_version: 'question_set_run_v1',
+    planned_record_count: 2,
+    integrity_status: 'complete',
+    imported_rows: [report.rows[explicitIndex]],
+    started_at: new Date(),
+    completed_at: null
+  });
+  await assert.rejects(
+    QuestionSetRunService.exportCsv({ projectId: project.id, runId: unreconciledRun.id }),
+    (error) => error?.code === 'CSV_EXPORT_NOT_ALLOWED' && error?.status === 409
+  );
+  await unreconciledRun.destroy();
 });
 
 test('报告不再用文本规则猜测无竞品项目的历史排名', async () => {

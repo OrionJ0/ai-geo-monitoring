@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const databaseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'geo-question-set-run-api-'));
 process.env.DB_STORAGE = path.join(databaseDir, 'test.sqlite');
+process.env.JWT_SECRET = 'question-set-run-api-csv-integrity-test-secret';
 delete process.env.DATABASE_URL;
 
 const router = require('../routes/geoProjects');
@@ -19,6 +20,7 @@ const {
 } = require('../models');
 const AIPlatformService = require('../services/AIPlatformService');
 const ProjectRunService = require('../services/ProjectRunService');
+const QuestionSetRunService = require('../services/QuestionSetRunService');
 const originalAnalysisConfigService = ProjectRunService.analysisConfigService;
 
 let user;
@@ -245,6 +247,48 @@ test('用户可以从报告接口导出标准 CSV 并安全回导', async () => 
     column: 'status'
   });
   assert.equal(await QuestionSetRun.count({ where: { project_id: project.id } }), beforeInvalidImport);
+});
+
+test('导出接口区分业务状态冲突和完整性配置不可用', async () => {
+  const incompleteRun = await QuestionSetRun.create({
+    project_id: project.id,
+    user_id: user.id,
+    question_set_name: '不完整运行',
+    source: 'native',
+    planned_record_count: 2,
+    integrity_status: 'missing_records',
+    integrity_missing_record_count: 1,
+    integrity_error_code: 'question_set_run_records_missing',
+    imported_rows: [],
+    completed_at: new Date()
+  });
+  const conflictResponse = await requestRoute(
+    'get',
+    '/:projectId/question-set-runs/:runId/export',
+    { params: { projectId: project.id, runId: incompleteRun.id } }
+  );
+  assert.equal(conflictResponse.statusCode, 409);
+  assert.equal(conflictResponse.payload.error.code, 'CSV_EXPORT_NOT_ALLOWED');
+  await incompleteRun.destroy();
+
+  const originalExportCsv = QuestionSetRunService.exportCsv;
+  QuestionSetRunService.exportCsv = async () => {
+    const error = new Error('CSV 报告完整性密钥未配置');
+    error.code = 'CSV_EXPORT_INTEGRITY_UNAVAILABLE';
+    error.status = 503;
+    throw error;
+  };
+  try {
+    const unavailableResponse = await requestRoute(
+      'get',
+      '/:projectId/question-set-runs/:runId/export',
+      { params: { projectId: project.id, runId: run.id } }
+    );
+    assert.equal(unavailableResponse.statusCode, 503);
+    assert.equal(unavailableResponse.payload.error.code, 'CSV_EXPORT_INTEGRITY_UNAVAILABLE');
+  } finally {
+    QuestionSetRunService.exportCsv = originalExportCsv;
+  }
 });
 
 test('用户可以在原报告中重试失败项且重复提交不会创建第二批任务', async () => {

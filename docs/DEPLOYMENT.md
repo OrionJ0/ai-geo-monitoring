@@ -161,6 +161,10 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 
   # 用于加密数据库中的 AI 平台密钥（32 字节 Base64 或 64 位十六进制）
   CONFIG_ENCRYPTION_KEY=<加密主密钥>
+  # 可选独立 CSV 签名根，必须为 32 字节 Base64 或 64 位十六进制；未配置时使用现役加密/JWT 密钥环
+  CSV_REPORT_INTEGRITY_KEY=
+  # 轮换后仍需验签的旧签名根；Base64/Hex 用字符串，旧原始 JWT 用 {"type":"raw_utf8","value":"..."}
+  CSV_REPORT_INTEGRITY_PREVIOUS_KEYS=[]
 
   # 内部部署可设为 true；公网或存在不可信账号时必须保持 false
   SEO_AUDIT_ALLOW_PRIVATE_TARGETS=false

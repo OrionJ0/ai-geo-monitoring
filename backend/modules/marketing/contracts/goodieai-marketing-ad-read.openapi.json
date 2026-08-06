@@ -128,7 +128,7 @@
             "description": "同一 revision 的完整广告层级。",
             "headers": {
               "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } },
-              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string" } }
+              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string", "pattern": "(?:^|,\\s*)[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn](?:\\s*,|$)" } }
             },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MarketingAdHierarchyResponse" } }
@@ -171,7 +171,7 @@
             "description": "有界关键词页及完整筛选范围 summary。",
             "headers": {
               "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } },
-              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string" } }
+              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string", "pattern": "(?:^|,\\s*)[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn](?:\\s*,|$)" } }
             },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MarketingKeywordResponse" } }
@@ -218,7 +218,7 @@
             "description": "有界搜索词页；items 中没有 keywordId。",
             "headers": {
               "Cache-Control": { "schema": { "type": "string", "const": "private, max-age=60" } },
-              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string" } }
+              "Vary": { "description": "逗号分隔 token 必须包含 Authorization；全局 CORS 可能同时追加 Origin。", "schema": { "type": "string", "pattern": "(?:^|,\\s*)[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn](?:\\s*,|$)" } }
             },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MarketingSearchTermResponse" } }
@@ -276,12 +276,18 @@
       },
       "AuthenticationErrorResponse": {
         "description": "Bearer Token 缺失、无效、过期或账户停用。",
+        "headers": {
+          "Cache-Control": { "schema": { "type": "string", "const": "private, no-store" } }
+        },
         "content": {
           "application/json": { "schema": { "$ref": "#/components/schemas/AuthenticationError" } }
         }
       },
       "ServerErrorResponse": {
         "description": "营销读取内部失败或鉴权服务配置失败。",
+        "headers": {
+          "Cache-Control": { "schema": { "type": "string", "const": "private, no-store" } }
+        },
         "content": {
           "application/json": {
             "schema": {
@@ -295,6 +301,10 @@
       },
       "UnavailableResponse": {
         "description": "营销模块、上游协调或鉴权账户读取暂时不可用。",
+        "headers": {
+          "Cache-Control": { "schema": { "type": "string", "const": "private, no-store" } },
+          "Retry-After": { "required": false, "schema": { "type": "string", "pattern": "^[1-9][0-9]*$" } }
+        },
         "content": {
           "application/json": {
             "schema": {
@@ -360,6 +370,22 @@
           "query": { "type": "string", "minLength": 1, "maxLength": 200 },
           "campaignId": { "type": "string", "minLength": 1, "maxLength": 512 },
           "adGroupId": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      },
+      "MarketingSearchTermFilter": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "string", "format": "date" },
+          "to": { "type": "string", "format": "date" },
+          "query": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "accountId": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "campaignId": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "adGroupId": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "keywordName": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "queryStatus": { "type": "string", "enum": ["ADDED", "NOT_ADDED", "NOT_ADDABLE"] },
+          "matchType": { "type": "string", "minLength": 1, "maxLength": 40 }
         }
       },
       "MarketingDashboardStates": {
@@ -570,7 +596,7 @@
           "projectId": { "type": "string" },
           "revision": { "type": "string" },
           "coverage": { "$ref": "#/components/schemas/MarketingCoverage" },
-          "filter": { "$ref": "#/components/schemas/MarketingDateFilter" },
+          "filter": { "$ref": "#/components/schemas/MarketingSearchTermFilter" },
           "summary": { "$ref": "#/components/schemas/MarketingExactMetrics" },
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/MarketingAdSearchTerm" } },
           "pagination": { "$ref": "#/components/schemas/MarketingPagination" }

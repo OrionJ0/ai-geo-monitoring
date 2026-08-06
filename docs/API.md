@@ -133,10 +133,15 @@ Authorization: Bearer <token>
 - `GET /api/geo-projects/:projectId/question-set-runs/:runId/export` 导出一次运行报告
   - 返回 UTF-8 BOM 的 `text/csv` 文件，schema 为 `question_set_run_v1`
   - 固定单表结构，一行对应一个问题与一个平台结果；数组字段、失败阶段、分析诊断和重试链路使用 JSON 单元格保存以支持无损回导
+  - 服务端导出会追加版本化签名信封和文件级 HMAC，覆盖来源项目、表头、行数及有序完整行集合；签名只用于证明同一服务生成的历史事实，不包含或暴露签名密钥
 - `POST /api/geo-projects/:projectId/question-set-runs/import` 导入标准运行报告 CSV
   - 请求：原始 CSV 文本，`Content-Type: text/csv`，最大 5MB、5000 条数据行
   - 校验：schema 版本、必要列、终态 `status`、正整数 ID、非负计数、0–100 百分比、正数排名、时间顺序、JSON 结构和引用链接协议；仅允许 HTTP/HTTPS 引用链接
   - 校验失败返回 `422`，并给出稳定 `code`、`row` 和 `column`；整份文件原子拒绝，不写入部分报告
+  - 有效签名的原样导出只能回导到来源项目并无损恢复 KPI；新增专用密钥时仍会尝试现役配置/JWT 派生密钥，轮换后的旧 Base64/Hex 根或 typed `raw_utf8` JWT 根由 `CSV_REPORT_INTEGRITY_PREVIOUS_KEYS` 验证
+  - 只有已正式收敛、冻结行数与计划数一致且 `integrity=complete` 的可信报告，或已净化且保持 `unverified_import` 身份的历史导入可以签名；`missing_records`、`snapshot_only`、未收敛和仍有 pending 的运行不得借导出回导升级信任状态
+  - 当前报告状态禁止导出时返回 `409 CSV_EXPORT_NOT_ALLOWED`；签名密钥缺失或无效时返回 `503 CSV_EXPORT_INTEGRITY_UNAVAILABLE`，不将预期业务冲突伪装成服务器故障
+  - 无签名 v5 文件原子拒绝；无签名历史文件仍可读取并可再次签名归档，但始终保持 `unverified_import`，服务端把全部业务 KPI 返回为 unavailable/null，页面隐藏核心指标并明确警告；签名存在但被篡改或无法由密钥环验证时整份拒绝
   - 返回：`201 Created` 和只读导入报告；不会创建或覆盖问题、问题集，也不会计入项目汇总指标
 
 ### 项目看板与项目报告

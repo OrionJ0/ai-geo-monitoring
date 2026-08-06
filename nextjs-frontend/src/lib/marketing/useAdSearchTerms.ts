@@ -259,12 +259,7 @@ export default function useAdSearchTerms({
         return;
       }
       const selectedEvidence = scope || evidenceParts(resourceQuery.keywordEvidence);
-      const commonParams = {
-        revision: currentResult.data.revision,
-        page: resourceQuery.page,
-        pageSize: resourceQuery.pageSize,
-        sortBy: resourceQuery.sortBy,
-        sortOrder: resourceQuery.sortOrder,
+      const responseFilter = {
         query: resourceQuery.query || undefined,
         accountId: selectedEvidence?.accountId,
         campaignId: selectedEvidence?.campaignId,
@@ -280,6 +275,14 @@ export default function useAdSearchTerms({
           ? undefined
           : resourceQuery.matchType
       };
+      const commonParams = {
+        revision: currentResult.data.revision,
+        page: resourceQuery.page,
+        pageSize: resourceQuery.pageSize,
+        sortBy: resourceQuery.sortBy,
+        sortOrder: resourceQuery.sortOrder,
+        ...responseFilter
+      };
       const resourceEndpoint = `/api/marketing/projects/${encodeURIComponent(projectId)}/search-terms`;
       const currentResponse = await axios.get<MarketingSearchTermResourceResponse>(
         resourceEndpoint,
@@ -293,7 +296,7 @@ export default function useAdSearchTerms({
         currentResponse.data,
         projectId,
         revision,
-        { from, to }
+        { from, to, ...responseFilter }
       );
       const current = adaptMarketingSearchTermResource(
         currentResponse.data,
@@ -328,7 +331,7 @@ export default function useAdSearchTerms({
             previousResult.value.data,
             projectId,
             revision,
-            previousRange
+            { ...previousRange, ...responseFilter }
           );
           previous = adaptMarketingSearchTermResource(
             previousResult.value.data,

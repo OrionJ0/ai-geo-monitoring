@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const databaseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'geo-run-reconciliation-'));
 process.env.DB_STORAGE = path.join(databaseDir, 'test.sqlite');
+process.env.JWT_SECRET = 'question-set-run-reconciliation-csv-integrity-test-secret';
 delete process.env.DATABASE_URL;
 
 const ProjectRunService = require('../services/ProjectRunService');

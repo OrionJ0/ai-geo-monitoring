@@ -8,6 +8,9 @@ const express = require('express');
 
 const { authRequired } = require('../../middleware/auth');
 const {
+  setMarketingPrivateCache
+} = require('../../modules/marketing');
+const {
   createMarketingDashboardRouter
 } = require('../../modules/marketing/routes/marketingDashboardRoutes');
 
@@ -298,6 +301,38 @@ test('唯一 OpenAPI 3.1 合同覆盖四个现役读取入口和生成式前端 
     document.components.schemas.MarketingKeywordResponse.properties.filter.$ref,
     '#/components/schemas/MarketingKeywordFilter'
   );
+  const searchTermFilter = document.components.schemas.MarketingSearchTermFilter;
+  assert.deepEqual(searchTermFilter.required, ['from', 'to']);
+  assert.deepEqual(Object.keys(searchTermFilter.properties), [
+    'from',
+    'to',
+    'query',
+    'accountId',
+    'campaignId',
+    'adGroupId',
+    'keywordName',
+    'queryStatus',
+    'matchType'
+  ]);
+  assert.equal(
+    document.components.schemas.MarketingSearchTermResponse.properties.filter.$ref,
+    '#/components/schemas/MarketingSearchTermFilter'
+  );
+  for (const responseName of [
+    'ErrorResponse',
+    'AuthenticationErrorResponse',
+    'ServerErrorResponse',
+    'UnavailableResponse'
+  ]) {
+    assert.equal(
+      document.components.responses[responseName].headers['Cache-Control'].schema.const,
+      'private, no-store'
+    );
+  }
+  assert.deepEqual(
+    document.components.responses.UnavailableResponse.headers['Retry-After'].schema,
+    { type: 'string', pattern: '^[1-9][0-9]*$' }
+  );
   const generated = fs.readFileSync(path.resolve(
     __dirname,
     '../../../nextjs-frontend/src/lib/marketing/generated/marketingAdReadApi.ts'
@@ -315,13 +350,21 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
   const authResponse = {
     statusCode: null,
     payload: null,
+    headers: {},
+    set(name, value) { this.headers[String(name).toLowerCase()] = value; return this; },
     status(code) { this.statusCode = code; return this; },
     json(payload) { this.payload = payload; return this; }
   };
+  let cacheMiddlewareContinued = false;
+  setMarketingPrivateCache({}, authResponse, () => {
+    cacheMiddlewareContinued = true;
+  });
+  assert.equal(cacheMiddlewareContinued, true);
   await authRequired({ headers: {} }, authResponse, () => {
     assert.fail('missing token must not reach the route');
   });
   assert.equal(authResponse.statusCode, 401);
+  assert.equal(authResponse.headers['cache-control'], 'private, no-store');
   assert.deepEqual(authResponse.payload, {
     success: false,
     message: '未授权：缺少令牌'
@@ -329,7 +372,8 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
   assertMarketingOpenApiResponse({
     path: '/api/marketing/projects/{projectId}/dashboard',
     status: 401,
-    payload: authResponse.payload
+    payload: authResponse.payload,
+    headers: authResponse.headers
   });
 
   const logs = [];
@@ -455,21 +499,30 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
       `${baseUrl}/api/marketing/projects/11/${suffix}`
     );
     assert.equal(response.status, 200);
+    const payload = await response.json();
     assertMarketingOpenApiResponse({
       path: pathName,
       status: 200,
-      payload: await response.json()
+      payload,
+      headers: response.headers
     });
   }
   const internalFailure = await fetch(
     `${baseUrl}/api/marketing/projects/11/ad-hierarchy?revision=database-fail`
   );
   assert.equal(internalFailure.status, 500);
-  assert.deepEqual(await internalFailure.json(), {
+  const internalFailurePayload = await internalFailure.json();
+  assert.deepEqual(internalFailurePayload, {
     error: {
       code: 'MARKETING_AD_RESOURCE_FAILED',
       message: '营销广告资源暂时不可用'
     }
+  });
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/ad-hierarchy',
+    status: 500,
+    payload: internalFailurePayload,
+    headers: internalFailure.headers
   });
   const timeout = await fetch(
     `${baseUrl}/api/marketing/projects/504/dashboard`
@@ -478,17 +531,25 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
   assertMarketingOpenApiResponse({
     path: '/api/marketing/projects/{projectId}/dashboard',
     status: 504,
-    payload: await timeout.json()
+    payload: await timeout.json(),
+    headers: timeout.headers
   });
   const dashboardInternalFailure = await fetch(
     `${baseUrl}/api/marketing/projects/500/dashboard`
   );
   assert.equal(dashboardInternalFailure.status, 500);
-  assert.deepEqual(await dashboardInternalFailure.json(), {
+  const dashboardInternalFailurePayload = await dashboardInternalFailure.json();
+  assert.deepEqual(dashboardInternalFailurePayload, {
     error: {
       code: 'MARKETING_DASHBOARD_FAILED',
       message: '营销看板暂时不可用'
     }
+  });
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 500,
+    payload: dashboardInternalFailurePayload,
+    headers: dashboardInternalFailure.headers
   });
   for (const [projectId, code, status] of [
     ['response', 'BAIDU_TONGJI_RESPONSE_INVALID', 502],
@@ -548,7 +609,8 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
   assertMarketingOpenApiResponse({
     path: '/api/marketing/projects/{projectId}/search-terms',
     status: 409,
-    payload: failedPayload
+    payload: failedPayload,
+    headers: failed.headers
   });
 
   const outOfRange = await fetch(
@@ -558,7 +620,8 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
   assertMarketingOpenApiResponse({
     path: '/api/marketing/projects/{projectId}/keywords',
     status: 422,
-    payload: await outOfRange.json()
+    payload: await outOfRange.json(),
+    headers: outOfRange.headers
   });
 
   const unavailable = await fetch(
@@ -568,7 +631,8 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
   assertMarketingOpenApiResponse({
     path: '/api/marketing/projects/{projectId}/dashboard',
     status: 503,
-    payload: await unavailable.json()
+    payload: await unavailable.json(),
+    headers: unavailable.headers
   });
   assert.deepEqual(logs.map(({ event, operation, status, errorCode }) => ({
     event,

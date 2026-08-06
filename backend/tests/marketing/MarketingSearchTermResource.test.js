@@ -191,7 +191,8 @@ test('search-term resource pins an old revision and keeps exact database paginat
   });
   assert.deepEqual(result.filter, {
     from: '2026-07-02',
-    to: '2026-07-03'
+    to: '2026-07-03',
+    keywordName: '周界报警'
   });
   assert.deepEqual(result.summary, {
     impressions: '1000000000000000000000207',
@@ -223,6 +224,31 @@ test('search-term resource pins an old revision and keeps exact database paginat
       costAmountScaled: '13'
     }
   ]);
+
+  const fullyFiltered = await service.readSearchTerms({
+    projectId: '11',
+    revision: 'old-revision',
+    from: '2026-07-02',
+    to: '2026-07-03',
+    query: '乙',
+    accountId: 'account-1',
+    campaignId: 'campaign-1',
+    adGroupId: 'group-1',
+    keywordName: '周界报警',
+    queryStatus: 'ADDED',
+    matchType: 'EXACT'
+  });
+  assert.deepEqual(fullyFiltered.filter, {
+    from: '2026-07-02',
+    to: '2026-07-03',
+    query: '乙',
+    accountId: 'account-1',
+    campaignId: 'campaign-1',
+    adGroupId: 'group-1',
+    keywordName: '周界报警',
+    queryStatus: 'ADDED',
+    matchType: 'EXACT'
+  });
   assert.equal(result.items.some((item) => 'keywordId' in item), false);
   assert.deepEqual(result.items[0].trend, [
     {

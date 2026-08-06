@@ -83,6 +83,13 @@ function getRunStateNotice({
     ? '可以重试失败项。'
     : (CAPABILITY_REASON_MESSAGES[capabilities.retry_disabled_reason] || '');
 
+  if (integrityStatus === 'unverified_import') {
+    return {
+      type: 'warning',
+      title: '未验证的历史导入报告',
+      description: `${counts}该文件没有可验证的完整性签名，品牌、推荐、排名、情绪、SOV 和引用指标均已退出核心 KPI；原证据仅供只读核对。`
+    };
+  }
   if (source === 'imported') {
     return {
       type: 'info',

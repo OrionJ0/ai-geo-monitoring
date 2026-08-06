@@ -77,3 +77,71 @@ test('OpenAPI 运行时校验拒绝错误信封和嵌套响应漂移', () => {
     /items\/0\/impressions/u
   );
 });
+
+test('OpenAPI 运行时校验约束实际 HTTP 缓存与重试响应头', () => {
+  const payload = {
+    error: {
+      code: 'MARKETING_MODULE_UNAVAILABLE',
+      message: '营销看板暂时不可用'
+    }
+  };
+  assert.throws(() => assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 503,
+    payload,
+    headers: {}
+  }), /Cache-Control/u);
+  assert.throws(() => assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 503,
+    payload,
+    headers: {
+      'cache-control': 'private, no-store',
+      'retry-after': 'later'
+    }
+  }), /Retry-After/u);
+  assert.doesNotThrow(() => assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 503,
+    payload,
+    headers: {
+      'cache-control': 'private, no-store',
+      'retry-after': '3'
+    }
+  }));
+
+  const keywordPayload = {
+    schemaVersion: 'marketing_keywords_v1',
+    projectId: '11',
+    revision: 'revision-1',
+    coverage: {
+      from: '2026-07-01',
+      to: '2026-07-31',
+      lastSuccessfulAt: '2026-08-01T00:00:00.000Z',
+      currency: 'CNY',
+      costScale: 2
+    },
+    filter: { from: '2026-07-01', to: '2026-07-31' },
+    summary: { impressions: '0', clicks: '0', costAmountScaled: '0' },
+    items: [],
+    pagination: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 }
+  };
+  assert.throws(() => assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/keywords',
+    status: 200,
+    payload: keywordPayload,
+    headers: {
+      'cache-control': 'private, max-age=60',
+      vary: 'Origin'
+    }
+  }), /Vary/u);
+  assert.doesNotThrow(() => assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/keywords',
+    status: 200,
+    payload: keywordPayload,
+    headers: {
+      'cache-control': 'private, max-age=60',
+      vary: 'Origin, authorization'
+    }
+  }));
+});

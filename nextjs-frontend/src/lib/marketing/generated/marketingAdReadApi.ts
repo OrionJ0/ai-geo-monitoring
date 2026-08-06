@@ -29,6 +29,17 @@ export type MarketingKeywordFilter = {
   campaignId?: string;
   adGroupId?: string;
 };
+export type MarketingSearchTermFilter = {
+  from: string;
+  to: string;
+  query?: string;
+  accountId?: string;
+  campaignId?: string;
+  adGroupId?: string;
+  keywordName?: string;
+  queryStatus?: "ADDED" | "NOT_ADDED" | "NOT_ADDABLE";
+  matchType?: string;
+};
 export type MarketingDashboardStates = {
   moduleState: string;
   projectState: "ACTIVE" | "ARCHIVED";
@@ -163,7 +174,7 @@ export type MarketingSearchTermResponse = {
   projectId: string;
   revision: string;
   coverage: MarketingCoverage;
-  filter: MarketingDateFilter;
+  filter: MarketingSearchTermFilter;
   summary: MarketingExactMetrics;
   items: Array<MarketingAdSearchTerm>;
   pagination: MarketingPagination;

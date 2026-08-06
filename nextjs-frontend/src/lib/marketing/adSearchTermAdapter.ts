@@ -6,6 +6,7 @@ import type {
 import type {
   MarketingAdSearchTerm,
   MarketingDashboardResponse,
+  MarketingSearchTermFilter,
   MarketingSearchTermResponse
 } from '@/lib/marketing/generated/marketingAdReadApi';
 import {
@@ -73,11 +74,30 @@ function resourceItem(value: unknown): value is MarketingAdSearchTerm {
     && decimalText(value.costAmountScaled);
 }
 
+function exactFilter(
+  value: Record<string, unknown>,
+  expected: MarketingSearchTermFilter
+): boolean {
+  const fields = [
+    'from',
+    'to',
+    'query',
+    'accountId',
+    'campaignId',
+    'adGroupId',
+    'keywordName',
+    'queryStatus',
+    'matchType'
+  ] as const;
+  return Object.keys(value).every((field) => fields.includes(field as typeof fields[number]))
+    && fields.every((field) => value[field] === expected[field]);
+}
+
 export function assertMarketingSearchTermResourceResponse(
   value: unknown,
   expectedProjectId: string,
   expectedRevision: string,
-  expectedRange: { from: string; to: string }
+  expectedFilter: MarketingSearchTermFilter
 ): asserts value is MarketingSearchTermResourceResponse {
   if (!record(value)) invalidResource();
   const coverage = value.coverage;
@@ -97,8 +117,7 @@ export function assertMarketingSearchTermResourceResponse(
     || Number(coverage.costScale) < 0
     || Number(coverage.costScale) > 12
     || !record(filter)
-    || filter.from !== expectedRange.from
-    || filter.to !== expectedRange.to
+    || !exactFilter(filter, expectedFilter)
     || !record(summary)
     || !decimalText(summary.impressions)
     || !decimalText(summary.clicks)

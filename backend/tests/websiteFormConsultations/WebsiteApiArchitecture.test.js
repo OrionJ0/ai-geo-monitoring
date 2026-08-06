@@ -17,7 +17,7 @@ test('application mounts website and Baidu APIs under separate modules and names
   );
   assert.match(
     appSource,
-    /app\.use\('\/api\/marketing', authRequired, marketingModule\.router\)/u
+    /app\.use\('\/api\/marketing', setMarketingPrivateCache, authRequired, marketingModule\.router\)/u
   );
 
   const marketingSource = fs.readFileSync(

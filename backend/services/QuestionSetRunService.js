@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const { Op } = require('sequelize');
 const {
   BrandProject,
@@ -26,6 +27,99 @@ const STRUCTURED_ANALYSIS_METHODS = new Set([
   'ai_structured_v4',
   V5_ANALYSIS_CONTRACT
 ]);
+const CSV_INTEGRITY_KEY_ID = 'question-set-run-csv-hmac-v1';
+
+function csvExportError({ code, status, message, cause = null }) {
+  const error = new Error(message, cause ? { cause } : undefined);
+  error.code = code;
+  error.status = status;
+  return error;
+}
+
+function parseEncodedIntegrityRoot(rawKey, label) {
+  const value = String(rawKey || '').trim();
+  let decoded = null;
+  if (/^[a-f0-9]{64}$/i.test(value)) {
+    decoded = Buffer.from(value, 'hex');
+  } else if (/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    decoded = Buffer.from(value, 'base64');
+  }
+  if (!decoded || decoded.length !== 32) {
+    throw new Error(`${label} 必须是 32 字节 Base64 或 64 位十六进制随机材料`);
+  }
+  return decoded;
+}
+
+function previousCsvIntegrityRoots() {
+  const raw = String(process.env.CSV_REPORT_INTEGRITY_PREVIOUS_KEYS || '').trim();
+  if (!raw) return [];
+  let values;
+  try {
+    values = JSON.parse(raw);
+  } catch {
+    throw new Error('CSV_REPORT_INTEGRITY_PREVIOUS_KEYS 必须是 JSON 数组');
+  }
+  if (!Array.isArray(values)) {
+    throw new Error('CSV_REPORT_INTEGRITY_PREVIOUS_KEYS 必须是 JSON 数组');
+  }
+  return values.map((entry, index) => {
+    const label = `CSV_REPORT_INTEGRITY_PREVIOUS_KEYS[${index}]`;
+    if (typeof entry === 'string') return parseEncodedIntegrityRoot(entry, label);
+    if (
+      entry
+      && typeof entry === 'object'
+      && !Array.isArray(entry)
+      && entry.type === 'raw_utf8'
+      && typeof entry.value === 'string'
+      && Buffer.byteLength(entry.value, 'utf8') >= 32
+    ) {
+      return Buffer.from(entry.value, 'utf8');
+    }
+    throw new Error(`${label} 必须是编码密钥字符串或 {"type":"raw_utf8","value":"..."}`);
+  });
+}
+
+function csvIntegrityKeys() {
+  const roots = [];
+  if (String(process.env.CSV_REPORT_INTEGRITY_KEY || '').trim()) {
+    roots.push(parseEncodedIntegrityRoot(
+      process.env.CSV_REPORT_INTEGRITY_KEY,
+      'CSV_REPORT_INTEGRITY_KEY'
+    ));
+  }
+  if (String(process.env.CONFIG_ENCRYPTION_KEY || '').trim()) {
+    roots.push(parseEncodedIntegrityRoot(
+      process.env.CONFIG_ENCRYPTION_KEY,
+      'CONFIG_ENCRYPTION_KEY'
+    ));
+  }
+  const jwtSecret = String(process.env.JWT_SECRET || '').trim();
+  if (jwtSecret) {
+    if (Buffer.byteLength(jwtSecret, 'utf8') < 32) {
+      throw new Error('JWT_SECRET 至少需要 32 字节才能派生 CSV 完整性密钥');
+    }
+    roots.push(Buffer.from(jwtSecret, 'utf8'));
+  }
+  roots.push(...previousCsvIntegrityRoots());
+  const seen = new Set();
+  return roots
+    .filter((root) => {
+      const key = root.toString('hex');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((rootKey) => crypto
+      .createHmac('sha256', rootKey)
+      .update(CSV_INTEGRITY_KEY_ID)
+      .digest('hex'));
+}
+
+// 专用覆盖密钥和历史密钥环在模块加载时即 fail-closed；正式启动不会带着弱值运行。
+if (
+  String(process.env.CSV_REPORT_INTEGRITY_KEY || '').trim()
+  || String(process.env.CSV_REPORT_INTEGRITY_PREVIOUS_KEYS || '').trim()
+) csvIntegrityKeys();
 
 function isV5Metric(row) {
   return String(row?.metric_semantics_version || '') === SCOPED_METRIC_SEMANTICS
@@ -125,6 +219,21 @@ function normalizeCitationSemantics(row) {
       citation_evidence_status: 'explicit'
     };
   }
+  if (
+    CitationMetricSemanticsService.semanticsVersion(row)
+      === 'imported-citation-unverified-v1'
+  ) {
+    return {
+      ...row,
+      citation_count: 0,
+      owned_citation_count: 0,
+      competitor_citation_count: 0,
+      citation_sources: [],
+      citation_evidence_status: 'legacy_unverified',
+      legacy_citation_count: finiteNumber(row.legacy_citation_count),
+      legacy_citation_sources: normalizeMetricCitationSources(row.legacy_citation_sources)
+    };
+  }
   if (row?.has_metrics === false) {
     return {
       ...row,
@@ -164,6 +273,70 @@ function normalizeCitationSemantics(row) {
           legacy_citation_sources: rawSources
         }
       : {})
+  };
+}
+
+function downgradeImportedCitationEvidence(row) {
+  if (
+    CitationMetricSemanticsService.semanticsVersion(row)
+      !== CitationMetricSemanticsService.SEMANTICS_VERSION
+    || CitationMetricSemanticsService.evidenceStatus(row) === 'unavailable'
+  ) {
+    return row;
+  }
+  const sources = Array.isArray(row.citation_sources) ? row.citation_sources : [];
+  return {
+    ...row,
+    citation_count: 0,
+    owned_citation_count: 0,
+    competitor_citation_count: 0,
+    citation_sources: [],
+    legacy_citation_count: finiteNumber(row.citation_count) || sources.length,
+    legacy_citation_sources: sources,
+    analysis_structure: {
+      ...(plain(row.analysis_structure) || {}),
+      citations: {
+        semantics_version: 'imported-citation-unverified-v1',
+        evidence_status: 'unverified'
+      }
+    }
+  };
+}
+
+function downgradeUnverifiedImportedMetrics(row) {
+  const citationRow = downgradeImportedCitationEvidence(row);
+  return {
+    ...citationRow,
+    has_metrics: false,
+    brand_mentioned: false,
+    brand_mentions: 0,
+    brand_rank: null,
+    brand_recommended: false,
+    sentiment: '',
+    sentiment_reason: '',
+    share_of_voice: null,
+    answer_competitor_share: null,
+    sov_numerator: null,
+    sov_denominator: null,
+    competitor_mentions: [],
+    competition_entities: [],
+    analysis_method: row.analysis_method,
+    analysis_evidence: {},
+    analysis_structure: row.status === 'failed'
+      ? (citationRow.analysis_structure?.citations
+          ? { citations: citationRow.analysis_structure.citations }
+          : {})
+      : {
+          ...(citationRow.analysis_structure?.citations
+            ? { citations: citationRow.analysis_structure.citations }
+            : {}),
+          imported_unverified: {
+            analysis_method: row.analysis_method,
+            metric_semantics_version: row.metric_semantics_version,
+            analysis_structure: row.analysis_structure,
+            analysis_evidence: row.analysis_evidence
+          }
+        }
   };
 }
 
@@ -401,6 +574,43 @@ function summarize(rows) {
       kind: 'legacy_configured_competitors',
       average: legacySovRows.length ? legacyAverage : null,
       calculable_answers: legacySovRows.length
+    }
+  };
+}
+
+function summarizeUnverified(rows) {
+  return {
+    total: rows.length,
+    completed: rows.filter((row) => row.status === 'completed').length,
+    failed: rows.filter((row) => row.status === 'failed').length,
+    pending: rows.filter((row) => row.status === 'pending').length,
+    business_metrics_status: 'unavailable',
+    valid_analyses: null,
+    valid_answers: null,
+    acquired_answers: null,
+    invalid_captures: null,
+    analysis_coverage_rate: null,
+    brand_mentioned_answers: null,
+    recommendation_assessed_answers: null,
+    recommended_answers: null,
+    ranked_answers: null,
+    sov_calculable_answers: null,
+    avg_answer_competitor_share: null,
+    citation_valid_analyses: null,
+    citation_unverified_analyses: null,
+    competitor_baseline_count: null,
+    brand_mention_rate: null,
+    recommendation_rate: null,
+    citation_rate: null,
+    owned_citation_rate: null,
+    avg_brand_rank: null,
+    total_citations: null,
+    total_owned_citations: null,
+    avg_share_of_voice: null,
+    sov_summary: {
+      status: 'unavailable',
+      average: null,
+      calculable_answers: null
     }
   };
 }
@@ -875,7 +1085,9 @@ class QuestionSetRunService {
     const status = integrityStatus === 'missing_records'
       ? 'failed'
       : deriveStatus(rows, pausedAt);
-    const summary = summarize(rows);
+    const summary = integrityStatus === 'unverified_import'
+      ? summarizeUnverified(rows)
+      : summarize(rows);
     const executionSummary = summarizeExecution(rows);
     const controlState = deriveControlState({
       source: run.source,
@@ -1163,14 +1375,84 @@ class QuestionSetRunService {
   async exportCsv({ projectId, runId, repositories = {} }) {
     const report = await this.getReport({ projectId, runId, repositories });
     if (!report) return null;
-    return QuestionSetRunCsvService.buildCsv(report);
+    const storedRun = plain(await this.findRun({ projectId, runId, repositories }));
+    const sourceIntegrityStatus = report.integrity?.status || 'complete';
+    const storedRows = Array.isArray(storedRun?.imported_rows) ? storedRun.imported_rows : [];
+    const expectedRows = Number(storedRun?.planned_record_count) || 0;
+    const nativeRunNotFrozen = report.source === 'native' && (
+      !storedRun?.completed_at
+      || storedRows.length === 0
+      || expectedRows <= 0
+      || storedRows.length !== expectedRows
+      || report.rows.length !== expectedRows
+    );
+    if (
+      !['complete', 'unverified_import'].includes(sourceIntegrityStatus)
+      || Number(report.execution_summary?.pending) > 0
+      || ['running', 'paused'].includes(report.status)
+      || nativeRunNotFrozen
+    ) {
+      throw csvExportError({
+        code: 'CSV_EXPORT_NOT_ALLOWED',
+        status: 409,
+        message: '只有终态且记录完整的报告可以生成可信 CSV 签名'
+      });
+    }
+    let integrityKeys;
+    try {
+      integrityKeys = csvIntegrityKeys();
+    } catch (cause) {
+      throw csvExportError({
+        code: 'CSV_EXPORT_INTEGRITY_UNAVAILABLE',
+        status: 503,
+        message: 'CSV 报告完整性配置不可用',
+        cause
+      });
+    }
+    if (!integrityKeys.length) {
+      throw csvExportError({
+        code: 'CSV_EXPORT_INTEGRITY_UNAVAILABLE',
+        status: 503,
+        message: 'CSV 报告完整性密钥未配置'
+      });
+    }
+    return QuestionSetRunCsvService.buildCsv(report, {
+      integrityKey: integrityKeys[0],
+      integrityKeyId: CSV_INTEGRITY_KEY_ID,
+      sourceProjectId: projectId,
+      sourceIntegrityStatus
+    });
   }
 
   async importCsv({ project, user, csv, repositories = {} }) {
     const Run = repositories.QuestionSetRun || QuestionSetRun;
     const projectRow = plain(project);
     const userRow = plain(user);
-    const parsed = QuestionSetRunCsvService.parseCsv(csv);
+    const integrityKeys = csvIntegrityKeys();
+    const parsed = QuestionSetRunCsvService.parseCsv(csv, {
+      integrityKeys,
+      expectedProjectId: projectRow.id
+    });
+    const currentV5 = parsed.analysisContractVersion === V5_ANALYSIS_CONTRACT
+      || parsed.metricSemanticsVersion === SCOPED_METRIC_SEMANTICS;
+    if (!parsed.integrityVerified && currentV5) {
+      throw new QuestionSetRunCsvService.CsvValidationError(
+        'CSV_SIGNATURE_REQUIRED',
+        'v5 CSV 必须携带由当前或历史完整性密钥验证通过的文件签名'
+      );
+    }
+    if (parsed.integrityPresent && !parsed.integrityVerified) {
+      throw new QuestionSetRunCsvService.CsvValidationError(
+        'INVALID_CSV_SIGNATURE',
+        'CSV 完整性签名无法由当前或历史密钥验证'
+      );
+    }
+    const importedRows = parsed.integrityVerified
+      ? parsed.rows
+      : parsed.rows.map(downgradeUnverifiedImportedMetrics);
+    const integrityStatus = parsed.integrityVerified
+      ? (parsed.sourceIntegrityStatus || 'complete')
+      : 'unverified_import';
     return Run.create({
       project_id: projectRow.id,
       user_id: userRow.id,
@@ -1181,10 +1463,10 @@ class QuestionSetRunService {
       analysis_contract_version: parsed.analysisContractVersion,
       metric_semantics_version: parsed.metricSemanticsVersion,
       planned_record_count: 0,
-      integrity_status: 'complete',
+      integrity_status: integrityStatus,
       integrity_missing_record_count: 0,
-      integrity_error_code: null,
-      imported_rows: parsed.rows,
+      integrity_error_code: parsed.integrityVerified ? null : 'csv_signature_missing',
+      imported_rows: importedRows,
       started_at: parsed.startedAt,
       completed_at: parsed.completedAt
     });

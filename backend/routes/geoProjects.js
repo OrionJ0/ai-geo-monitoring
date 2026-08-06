@@ -916,6 +916,16 @@ router.get('/:projectId/question-set-runs/:runId/export', loadProject, async (re
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
     return res.send(csv);
   } catch (error) {
+    if (
+      ['CSV_EXPORT_NOT_ALLOWED', 'CSV_EXPORT_INTEGRITY_UNAVAILABLE'].includes(error?.code)
+      && [409, 503].includes(error?.status)
+    ) {
+      return res.status(error.status).json({
+        success: false,
+        message: error.message,
+        error: { code: error.code, message: error.message }
+      });
+    }
     return res.status(500).json({ success: false, message: '导出问题集运行报告失败' });
   }
 });

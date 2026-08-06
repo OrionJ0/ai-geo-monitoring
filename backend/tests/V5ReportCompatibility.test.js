@@ -56,10 +56,27 @@ function csvReport(rowOverrides = {}) {
       }],
       analysis_structure: {
         schema_version: 'geo_metric_input_v5',
-        target_fact: { status: 'complete', brand_mentioned: true },
-        target_semantics: { status: 'complete' },
+        target_fact: {
+          status: 'complete',
+          brand_mentioned: true,
+          brand_mentions: 1,
+          mentions: []
+        },
+        target_semantics: {
+          status: 'complete',
+          recommendation: { status: 'assessed', value: true },
+          rank: { status: 'assessed', value: 1 },
+          sentiment: { status: 'assessed', value: 'positive' }
+        },
         competition_analysis: { status: 'partial', scope: 'open_discovery', completeness: 'not_proven' },
-        sov: { status: 'observed_only', scope: 'open_discovery', completeness: 'not_proven' }
+        sov: {
+          status: 'observed_only',
+          scope: 'open_discovery',
+          completeness: 'not_proven',
+          numerator: 1,
+          denominator: 2,
+          value: 50
+        }
       },
       analysis_evidence: {},
       failure: null,

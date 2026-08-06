@@ -86,7 +86,10 @@ const AIPlatformConfigService = require('./services/AIPlatformConfigService');
 const AIRuntimeSettingsService = require('./services/AIRuntimeSettingsService');
 const GeoMetricSemanticsMigrationService = require('./services/GeoMetricSemanticsMigrationService');
 const { authHeaderRequired, authRequired } = require('./middleware/auth');
-const { createMarketingModule } = require('./modules/marketing');
+const {
+  createMarketingModule,
+  setMarketingPrivateCache
+} = require('./modules/marketing');
 const {
   createWebsiteFormConsultationModule
 } = require('./modules/websiteFormConsultations');
@@ -135,7 +138,7 @@ app.use(
   authHeaderRequired,
   consultationRecordModule.router
 );
-app.use('/api/marketing', authRequired, marketingModule.router);
+app.use('/api/marketing', setMarketingPrivateCache, authRequired, marketingModule.router);
 app.use(
   '/api/admin/marketing/baidu',
   marketingAuthorizationLimiter,

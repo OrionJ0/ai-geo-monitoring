@@ -108,6 +108,24 @@ test('snapshot-only 和 imported 报告只给出只读说明', () => {
   assert.match(imported.description, /不能暂停、继续或重试/);
 });
 
+test('未验证导入优先显示 KPI 退出警告', () => {
+  const notice = getRunStateNotice({
+    status: 'completed',
+    source: 'imported',
+    integrityStatus: 'unverified_import',
+    capabilities: {
+      can_retry: false,
+      retry_disabled_reason: 'imported_report_read_only'
+    },
+    executionSummary: { completed: 2, failed: 0, pending: 0 }
+  });
+
+  assert.equal(notice.type, 'warning');
+  assert.equal(notice.title, '未验证的历史导入报告');
+  assert.match(notice.description, /完整性签名/);
+  assert.match(notice.description, /退出核心 KPI/);
+});
+
 test('运行、暂停、完成和失败提示不互相矛盾', () => {
   const base = {
     source: 'native',

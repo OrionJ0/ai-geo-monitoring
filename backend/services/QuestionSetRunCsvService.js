@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const SCHEMA_VERSION = 'question_set_run_v1';
 const {
   CURRENT_METRIC_SEMANTICS,
@@ -5,6 +6,7 @@ const {
   SCOPED_METRIC_SEMANTICS,
   V1_METRIC_SEMANTICS
 } = require('./GeoMetricSemanticsService');
+const CitationAnalysisService = require('./CitationAnalysisService');
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_ROWS = 5000;
 const MAX_JSON_CELL_CHARS = 100000;
@@ -74,6 +76,16 @@ const HEADERS = [
   ...REVERSIBILITY_HEADERS,
   ...METRIC_SEMANTICS_HEADERS
 ];
+const INTEGRITY_HEADER = 'integrity_signature';
+const INTEGRITY_KEY_ID_HEADER = 'integrity_key_id';
+const SOURCE_PROJECT_ID_HEADER = 'source_project_id';
+const SOURCE_INTEGRITY_STATUS_HEADER = 'source_integrity_status';
+const INTEGRITY_ENVELOPE_HEADERS = [
+  INTEGRITY_KEY_ID_HEADER,
+  SOURCE_PROJECT_ID_HEADER,
+  SOURCE_INTEGRITY_STATUS_HEADER,
+  INTEGRITY_HEADER
+];
 
 class CsvValidationError extends Error {
   constructor(code, message, details = {}) {
@@ -122,7 +134,29 @@ function v5SemanticCell(row, field, fallback) {
   return semantic?.status === 'assessed' ? semantic.value : '';
 }
 
-function buildCsv(report) {
+function signatureForRows(rows, integrityKey, {
+  integrityKeyId,
+  sourceProjectId,
+  sourceIntegrityStatus
+}) {
+  return crypto
+    .createHmac('sha256', integrityKey)
+    .update(JSON.stringify({
+      headers: HEADERS,
+      integrity_key_id: integrityKeyId,
+      source_project_id: String(sourceProjectId),
+      source_integrity_status: sourceIntegrityStatus,
+      rows: rows.map((cells) => cells.map((value) => String(value ?? '')))
+    }))
+    .digest('hex');
+}
+
+function buildCsv(report, {
+  integrityKey = null,
+  integrityKeyId = null,
+  sourceProjectId = null,
+  sourceIntegrityStatus = null
+} = {}) {
   const rows = (Array.isArray(report?.rows) ? report.rows : []).map((row) => [
     SCHEMA_VERSION,
     report.id,
@@ -189,7 +223,30 @@ function buildCsv(report) {
     row.sov_denominator == null ? '' : Number(row.sov_denominator),
     JSON.stringify(Array.isArray(row.competition_entities) ? row.competition_entities : [])
   ]);
-  return `\uFEFF${[HEADERS, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')}`;
+  const signed = Boolean(
+    integrityKey
+    && integrityKeyId
+    && sourceProjectId
+    && sourceIntegrityStatus
+  );
+  const outputHeaders = signed ? [...HEADERS, ...INTEGRITY_ENVELOPE_HEADERS] : HEADERS;
+  const integritySignature = signed
+    ? signatureForRows(rows, integrityKey, {
+        integrityKeyId,
+        sourceProjectId,
+        sourceIntegrityStatus
+      })
+    : null;
+  const outputRows = signed
+    ? rows.map((row) => [
+        ...row,
+        integrityKeyId,
+        sourceProjectId,
+        sourceIntegrityStatus,
+        integritySignature
+      ])
+    : rows;
+  return `\uFEFF${[outputHeaders, ...outputRows].map((row) => row.map(csvEscape).join(',')).join('\n')}`;
 }
 
 function parseCsvRows(csv) {
@@ -324,6 +381,322 @@ function parseOptionalJsonObject(value, column, line) {
   return Object.keys(parsed).length ? parsed : null;
 }
 
+function validateAnalysisContract({
+  version,
+  method,
+  metricVersion,
+  line,
+  noAnalysisResult = false
+}) {
+  const supportedContracts = new Set([
+    null,
+    'geo_metric_input_v2',
+    'legacy_unknown',
+    'ai_structured_v1',
+    'ai_structured_v2',
+    'ai_structured_v3',
+    'ai_structured_v4',
+    'ai_structured_v5'
+  ]);
+  if (!supportedContracts.has(version)) {
+    throw fieldError(
+      'UNSUPPORTED_ANALYSIS_CONTRACT',
+      line,
+      'analysis_contract_version',
+      '不受支持'
+    );
+  }
+  if (method.length > 40) {
+    throw fieldError(
+      'INVALID_FIELD',
+      line,
+      'analysis_method',
+      '不能超过 40 个字符'
+    );
+  }
+  const supportedMethods = new Set([
+    'legacy_rules_v1',
+    'ai_structured_v1',
+    'ai_structured_v2',
+    'ai_structured_v3',
+    'ai_structured_v4',
+    'ai_structured_v5'
+  ]);
+  if (!supportedMethods.has(method)) {
+    throw fieldError(
+      'UNSUPPORTED_ANALYSIS_METHOD',
+      line,
+      'analysis_method',
+      '不受支持'
+    );
+  }
+  if (noAnalysisResult && method === 'legacy_rules_v1') return;
+  const legacyContractByMethod = {
+    legacy_rules_v1: new Set([null, 'legacy_unknown']),
+    ai_structured_v1: new Set([null, 'legacy_unknown', 'ai_structured_v1']),
+    ai_structured_v2: new Set([
+      null,
+      'legacy_unknown',
+      'geo_metric_input_v2',
+      'ai_structured_v2'
+    ])
+  };
+  const historicalLegacyPair = metricVersion === LEGACY_METRIC_SEMANTICS
+    && legacyContractByMethod[method]?.has(version);
+  const historicalVersionedPair = metricVersion === V1_METRIC_SEMANTICS
+    && ['ai_structured_v3', 'ai_structured_v4'].includes(method)
+    && [null, 'legacy_unknown', method].includes(version);
+  const currentV5Pair = version === 'ai_structured_v5'
+    && metricVersion === SCOPED_METRIC_SEMANTICS
+    && method === 'ai_structured_v5';
+  if (!historicalLegacyPair && !historicalVersionedPair && !currentV5Pair) {
+    throw fieldError(
+      'ANALYSIS_CONTRACT_MISMATCH',
+      line,
+      'analysis_method',
+      '与分析合同或指标语义版本不一致'
+    );
+  }
+}
+
+function validateNoAnalysisResult({
+  line,
+  brandMentioned,
+  brandMentions,
+  brandRank,
+  brandRecommended,
+  sentiment,
+  shareOfVoice,
+  answerCompetitorShare,
+  sovNumerator,
+  sovDenominator,
+  competitorBaseline,
+  competitionEntities,
+  analysisStructure,
+  analysisEvidence
+}) {
+  const structureKeys = Object.keys(analysisStructure);
+  const citations = analysisStructure.citations;
+  const citationsValid = citations === undefined || (
+    plainObject(citations)
+    && Object.keys(citations).every((field) => (
+      ['semantics_version', 'evidence_status'].includes(field)
+    ))
+    && typeof citations.semantics_version === 'string'
+    && citations.semantics_version.length > 0
+    && citations.semantics_version.length <= 40
+    && (
+      citations.evidence_status === undefined
+      || (
+        typeof citations.evidence_status === 'string'
+        && citations.evidence_status.length > 0
+        && citations.evidence_status.length <= 40
+      )
+    )
+  );
+  const analysisStructureValid = structureKeys.every((field) => field === 'citations')
+    && citationsValid;
+  if (
+    brandMentioned
+    || brandMentions !== 0
+    || brandRank !== null
+    || brandRecommended
+    || sentiment !== ''
+    || shareOfVoice !== null
+    || answerCompetitorShare !== null
+    || sovNumerator !== null
+    || sovDenominator !== null
+    || competitorBaseline.length > 0
+    || competitionEntities.length > 0
+    || !analysisStructureValid
+    || Object.keys(analysisEvidence).length > 0
+  ) {
+    throw fieldError(
+      'FAILED_ROW_METRICS_NOT_EMPTY',
+      line,
+      'has_metrics',
+      '失败或无指标行不得携带品牌指标、权威指标结构或分析依据'
+    );
+  }
+}
+
+function validateCitationEvidence({
+  line,
+  analysisStructure,
+  citationCount,
+  ownedCitationCount,
+  competitorCitationCount,
+  citationSources
+}) {
+  const citations = analysisStructure.citations;
+  if (!plainObject(citations) || citations.semantics_version !== 'explicit-citation-v2') return;
+  // 早期 explicit-citation-v2 快照没有写 evidence_status；仅在字段真正缺失且
+  // 计数和来源完全一致时视为历史 explicit，显式 falsy 或其他状态一律拒绝。
+  const evidenceStatus = Object.prototype.hasOwnProperty.call(citations, 'evidence_status')
+    ? citations.evidence_status
+    : 'explicit';
+  const normalizedSources = CitationAnalysisService.normalizeSources(
+    citationSources,
+    null,
+    []
+  );
+  const sourcesCanonical = normalizedSources.length === citationSources.length
+    && normalizedSources.every((source, index) => {
+      const rawSource = citationSources[index];
+      if (!rawSource.url || !rawSource.domain) return true;
+      return CitationAnalysisService.canonicalDomain(
+        CitationAnalysisService.normalizeDomain(rawSource.domain)
+      ) === source.domain;
+    });
+  const sourceCount = citationSources.length;
+  const sourceOwnedCount = citationSources.filter((source) => source.owned === true).length;
+  const sourceCompetitorCount = citationSources
+    .filter((source) => source.competitor_owned === true).length;
+  const explicitConsistent = evidenceStatus === 'explicit'
+    && citationCount === sourceCount
+    && ownedCitationCount === sourceOwnedCount
+    && competitorCitationCount === sourceCompetitorCount
+    && sourcesCanonical;
+  const unavailableConsistent = evidenceStatus === 'unavailable'
+    && citationCount === 0
+    && ownedCitationCount === 0
+    && competitorCitationCount === 0
+    && sourceCount === 0;
+  if (!explicitConsistent && !unavailableConsistent) {
+    throw fieldError(
+      'INVALID_CITATION_EVIDENCE',
+      line,
+      'citation_sources_json',
+      '显式引用状态、计数和来源不一致'
+    );
+  }
+}
+
+function plainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sameNullableNumber(left, right) {
+  if (left === null || left === undefined) return right === null || right === undefined;
+  if (right === null || right === undefined) return false;
+  return Number(left) === Number(right);
+}
+
+function validateV5AnalysisStructure({
+  structure,
+  line,
+  brandMentioned,
+  brandMentions,
+  brandRank,
+  brandRecommended,
+  sentiment,
+  answerCompetitorShare,
+  sovNumerator,
+  sovDenominator
+}) {
+  const targetFact = structure?.target_fact;
+  const targetSemantics = structure?.target_semantics;
+  const recommendation = targetSemantics?.recommendation;
+  const rank = targetSemantics?.rank;
+  const sentimentSemantic = targetSemantics?.sentiment;
+  const sov = structure?.sov;
+  const fieldStatuses = new Set(['assessed', 'not_applicable', 'unresolved', 'unavailable']);
+  const semanticFields = [recommendation, rank, sentimentSemantic];
+  const semanticStatuses = semanticFields.map((field) => field?.status);
+  const nullish = (value) => value === null || value === undefined;
+  const recommendationValid = recommendation?.status === 'assessed'
+    ? typeof recommendation.value === 'boolean'
+    : nullish(recommendation?.value);
+  const rankValid = rank?.status === 'assessed'
+    ? (nullish(rank.value) || (Number.isInteger(rank.value) && rank.value > 0))
+    : nullish(rank?.value);
+  const sentimentValues = new Set(['positive', 'neutral', 'negative']);
+  const sentimentValid = sentimentSemantic?.status === 'assessed'
+    ? sentimentValues.has(sentimentSemantic.value)
+    : nullish(sentimentSemantic?.value);
+  const targetSemanticsStatusValid = targetFact?.brand_mentioned === false
+    ? targetSemantics?.status === 'complete'
+      && semanticStatuses.every((status) => status === 'not_applicable')
+    : (
+        (targetSemantics?.status === 'complete'
+          && semanticStatuses.every((status) => status === 'assessed'))
+        || (targetSemantics?.status === 'unavailable'
+          && semanticStatuses.every((status) => status === 'unavailable'))
+        || (targetSemantics?.status === 'partial'
+          && semanticStatuses.some((status) => ['unresolved', 'unavailable'].includes(status))
+          && semanticStatuses.every((status) => status !== 'not_applicable')
+          && !semanticStatuses.every((status) => status === 'unavailable'))
+      );
+  const expectedSovValue = Number.isInteger(sov?.denominator) && sov.denominator > 0
+    ? Number(((sov.numerator / sov.denominator) * 100).toFixed(2))
+    : null;
+  const structureValid = (
+    structure?.schema_version === 'geo_metric_input_v5'
+    && plainObject(targetFact)
+    && targetFact.status === 'complete'
+    && typeof targetFact.brand_mentioned === 'boolean'
+    && Number.isInteger(targetFact.brand_mentions)
+    && targetFact.brand_mentions >= 0
+    && targetFact.brand_mentioned === (targetFact.brand_mentions > 0)
+    && Array.isArray(targetFact.mentions)
+    && plainObject(targetSemantics)
+    && ['complete', 'partial', 'unavailable'].includes(targetSemantics.status)
+    && semanticFields.every((field) => (
+      plainObject(field) && fieldStatuses.has(field.status)
+    ))
+    && recommendationValid
+    && rankValid
+    && sentimentValid
+    && targetSemanticsStatusValid
+    && plainObject(sov)
+    && sov.status === 'observed_only'
+    && sov.scope === 'open_discovery'
+    && sov.completeness === 'not_proven'
+    && Number.isInteger(sov.numerator)
+    && Number.isInteger(sov.denominator)
+    && sov.numerator >= 0
+    && sov.denominator >= sov.numerator
+    && targetFact.brand_mentions === sov.numerator
+    && sameNullableNumber(sov.value, expectedSovValue)
+  );
+  if (!structureValid) {
+    throw fieldError(
+      'INVALID_V5_ANALYSIS_STRUCTURE',
+      line,
+      'analysis_structure_json',
+      '不符合 v5 权威语义结构'
+    );
+  }
+
+  const assessedRecommendationValid = recommendation.status === 'assessed'
+    ? recommendation.value === brandRecommended
+    : brandRecommended === false;
+  const assessedRankValid = rank.status === 'assessed'
+    ? sameNullableNumber(rank.value, brandRank)
+    : brandRank === null;
+  const assessedSentimentValid = sentimentSemantic.status === 'assessed'
+    ? (typeof sentimentSemantic.value === 'string' && sentimentSemantic.value === sentiment)
+    : !sentiment;
+  const scalarsMatch = (
+    targetFact.brand_mentioned === brandMentioned
+    && targetFact.brand_mentions === brandMentions
+    && assessedRecommendationValid
+    && assessedRankValid
+    && assessedSentimentValid
+    && sov.numerator === sovNumerator
+    && sov.denominator === sovDenominator
+    && sameNullableNumber(sov.value, answerCompetitorShare)
+  );
+  if (!scalarsMatch) {
+    throw fieldError(
+      'V5_ANALYSIS_SCALAR_MISMATCH',
+      line,
+      'analysis_structure_json',
+      '与兼容指标列不一致'
+    );
+  }
+}
+
 function parseObjectArray(value, column, line) {
   const rows = parseJsonArray(value, column, line);
   rows.forEach((item) => {
@@ -340,6 +713,11 @@ function parseCitationSources(value, column, line) {
     for (const field of ['url', 'domain', 'title', 'source_origin', 'source_role']) {
       if (source[field] !== undefined && typeof source[field] !== 'string') {
         throw fieldError('INVALID_FIELD', line, column, `中的 ${field} 必须是字符串`);
+      }
+    }
+    for (const field of ['owned', 'competitor_owned']) {
+      if (source[field] !== undefined && typeof source[field] !== 'boolean') {
+        throw fieldError('INVALID_FIELD', line, column, `中的 ${field} 必须是布尔值`);
       }
     }
     if (!source.url) return;
@@ -416,7 +794,10 @@ function parseDate(value, column, line, { nullable = true } = {}) {
   return date;
 }
 
-function parseCsv(csv) {
+function parseCsv(csv, {
+  integrityKeys = [],
+  expectedProjectId = null
+} = {}) {
   if (Buffer.byteLength(String(csv || ''), 'utf8') > MAX_CSV_BYTES) {
     throw new CsvValidationError('FILE_TOO_LARGE', 'CSV 文件不能超过 5MB');
   }
@@ -431,6 +812,15 @@ function parseCsv(csv) {
     throw new CsvValidationError('MISSING_COLUMNS', `CSV 缺少必要列：${missing.join('、')}`);
   }
   const columnIndex = new Map(headers.map((header, index) => [header, index]));
+  const integrityHeaderCount = INTEGRITY_ENVELOPE_HEADERS
+    .filter((header) => headers.includes(header)).length;
+  if (integrityHeaderCount > 0 && integrityHeaderCount !== INTEGRITY_ENVELOPE_HEADERS.length) {
+    throw new CsvValidationError(
+      'MISSING_COLUMNS',
+      `CSV 完整性信封列必须完整：${INTEGRITY_ENVELOPE_HEADERS.join('、')}`
+    );
+  }
+  const hasIntegritySignature = integrityHeaderCount === INTEGRITY_ENVELOPE_HEADERS.length;
   const metricHeaderCount = METRIC_SEMANTICS_HEADERS.filter((header) => headers.includes(header)).length;
   if (metricHeaderCount > 0 && metricHeaderCount !== METRIC_SEMANTICS_HEADERS.length) {
     throw new CsvValidationError(
@@ -502,6 +892,7 @@ function parseCsv(csv) {
         '只允许 completed 或 failed'
       );
     }
+    const analysisMethod = valueAt(row, 'analysis_method').trim() || 'legacy_rules_v1';
     const currentAnalysisContractVersion = valueAt(row, 'analysis_contract_version').trim() || null;
     if (currentAnalysisContractVersion && currentAnalysisContractVersion.length > 40) {
       throw fieldError('INVALID_FIELD', line, 'analysis_contract_version', '不能超过 40 个字符');
@@ -562,6 +953,14 @@ function parseCsv(csv) {
       ? parseObjectArray(competitorBaselineCell, 'competitor_baseline_json', line)
       : competitorMentions;
     const hasMetrics = parseBoolean(valueAt(row, 'has_metrics'), 'has_metrics', line);
+    if (status === 'failed' && hasMetrics) {
+      throw fieldError(
+        'FAILED_ROW_HAS_METRICS',
+        line,
+        'has_metrics',
+        '失败行必须明确标记为无指标'
+      );
+    }
     const shareOfVoice = parsePercentage(valueAt(row, 'share_of_voice'), 'share_of_voice', line);
     const answerCompetitorShare = hasMetricSemanticsHeaders
       ? parsePercentage(
@@ -598,6 +997,90 @@ function parseCsv(csv) {
           }
         )
       : [];
+    const brandMentioned = parseBoolean(valueAt(row, 'brand_mentioned'), 'brand_mentioned', line);
+    const brandMentions = parseNonNegativeInteger(
+      valueAt(row, 'brand_mentions'),
+      'brand_mentions',
+      line
+    );
+    const brandRank = parsePositiveNumber(
+      valueAt(row, 'brand_rank'),
+      'brand_rank',
+      line,
+      { nullable: true }
+    );
+    const brandRecommended = parseBoolean(
+      valueAt(row, 'brand_recommended'),
+      'brand_recommended',
+      line
+    );
+    const sentiment = valueAt(row, 'sentiment');
+    const analysisStructure = parseJsonObject(
+      valueAt(row, 'analysis_structure_json'),
+      'analysis_structure_json',
+      line
+    );
+    const analysisEvidence = parseJsonObject(
+      valueAt(row, 'analysis_evidence_json'),
+      'analysis_evidence_json',
+      line
+    );
+    const citationCount = parseNonNegativeInteger(
+      valueAt(row, 'citation_count'),
+      'citation_count',
+      line
+    );
+    const ownedCitationCount = parseNonNegativeInteger(
+      valueAt(row, 'owned_citation_count'),
+      'owned_citation_count',
+      line,
+      { nullable: true }
+    );
+    const competitorCitationCount = parseNonNegativeInteger(
+      valueAt(row, 'competitor_citation_count'),
+      'competitor_citation_count',
+      line,
+      { nullable: true }
+    );
+    const citationSources = parseCitationSources(
+      valueAt(row, 'citation_sources_json'),
+      'citation_sources_json',
+      line
+    );
+    const noAnalysisResult = status === 'failed' && !hasMetrics;
+    validateAnalysisContract({
+      version: currentAnalysisContractVersion,
+      method: analysisMethod,
+      metricVersion: currentMetricSemanticsVersion,
+      line,
+      noAnalysisResult
+    });
+    if (noAnalysisResult) {
+      validateNoAnalysisResult({
+        line,
+        brandMentioned,
+        brandMentions,
+        brandRank,
+        brandRecommended,
+        sentiment,
+        shareOfVoice,
+        answerCompetitorShare,
+        sovNumerator,
+        sovDenominator,
+        competitorBaseline,
+        competitionEntities,
+        analysisStructure,
+        analysisEvidence
+      });
+    }
+    validateCitationEvidence({
+      line,
+      analysisStructure,
+      citationCount,
+      ownedCitationCount,
+      competitorCitationCount,
+      citationSources
+    });
     // 010 硬切（2026-08-06）：历史 v1（contextual_competitor_mentions_sov_v1）
     // 与当前 v2_scoped 一样携带新版指标字段（v4 时代即带 competition_entities/
     // 分子分母），走同一校验；legacy（configured_competitor_sov_v1）才拒绝。
@@ -686,6 +1169,24 @@ function parseCsv(csv) {
         '历史口径不得携带新版指标字段'
       );
     }
+    if (
+      currentAnalysisContractVersion === 'ai_structured_v5'
+      && status === 'completed'
+      && hasMetrics
+    ) {
+      validateV5AnalysisStructure({
+        structure: analysisStructure,
+        line,
+        brandMentioned,
+        brandMentions,
+        brandRank,
+        brandRecommended,
+        sentiment,
+        answerCompetitorShare,
+        sovNumerator,
+        sovDenominator
+      });
+    }
     return {
       record_id: parsePositiveInteger(valueAt(row, 'record_id'), 'record_id', line, { nullable: true }),
       question_id: parsePositiveInteger(valueAt(row, 'question_id'), 'question_id', line, { nullable: true }),
@@ -699,43 +1200,29 @@ function parseCsv(csv) {
       answer: valueAt(row, 'answer'),
       answer_format: answerFormat,
       has_metrics: hasMetrics,
-      brand_mentioned: parseBoolean(valueAt(row, 'brand_mentioned'), 'brand_mentioned', line),
-      brand_mentions: parseNonNegativeInteger(valueAt(row, 'brand_mentions'), 'brand_mentions', line),
-      brand_rank: parsePositiveNumber(valueAt(row, 'brand_rank'), 'brand_rank', line, { nullable: true }),
-      brand_recommended: parseBoolean(valueAt(row, 'brand_recommended'), 'brand_recommended', line),
+      brand_mentioned: brandMentioned,
+      brand_mentions: brandMentions,
+      brand_rank: brandRank,
+      brand_recommended: brandRecommended,
       metric_semantics_version: currentMetricSemanticsVersion,
       share_of_voice: shareOfVoice,
       answer_competitor_share: answerCompetitorShare,
       sov_numerator: sovNumerator,
       sov_denominator: sovDenominator,
       competition_entities: competitionEntities,
-      citation_count: parseNonNegativeInteger(valueAt(row, 'citation_count'), 'citation_count', line),
-      owned_citation_count: parseNonNegativeInteger(
-        valueAt(row, 'owned_citation_count'),
-        'owned_citation_count',
-        line,
-        { nullable: true }
-      ),
-      competitor_citation_count: parseNonNegativeInteger(
-        valueAt(row, 'competitor_citation_count'),
-        'competitor_citation_count',
-        line,
-        { nullable: true }
-      ),
+      citation_count: citationCount,
+      owned_citation_count: ownedCitationCount,
+      competitor_citation_count: competitorCitationCount,
       legacy_citation_count: parseNonNegativeInteger(
         valueAt(row, 'legacy_citation_count'),
         'legacy_citation_count',
         line,
         { nullable: true }
       ),
-      sentiment: valueAt(row, 'sentiment'),
+      sentiment,
       sentiment_reason: valueAt(row, 'sentiment_reason'),
       competitor_mentions: competitorBaseline,
-      citation_sources: parseCitationSources(
-        valueAt(row, 'citation_sources_json'),
-        'citation_sources_json',
-        line
-      ),
+      citation_sources: citationSources,
       legacy_citation_sources: parseCitationSources(
         valueAt(row, 'legacy_citation_sources_json'),
         'legacy_citation_sources_json',
@@ -743,15 +1230,11 @@ function parseCsv(csv) {
       ),
       created_at: recordCreatedAt,
       updated_at: recordUpdatedAt,
-      analysis_method: valueAt(row, 'analysis_method').trim() || 'legacy_rules_v1',
+      analysis_method: analysisMethod,
       analysis_platform: valueAt(row, 'analysis_platform').trim(),
       analysis_model: valueAt(row, 'analysis_model').trim(),
-      analysis_structure: parseJsonObject(
-        valueAt(row, 'analysis_structure_json'),
-        'analysis_structure_json',
-        line
-      ),
-      analysis_evidence: parseJsonObject(valueAt(row, 'analysis_evidence_json'), 'analysis_evidence_json', line),
+      analysis_structure: analysisStructure,
+      analysis_evidence: analysisEvidence,
       failure: parseOptionalJsonObject(valueAt(row, 'failure_json'), 'failure_json', line),
       retry: parseOptionalJsonObject(valueAt(row, 'retry_json'), 'retry_json', line),
       analysis_diagnostics: parseOptionalJsonObject(
@@ -762,6 +1245,78 @@ function parseCsv(csv) {
     };
   });
 
+  let integrityVerified = false;
+  let verifiedSourceIntegrityStatus = null;
+  if (hasIntegritySignature && integrityKeys.length > 0) {
+    const firstSignedRow = table[1];
+    const integrityKeyId = valueAt(firstSignedRow, INTEGRITY_KEY_ID_HEADER);
+    const sourceProjectId = valueAt(firstSignedRow, SOURCE_PROJECT_ID_HEADER);
+    const sourceIntegrityStatus = valueAt(firstSignedRow, SOURCE_INTEGRITY_STATUS_HEADER);
+    if (
+      !integrityKeyId
+      || !/^\d+$/.test(sourceProjectId)
+      || Number(sourceProjectId) < 1
+      || !['complete', 'unverified_import'].includes(sourceIntegrityStatus)
+    ) {
+      throw fieldError(
+        'INVALID_CSV_SIGNATURE',
+        2,
+        INTEGRITY_KEY_ID_HEADER,
+        '完整性信封无效'
+      );
+    }
+    const signedRows = table.slice(1).map((row) => (
+      HEADERS.map((header) => valueAt(row, header))
+    ));
+    const expectedSignatures = integrityKeys.map((integrityKey) => (
+      signatureForRows(signedRows, integrityKey, {
+        integrityKeyId,
+        sourceProjectId,
+        sourceIntegrityStatus
+      })
+    ));
+    table.slice(1).forEach((row, index) => {
+      const line = index + 2;
+      const actual = valueAt(row, INTEGRITY_HEADER);
+      if (
+        valueAt(row, INTEGRITY_KEY_ID_HEADER) !== integrityKeyId
+        || valueAt(row, SOURCE_PROJECT_ID_HEADER) !== sourceProjectId
+        || valueAt(row, SOURCE_INTEGRITY_STATUS_HEADER) !== sourceIntegrityStatus
+      ) {
+        throw fieldError(
+          'INVALID_CSV_SIGNATURE',
+          line,
+          INTEGRITY_HEADER,
+          '完整性信封行不一致'
+        );
+      }
+      const actualBuffer = Buffer.from(actual, 'utf8');
+      const signatureMatches = expectedSignatures.some((expected) => {
+        const expectedBuffer = Buffer.from(expected, 'utf8');
+        return actualBuffer.length === expectedBuffer.length
+          && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+      });
+      if (!signatureMatches) {
+        throw fieldError(
+          'INVALID_CSV_SIGNATURE',
+          line,
+          INTEGRITY_HEADER,
+          '完整性签名无效'
+        );
+      }
+    });
+    if (expectedProjectId !== null && Number(sourceProjectId) !== Number(expectedProjectId)) {
+      throw fieldError(
+        'CSV_PROJECT_MISMATCH',
+        2,
+        SOURCE_PROJECT_ID_HEADER,
+        '来源项目与目标项目不一致'
+      );
+    }
+    integrityVerified = true;
+    verifiedSourceIntegrityStatus = sourceIntegrityStatus;
+  }
+
   return {
     schemaVersion: SCHEMA_VERSION,
     questionSetName,
@@ -769,6 +1324,9 @@ function parseCsv(csv) {
     metricSemanticsVersion,
     startedAt,
     completedAt,
+    integrityPresent: hasIntegritySignature,
+    integrityVerified,
+    sourceIntegrityStatus: verifiedSourceIntegrityStatus,
     rows
   };
 }

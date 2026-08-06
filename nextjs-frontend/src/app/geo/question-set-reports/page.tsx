@@ -65,11 +65,12 @@ type CitationSourceGroups = {
   analysis_sources?: CitationSource[];
 };
 type ReportSummary = {
+  business_metrics_status?: 'unavailable' | string;
   total?: number;
   completed?: number;
   failed?: number;
   pending?: number;
-  valid_analyses?: number;
+  valid_analyses?: number | null;
   valid_answers?: number | null;
   acquired_answers?: number | null;
   invalid_captures?: number | null;
@@ -80,9 +81,9 @@ type ReportSummary = {
   ranked_answers?: number | null;
   sov_calculable_answers?: number | null;
   avg_answer_competitor_share?: number | null;
-  citation_valid_analyses?: number;
-  citation_unverified_analyses?: number;
-  competitor_baseline_count?: number;
+  citation_valid_analyses?: number | null;
+  citation_unverified_analyses?: number | null;
+  competitor_baseline_count?: number | null;
   brand_mention_rate?: number | null;
   recommendation_rate?: number | null;
   sov_summary?: {
@@ -91,13 +92,14 @@ type ReportSummary = {
     scope?: string;
     completeness?: string;
     average?: number | null;
-    calculable_answers?: number;
+    calculable_answers?: number | null;
+    status?: 'unavailable' | string;
   } | null;
-  citation_rate?: number;
-  owned_citation_rate?: number;
+  citation_rate?: number | null;
+  owned_citation_rate?: number | null;
   avg_brand_rank?: number | null;
-  total_citations?: number;
-  total_owned_citations?: number;
+  total_citations?: number | null;
+  total_owned_citations?: number | null;
 };
 type ExecutionSummary = {
   total?: number;
@@ -1031,7 +1033,9 @@ export default function QuestionSetReportsPage() {
       title: '引用',
       dataIndex: 'citation_count',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.citations : 70,
-      render: (value: number) => Number(value || 0),
+      render: (value: number) => report?.integrity?.status === 'unverified_import'
+        ? <Text type="secondary">未验证</Text>
+        : Number(value || 0),
     },
     {
       title: '情绪（AI 语义分析）',
@@ -1137,6 +1141,9 @@ export default function QuestionSetReportsPage() {
                       {report.integrity?.status === 'snapshot_only'
                         ? <Tag color="warning">仅快照</Tag>
                         : null}
+                      {report.integrity?.status === 'unverified_import'
+                        ? <Tag color="warning">未验证 · KPI 已排除</Tag>
+                        : null}
                     </Space>
                     <Title level={2}>{report.question_set_name}</Title>
                     <Text type="secondary">
@@ -1218,6 +1225,7 @@ export default function QuestionSetReportsPage() {
                   />
                 ) : null}
 
+                {report.integrity?.status !== 'unverified_import' ? (
                 <section className={styles.metricsSection} aria-label="本次运行指标">
                   <div className={styles.metricsHeading}>
                     <Title level={4}>核心指标</Title>
@@ -1330,12 +1338,15 @@ export default function QuestionSetReportsPage() {
                     }]}
                   />
                 </section>
+                ) : null}
 
                 <section className={styles.resultsSection} aria-labelledby="run-results-title">
                   <div className={styles.resultsHeading}>
                     <Title level={4} id="run-results-title">逐问题结果</Title>
                     <Text type="secondary">
-                      有效分析 {summary.valid_analyses || 0} · 采集无效 {summary.invalid_captures || 0} · 引用 {summary.total_citations || 0}
+                      {report.integrity?.status === 'unverified_import'
+                        ? '原始行仅供核对，未计入任何业务 KPI'
+                        : `有效分析 ${summary.valid_analyses || 0} · 采集无效 ${summary.invalid_captures || 0} · 引用 ${summary.total_citations || 0}`}
                     </Text>
                   </div>
                   <Table<ReportRow>

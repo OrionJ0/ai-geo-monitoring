@@ -328,7 +328,14 @@ function searchTermResourceFixture(requestUrl: string) {
     projectId: dashboard.projectId,
     revision: request.searchParams.get('revision'),
     coverage: dashboard.coverage,
-    filter: { from, to },
+    filter: {
+      from,
+      to,
+      ...(query ? { query } : {}),
+      ...Object.fromEntries(exactFilters
+        .filter(([parameter]) => request.searchParams.has(parameter))
+        .map(([parameter]) => [parameter, request.searchParams.get(parameter)]))
+    },
     summary,
     items,
     pagination: {

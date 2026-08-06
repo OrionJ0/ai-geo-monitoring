@@ -39,6 +39,15 @@ test('运行报告页面以运行历史和单次逐条结果为中心', () => {
   assert.doesNotMatch(styles, /\.toolbar\s*\{[^}]*border-bottom/);
 });
 
+test('未验证导入隐藏核心指标并明确原始行不计入 KPI', () => {
+  const source = fs.readFileSync(pagePath, 'utf8');
+
+  assert.match(source, /integrity\?\.status !== 'unverified_import'/);
+  assert.match(source, /未验证 · KPI 已排除/);
+  assert.match(source, /原始行仅供核对，未计入任何业务 KPI/);
+  assert.match(source, /integrity\?\.status === 'unverified_import'[\s\S]*?<Text type="secondary">未验证<\/Text>/);
+});
+
 test('问题集报告分级展示指标并给出简短的悬停口径说明', () => {
   const source = fs.readFileSync(pagePath, 'utf8');
   const primaryStart = source.indexOf(`className={styles.primaryMetrics}`);

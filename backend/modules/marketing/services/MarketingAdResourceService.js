@@ -298,6 +298,21 @@ function keywordResponseFilter(options, selected) {
   };
 }
 
+function searchTermResponseFilter(options, selected) {
+  return {
+    ...selected.filter,
+    ...Object.fromEntries([
+      'query',
+      'accountId',
+      'campaignId',
+      'adGroupId',
+      'keywordName',
+      'queryStatus',
+      'matchType'
+    ].filter((field) => options[field] !== undefined).map((field) => [field, options[field]]))
+  };
+}
+
 function buildPageIdentityWhere(items, columns) {
   const replacements = {};
   const clauses = items.map((item, itemIndex) => `(${columns.map((column) => {
@@ -1230,7 +1245,7 @@ class MarketingAdResourceService {
           currency: selected.run.currency_code,
           costScale: Number(selected.run.cost_scale)
         },
-        filter: selected.filter,
+        filter: searchTermResponseFilter(options, selected),
         summary,
         items: items.map((item) => {
           const key = SEARCH_TERM_COLUMNS.map((column) => item[column]).join('\u0000');
