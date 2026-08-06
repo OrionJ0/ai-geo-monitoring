@@ -8,6 +8,14 @@
   margin-bottom: 16px;
 }
 
+.pageHeader :global(.ant-btn-default) {
+  color: #374151 !important;
+}
+
+.pageHeader :global(.ant-btn-default:disabled) {
+  color: #595959 !important;
+}
+
 .reportSheet {
   min-height: 640px;
   border: 1px solid #dfe5ec;
