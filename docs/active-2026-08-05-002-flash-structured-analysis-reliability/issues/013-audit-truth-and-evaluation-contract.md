@@ -80,8 +80,8 @@ blocked_by:
 
 1. ⏳ 由真实复核人在 `truth.v3-template.jsonl` 填写 reviewer/reviewed_at 并将 55 条改为 `review_status=confirmed`（更名 `truth.jsonl`）。
 2. ⏳ S18/S19/S20 按 manifest 重复簇规则（去重或簇权重 1）处理；运行 truth preflight。
-3. ⏳ 评测器补全（用户与独立审查确认，015 门槛算术现状无法通过）：55 条真值中明确排名仅 6 条、门槛要求 ≥20 条；推荐 F1/情绪准确率/排名准确率/Token 比例未接入硬门禁；`target_mapping` 未被评分；`recommendation=null` 仍会被旧 loader 转成 `false`。
-4. 认证完成后，由人工将本 issue 改为 closed；在此之前 015 不启动，014 不受此限制。
+3. ✅ **评测器补全已完成**（2026-08-06，issue 015，代码 commit 就绪待冻结）：推荐 F1/情绪准确率/排名准确率/Token 比例已接入四组门禁；排名真值按 NOT_EVALUABLE 合同处理（不伪造、不凑数，报告分子/分母/样本 ID）；`target_mapping` 已接入评分（状态判断 + 成功映射）；`recommendation=null` 保留 unavailable（labels 合并、`addComparison`、新指标均不再转 false）；诚实降级单独计数；三次重复逐次计分报方差、禁止多数投票。见 [015 评测器补全记录](015-v51-41x3-comparison-gate.md)。
+4. 认证完成后，由人工将本 issue 改为 closed；在此之前 015 不启动全量门禁（评测器代码可先完成），014 不受此限制。
 
 ## Blocked by
 

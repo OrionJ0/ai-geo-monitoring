@@ -49,15 +49,24 @@ blocked_by:
 - [ ] 重复运行只用于测量重复一致率（方差），不得通过多数投票改写单次预测；重复一致率按 014 修正口径报告（确定性稳定性与 assessed 语义一致性分开，降级重复排除）。
 - [ ] 任一硬门槛失败时明确“不批准硬切”并保持 010 阻塞；全部通过时仍需记录明确人工批准，不能由脚本自动切换生产默认值。
 
-## 认证前置待办（015 启动前必须完成，不阻塞 014 探针）
+## 认证前置待办（状态 2026-08-06 评测器补全完成）
 
-用户与独立 Claude 审查（2026-08-06）确认以下缺口必须在 015 前解决：
+用户与独立 Claude 审查（2026-08-06）确认以下缺口；1–4 已由评测器代码补全完成（issue 015 评测器 commit 已就绪，待人工签字后冻结）：
 
-1. **排名真值不足**：55 条真值中明确排名仅 6 条，门槛要求 ≥20 条，算术上无法满足——需扩充已复核排名真值或修订门槛合同。
-2. **推荐 F1、情绪准确率、排名准确率、Token 比例未接入硬门禁**：009/当前评测器尚未把这三项与成本比接入 PASS/FAIL 判定。
-3. **`target_mapping` 未被评分**：truth v3 已新增 target_mapping 真值（S53 conflicting_identity），但评测器还没有对预测 target_mapping 的计分与门禁。
-4. **`recommendation=null` 被旧 loader 转成 `false`**：`Boolean(null) === false` 会掩盖语义 unavailable 与明确不推荐的差异，需与第三轮 confirmed 完整性合同对齐。
-5. 013 最终签字（reviewer/reviewed_at + confirmed + 更名 truth.jsonl + truth preflight）。
+1. **排名真值不足（已按新合同处理，不伪造）**：55 条真值中明确排名仅 6 条（S01/S02/S46/S49/S50/S55），不足 20。**拒绝人为扩充或伪造排名样本**——按真实可评估样本计算排名 exact accuracy，始终展示分子、分母与样本 ID；样本不足时该指标输出 NOT_EVALUABLE（不判 PASS、不阻塞其他指标）。后续可补充真实回答，但不得改变冻结答案或把编号列表当排名。
+2. ✅ **推荐 F1、情绪准确率、排名准确率、Token 比例已接入门禁**：`recommendationQualityStats`（precision/recall/F1/assessed coverage）、`sentimentQualityStats`（逐次准确率 + 3×3 混淆矩阵）、`rankQualityStats`（exact accuracy）、Token 中位≤基线×1.5 / P95≤基线×2，全部进入 buildReport 四组门禁；语义门槛仅对 EVALUATED 判定，NOT_EVALUABLE 不判 PASS。
+3. ✅ **`target_mapping` 已接入评分**：`targetMappingQualityStats` 分别统计状态判断准确率（status 精确一致，含 conflicting_identity）与成功映射准确率（预测 resolved+非空 entity_id vs 真值 target_mapped）；真值仅 S53 一条 → 报告分母与样本，NOT_EVALUABLE 不设 PASS 门槛。
+4. ✅ **`recommendation=null` 不再转 false**：labels 合并保留 null；`addComparison` 对 null 跳过 recommended 混淆；新指标直接从 truth 读取，null 不进入评估分母。
+5. ⏳ 013 最终签字（reviewer/reviewed_at + confirmed + 更名 truth.jsonl + truth preflight）——**唯一剩余人工前置条件**，完成后冻结评测器 commit、独立运行 41×3。
+
+## 评测器补全（2026-08-06，代码完成，暂未运行全量 Flash）
+
+按已冻结的四组门禁合同实现，未修改 v5-json-rev2 提示词、未调用真实 Flash、未修改生产入口（正式入口仍 v4）：
+
+- `backend/services/GeoFlashStructuredBenchmarkService.js`：新增 `recommendationQualityStats`（precision/recall/F1/assessed coverage，truth=null 不评估、预测 unresolved 计诚实降级）、`sentimentQualityStats`（逐次准确率 + 3×3 混淆矩阵）、`rankQualityStats`（仅真值 rank 非空样本，exact accuracy，<20 时 NOT_EVALUABLE 并报告分母与样本 ID）、`targetMappingQualityStats`（状态判断与成功映射分别计分）、`groundingEvidenceStats`（evidence 错误码 + mention span 与原文逐字校验）、`groupByRepeat`/`spread`（逐次计分与方差）；`precisionRecallF1` 改为等价公式 `2TP/(2TP+FP+FN)`（tp=0 时 F1=0 而非 null，门禁可判、方差可算）。
+- `backend/scripts/geoFlashStructuredBenchmark.js`：labels 合并 `recommended: truth.recommendation === null ? null : ...`（不再 Boolean(null)→false）；buildReport 新增"语义指标"段（每臂推荐/情绪/排名/target_mapping/证据/方差）与四组门禁说明（硬门槛含完成率/目标事实/grounding/证据/关系 precision/Token；语义门槛仅 EVALUATED 判定；诚实降级单独计数；重复运行只测方差禁止多数投票）；`targetMappingTruthCount` 报告 target_mapping 真值数。
+- `backend/scripts/geoBaselineEvaluate.js`：`addComparison` 对 `label.recommended === null` 跳过 recommended 混淆（unavailable 不得当 false 计 FP/FN）。
+- 测试：新增 17 个构造反例测试（正例/反例/缺失值/诚实降级/防投机/逐次计分方差/混淆矩阵/NOT_EVALUABLE 分子分母样本 ID/grounding span 校验），后端全量 1134/1134 通过。
 
 ## Blocked by
 

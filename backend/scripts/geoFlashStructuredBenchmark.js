@@ -58,10 +58,16 @@ function cacheIdentityFor(arm) {
 }
 
 const {
+  MIN_EVALUABLE_SAMPLES,
   entityQualityStats,
   fieldStatusDistribution,
+  groundingEvidenceStats,
+  rankQualityStats,
+  recommendationQualityStats,
   relationQualityStats,
   semanticTruthCoverage,
+  sentimentQualityStats,
+  targetMappingQualityStats,
   validateTruthEntry
 } = require('../services/GeoFlashStructuredBenchmarkService');
 // v5-json-rev2：014 最后一轮 A/B 修订臂，阶段 2 提示词仅改情绪规则
@@ -421,6 +427,14 @@ function percentage(value) {
   return value == null ? '—' : `${(value * 100).toFixed(2)}%`;
 }
 
+function targetMappingTruthCount(truthBySample = new Map()) {
+  let count = 0;
+  truthBySample.forEach((truth) => {
+    if (truth?.review_status === 'confirmed' && truth.target_mapping?.status) count += 1;
+  });
+  return count;
+}
+
 function targetStatsForEntries(entries, labels) {
   const pairs = entries
     .filter((entry) => entry.ok && labels.has(entry.sample_id))
@@ -492,28 +506,74 @@ function buildReport({ options, samples, labels, entries, summaries, truthBySamp
       lines.push(`- ${arm}：已输出关系 ${relation.status} — ${relation.reason}`);
     }
   });
+  lines.push('', '## 语义指标（issue 015 四组合同）', '');
+  const sampleById = new Map(samples.map((sample) => [sample.sample_id, sample]));
+  const candidateArm = options.arms.includes('v5-json-rev2')
+    ? 'v5-json-rev2'
+    : (options.arms.includes('v5-json') ? 'v5-json' : null);
+  options.arms.forEach((arm) => {
+    if (!arm.startsWith('v5-json')) return;
+    const armEntries = entries.filter((entry) => entry.arm === arm);
+    const rec = recommendationQualityStats(armEntries, truthBySample);
+    const sent = sentimentQualityStats(armEntries, truthBySample);
+    const rank = rankQualityStats(armEntries, truthBySample);
+    const mapping = targetMappingQualityStats(armEntries, truthBySample);
+    const evidence = groundingEvidenceStats(armEntries, sampleById);
+    lines.push(`### ${arm}`, '');
+    lines.push(`- 推荐：${rec.status}；precision=${percentage(rec.precision)}，recall=${percentage(rec.recall)}，F1=${percentage(rec.f1)}，assessed coverage=${percentage(rec.coverage)}；可评估真值 ${rec.evaluated_samples}，降级 ${rec.degraded_count} 条${rec.status_reason ? `（${rec.status_reason}）` : ''}`);
+    lines.push(`- 情绪：${sent.status}；accuracy=${percentage(sent.accuracy)}（${sent.correct}/${sent.evaluated_samples}），混淆矩阵=${JSON.stringify(sent.confusion_matrix)}；降级 ${sent.degraded_count} 条${sent.status_reason ? `（${sent.status_reason}）` : ''}`);
+    lines.push(`- 排名：${rank.status}；exact accuracy=${percentage(rank.exact_accuracy)}（${rank.exact_matches}/${rank.denominator_samples}），coverage=${percentage(rank.coverage)}；降级 ${rank.degraded_count} 条${rank.status_reason ? `（${rank.status_reason}）` : ''}；真值样本 ID=${rank.sample_ids.join(',') || '—'}`);
+    lines.push(`- target_mapping：${mapping.status}；状态判断 accuracy=${percentage(mapping.status_accuracy)}（${mapping.status_evaluated_samples} 条），成功映射 accuracy=${percentage(mapping.mapped_accuracy)}（${mapping.mapped_evaluated_samples} 条）；降级 ${mapping.degraded_count} 条${mapping.status_reason ? `（${mapping.status_reason}）` : ''}`);
+    lines.push(`- 证据合法性：evidence_reference_invalid=${evidence.evidence_invalid_count}；grounding 错误=${evidence.grounding_error_count}（mention span 与原文逐字校验）`);
+    lines.push(`- 重复方差（逐次计分，禁止多数投票）：推荐 F1 ${JSON.stringify(rec.repeat_variance.f1)}；情绪 accuracy ${JSON.stringify(sent.repeat_variance.accuracy)}；排名 exact ${JSON.stringify(rank.repeat_variance.exact_accuracy)}`);
+    lines.push('');
+  });
+
   lines.push('', '## 门禁说明', '');
-  const v5 = summaries['v5-json'];
+  const v5 = candidateArm ? summaries[candidateArm] : null;
   if (v5) {
+    const armEntries = entries.filter((entry) => entry.arm === candidateArm);
+    const rec = recommendationQualityStats(armEntries, truthBySample);
+    const sent = sentimentQualityStats(armEntries, truthBySample);
+    const rank = rankQualityStats(armEntries, truthBySample);
+    const evidence = groundingEvidenceStats(armEntries, sampleById);
     const completionPass = v5.total >= 120 && v5.completion_rate >= (118 / 120);
     const targetPass = v5.target_false_positives === 0 && v5.target_presence_accuracy === 1;
-    const stabilityPass = v5.stability_rate !== null && v5.stability_rate >= 0.99;
     const coveragePass = Object.values(coverage).every((item) => item.pass);
-    const v5Relation = relationQualityStats(
-      entries.filter((entry) => entry.arm === 'v5-json'),
-      truthBySample
-    );
+    const v5Relation = relationQualityStats(armEntries, truthBySample);
     const relationGatePass = coverage.relations.pass
       && v5Relation.status === 'EVALUATED'
       && v5Relation.precision !== null
       && v5Relation.precision >= 0.95;
-    lines.push(`- 完成率门槛：${completionPass ? 'PASS' : 'FAIL'}。`);
-    lines.push(`- 目标品牌事实门槛：${targetPass ? 'PASS' : 'FAIL'}。`);
-    lines.push(`- 目标核心稳定门槛：${stabilityPass ? 'PASS' : 'FAIL'}。`);
-    lines.push(`- 语义真值覆盖（推荐/排名/情绪/已输出关系各 ≥20 已复核实例）：${coveragePass ? 'PASS' : 'NOT EVALUABLE'}。`);
+    const evidencePass = evidence.evidence_invalid_count === 0 && evidence.grounding_error_count === 0;
+    const recGatePass = rec.status === 'EVALUATED' && rec.f1 !== null && rec.f1 >= 0.95;
+    const sentGatePass = sent.status === 'EVALUATED' && sent.accuracy !== null && sent.accuracy >= 0.90;
+    const rankGatePass = rank.status === 'EVALUATED' && rank.exact_accuracy !== null && rank.exact_accuracy >= 0.95;
+    const baselineArm = options.arms.includes('v4-current') ? 'v4-current'
+      : (options.arms.includes('v5-json') && candidateArm !== 'v5-json' ? 'v5-json' : null);
+    const tokenGatePass = baselineArm
+      ? summaries[baselineArm].tokens.median !== null
+        && v5.tokens.median !== null
+        && v5.tokens.median <= summaries[baselineArm].tokens.median * 1.5
+        && v5.tokens.p95 !== null
+        && summaries[baselineArm].tokens.p95 !== null
+        && v5.tokens.p95 <= summaries[baselineArm].tokens.p95 * 2
+      : null;
+    lines.push('**硬门槛**（完成率/目标事实/假阳性/grounding/证据合法性/关系 precision/Token）：');
+    lines.push(`- 完成率门槛：${completionPass ? 'PASS' : 'FAIL'}（${v5.completed}/${v5.total}）。`);
+    lines.push(`- 目标品牌事实门槛：${targetPass ? 'PASS' : 'FAIL'}（presence accuracy ${percentage(v5.target_presence_accuracy)}，假阳性 ${v5.target_false_positives}）。`);
+    lines.push(`- 证据合法性门槛：${evidencePass ? 'PASS' : 'FAIL'}（evidence_reference_invalid=${evidence.evidence_invalid_count}，grounding 错误=${evidence.grounding_error_count}）。`);
     lines.push(`- 已输出关系 precision≥0.95：${relationGatePass ? 'PASS' : (coverage.relations.pass ? 'FAIL' : 'NOT EVALUABLE')}（覆盖 ${coverage.relations.count}，precision ${percentage(v5Relation.precision)}）。`);
+    lines.push(`- Token/延迟门槛（候选 vs ${baselineArm || '无基线'}）：${tokenGatePass === null ? 'NOT EVALUABLE（无基线臂）' : (tokenGatePass ? 'PASS' : 'FAIL')}（候选中位 ${v5.tokens.median} ≤ 基线×1.5=${baselineArm ? Math.round(summaries[baselineArm].tokens.median * 1.5) : '—'}，p95 ${v5.tokens.p95} ≤ 基线×2=${baselineArm ? Math.round(summaries[baselineArm].tokens.p95 * 2) : '—'}）。`);
+    lines.push('**语义门槛**（仅 EVALUATED 判定；NOT_EVALUABLE 不判 PASS、不阻塞其他指标）：');
+    lines.push(`- 推荐 F1≥0.95：${rec.status === 'EVALUATED' ? (recGatePass ? 'PASS' : 'FAIL') : 'NOT EVALUABLE'}（F1=${percentage(rec.f1)}，覆盖 ${rec.evaluated_samples}${rec.status === 'NOT_EVALUABLE' ? `，${rec.status_reason}` : ''}）。`);
+    lines.push(`- 情绪准确率≥0.90：${sent.status === 'EVALUATED' ? (sentGatePass ? 'PASS' : 'FAIL') : 'NOT EVALUABLE'}（accuracy=${percentage(sent.accuracy)}，覆盖 ${sent.evaluated_samples}${sent.status === 'NOT_EVALUABLE' ? `，${sent.status_reason}` : ''}）。`);
+    lines.push(`- 明确排名 exact-match≥0.95：${rank.status === 'EVALUATED' ? (rankGatePass ? 'PASS' : 'FAIL') : 'NOT EVALUABLE'}（exact=${percentage(rank.exact_accuracy)}，真值样本 ${rank.denominator_samples}${rank.status === 'NOT_EVALUABLE' ? `，${rank.status_reason}` : ''}）。`);
+    lines.push(`- target_mapping：报告状态判断与成功映射 accuracy（真值 ${candidateArm ? targetMappingTruthCount(truthBySample) : 0} 条）；评分接入，不设 PASS/FAIL 门槛。`);
+    lines.push('**诚实降级**：unresolved/unavailable 单独计数（见上方各指标 degraded），不算错误预测、不得伪装成 assessed；降级只降低 assessed coverage。');
+    lines.push('**重复运行**：只用于测量方差（上方 repeat_variance），禁止多数投票改写单次预测。');
+    lines.push('- 语义真值覆盖（推荐/排名/情绪/已输出关系各 ≥20 已复核实例）：PASS 判定仅对 EVALUATED 生效；覆盖不足时 NOT EVALUABLE，不得用 grounding 100% 或 assessed 幸存样本宣布语义门禁通过。');
     lines.push('- 开放式竞品发现允许遗漏；竞品集合 Jaccard 作为诊断指标，不作为整条完成门槛。');
-    lines.push('- 实体 precision/recall/canonicalization 只按已复核真值报告；真值不足时 NOT EVALUABLE，不得用 grounding 100% 或 assessed 幸存样本宣布语义门禁通过。');
   }
   const failures = entries.filter((entry) => !entry.ok);
   lines.push('', '## 失败明细', '');
@@ -566,13 +626,15 @@ async function main() {
   }
   // 合并 confirmed 真值标签：truth.jsonl 的 confirmed 记录覆盖 LABELING 标签，
   // 补充样本只有 confirmed 才进入目标评分
+  // issue 015：recommendation=null（语义 unavailable，如 S53）必须保留 null，
+  // 禁止 Boolean(null) 强转成 false——unavailable 与明确不推荐是两个不同语义值。
   const labels = new Map(corpus.labels);
   truthBySample.forEach((truth, sampleId) => {
     if (truth.review_status !== 'confirmed') return;
     labels.set(sampleId, {
       mentioned: Boolean(truth.mentioned),
       mentions: Number(truth.mentions) || 0,
-      recommended: Boolean(truth.recommendation),
+      recommended: truth.recommendation === null ? null : Boolean(truth.recommendation),
       rank: truth.rank == null || truth.rank === 'none' ? null : Number(truth.rank),
       sentiment: truth.sentiment && truth.sentiment !== 'none' ? truth.sentiment : null
     });

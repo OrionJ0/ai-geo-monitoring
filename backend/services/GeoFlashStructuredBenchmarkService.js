@@ -105,10 +105,369 @@ function competitionStability(entries) {
 function precisionRecallF1({ tp = 0, fp = 0, fn = 0 } = {}) {
   const precision = tp + fp > 0 ? tp / (tp + fp) : null;
   const recall = tp + fn > 0 ? tp / (tp + fn) : null;
-  const f1 = precision !== null && recall !== null && precision + recall > 0
-    ? (2 * precision * recall) / (precision + recall)
-    : null;
+  // issue 015：F1 用等价公式 2TP/(2TP+FP+FN)——tp=0 时（无任何正面命中）
+  // 仍返回 0 而非 null，保证门禁可判、方差可算；tp+fp+fn=0（无评估）才 null。
+  const f1 = tp + fp + fn > 0 ? (2 * tp) / (2 * tp + fp + fn) : null;
   return { precision, recall, f1 };
+}
+
+// ---- issue 015 语义门禁指标（2026-08-06，数据所有者裁决合同） ----
+// 原则：
+// 1. 全部按单次预测计分（每次运行是一条预测）；重复运行只报告逐次分数与方差，
+//    禁止多数投票改写单次预测。
+// 2. 真值缺失/未复核/语义 unavailable（null）的样本不进入评估分母。
+// 3. 预测侧非 assessed（unresolved/unavailable/not_applicable）计为诚实降级：
+//    单独计数、降低 assessed coverage、不计作错误预测。
+// 4. 可评估真值样本 < MIN_EVALUABLE_SAMPLES 时 status=NOT_EVALUABLE（不判 PASS、
+//    不阻塞其他指标），但始终报告分子、分母与样本 ID，不伪造、不凑数。
+const MIN_EVALUABLE_SAMPLES = 20;
+
+/** v5 合同字段取值：analysis_structure.target_semantics.{field}.status/value；无结构返回 null。 */
+function semanticFieldOf(result = {}, field) {
+  const semantics = result?.analysis_structure?.target_semantics;
+  const item = semantics && semantics[field];
+  if (!item || typeof item !== 'object') return null;
+  return { status: String(item.status || ''), value: item.value };
+}
+
+/** 逐次计分：按 entry.repeat 分组；无 repeat 时全部归入组 1。 */
+function groupByRepeat(entries) {
+  const groups = new Map();
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const key = Number(entry?.repeat) > 0 ? Number(entry.repeat) : 1;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  });
+  return [...groups.entries()].sort((left, right) => left[0] - right[0]);
+}
+
+/** 数值序列 min/max/mean/stddev（样本方差，n-1 分母；n<2 时 stddev=null）。 */
+function spread(values) {
+  const normalized = values.map(Number).filter(Number.isFinite);
+  if (!normalized.length) {
+    return { values: [], min: null, max: null, mean: null, stddev: null };
+  }
+  const mean = normalized.reduce((sum, value) => sum + value, 0) / normalized.length;
+  const variance = normalized.length > 1
+    ? normalized.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (normalized.length - 1)
+    : null;
+  return {
+    values: normalized,
+    min: Math.min(...normalized),
+    max: Math.max(...normalized),
+    mean,
+    stddev: variance === null ? null : Math.sqrt(variance)
+  };
+}
+
+function truthFor(truthBySample, sampleId) {
+  const truth = truthBySample.get(sampleId);
+  return truth && truth.review_status === 'confirmed' ? truth : null;
+}
+
+/**
+ * 推荐指标（issue 015）：precision/recall/F1 + assessed coverage。
+ * - 真值 recommendation 必须是 boolean（null=unavailable 不评估）。
+ * - 预测 assessed 时与真值比较（推荐=二分类）；非 assessed 计诚实降级，不计错误。
+ */
+function recommendationQualityStats(entries, truthBySample = new Map()) {
+  const totals = { tp: 0, fp: 0, fn: 0 };
+  let degraded = 0;
+  const degradedDetails = [];
+  let coverageDenominator = 0;
+  const uniqueEvaluable = new Set();
+  const perRepeat = {};
+  groupByRepeat(entries).forEach(([repeat, groupEntries]) => {
+    const group = { tp: 0, fp: 0, fn: 0, evaluable: 0, degraded: 0 };
+    groupEntries.forEach((entry) => {
+      if (!entry?.ok || !entry.result) return;
+      const truth = truthFor(truthBySample, entry.sample_id);
+      if (!truth || typeof truth.recommendation !== 'boolean') return;
+      group.evaluable += 1;
+      uniqueEvaluable.add(entry.sample_id);
+      const pred = semanticFieldOf(entry.result, 'recommendation');
+      if (!pred || pred.status !== 'assessed' || typeof pred.value !== 'boolean') {
+        group.degraded += 1;
+        degraded += 1;
+        degradedDetails.push(`${entry.sample_id} r${entry.repeat}: ${pred ? pred.status : 'no_structure'}`);
+        return;
+      }
+      const truthValue = truth.recommendation;
+      if (pred.value === truthValue) {
+        if (truthValue) { totals.tp += 1; group.tp += 1; }
+      } else if (truthValue) {
+        totals.fn += 1;
+        group.fn += 1;
+      } else {
+        totals.fp += 1;
+        group.fp += 1;
+      }
+    });
+    coverageDenominator += group.evaluable;
+    const stats = precisionRecallF1(group);
+    perRepeat[repeat] = { ...stats, evaluable: group.evaluable, degraded: group.degraded };
+  });
+  const coverage = coverageDenominator > 0 ? (coverageDenominator - degraded) / coverageDenominator : null;
+  const overall = precisionRecallF1(totals);
+  const variance = spread(Object.values(perRepeat).map((group) => group.f1).filter((value) => value !== null));
+  // 状态判定基于唯一已复核真值样本数（"至少 20 个已复核可评估实例"合同）；
+  // accuracy/PRF 仍按逐次预测合并计分（重复不合并、不投票）。
+  const status = uniqueEvaluable.size >= MIN_EVALUABLE_SAMPLES ? 'EVALUATED' : 'NOT_EVALUABLE';
+  return {
+    status,
+    status_reason: status === 'NOT_EVALUABLE'
+      ? `可评估推荐真值样本 ${uniqueEvaluable.size} < ${MIN_EVALUABLE_SAMPLES}`
+      : null,
+    evaluated_samples: uniqueEvaluable.size,
+    predictions: coverageDenominator,
+    sample_ids: [...uniqueEvaluable].sort(),
+    coverage,
+    degraded_count: degraded,
+    degraded_details: degradedDetails,
+    tp: totals.tp,
+    fp: totals.fp,
+    fn: totals.fn,
+    ...overall,
+    per_repeat: perRepeat,
+    repeat_variance: { f1: variance }
+  };
+}
+
+/**
+ * 情绪指标（issue 015）：逐次预测准确率 + 3×3 混淆矩阵。
+ * 真值 sentiment 必须是 positive/neutral/negative（null 不评估）；预测非 assessed 计降级。
+ */
+function sentimentQualityStats(entries, truthBySample = new Map()) {
+  const totals = { correct: 0, evaluated: 0, degraded: 0 };
+  const confusion = {};
+  const degradedDetails = [];
+  const uniqueEvaluable = new Set();
+  const perRepeat = {};
+  VALID_SENTIMENTS.forEach((truthLabel) => {
+    confusion[truthLabel] = { positive: 0, neutral: 0, negative: 0 };
+  });
+  groupByRepeat(entries).forEach(([repeat, groupEntries]) => {
+    const group = { correct: 0, evaluated: 0, degraded: 0 };
+    groupEntries.forEach((entry) => {
+      if (!entry?.ok || !entry.result) return;
+      const truth = truthFor(truthBySample, entry.sample_id);
+      if (!truth || !VALID_SENTIMENTS.has(truth.sentiment)) return;
+      group.evaluated += 1;
+      uniqueEvaluable.add(entry.sample_id);
+      const pred = semanticFieldOf(entry.result, 'sentiment');
+      if (!pred || pred.status !== 'assessed' || !VALID_SENTIMENTS.has(pred.value)) {
+        group.degraded += 1;
+        totals.degraded += 1;
+        degradedDetails.push(`${entry.sample_id} r${entry.repeat}: ${pred ? pred.status : 'no_structure'}`);
+        return;
+      }
+      totals.evaluated += 1;
+      confusion[truth.sentiment][pred.value] += 1;
+      if (pred.value === truth.sentiment) {
+        totals.correct += 1;
+        group.correct += 1;
+      }
+    });
+    perRepeat[repeat] = {
+      accuracy: group.evaluated ? group.correct / group.evaluated : null,
+      evaluated: group.evaluated,
+      degraded: group.degraded
+    };
+  });
+  const predictions = totals.evaluated + totals.degraded;
+  const coverage = predictions > 0 ? totals.evaluated / predictions : null;
+  const variance = spread(Object.values(perRepeat).map((group) => group.accuracy).filter((value) => value !== null));
+  const status = uniqueEvaluable.size >= MIN_EVALUABLE_SAMPLES ? 'EVALUATED' : 'NOT_EVALUABLE';
+  return {
+    status,
+    status_reason: status === 'NOT_EVALUABLE'
+      ? `可评估情绪真值样本 ${uniqueEvaluable.size} < ${MIN_EVALUABLE_SAMPLES}`
+      : null,
+    evaluated_samples: uniqueEvaluable.size,
+    predictions,
+    accuracy: totals.evaluated ? totals.correct / totals.evaluated : null,
+    correct: totals.correct,
+    coverage,
+    degraded_count: totals.degraded,
+    degraded_details: degradedDetails,
+    confusion_matrix: confusion,
+    per_repeat: perRepeat,
+    repeat_variance: { accuracy: variance }
+  };
+}
+
+/**
+ * 排名指标（issue 015）：仅评估真值 rank 非空的样本，报告 exact accuracy。
+ * 不人为扩充/伪造排名样本；样本不足时 NOT_EVALUABLE（不判 PASS、不阻塞其他指标），
+ * 但始终报告分子、分母与样本 ID。
+ */
+function rankQualityStats(entries, truthBySample = new Map()) {
+  const evaluableSampleIds = (Array.isArray(entries) ? entries : [])
+    .filter((entry) => {
+      const truth = truthFor(truthBySample, entry.sample_id);
+      return Boolean(entry?.ok) && truth && Number.isInteger(truth.rank) && truth.rank > 0;
+    })
+    .map((entry) => entry.sample_id);
+  const denominator = new Set(evaluableSampleIds).size;
+  let exact = 0;
+  let degraded = 0;
+  const degradedDetails = [];
+  const perRepeat = {};
+  const totalEvaluated = { evaluated: 0 };
+  groupByRepeat(entries).forEach(([repeat, groupEntries]) => {
+    const group = { exact: 0, evaluated: 0, degraded: 0 };
+    groupEntries.forEach((entry) => {
+      if (!entry?.ok || !entry.result) return;
+      const truth = truthFor(truthBySample, entry.sample_id);
+      if (!truth || !Number.isInteger(truth.rank) || truth.rank < 1) return;
+      group.evaluated += 1;
+      totalEvaluated.evaluated += 1;
+      const pred = semanticFieldOf(entry.result, 'rank');
+      if (!pred || pred.status !== 'assessed' || pred.value === null) {
+        group.degraded += 1;
+        degraded += 1;
+        degradedDetails.push(`${entry.sample_id} r${entry.repeat}: ${pred ? pred.status : 'no_structure'}`);
+        return;
+      }
+      if (Number(pred.value) === Number(truth.rank)) {
+        exact += 1;
+        group.exact += 1;
+      }
+    });
+    perRepeat[repeat] = {
+      exact_accuracy: group.evaluated ? group.exact / group.evaluated : null,
+      evaluated: group.evaluated,
+      degraded: group.degraded
+    };
+  });
+  const variance = spread(Object.values(perRepeat).map((group) => group.exact_accuracy).filter((value) => value !== null));
+  const coverage = totalEvaluated.evaluated > 0
+    ? (totalEvaluated.evaluated - degraded) / totalEvaluated.evaluated
+    : null;
+  return {
+    status: denominator >= MIN_EVALUABLE_SAMPLES ? 'EVALUATED' : 'NOT_EVALUABLE',
+    status_reason: denominator < MIN_EVALUABLE_SAMPLES
+      ? `排名真值仅 ${denominator} 个可评估样本 < ${MIN_EVALUABLE_SAMPLES}；不伪造、不凑数`
+      : null,
+    denominator_samples: denominator,
+    sample_ids: [...new Set(evaluableSampleIds)].sort(),
+    exact_accuracy: totalEvaluated.evaluated ? exact / totalEvaluated.evaluated : null,
+    exact_matches: exact,
+    coverage,
+    degraded_count: degraded,
+    degraded_details: degradedDetails,
+    per_repeat: perRepeat,
+    repeat_variance: { exact_accuracy: variance }
+  };
+}
+
+/**
+ * 证据合法性与 grounding（issue 015 硬门槛）：
+ * - evidence_reference_invalid：来自 diagnostics.error_codes（运行时机械校验
+ *   已拒绝无效 source_id；评测器侧复计数作为门禁证据）。
+ * - grounding：校验结构内全部 mention（target_mentions + mentions）的 span
+ *   与冻结回答原文逐字匹配（绝对字符位置）；span 越界或文本不匹配计 grounding 错误。
+ *   source_id 的段级合法性由运行时合同保证（无效引用会导致字段降级或整条错误）。
+ */
+function groundingEvidenceStats(entries, samplesById = new Map()) {
+  const stats = { evaluated: 0, evidence_invalid_count: 0, grounding_error_count: 0, details: [] };
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    if (!entry?.ok || !entry.result) return;
+    const structure = entry.result.analysis_structure;
+    if (!structure) return;
+    stats.evaluated += 1;
+    const codes = new Set((structure.diagnostics?.error_codes || []).map((item) => item?.code));
+    if (codes.has('analysis_evidence_reference_invalid')) {
+      stats.evidence_invalid_count += 1;
+      stats.details.push(`${entry.sample_id} r${entry.repeat}: analysis_evidence_reference_invalid`);
+    }
+    const text = String(samplesById.get(entry.sample_id)?.response_text || '');
+    const mentions = [
+      ...(Array.isArray(structure.target_mentions) ? structure.target_mentions : []),
+      ...(Array.isArray(structure.mentions) ? structure.mentions : [])
+    ];
+    mentions.forEach((mention) => {
+      const start = Number(mention?.start);
+      const end = Number(mention?.end);
+      const surface = String(mention?.surface_form || '');
+      const slice = text.slice(start, end);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start || end > text.length || slice !== surface) {
+        stats.grounding_error_count += 1;
+        stats.details.push(`${entry.sample_id} r${entry.repeat}: mention ${mention?.source_id || ''} span 与原文不匹配`);
+      }
+    });
+  });
+  return stats;
+}
+
+/**
+ * target_mapping 指标（issue 015）：分别统计状态判断准确率与成功映射准确率。
+ * - 状态判断：预测 target_mapping.status 与真值 status 精确一致（含 conflicting_identity）。
+ * - 成功映射：真值 target_mapped=false（conflicting_identity）时，预测不得把目标
+ *   映射为已解析（resolved + 非空 target_entity_id）；真值 target_mapped=true 时
+ *   预测必须已解析。预测侧无法确定映射时计诚实降级。
+ */
+function targetMappingQualityStats(entries, truthBySample = new Map()) {
+  const totals = { status_evaluated: 0, status_correct: 0, mapped_evaluated: 0, mapped_correct: 0, degraded: 0 };
+  const degradedDetails = [];
+  const perRepeat = {};
+  groupByRepeat(entries).forEach(([repeat, groupEntries]) => {
+    const group = { status_evaluated: 0, status_correct: 0, mapped_evaluated: 0, mapped_correct: 0, degraded: 0 };
+    groupEntries.forEach((entry) => {
+      if (!entry?.ok || !entry.result) return;
+      const truth = truthFor(truthBySample, entry.sample_id);
+      const truthMapping = truth && truth.target_mapping;
+      if (!truthMapping || typeof truthMapping !== 'object' || !truthMapping.status) return;
+      const predicted = entry.result.analysis_structure?.target_mapping;
+      if (!predicted || typeof predicted !== 'object') {
+        group.degraded += 1;
+        totals.degraded += 1;
+        degradedDetails.push(`${entry.sample_id} r${entry.repeat}: no target_mapping structure`);
+        return;
+      }
+      // 状态判断
+      group.status_evaluated += 1;
+      totals.status_evaluated += 1;
+      if (String(predicted.status || '') === String(truthMapping.status)) {
+        group.status_correct += 1;
+        totals.status_correct += 1;
+      }
+      // 成功映射：仅当真值声明 target_mapped 时评估
+      if (typeof truthMapping.target_mapped === 'boolean') {
+        const predictedMapped = String(predicted.status || '') === 'resolved'
+          && Boolean(String(predicted.target_entity_id || '').trim());
+        group.mapped_evaluated += 1;
+        totals.mapped_evaluated += 1;
+        if (predictedMapped === truthMapping.target_mapped) {
+          group.mapped_correct += 1;
+          totals.mapped_correct += 1;
+        }
+      }
+    });
+    perRepeat[repeat] = {
+      status_accuracy: group.status_evaluated ? group.status_correct / group.status_evaluated : null,
+      mapped_accuracy: group.mapped_evaluated ? group.mapped_correct / group.mapped_evaluated : null,
+      status_evaluated: group.status_evaluated,
+      mapped_evaluated: group.mapped_evaluated,
+      degraded: group.degraded
+    };
+  });
+  const statusVariance = spread(Object.values(perRepeat).map((group) => group.status_accuracy).filter((value) => value !== null));
+  const mappedVariance = spread(Object.values(perRepeat).map((group) => group.mapped_accuracy).filter((value) => value !== null));
+  return {
+    status: totals.status_evaluated >= MIN_EVALUABLE_SAMPLES ? 'EVALUATED' : 'NOT_EVALUABLE',
+    status_reason: totals.status_evaluated < MIN_EVALUABLE_SAMPLES
+      ? `target_mapping 真值样本 ${totals.status_evaluated} < ${MIN_EVALUABLE_SAMPLES}`
+      : null,
+    status_accuracy: totals.status_evaluated ? totals.status_correct / totals.status_evaluated : null,
+    mapped_accuracy: totals.mapped_evaluated ? totals.mapped_correct / totals.mapped_evaluated : null,
+    status_evaluated_samples: totals.status_evaluated,
+    mapped_evaluated_samples: totals.mapped_evaluated,
+    degraded_count: totals.degraded,
+    degraded_details: degradedDetails,
+    per_repeat: perRepeat,
+    repeat_variance: { status_accuracy: statusVariance, mapped_accuracy: mappedVariance }
+  };
 }
 
 function pairwiseDiff(left = [], right = []) {
@@ -615,17 +974,26 @@ function summarizeArm(entries, labels = new Map()) {
 }
 
 module.exports = {
+  MIN_EVALUABLE_SAMPLES,
   answerSha256,
   competitionJaccard,
   distribution,
   entityQualityStats,
   fieldStatusDistribution,
+  groundingEvidenceStats,
+  groupByRepeat,
   metricSignature,
   pairwiseDiff,
   percentile,
   precisionRecallF1,
+  rankQualityStats,
+  recommendationQualityStats,
   relationQualityStats,
+  semanticFieldOf,
   semanticTruthCoverage,
+  sentimentQualityStats,
+  spread,
   summarizeArm,
+  targetMappingQualityStats,
   validateTruthEntry
 };
