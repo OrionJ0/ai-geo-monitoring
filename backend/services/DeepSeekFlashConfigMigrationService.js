@@ -8,6 +8,22 @@ const OFFICIAL_DEEPSEEK_PRESET = Object.freeze({
 });
 const ANALYSIS_PLATFORM_SETTING = 'ai_analysis_platform_code';
 const ANALYSIS_MODEL_SETTING = 'ai_analysis_model_name';
+const ANALYSIS_REQUEST_OPTIONS_SETTING = 'ai_analysis_request_options';
+const FIXED_ANALYSIS_OPTION_KEYS = new Set([
+  'model',
+  'messages',
+  'input',
+  'temperature',
+  'response_format',
+  'thinking',
+  'max_tokens',
+  'max_output_tokens',
+  'tools',
+  'tool_choice',
+  'enable_search',
+  'search_options',
+  'web_search_options'
+]);
 
 class DeepSeekFlashConfigMigrationError extends Error {
   constructor(message, code) {
@@ -82,6 +98,10 @@ class DeepSeekFlashConfigMigrationService {
     this.model = options.model || require('../models').AIPlatformConfig;
     this.settingModel = options.settingModel || require('../models').Setting;
     this.sequelize = options.sequelize || require('../config/database');
+    this.credentialValidator = options.credentialValidator || ((row) => {
+      const secret = require('./AIPlatformConfigService').decryptApiKey(row);
+      return Boolean(String(secret || '').trim());
+    });
   }
 
   async findPreset(transaction = null) {
@@ -110,14 +130,14 @@ class DeepSeekFlashConfigMigrationService {
   }
 
   async findAnalysisSettings(transaction = null) {
-    const find = async (key) => {
+    const find = async (key, { required = true } = {}) => {
       const options = { where: { key } };
       if (transaction) {
         options.transaction = transaction;
         options.lock = transaction.LOCK.UPDATE;
       }
       const row = await this.settingModel.findOne(options);
-      if (!row) {
+      if (!row && required) {
         fail(
           `缺少正式分析配置 ${key}，拒绝自动迁移`,
           'DEEPSEEK_FLASH_ANALYSIS_SETTING_MISSING'
@@ -125,9 +145,43 @@ class DeepSeekFlashConfigMigrationService {
       }
       return row;
     };
+    const requestOptionsQuery = { where: { key: ANALYSIS_REQUEST_OPTIONS_SETTING } };
+    if (transaction) {
+      requestOptionsQuery.transaction = transaction;
+      requestOptionsQuery.lock = transaction.LOCK.UPDATE;
+    }
     return {
       platform: await find(ANALYSIS_PLATFORM_SETTING),
-      model: await find(ANALYSIS_MODEL_SETTING)
+      model: await find(ANALYSIS_MODEL_SETTING, { required: false }),
+      requestOptions: await this.settingModel.findOne(requestOptionsQuery)
+    };
+  }
+
+  inspectAnalysisRequestOptions(settings) {
+    let analysisRequestOptions = {};
+    if (settings.requestOptions?.value) {
+      try {
+        analysisRequestOptions = JSON.parse(settings.requestOptions.value);
+      } catch (_) {
+        fail(
+          '正式分析请求参数不是有效 JSON，拒绝自动迁移',
+          'DEEPSEEK_FLASH_ANALYSIS_OPTIONS_INVALID'
+        );
+      }
+    }
+    if (!analysisRequestOptions || Array.isArray(analysisRequestOptions) || typeof analysisRequestOptions !== 'object') {
+      fail(
+        '正式分析请求参数必须是对象，拒绝自动迁移',
+        'DEEPSEEK_FLASH_ANALYSIS_OPTIONS_INVALID'
+      );
+    }
+    const sanitized = Object.fromEntries(
+      Object.entries(analysisRequestOptions)
+        .filter(([key]) => !FIXED_ANALYSIS_OPTION_KEYS.has(key))
+    );
+    return {
+      migrationRequired: Object.keys(sanitized).length !== Object.keys(analysisRequestOptions).length,
+      sanitized
     };
   }
 
@@ -140,7 +194,9 @@ class DeepSeekFlashConfigMigrationService {
         'DEEPSEEK_FLASH_ANALYSIS_PLATFORM_MISMATCH'
       );
     }
-    const runtimeModel = String(value(settings.model, 'value') || '').trim();
+    const runtimeModel = String(
+      value(settings.model, 'value') || platformState.current_model || ''
+    ).trim();
     if (
       runtimeModel !== OFFICIAL_DEEPSEEK_PRESET.source_model
       && runtimeModel !== OFFICIAL_DEEPSEEK_PRESET.target_model
@@ -156,12 +212,29 @@ class DeepSeekFlashConfigMigrationService {
         'DEEPSEEK_FLASH_CONFIG_RUNTIME_UNAVAILABLE'
       );
     }
+    let credentialDecryptable = false;
+    try {
+      credentialDecryptable = this.credentialValidator(row) === true;
+    } catch (_) {
+      credentialDecryptable = false;
+    }
+    if (!credentialDecryptable) {
+      fail(
+        'DeepSeek 正式凭据无法由当前主密钥验证，拒绝发布',
+        'DEEPSEEK_FLASH_CREDENTIAL_INVALID'
+      );
+    }
+    const analysisOptions = this.inspectAnalysisRequestOptions(settings);
+    const analysisOptionsMigrationRequired = analysisOptions.migrationRequired;
     const ready = platformState.current_model === OFFICIAL_DEEPSEEK_PRESET.target_model
-      && runtimeModel === OFFICIAL_DEEPSEEK_PRESET.target_model;
+      && !settings.model
+      && !analysisOptionsMigrationRequired;
     return {
       ...platformState,
       analysis_platform_code: platformCode,
       analysis_model: runtimeModel,
+      legacy_analysis_model_setting_present: Boolean(settings.model),
+      analysis_options_migration_required: analysisOptionsMigrationRequired,
       migration_required: !ready,
       ready
     };
@@ -196,9 +269,14 @@ class DeepSeekFlashConfigMigrationService {
         };
         await row.update(patch, { transaction, fields: Object.keys(patch) });
       }
-      if (before.analysis_model === OFFICIAL_DEEPSEEK_PRESET.source_model) {
-        await settings.model.update(
-          { value: OFFICIAL_DEEPSEEK_PRESET.target_model },
+      if (settings.model) {
+        await settings.model.destroy({ transaction });
+        settings.model = null;
+      }
+      if (before.analysis_options_migration_required && settings.requestOptions) {
+        const analysisOptions = this.inspectAnalysisRequestOptions(settings);
+        await settings.requestOptions.update(
+          { value: JSON.stringify(analysisOptions.sanitized) },
           { transaction, fields: ['value'] }
         );
       }
@@ -218,6 +296,7 @@ module.exports = {
   OFFICIAL_DEEPSEEK_PRESET,
   ANALYSIS_PLATFORM_SETTING,
   ANALYSIS_MODEL_SETTING,
+  ANALYSIS_REQUEST_OPTIONS_SETTING,
   DeepSeekFlashConfigMigrationError,
   DeepSeekFlashConfigMigrationService,
   inspectDeepSeekFlashConfigRow

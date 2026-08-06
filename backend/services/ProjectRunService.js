@@ -34,7 +34,7 @@ const PromptCategoryService = require('./PromptCategoryService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
 const WebCaptureAnswerQualityService = require('./WebCaptureAnswerQualityService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
-const { consumeQuotaDirect } = require('../middleware/quota');
+const { consumeQuotaDirect, quotaBatchTransactionOptions } = require('../middleware/quota');
 
 function normalizeCompetitorSnapshot(competitors, fallbackSnapshot = null) {
   if (Array.isArray(competitors) && competitors.length) {
@@ -147,6 +147,10 @@ function metricFailureDiagnostics(error) {
     error_code: String(error?.code || 'analysis_failed').slice(0, 80),
     error_detail: String(error?.message || 'AI 分析失败').slice(0, 300)
   };
+  if (error?.retryable === true) diagnostics.retryable = true;
+  if (Number.isFinite(Number(error?.retryAfterSeconds))) {
+    diagnostics.retry_after_seconds = Number(error.retryAfterSeconds);
+  }
   ['stage', 'platform', 'model', 'finish_reason'].forEach((field) => {
     if (details[field] !== undefined && details[field] !== null) {
       diagnostics[field] = String(details[field]).slice(0, 120);
@@ -336,6 +340,7 @@ function isAnalysisOnlyRetry(record, detail) {
       record?.result_summary?.retry?.kind === 'analysis_only'
       || [
         'analysis_request',
+        'analysis_queue',
         'analysis_validation',
         'metric_persist',
         'execution_interrupted'
@@ -406,6 +411,7 @@ class ProjectRunService {
     this.recordLeaseOwner = `${os.hostname()}:${process.pid}:project-run`;
     this.acceptingBackgroundRuns = true;
     this.backgroundRuns = new Set();
+    this.shutdownController = new AbortController();
     this.analysisConfigService = options.analysisConfigService || AIAnalysisConfigService;
   }
 
@@ -511,7 +517,9 @@ class ProjectRunService {
       question,
       responseText,
       brand: projectData,
-      competitors: frozenSnapshot
+      competitors: frozenSnapshot,
+      correlationId: `record-${record.id}`,
+      signal: this.shutdownController.signal
     });
     const citationAnalysis = providedCitationAnalysis || this.buildCitationAnalysis({
       responseText,
@@ -574,6 +582,10 @@ class ProjectRunService {
 
   runInTransaction(work) {
     return sequelize.transaction(work);
+  }
+
+  runQuotaBatchTransaction(work) {
+    return sequelize.transaction(quotaBatchTransactionOptions(sequelize), work);
   }
 
   async persistVisibilityMetric({ record, payload, transaction }) {
@@ -787,7 +799,11 @@ class ProjectRunService {
       const diagnostics = metricFailureDiagnostics(error);
       const failure = {
         stage: diagnostics
-          ? (diagnostics.stage === 'request' ? 'analysis_request' : 'analysis_validation')
+          ? (
+              diagnostics.stage === 'request'
+                ? 'analysis_request'
+                : (diagnostics.stage === 'analysis_queue' ? 'analysis_queue' : 'analysis_validation')
+            )
           : 'metric_persist',
         error_code: diagnostics?.error_code || 'metric_persist_failed'
       };
@@ -1180,6 +1196,7 @@ class ProjectRunService {
 
     const runNext = async () => {
       while (nextIndex < rows.length) {
+        if (this.shutdownController.signal.aborted) break;
         if (questionSetRunId) {
           const run = await QuestionSetRun.findByPk(questionSetRunId, { attributes: ['paused_at'] });
           if (run?.paused_at) break;
@@ -1367,17 +1384,27 @@ class ProjectRunService {
   async prepareProjectRun(options) {
     const plan = await this.planProjectRun(options);
     if (!plan.ok) return plan;
-    const quota = await this.consumeRunQuota(plan.runUser.id, plan.targets.length);
-    if (!quota.ok) return this.quotaFailureResult(quota);
-    const entries = await this.createRunEntries({
-      targets: plan.targets,
-      runUser: plan.runUser,
-      projectData: plan.projectData,
-      keywords: plan.keywords,
-      scheduledExecutionId: options.scheduledExecutionId,
-      questionSetRunId: options.questionSetRunId
+    const prepared = await this.runQuotaBatchTransaction(async (transaction) => {
+      const quota = await this.consumeRunQuota(
+        plan.runUser.id,
+        plan.targets.length,
+        { transaction }
+      );
+      if (!quota.ok) return { quota, entries: [] };
+      const entries = await this.createRunEntries({
+        targets: plan.targets,
+        runUser: plan.runUser,
+        projectData: plan.projectData,
+        keywords: plan.keywords,
+        scheduledExecutionId: options.scheduledExecutionId,
+        questionSetRunId: options.questionSetRunId,
+        competitorSnapshot: normalizeCompetitorSnapshot(plan.competitors),
+        transaction
+      });
+      return { quota, entries };
     });
-    return { ...plan, quota, entries };
+    if (!prepared.quota.ok) return this.quotaFailureResult(prepared.quota);
+    return { ...plan, ...prepared };
   }
 
   buildQuestionSetRunFingerprint({ project, questionSet, prompts, user }) {
@@ -1521,6 +1548,7 @@ class ProjectRunService {
           projectData,
           keywords: plan.keywords,
           questionSetRunId: run.id,
+          competitorSnapshot,
           transaction,
           afterRecordCreated: async (context) => {
             if (typeof options.faultInjector === 'function') {
@@ -1835,6 +1863,41 @@ class ProjectRunService {
 
   beginShutdown() {
     this.acceptingBackgroundRuns = false;
+    this.shutdownController.abort(new Error('project_run_shutdown'));
+  }
+
+  getShutdownSignal() {
+    return this.shutdownController.signal;
+  }
+
+  scheduleBackgroundTask(work, { label = 'background_task', admitted = false } = {}) {
+    if (!this.acceptingBackgroundRuns && !admitted) return null;
+    let execution;
+    execution = Promise.resolve()
+      .then(work)
+      .catch((error) => {
+        console.error('后台运行异常:', {
+          label: String(label).slice(0, 80),
+          error_code: String(error?.code || 'background_task_failed').slice(0, 80)
+        });
+      })
+      .finally(() => this.backgroundRuns.delete(execution));
+    this.backgroundRuns.add(execution);
+    return execution;
+  }
+
+  registerBackgroundActivity() {
+    if (!this.acceptingBackgroundRuns) return null;
+    let releasePromise;
+    const execution = new Promise((resolve) => { releasePromise = resolve; });
+    this.backgroundRuns.add(execution);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.backgroundRuns.delete(execution);
+      releasePromise();
+    };
   }
 
   async drain() {
@@ -2022,7 +2085,7 @@ class ProjectRunService {
 
     let prepared;
     try {
-      prepared = await sequelize.transaction(async (transaction) => {
+      prepared = await this.runQuotaBatchTransaction(async (transaction) => {
       const run = await QuestionSetRun.findOne({
         where: { id: runId, project_id: projectData.id },
         transaction,
@@ -2365,10 +2428,12 @@ class ProjectRunService {
       if (retryMode !== 'analysis_only') {
         const queryOptions = {
           config: target.platformConfig,
-          runtimeSettings
+          runtimeSettings,
+          purpose: 'project_monitoring',
+          correlationId: `record-${record.id}`,
+          signal: this.shutdownController.signal
         };
         if (WebPlatformRegistry.hasDefinition(target.platform)) {
-          queryOptions.purpose = 'project_monitoring';
           queryOptions.capture_owner = {
             record_id: record.id,
             user_id: runUser.id,

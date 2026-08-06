@@ -1,9 +1,11 @@
 const AIResponseEntityExtractionService = require('./AIResponseEntityExtractionService');
-const AIResponseSemanticJudgmentService = require('./AIResponseSemanticJudgmentService');
+const {
+  AIResponseSemanticJudgmentService,
+  SEMANTIC_PROMPT_REVISION_REV2
+} = require('./AIResponseSemanticJudgmentService');
 const { createSourceMap, SOURCE_MAP_VERSION } = require('./AIAnalysisSourceMapService');
 const { buildEntityCatalog, buildTargetMentions } = require('./AIEntityCatalogService');
 const { ENTITY_PROMPT_REVISION } = require('./AIResponseEntityExtractionService');
-const { SEMANTIC_PROMPT_REVISION } = require('./AIResponseSemanticJudgmentService');
 const { SCOPED_METRIC_SEMANTICS } = require('./GeoMetricSemanticsService');
 const {
   buildRegistrySnapshot,
@@ -13,17 +15,58 @@ const AIAnalysisExecutionCoordinator = require('./AIAnalysisExecutionCoordinator
 const {
   AIAnalysisExecutionQueueError
 } = require('./AIAnalysisExecutionCoordinator');
+const { AIAnalysisConfigError } = require('./AIAnalysisConfigService');
 
 const ANALYSIS_METHOD = 'ai_structured_v5';
 const STRUCTURE_VERSION = 'geo_metric_input_v5';
 const CONTRACT_REVISION = 'three_track_partial_v2';
+const FAIL_CLOSED_ANALYSIS_ERROR_CODES = new Set([
+  'analysis_api_required',
+  'analysis_api_failed',
+  'analysis_config_unavailable',
+  'analysis_model_not_configured',
+  'analysis_model_policy_mismatch',
+  'analysis_platform_identity_invalid',
+  'analysis_platform_policy_mismatch',
+  'analysis_request_options_invalid',
+  'authentication_failed',
+  'config_unavailable',
+  'disabled',
+  'missing_api_key',
+  'missing_base_url',
+  'missing_model',
+  'service_shutting_down'
+]);
+
+function mustFailClosed(error) {
+  return error instanceof AIAnalysisConfigError
+    || FAIL_CLOSED_ANALYSIS_ERROR_CODES.has(String(error?.code || ''));
+}
+
+function failClosedError(error, stage) {
+  return new AIResponseAnalysisV5Error(
+    error?.message || 'v5 结构化分析配置不可用',
+    error?.code || 'analysis_config_unavailable',
+    { stage, ...(error?.details || {}) },
+    {
+      retryable: error?.retryable === true,
+      status: Number(error?.status) || 503,
+      retryAfterSeconds: error?.retryAfterSeconds
+    }
+  );
+}
 
 class AIResponseAnalysisV5Error extends Error {
-  constructor(message, code = 'invalid_analysis_output', details = {}) {
+  constructor(message, code = 'invalid_analysis_output', details = {}, options = {}) {
     super(message);
     this.name = 'AIResponseAnalysisV5Error';
     this.code = code;
     this.details = details;
+    this.retryable = options.retryable === true;
+    this.status = Number.isInteger(options.status) ? options.status : undefined;
+    this.retryAfterSeconds = Number.isFinite(Number(options.retryAfterSeconds))
+      ? Number(options.retryAfterSeconds)
+      : undefined;
   }
 }
 
@@ -479,7 +522,7 @@ function calculate({
     },
     diagnostics: {
       entity_prompt_revision: ENTITY_PROMPT_REVISION,
-      semantic_prompt_revision: SEMANTIC_PROMPT_REVISION,
+      semantic_prompt_revision: SEMANTIC_PROMPT_REVISION_REV2,
       model: stages.find((stage) => stage.model)?.model || 'deepseek-v4-flash',
       attempt_count: totalAttempts(stages),
       usage: combinedUsage(stages),
@@ -578,9 +621,35 @@ class AIResponseAnalysisV5Service {
     this.entityExtractionService = options.entityExtractionService
       || AIResponseEntityExtractionService;
     this.semanticJudgmentService = options.semanticJudgmentService
-      || AIResponseSemanticJudgmentService;
+      || new AIResponseSemanticJudgmentService({ promptRevision: 'rev2' });
     this.executionCoordinator = options.executionCoordinator
       || AIAnalysisExecutionCoordinator;
+  }
+
+  getPromptDefinition(platform = null) {
+    const stages = [
+      this.entityExtractionService.getPromptDefinition(platform),
+      this.semanticJudgmentService.getPromptDefinition(platform)
+    ];
+    return {
+      version: 'ai_structured_v5_two_stage_v2',
+      prompt_revision: `${ENTITY_PROMPT_REVISION}+${SEMANTIC_PROMPT_REVISION_REV2}`,
+      template: stages.map((stage, index) => (
+        `=== 阶段 ${index + 1}: ${stage.version} ===\n${stage.template}`
+      )).join('\n\n'),
+      runtime_fields: [...new Set(stages.flatMap((stage) => stage.runtime_fields || []))],
+      expected_output: { stages: stages.map((stage) => stage.expected_output) },
+      request_options: stages[0].request_options,
+      max_attempts: stages.reduce((sum, stage) => sum + stage.max_attempts, 0),
+      request_profile: {
+        ...stages[0].request_profile,
+        max_attempts: stages.reduce((sum, stage) => sum + stage.max_attempts, 0)
+      },
+      request_parameters: {
+        stages: stages.map((stage) => stage.request_parameters)
+      },
+      stages
+    };
   }
 
   async analyze(input) {
@@ -591,13 +660,17 @@ class AIResponseAnalysisV5Service {
         throw new AIResponseAnalysisV5Error(error.message, error.code, {
           stage: 'analysis_queue',
           ...this.executionCoordinator.snapshot()
+        }, {
+          retryable: error.retryable,
+          status: error.status,
+          retryAfterSeconds: error.retryAfterSeconds
         });
       }
       throw error;
     }
   }
 
-  async analyzeUncoordinated({ question, responseText, brand, competitors }) {
+  async analyzeUncoordinated({ question, responseText, brand, competitors, correlationId = null, signal = undefined }) {
     const normalizedQuestion = String(question || '').trim();
     const answer = String(responseText || '');
     if (!normalizedQuestion || !answer.trim()) {
@@ -618,6 +691,8 @@ class AIResponseAnalysisV5Service {
       const extracted = await this.entityExtractionService.extract({
         answer,
         sourceMap,
+        correlationId,
+        signal,
         validateMentions: (mentions) => buildEntityCatalog({
           answer,
           sourceMap,
@@ -633,6 +708,15 @@ class AIResponseAnalysisV5Service {
       });
       entityDiagnostics = extracted.diagnostics;
     } catch (error) {
+      if (mustFailClosed(error)) throw failClosedError(error, 'entity_extract');
+      if (signal?.aborted) {
+        throw new AIResponseAnalysisV5Error(
+          '服务正在安全关闭，请稍后重试',
+          'service_shutting_down',
+          { stage: 'entity_extract' },
+          { retryable: true, status: 503, retryAfterSeconds: 1 }
+        );
+      }
       // 阶段 1 达到上限：确定性目标事实仍由程序扫描保留（target_fact 不丢），
       // 无实体可给阶段 2 -> 目标语义与开放竞品轨 unavailable，不抛整条错误。
       catalog = buildDegradedCatalog({ sourceMap, targetBrand });
@@ -652,11 +736,24 @@ class AIResponseAnalysisV5Service {
         semanticResult = await this.semanticJudgmentService.judge({
           question: normalizedQuestion,
           sourceMap,
+          correlationId,
+          signal,
           // 阶段 2 使用匹配前的 grounded 投影；buildSemanticPrompt 只取
           // entity_id/name/type/surface_forms/source_ids，不含注册表身份
           catalog: registryCatalog
         });
       } catch (semanticError) {
+        if (mustFailClosed(semanticError)) {
+          throw failClosedError(semanticError, 'semantic_judge');
+        }
+        if (signal?.aborted) {
+          throw new AIResponseAnalysisV5Error(
+            '服务正在安全关闭，请稍后重试',
+            'service_shutting_down',
+            { stage: 'semantic_judge' },
+            { retryable: true, status: 503, retryAfterSeconds: 1 }
+          );
+        }
         // 阶段 2 达到上限后按字段降级：目标事实不被清空，
         // 已发现竞品进入 unresolved，不回退 v4 或 Pro。
         semanticResult = buildDegradedSemantic(registryCatalog, semanticError);
@@ -682,7 +779,7 @@ class AIResponseAnalysisV5Service {
     return {
       ...calculated,
       analysis_method: ANALYSIS_METHOD,
-      analysis_prompt_revision: `${ENTITY_PROMPT_REVISION}+${SEMANTIC_PROMPT_REVISION}`,
+      analysis_prompt_revision: `${ENTITY_PROMPT_REVISION}+${SEMANTIC_PROMPT_REVISION_REV2}`,
       analysis_platform: entityDiagnostics?.platform
         || semanticResult.diagnostics?.platform
         || 'deepseek',

@@ -73,7 +73,7 @@ scope: deep
 ### 3.3 现有 AI 能力
 
 - `backend/services/AIPlatformRequestService.js` 已处理 OpenAI-compatible Chat Completions/Responses 适配、URL 安全校验、密钥解密、超时、错误分类和模型文本提取。
-- `backend/services/AIAnalysisConfigService.js` 与 `backend/services/AIResponseAnalysisService.js` 展示了“独立平台配置、显式结构校验、一次纠正、Prompt/模型版本记录”的现有模式。
+- `backend/services/AIAnalysisConfigService.js` 与现役 `backend/services/AIResponseAnalysisV5Service.js` 展示了“独立平台配置、显式结构校验、一次纠正、Prompt/模型版本记录”的现有模式；历史 v4 基线只保留在 `backend/evaluation/AIResponseAnalysisV4BaselineService.js` 供离线评测。
 - 营销报告只复用上述基础设施和模式，不复用 GEO 配置键、Prompt、Schema 或分析结果。
 - 模型请求必须显式关闭联网搜索，并且请求体不得包含工具定义。
 

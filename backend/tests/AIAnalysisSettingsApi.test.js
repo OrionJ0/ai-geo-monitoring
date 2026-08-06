@@ -119,7 +119,7 @@ test('returns the versioned runtime analysis prompt template to administrators',
   AIAnalysisConfigService.getAnalysisPlatform = async () => ({
     code: 'deepseek',
     adapter_type: 'openai_chat_completions',
-    default_model: 'deepseek-v4-pro'
+    default_model: 'deepseek-v4-flash'
   });
   assert.equal((await api('GET', '/analysis-api/prompt', { role: 'user' })).status, 403);
 
@@ -128,22 +128,25 @@ test('returns the versioned runtime analysis prompt template to administrators',
 
     assert.equal(response.status, 200);
     assert.equal(response.headers['cache-control'], 'no-store');
-    // 010 硬切：/analysis-api/prompt 返回 v5 阶段 1（实体提取）提示定义，
-    // 不再暴露 v4 运行时提示词。
-    assert.equal(response.json.data.prompt_revision, 'grounded_entity_catalog_v1');
+    assert.equal(
+      response.json.data.prompt_revision,
+      'grounded_entity_catalog_v1+closed_entity_semantics_v4_evidence_roles_rev2'
+    );
+    assert.equal(response.json.data.stages.length, 2);
     assert.match(response.json.data.template, /<source_answer>/);
+    assert.match(response.json.data.template, /<semantic_input>/);
     assert.match(response.json.data.template, /\{\{待分析回答原文片段\}\}/);
     assert.match(response.json.data.template, /只从 source_answer\.segments 的 text 中抽取/);
     assert.match(response.json.data.template, /<output_contract>/);
     assert.match(response.json.data.template, /other_organization/);
-    assert.doesNotMatch(response.json.data.template, /\{\{目标品牌\}\}/);
+    assert.match(response.json.data.template, /\{\{目标品牌\}\}/);
     assert.doesNotMatch(response.json.data.template, /competitor_hints|竞品提示/);
     assert.deepEqual(response.json.data.request_options, {
       temperature: 0,
       response_format: { type: 'json_object' },
       thinking: { type: 'disabled' }
     });
-    assert.equal(response.json.data.max_attempts, 2);
+    assert.equal(response.json.data.max_attempts, 4);
   } finally {
     AIAnalysisConfigService.getAnalysisPlatform = originalGetAnalysisPlatform;
   }
@@ -207,6 +210,37 @@ test('returns temporary analysis test input and output without a persistence con
     );
     assert.equal(response.json.data.output.analysis_structure.schema_version, 'geo_metric_input_v5');
     assert.equal(response.json.data.output.analysis_structure.entities[0].name, '广拓');
+  } finally {
+    AIResponseAnalysisV5Service.analyze = originalAnalyze;
+  }
+});
+
+test('returns bounded retry metadata when the shared analysis queue is overloaded', async () => {
+  const originalAnalyze = AIResponseAnalysisV5Service.analyze;
+  AIResponseAnalysisV5Service.analyze = async () => {
+    throw new AIResponseAnalysisV5Service.AIResponseAnalysisV5Error(
+      'AI 分析排队超时，请稍后重试',
+      'analysis_queue_timeout',
+      { stage: 'analysis_queue' },
+      { retryable: true, status: 503, retryAfterSeconds: 2 }
+    );
+  };
+  try {
+    const response = await api('POST', '/analysis-api/test', {
+      role: 'admin',
+      body: {
+        question_text: '问题',
+        brand_name: '品牌',
+        response_text: '回答'
+      }
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers['retry-after'], '2');
+    assert.deepEqual(response.json.data, {
+      error_code: 'analysis_queue_timeout',
+      retryable: true,
+      retry_after_seconds: 2
+    });
   } finally {
     AIResponseAnalysisV5Service.analyze = originalAnalyze;
   }

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { AIPlatformService } = require('../services/AIPlatformService');
 
 function createService(options = {}) {
+  const audits = [];
   const rows = [
     {
       code: 'doubao',
@@ -136,10 +137,12 @@ function createService(options = {}) {
     service: new AIPlatformService({
       requestService,
       configService,
-      webPlatformRegistry
+      webPlatformRegistry,
+      auditLogger: options.auditLogger || ((event) => audits.push(event))
     }),
     rows,
-    calls
+    calls,
+    audits
   };
 }
 
@@ -148,6 +151,66 @@ test('reports runnable platforms from database configuration only', async () => 
 
   assert.deepEqual(await service.getAvailablePlatforms(), ['deepseek', 'deepseek-web']);
   assert.deepEqual(await service.getAvailablePlatforms({ capability: 'analysis' }), ['deepseek']);
+});
+
+test('emits the same safe request audit for managed Web monitoring', async () => {
+  const { service, rows, audits } = createService();
+  const config = rows.find((row) => row.code === 'deepseek-web');
+  const result = await service.queryPlatform('deepseek-web', 'secret question', {
+    config,
+    purpose: 'project_monitoring',
+    correlationId: 'record-77',
+    capture_owner: { record_id: 77, user_id: 9, project_id: 3 }
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(audits, [{
+    event: 'ai_platform_request',
+    platform: 'deepseek-web',
+    model: 'deepseek-web-ui',
+    purpose: 'project_monitoring',
+    attempt: 1,
+    correlation_id: 'record-77',
+    policy_revision: null,
+    policy_fingerprint: null,
+    policy_valid: null,
+    prompt_fingerprint: null,
+    prompt_template_fingerprint: null,
+    prompt_variant: null
+  }]);
+  assert.doesNotMatch(JSON.stringify(audits), /secret question/u);
+});
+
+test('forwards the project shutdown signal to managed Web monitoring', async () => {
+  const controller = new AbortController();
+  let receivedSignal;
+  const webPlatformRegistry = {
+    listDefinitions: () => [{
+      code: 'deepseek-web',
+      adapterType: 'deepseek_web',
+      displayName: 'DeepSeek Web',
+      captureSchemaVersion: 'deepseek-web-capture-v1'
+    }],
+    validateManagedConfig: () => {},
+    getService: () => ({
+      queryPlatform: async (_question, options) => {
+        receivedSignal = options.signal;
+        return { success: false, error_code: 'service_shutting_down' };
+      }
+    })
+  };
+  const { service, rows } = createService({ webPlatformRegistry });
+  const config = rows.find((row) => row.code === 'deepseek-web');
+
+  await service.queryPlatform('deepseek-web', '测试问题', {
+    config,
+    purpose: 'project_monitoring',
+    correlationId: 'record-77',
+    capture_owner: { record_id: 77, user_id: 9 },
+    signal: controller.signal
+  });
+
+  assert.equal(receivedSignal, controller.signal);
 });
 
 test('resolves detailed availability for requested dynamic platform codes', async () => {

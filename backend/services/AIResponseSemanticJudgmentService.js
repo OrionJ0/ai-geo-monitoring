@@ -432,7 +432,71 @@ class AIResponseSemanticJudgmentService {
     return buildSemanticPrompt({ ...input, revision: this.promptRevision });
   }
 
-  async judge({ question, sourceMap, catalog }) {
+  getPromptDefinition(platform = null) {
+    const sourceMap = {
+      segments: [{ source_id: 'L001', text: '{{待分析回答原文片段}}' }]
+    };
+    const catalog = {
+      target_entity_id: 'E001',
+      entities: [{
+        entity_id: 'E001',
+        name: '{{目标品牌}}',
+        type: 'brand',
+        surface_forms: ['{{原文目标实体文本}}'],
+        mentions: [{ source_id: 'L001' }]
+      }]
+    };
+    const requestOptions = effectiveRequestOptions(platform);
+    return {
+      version: 'ai_structured_v5_semantic_stage_v2',
+      prompt_revision: this.promptRevision === 'rev2'
+        ? SEMANTIC_PROMPT_REVISION_REV2
+        : SEMANTIC_PROMPT_REVISION,
+      template: buildSemanticPrompt({
+        question: '{{当前问题}}',
+        sourceMap,
+        catalog,
+        revision: this.promptRevision
+      }),
+      runtime_fields: ['question', 'semantic_input.entities', 'semantic_input.segments'],
+      expected_output: {
+        competitor_relations: [],
+        recommendations: [],
+        sentiment: {
+          status: 'assessed | not_applicable',
+          label: 'positive | neutral | negative | null',
+          semantic_context_source_ids: ['L001']
+        }
+      },
+      request_options: requestOptions,
+      max_attempts: SEMANTIC_MAX_ATTEMPTS,
+      request_profile: {
+        temperature: requestOptions.temperature,
+        timeout_seconds: ANALYSIS_TIMEOUT_SECONDS,
+        max_attempts: SEMANTIC_MAX_ATTEMPTS,
+        web_search: false,
+        token_limit: null,
+        json_mode: 'chat_completions_only',
+        deepseek_thinking: 'disabled'
+      },
+      request_parameters: {
+        adapter_type: platform?.adapter_type || 'openai_chat_completions',
+        request_body: {
+          ...requestOptions,
+          model: platform?.default_model || 'deepseek-v4-flash',
+          messages: [{ role: 'user', content: '{{运行时语义判断提示词}}' }]
+        },
+        runtime_policy: {
+          timeout_seconds: ANALYSIS_TIMEOUT_SECONDS,
+          max_attempts: SEMANTIC_MAX_ATTEMPTS,
+          web_search: false,
+          token_limit: null
+        }
+      }
+    };
+  }
+
+  async judge({ question, sourceMap, catalog, correlationId = null, signal = undefined }) {
     if (!String(question || '').trim() || !Array.isArray(sourceMap?.segments) || !Array.isArray(catalog?.entities)) {
       throw new AISemanticJudgmentError(
         '语义判断缺少问题、source map 或实体目录',
@@ -453,11 +517,13 @@ class AIResponseSemanticJudgmentService {
         : buildSemanticRepairPrompt(basePrompt, lastError, { sourceMap, catalog, revision: this.promptRevision });
       const connection = await this.requestService.queryConfig(platform, prompt, {
         purpose: 'analysis_semantic_judge',
+        correlationId,
         retryCount: 0,
         requestOptions: effectiveRequestOptions(platform),
         disableWebSearch: true,
         omitTokenLimit: true,
-        timeoutSeconds: ANALYSIS_TIMEOUT_SECONDS
+        timeoutSeconds: ANALYSIS_TIMEOUT_SECONDS,
+        signal
       });
       const diagnostics = requestDiagnostics(connection, platform, attempt);
       if (!connection?.success) {
@@ -491,7 +557,7 @@ class AIResponseSemanticJudgmentService {
   }
 }
 
-module.exports = new AIResponseSemanticJudgmentService();
+module.exports = new AIResponseSemanticJudgmentService({ promptRevision: 'rev2' });
 module.exports.AIResponseSemanticJudgmentService = AIResponseSemanticJudgmentService;
 module.exports.AISemanticJudgmentError = AISemanticJudgmentError;
 module.exports.SEMANTIC_PROMPT_REVISION = SEMANTIC_PROMPT_REVISION;
@@ -499,3 +565,4 @@ module.exports.SEMANTIC_PROMPT_REVISION_REV2 = SEMANTIC_PROMPT_REVISION_REV2;
 module.exports.SEMANTIC_MAX_ATTEMPTS = SEMANTIC_MAX_ATTEMPTS;
 module.exports.parseSemanticOutput = parseSemanticOutput;
 module.exports.buildSemanticPrompt = buildSemanticPrompt;
+module.exports.buildSemanticRepairPrompt = buildSemanticRepairPrompt;

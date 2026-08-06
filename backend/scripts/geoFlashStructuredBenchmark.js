@@ -10,7 +10,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env'), quiet: true
 const fs = require('node:fs');
 const AIPlatformConfigService = require('../services/AIPlatformConfigService');
 const AIPlatformRequestService = require('../services/AIPlatformRequestService');
-const { AIResponseAnalysisService } = require('../services/AIResponseAnalysisService');
+const { AIResponseAnalysisService } = require('../evaluation/AIResponseAnalysisV4BaselineService');
 const {
   AIResponseEntityExtractionService
 } = require('../services/AIResponseEntityExtractionService');
@@ -45,8 +45,7 @@ function cacheIdentityFor(arm) {
       experimentRevision: EXPERIMENT_REVISION
     };
   }
-  const singleton = require('../services/AIResponseAnalysisService');
-  const definition = singleton.getPromptDefinition();
+  const definition = new AIResponseAnalysisService().getPromptDefinition();
   return {
     promptRevision: definition.prompt_revision,
     model: 'deepseek-v4-flash',

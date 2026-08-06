@@ -54,7 +54,8 @@ test('platform settings hide API-only controls for managed Web adapters', () => 
   assert.match(platformSettings, /getWebPlatformAdminSessionMeta/);
   assert.match(platformSettings, /lastVerifiedDetail/);
   assert.match(platformSettings, /accountDetail/);
-  assert.match(analysisSettings, /capabilities\?\.analysis/);
+  assert.match(analysisSettings, /item\.code === 'deepseek'/);
+  assert.match(analysisSettings, /正式结构化分析固定使用官方内置 DeepSeek/);
 });
 
 test('platform settings warn before disabling the API used for structural analysis', () => {

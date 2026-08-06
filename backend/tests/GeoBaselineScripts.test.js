@@ -11,6 +11,10 @@ const sentimentBaselineDir = path.resolve(
 );
 const sampleScript = require('../scripts/geoBaselineSample');
 const evaluateScript = require('../scripts/geoBaselineEvaluate');
+const {
+  AIResponseAnalysisService: V4BaselineAnalyzer
+} = require('../evaluation/AIResponseAnalysisV4BaselineService');
+const v4BaselineAnalyzer = new V4BaselineAnalyzer();
 
 test('评测实验隔离输出目录并保留同一份样本和人工真值', () => {
   const options = evaluateScript.parseArgs([
@@ -47,12 +51,12 @@ test('评测分析器只暴露正式提示词与默认关闭思考路径', async
   assert.match(via, /thinking=disabled/);
 });
 
-test('人工基线抽样文件声明当前契约并标记 10 条多实体复核样本', () => {
+test('人工基线抽样文件声明冻结 v4 契约并标记 10 条多实体复核样本', () => {
   const source = fs.readFileSync(samplePath, 'utf8');
 
-  assert.match(source, /CURRENT_ANALYSIS_CONTRACT/);
-  assert.match(source, /CURRENT_STRUCTURE_VERSION/);
-  assert.match(source, /CURRENT_METRIC_SEMANTICS/);
+  assert.match(source, /BASELINE_ANALYSIS_CONTRACT/);
+  assert.match(source, /BASELINE_STRUCTURE_VERSION/);
+  assert.match(source, /BASELINE_METRIC_SEMANTICS/);
   assert.match(source, /multi_entity_review/);
   assert.match(source, /multiEntitySize:\s*10/);
   assert.match(source, /stored_metric/);
@@ -63,15 +67,65 @@ test('人工基线抽样文件声明当前契约并标记 10 条多实体复核�
 test('人工基线评测拒绝旧缓存、传入完整上下文且不泄露人工竞品', () => {
   const source = fs.readFileSync(evaluatePath, 'utf8');
 
-  assert.match(source, /CURRENT_ANALYSIS_CONTRACT/);
+  assert.doesNotMatch(source, /CURRENT_ANALYSIS_CONTRACT/);
+  assert.match(source, /ANALYSIS_METHOD/);
   assert.match(source, /CURRENT_STRUCTURE_VERSION/);
   assert.match(source, /CURRENT_METRIC_SEMANTICS/);
   assert.match(source, /cached\.ok === true/);
-  assert.match(source, /cached\.analysis_method === CURRENT_ANALYSIS_CONTRACT/);
+  assert.match(source, /cached\.analysis_method === ANALYSIS_METHOD/);
   assert.match(source, /cached\.analysis_prompt_revision === CURRENT_PROMPT_REVISION/);
+  assert.match(source, /cached\.analysis_input_fingerprint === inputFingerprint/);
+  assert.match(source, /identity\.requestPolicyFingerprint/);
   assert.match(source, /schema_version === CURRENT_STRUCTURE_VERSION/);
   assert.match(source, /question:\s*sample\.question/);
   assert.doesNotMatch(source, /competitorHints:\s*sample\.competitors/);
+});
+
+test('v4 基线缓存身份随完整输入和实际请求参数变化', () => {
+  const base = {
+    question: '工业园区如何选设备？',
+    response_text: '完整回答',
+    brand: { name: '广拓', aliases: ['GATO'] }
+  };
+  assert.notEqual(
+    evaluateScript.analysisInputFingerprint(base),
+    evaluateScript.analysisInputFingerprint({ ...base, response_text: '另一份回答' })
+  );
+  const platform = {
+    code: 'deepseek',
+    adapter_type: 'openai_chat_completions',
+    default_model: 'deepseek-v4-pro',
+    analysis_request_options: { temperature: 0 }
+  };
+  assert.notEqual(
+    evaluateScript.requestPolicyFingerprint(v4BaselineAnalyzer, platform),
+    evaluateScript.requestPolicyFingerprint(
+      v4BaselineAnalyzer,
+      { ...platform, analysis_request_options: { temperature: 0.2 } }
+    )
+  );
+});
+
+test('默认基线运行冻结同一平台快照供请求与缓存身份使用', async () => {
+  const platform = {
+    code: 'deepseek',
+    adapter_type: 'openai_chat_completions',
+    default_model: 'deepseek-v4-pro',
+    analysis_request_options: { temperature: 0 }
+  };
+  const built = await evaluateScript.buildAnalyzer({
+    platform: null,
+    resolveIdentity: true,
+    analysisConfigService: { getAnalysisPlatform: async () => platform }
+  });
+  platform.analysis_request_options.temperature = 0.9;
+
+  const frozen = await built.analyzer.configService.getAnalysisPlatform();
+  assert.equal(frozen.analysis_request_options.temperature, 0);
+  assert.equal(
+    built.identity.requestPolicyFingerprint,
+    evaluateScript.requestPolicyFingerprint(built.analyzer, frozen)
+  );
 });
 
 test('复用 AI 结构缓存时按当前确定性计算器刷新派生指标', () => {

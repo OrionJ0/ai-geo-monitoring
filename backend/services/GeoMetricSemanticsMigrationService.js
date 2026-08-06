@@ -397,6 +397,13 @@ class GeoMetricSemanticsMigrationService {
     const quickCheck = await this.quickCheck(database);
     const postflight = await this.audit({ sequelize: database });
 
+    if (postflight.migration_required) {
+      throw migrationError(
+        'GEO 指标语义迁移后复审仍未就绪',
+        'GEO_METRIC_SEMANTICS_MIGRATION_INCOMPLETE'
+      );
+    }
+
     if (
       preflight.legacy_sov_count !== postflight.legacy_sov_count
       || preflight.legacy_sov_checksum !== postflight.legacy_sov_checksum

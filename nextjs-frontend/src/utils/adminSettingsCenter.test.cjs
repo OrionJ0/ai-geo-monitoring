@@ -44,16 +44,18 @@ test('SEO title may be cleared to use the application default', () => {
   assert.match(titleField, /留空使用应用默认标题/);
 });
 
-test('analysis API settings select a configured platform and an independent model', () => {
+test('analysis API settings lock the official DeepSeek Flash identity', () => {
   assert.match(analysisSource, /\/api\/settings\/analysis-api/);
   assert.match(analysisSource, /\/api\/settings\/analysis-api\/test/);
   assert.match(analysisSource, /\/api\/settings\/analysis-api\/prompt/);
-  assert.match(analysisSource, /\/api\/admin\/ai-platforms\/\$\{platformId\}\/models/);
   assert.match(analysisSource, /name="platform_code"/);
   assert.match(analysisSource, /name="model_name"/);
-  assert.match(analysisSource, /name="model_name"\s+noStyle/);
   assert.match(analysisSource, /分析平台/);
   assert.match(analysisSource, /分析模型/);
+  assert.match(analysisSource, /正式结构化分析固定使用官方内置 DeepSeek/);
+  assert.match(analysisSource, /role="note"/);
+  assert.match(analysisSource, /platform_code:\s*'deepseek'/);
+  assert.match(analysisSource, /model_name:\s*'deepseek-v4-flash'/);
   assert.match(analysisSource, /request_profile/);
   assert.match(analysisSource, /request_parameters/);
   assert.match(analysisSource, /分析专用调用参数/);
@@ -65,15 +67,18 @@ test('analysis API settings select a configured platform and an independent mode
   assert.match(analysisSource, /测试输入/);
   assert.match(analysisSource, /分析模型原始 JSON 输出/);
   assert.match(analysisSource, /当前分析提示词/);
-  assert.match(analysisSource, /刷新模型列表/);
-  assert.match(analysisSource, /setModelDropdownOpen\(true\)/);
-  assert.match(analysisSource, /open=\{modelDropdownOpen\}/);
-  assert.match(analysisSource, /本次读取的列表不会保存/);
+  assert.doesNotMatch(analysisSource, /刷新模型列表/);
+  assert.doesNotMatch(analysisSource, /setModelDropdownOpen/);
   assert.match(analysisSource, /不会保存测试输入和输出/);
   assert.match(analysisSource, /全部品牌和公司/);
   assert.match(analysisSource, /目标品牌\/竞品实体映射/);
   assert.match(analysisSource, /引用数据不由分析模型生成/);
   assert.doesNotMatch(analysisSource, /逐字原文/);
+});
+
+test('official DeepSeek platform identity fields are read-only in the editor', () => {
+  assert.match(platformSource, /editing\?\.builtin && editing\.code === 'deepseek'/);
+  assert.match(platformSource, /deepseek_builtin_identity_immutable|默认模型/);
 });
 
 test('analysis API test sends the current question required by the runtime contract', () => {
@@ -140,6 +145,8 @@ test('platform settings use the management API for every explicit operation', ()
   assert.doesNotMatch(platformSource, /max_keyword/);
   assert.doesNotMatch(platformSource, /doubao_responses|豆包 Responses/);
   assert.match(platformSource, /request_options/);
+  assert.match(platformSource, /lockedBuiltinDeepSeek/);
+  assert.match(platformSource, /aria-readonly/);
   assert.match(platformSource, /请求参数/);
   assert.match(platformSource, /联网能力/);
   assert.match(platformSource, /测试输入/);

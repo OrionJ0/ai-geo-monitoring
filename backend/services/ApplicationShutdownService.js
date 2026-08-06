@@ -25,6 +25,7 @@ function createApplicationShutdown({
   getServer,
   schedulerService,
   projectRunService,
+  analysisExecutionCoordinator,
   webPlatformRegistry,
   marketingModule,
   sequelize
@@ -33,12 +34,15 @@ function createApplicationShutdown({
   return function shutdown() {
     if (shutdownPromise) return shutdownPromise;
     shutdownPromise = (async () => {
-      await closeHttpServer(getServer?.());
+      analysisExecutionCoordinator?.beginShutdown?.();
+      schedulerService.beginShutdown?.();
       projectRunService.beginShutdown();
+      await closeHttpServer(getServer?.());
       await Promise.all([
         schedulerService.stop(),
         webPlatformRegistry.shutdown(),
         projectRunService.drain(),
+        analysisExecutionCoordinator?.drain?.(),
         marketingModule?.shutdown?.()
       ]);
       await sequelize.close();

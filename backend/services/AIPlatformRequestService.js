@@ -1,4 +1,5 @@
 const axios = require('axios');
+const crypto = require('node:crypto');
 const https = require('node:https');
 const AIPlatformConfigService = require('./AIPlatformConfigService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
@@ -21,6 +22,7 @@ const ERROR_MESSAGES = Object.freeze({
   provider_error: '平台服务暂时异常，请稍后重试。',
   input_too_long: '提交内容超出模型可处理范围。',
   invalid_provider_response: '平台返回格式异常，请管理员检查平台配置。',
+  service_shutting_down: '服务正在安全关闭，请稍后重试。',
   config_unavailable: '监测平台配置暂不可用，请联系管理员。',
   disabled: '监测平台已被管理员停用。',
   missing_api_key: '平台未配置 API Key。',
@@ -61,10 +63,222 @@ const PROTECTED_REQUEST_OPTION_KEYS = new Set([
   'max_tokens',
   'max_output_tokens'
 ]);
+const AUDIT_PURPOSES = new Set([
+  'analysis_entity_extract',
+  'analysis_semantic_judge',
+  'connection_test',
+  'direct_stream',
+  'evaluation_v4_baseline',
+  'legacy_schedule',
+  'model_listing',
+  'project_monitoring',
+  'prompt_generation',
+  'web_search_test'
+]);
+const ANALYSIS_PROMPT_TEMPLATES = Object.freeze({
+  analysis_entity_extract: Object.freeze({
+    open: '<source_answer>',
+    close: '</source_answer>',
+    revision: 'grounded_entity_catalog_v1',
+    fingerprints: Object.freeze({
+      base: '43508380a32708aab5f3815e114dbfbd19af21ec52018f58f055e2bc76ff93af',
+      repair: 'e515bc35a1d1f662d7aee4b6a930f37af33fb28e0586e0045d1db65266134ba0'
+    })
+  }),
+  analysis_semantic_judge: Object.freeze({
+    open: '<semantic_input>',
+    close: '</semantic_input>',
+    revision: 'closed_entity_semantics_v4_evidence_roles_rev2',
+    fingerprints: Object.freeze({
+      base: 'bbab0ccf31aecaa250bd24209581ef99fb9ef2c83e26c4ba90623aef741efddb',
+      repair: 'a577dd874396b24b6e5f1cfec8736b988b25a3415981b8cd6ba4d48cee87da90'
+    })
+  })
+});
 
 function normalizeAuditPurpose(value) {
   const purpose = String(value || '').trim();
-  return /^[a-z0-9_:-]{1,80}$/u.test(purpose) ? purpose : 'unspecified';
+  return AUDIT_PURPOSES.has(purpose) ? purpose : 'unspecified';
+}
+
+function normalizeCorrelationId(value) {
+  const correlationId = String(value || '').trim();
+  return /^record-[1-9][0-9]{0,18}$/u.test(correlationId) ? correlationId : null;
+}
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => (
+      `${JSON.stringify(key)}:${stableSerialize(value[key])}`
+    )).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function derivePromptEvidence(purpose, prompt) {
+  const definition = ANALYSIS_PROMPT_TEMPLATES[purpose];
+  if (!definition) {
+    return {
+      promptFingerprint: null,
+      promptTemplateFingerprint: null,
+      promptRevision: null,
+      promptVariant: null
+    };
+  }
+  const promptText = String(prompt || '');
+  const prefix = `${definition.open}\n`;
+  const closing = `\n${definition.close}\n`;
+  if (!promptText.startsWith(prefix)) {
+    return {
+      promptFingerprint: crypto.createHash('sha256').update(promptText).digest('hex'),
+      promptTemplateFingerprint: null,
+      promptRevision: null
+    };
+  }
+  const dynamicEnd = promptText.indexOf(closing, prefix.length);
+  if (dynamicEnd < 0) {
+    return {
+      promptFingerprint: crypto.createHash('sha256').update(promptText).digest('hex'),
+      promptTemplateFingerprint: null,
+      promptRevision: null
+    };
+  }
+  try {
+    JSON.parse(promptText.slice(prefix.length, dynamicEnd));
+  } catch (_) {
+    return {
+      promptFingerprint: crypto.createHash('sha256').update(promptText).digest('hex'),
+      promptTemplateFingerprint: null,
+      promptRevision: null
+    };
+  }
+  const normalized = `${prefix}<DYNAMIC_JSON>\n${definition.close}\n${
+    promptText.slice(dynamicEnd + closing.length)
+  }`;
+  const repairSeparator = '\n<validation_feedback>\n';
+  const repairIndex = normalized.indexOf(repairSeparator);
+  const baseTemplate = repairIndex >= 0 ? normalized.slice(0, repairIndex) : normalized;
+  let promptVariant = 'base';
+  let normalizedTemplate = baseTemplate;
+  if (repairIndex >= 0) {
+    promptVariant = 'repair';
+    let repair = normalized.slice(repairIndex + 1)
+      .replace(/^error_code=.*$/mu, 'error_code=<DYNAMIC_ERROR_CODE>')
+      .replace(/^field=.*$/mu, 'field=<DYNAMIC_FIELD>');
+    if (purpose === 'analysis_semantic_judge') {
+      repair = repair
+        .replace(/^message=.*$/mu, 'message=<DYNAMIC_MESSAGE>')
+        .replace(
+          /^target_entity_id=.*（非 null 时必须输出 assessed 情绪，label 为 positive\/neutral\/negative，不得返回 sentiment=not_applicable）$/mu,
+          'target_entity_id=<DYNAMIC_TARGET_ID>（非 null 时必须输出 assessed 情绪，label 为 positive/neutral/negative，不得返回 sentiment=not_applicable）'
+        )
+        .replace(
+          /<source_map>\n[\s\S]*?\n<\/source_map>/u,
+          '<source_map>\n<DYNAMIC_SOURCE_MAP>\n</source_map>'
+        )
+        .replace(
+          /<entity_occurrence_ids>\n[\s\S]*?\n<\/entity_occurrence_ids>/u,
+          '<entity_occurrence_ids>\n<DYNAMIC_OCCURRENCE_IDS>\n</entity_occurrence_ids>'
+        );
+    }
+    normalizedTemplate = `${baseTemplate}\n${repair}`;
+  }
+  const templateFingerprint = crypto.createHash('sha256').update(normalizedTemplate).digest('hex');
+  const promptFingerprint = crypto.createHash('sha256').update(promptText).digest('hex');
+  return {
+    promptFingerprint,
+    promptTemplateFingerprint: templateFingerprint,
+    promptRevision: templateFingerprint === definition.fingerprints[promptVariant]
+      ? definition.revision
+      : null,
+    promptVariant
+  };
+}
+
+function deriveRequestPolicyEvidence({ purpose, requestBody, prompt, adapterType, model }) {
+  if (!requestBody || typeof requestBody !== 'object') {
+    return {
+      policyRevision: null,
+      policyFingerprint: null,
+      policyValid: null,
+      promptFingerprint: null,
+      promptTemplateFingerprint: null,
+      promptVariant: null
+    };
+  }
+  const policyBody = Object.fromEntries(
+    Object.entries(requestBody).filter(([key]) => !['messages', 'input'].includes(key))
+  );
+  const policyFingerprint = crypto.createHash('sha256').update(stableSerialize({
+    adapter_type: adapterType,
+    model,
+    policy_body: policyBody
+  })).digest('hex');
+  if (!['analysis_entity_extract', 'analysis_semantic_judge'].includes(purpose)) {
+    return {
+      policyRevision: null,
+      policyFingerprint,
+      policyValid: null,
+      promptFingerprint: null,
+      promptTemplateFingerprint: null,
+      promptVariant: null
+    };
+  }
+  const noWebPolicy = !Object.hasOwn(policyBody, 'tools')
+    && !Object.hasOwn(policyBody, 'enable_search')
+    && !Object.hasOwn(policyBody, 'search_options')
+    && !Object.hasOwn(policyBody, 'web_search_options');
+  const fixedPolicy = policyBody.temperature === 0
+    && policyBody.response_format?.type === 'json_object'
+    && policyBody.thinking?.type === 'disabled'
+    && !Object.hasOwn(policyBody, 'max_tokens')
+    && !Object.hasOwn(policyBody, 'max_output_tokens')
+    && noWebPolicy;
+  const promptEvidence = derivePromptEvidence(purpose, prompt);
+  const promptRevision = promptEvidence.promptRevision;
+  return {
+    policyRevision: promptRevision ? `${promptRevision}+fixed_json_no_web_v1` : null,
+    policyFingerprint,
+    policyValid: fixedPolicy && Boolean(promptRevision),
+    promptFingerprint: promptEvidence.promptFingerprint,
+    promptTemplateFingerprint: promptEvidence.promptTemplateFingerprint,
+    promptVariant: promptEvidence.promptVariant
+  };
+}
+
+function emitRequestAudit(logger, {
+  platform,
+  model,
+  purpose,
+  attempt,
+  correlationId,
+  requestBody,
+  prompt,
+  adapterType
+}) {
+  const normalizedPurpose = normalizeAuditPurpose(purpose);
+  const policy = deriveRequestPolicyEvidence({
+    purpose: normalizedPurpose,
+    requestBody,
+    prompt,
+    adapterType,
+    model
+  });
+  logger({
+    event: 'ai_platform_request',
+    platform: String(platform || ''),
+    model: String(model || ''),
+    purpose: normalizedPurpose,
+    attempt: Math.max(1, Number(attempt) || 1),
+    correlation_id: normalizeCorrelationId(correlationId),
+    policy_revision: policy.policyRevision,
+    policy_fingerprint: policy.policyFingerprint,
+    policy_valid: policy.policyValid,
+    prompt_fingerprint: policy.promptFingerprint ?? null,
+    prompt_template_fingerprint: policy.promptTemplateFingerprint ?? null,
+    prompt_variant: policy.promptVariant ?? null
+  });
 }
 
 function safeRequestOptions(value) {
@@ -242,7 +456,7 @@ class AIPlatformRequestService {
     this.now = options.now || Date.now;
     this.wait = options.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.auditLogger = options.auditLogger || ((event) => {
-      console.info('AI 平台请求审计:', event);
+      console.info(`AI_PLATFORM_REQUEST_AUDIT ${JSON.stringify(event)}`);
     });
   }
 
@@ -301,19 +515,27 @@ class AIPlatformRequestService {
       delete requestBody.search_options;
       delete requestBody.web_search_options;
     }
-    const requestOptions = this.buildRequestOptions({ apiKey, timeoutSeconds, validation });
+    const requestOptions = this.buildRequestOptions({
+      apiKey,
+      timeoutSeconds,
+      validation,
+      signal: options.signal
+    });
     let lastFailure = null;
 
     for (let attempt = 0; attempt <= retryCount; attempt += 1) {
       const startedAt = this.now();
       try {
         const requestUrl = resolveRequestUrl(config.adapter_type, validation.url);
-        this.auditLogger({
-          event: 'ai_platform_request',
+        emitRequestAudit(this.auditLogger, {
           platform,
-          model: String(config.default_model || ''),
-          purpose: normalizeAuditPurpose(options.purpose),
-          attempt: attempt + 1
+          model: config.default_model,
+          purpose: options.purpose,
+          attempt: attempt + 1,
+          correlationId: options.correlationId,
+          requestBody,
+          prompt: question,
+          adapterType: config.adapter_type
         });
         const response = await this.httpClient.post(requestUrl, requestBody, requestOptions);
         const text = extractResponseText(config.adapter_type, response?.data);
@@ -337,6 +559,10 @@ class AIPlatformRequestService {
             : Math.max(0, this.now() - startedAt)
         };
       } catch (error) {
+        if (options.signal?.aborted) {
+          lastFailure = this.failure(platform, 'service_shutting_down');
+          break;
+        }
         const errorCode = normalizeRequestError(error);
         const providerError = providerErrorDetails(error);
         lastFailure = {
@@ -357,13 +583,22 @@ class AIPlatformRequestService {
         if (!retryable || attempt >= retryCount) break;
         const retryAfter = Number.parseInt(error?.response?.headers?.['retry-after'] || '0', 10);
         const delay = retryAfter > 0 ? retryAfter * 1000 : Math.min(5000, 1000 * (2 ** attempt));
-        await this.wait(delay);
+        await this.waitForRetry(delay, options.signal);
       }
     }
     return lastFailure || this.failure(platform, 'provider_error');
   }
 
-  buildRequestOptions({ apiKey, timeoutSeconds, validation }) {
+  async waitForRetry(delay, signal) {
+    if (!signal) return this.wait(delay);
+    if (signal.aborted) return;
+    await Promise.race([
+      this.wait(delay),
+      new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+    ]);
+  }
+
+  buildRequestOptions({ apiKey, timeoutSeconds, validation, signal = undefined }) {
     const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.PROXY_URL;
     let httpsAgent = createPinnedAgent(validation);
     if (proxyUrl && HttpsProxyAgent) httpsAgent = new HttpsProxyAgent(proxyUrl);
@@ -379,7 +614,8 @@ class AIPlatformRequestService {
       maxRedirects: 0,
       proxy: false,
       decompress: true,
-      httpsAgent
+      httpsAgent,
+      ...(signal ? { signal } : {})
     };
   }
 
@@ -400,6 +636,14 @@ class AIPlatformRequestService {
     const settings = await this.settingsService.getSettings();
     const timeoutSeconds = config.request_timeout_seconds || settings.ai_default_timeout_seconds;
     try {
+      emitRequestAudit(this.auditLogger, {
+        platform: config.code,
+        model: config.default_model,
+        purpose: 'model_listing',
+        attempt: 1,
+        correlationId: null,
+        adapterType: config.adapter_type
+      });
       const response = await this.httpClient.get(
         resolveModelsUrl(validation.url),
         this.buildRequestOptions({ apiKey, timeoutSeconds, validation })
@@ -436,7 +680,8 @@ class AIPlatformRequestService {
     const config = await this.configService.getPlatform(platformId);
     const connection = await this.queryConfig(config, '请只回复 OK', {
       allowDisabled: true,
-      retryCount: 0
+      retryCount: 0,
+      purpose: 'connection_test'
     });
     const platform = await this.configService.saveTestResult(platformId, {
       success: connection.success,
@@ -470,7 +715,11 @@ class AIPlatformRequestService {
     const connection = await this.queryConfig(
       config,
       testInput,
-      { allowDisabled: true, retryCount: 1 }
+      {
+        allowDisabled: true,
+        retryCount: 1,
+        purpose: 'web_search_test'
+      }
     );
 
     let result;
@@ -535,6 +784,7 @@ const service = new AIPlatformRequestService();
 module.exports = service;
 module.exports.AIPlatformRequestService = AIPlatformRequestService;
 module.exports.ERROR_MESSAGES = ERROR_MESSAGES;
+module.exports.emitRequestAudit = emitRequestAudit;
 module.exports.buildRequestBody = buildRequestBody;
 module.exports.extractResponseText = extractResponseText;
 module.exports.normalizeRequestError = normalizeRequestError;
@@ -544,3 +794,5 @@ module.exports.resolveModelsUrl = resolveModelsUrl;
 module.exports.resolveRequestUrl = resolveRequestUrl;
 module.exports.detectWebSearchEvidence = detectWebSearchEvidence;
 module.exports.isResponsesAdapter = isResponsesAdapter;
+module.exports.derivePromptEvidence = derivePromptEvidence;
+module.exports.ANALYSIS_PROMPT_TEMPLATES = ANALYSIS_PROMPT_TEMPLATES;

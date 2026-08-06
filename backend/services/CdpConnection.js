@@ -97,21 +97,35 @@ class CdpConnection {
   }
 }
 
-async function connectCdp(webSocketUrl, timeoutMs = 10000) {
+async function connectCdp(webSocketUrl, timeoutMs = 10000, signal = null) {
   const socket = new WebSocket(webSocketUrl);
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(timeoutError('renderer_timeout', '连接 Chrome 调试端口超时')),
-      timeoutMs
-    );
-    socket.addEventListener('open', () => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolve();
-    }, { once: true });
-    socket.addEventListener('error', () => {
-      clearTimeout(timer);
-      reject(timeoutError('renderer_connection_failed', '无法连接 Chrome 调试端口'));
-    }, { once: true });
+      signal?.removeEventListener('abort', onAbort);
+      callback(value);
+    };
+    const onAbort = () => {
+      socket.terminate();
+      finish(
+        reject,
+        timeoutError('renderer_shutdown', 'Chrome 调试连接因服务关闭而取消')
+      );
+    };
+    const timer = setTimeout(() => {
+      socket.terminate();
+      finish(reject, timeoutError('renderer_timeout', '连接 Chrome 调试端口超时'));
+    }, timeoutMs);
+    socket.addEventListener('open', () => finish(resolve), { once: true });
+    socket.addEventListener('error', () => finish(
+      reject,
+      timeoutError('renderer_connection_failed', '无法连接 Chrome 调试端口')
+    ), { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
   return new CdpConnection(socket, timeoutMs);
 }

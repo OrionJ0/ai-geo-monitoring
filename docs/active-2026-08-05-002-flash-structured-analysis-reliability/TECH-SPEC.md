@@ -10,7 +10,7 @@ scope: deep
 
 ## 1. 背景与目标
 
-当前正式 GEO 指标链路使用 `ai_structured_v4` / `geo_metric_input_v4`。`backend/services/AIResponseAnalysisService.js` 在一次 DeepSeek 请求中要求模型同时完成开放实体抽取、实体归一、目标映射、逐实体竞品关系、候选集合与顺序、明确推荐、品牌主张、目标情绪和可定位证据，再由程序校验与计算指标。
+历史基线 GEO 指标链路使用 `ai_structured_v4` / `geo_metric_input_v4`。该单体基线现已隔离到 `backend/evaluation/AIResponseAnalysisV4BaselineService.js`，只供离线评测；下文先记录重构前的问题，再定义 v5 目标与门禁。
 
 2026-08-05 的真实复现证明，当前失败不是 JSON 语法层问题：模型可以返回语法正确且结束原因是 `stop` 的 JSON，但会把提示上下文中的目标品牌“广拓”写进原回答并不存在的 `mentions`。严格校验正确地拒绝了这类输出。只修改温度不能解决任务污染；放宽校验则会把虚假品牌提及写入正式指标。
 
@@ -32,7 +32,7 @@ scope: deep
 
 目标是将新分析升级为 `ai_structured_v5` / `geo_metric_input_v5`。issue 001–008 已实现的候选合同为 `three_track_partial_v1`；009 真实 Flash 门禁未通过后，本轮修复合同升级为 `three_track_partial_v2`，语义证据合同升级为 `semantic_evidence_v2`。目标提及事实必须达到确定性可用；推荐、排名、情绪和开放竞品允许按字段部分完成，但未知不得冒充业务否定值。SOV 计算公式可以保留，语义版本继续使用带范围的 `contextual_competitor_mentions_sov_v2_scoped`，开放发现结果明确标记 `observed_only / open_discovery / not_proven`。只有新修订真实同题对比证明 v5 达到 PRD 门槛后，才硬切正式入口。
 
-当前代码状态是：issue 001–008 已完成，v5 已贯通候选运行、持久化、API、CSV、页面与历史兼容，但仅在显式 `analysisProvider='v5'` 时生效；009 已完成真实对比并作出“不批准硬切”决定。正式入口默认仍是 `ai_structured_v4 / geo_metric_input_v4`，当前 DeepSeek 默认分析配置为 `deepseek-v4-pro`；v5 候选自身强制 `deepseek-v4-flash`。010 尚未执行，v4 运行时、默认值和现役兼容文档仍存在。
+截至 2026-08-06 的当前代码状态是：数据所有者裁决和全量门禁已通过，v5 已成为单问题、问题集、项目自动监测和 analysis-only 的唯一生产候选分析器；正式分析固定官方内置 `deepseek-v4-flash`，不存在 v4/Pro fallback。竞品快照 schema-only 前置迁移已在生产完成；统一候选仍须完成正式发布与入口级验收后才能关闭 002/010。以下 v4 默认值和“不批准硬切”段落保留为设计演进历史。
 
 ## 2. 范围与非目标
 
@@ -1499,6 +1499,7 @@ assessed 幸存样本中的推荐 21/21、情绪 21/21 和排名 4/4 不能证�
 - Tech Spec path: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/TECH-SPEC.md`
 - Validation report: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/validation-report.md`
 - 可拆 issue：U1–U7 已由 001–009 承接；U9–U12 对应 011–015。010/U8 只能在 015 的 `three_track_partial_v2` 全部门槛通过并人工批准后开始。
-- 建议下一个 issue：先执行 011，消除 S55 的确定性目标映射失败；012 与 013 随后完成证据合同和真值审计，014 做小样本真实 Flash 探针，015 做独立全量门禁。
+- 建议下一步：发布统一候选并完成单问题、问题集、自动监测、analysis-only 四入口验收，同时核对 systemd 请求审计、历史 v4 报告/CSV 只读兼容和正式 Chrome 页面；生产证据全部成立后关闭 010 与本需求。
 - 是否适合 TDD：适合。source map、ID 合同、验证器、指标计算、请求体和报告兼容均应先写失败测试；真实 Flash 基线作为单元测试之外的独立验收层。
-- 当前正式路径：仍为 `ai_structured_v4` / `geo_metric_input_v4`，默认 DeepSeek 分析配置为 `deepseek-v4-pro`；v5 显式候选路径强制 `deepseek-v4-flash`。v5 未设为默认，v4 运行时代码、兼容和现役调用方尚未删除。
+- 当前候选路径：`ai_structured_v5` / `geo_metric_input_v5` / `three_track_partial_v2` 已设为唯一默认，正式分析固定 `deepseek-v4-flash`；v4 只保留在 `backend/evaluation/` 供离线基线比较，生产调用方、隐藏 fallback 和 Pro 分析路径均已删除。Stage2 发布与四入口验收完成前仍不得宣称生产切换完成。
+- 010 正式验收创建的随机命名项目会关闭监测并归档保留，作为可追溯发布审计证据；它不会继续调度，但不是“永久删除 fixture”。证据文件只记录规范化合同、哈希、记录 ID 和请求审计统计，不保存问题正文、回答正文或凭据。

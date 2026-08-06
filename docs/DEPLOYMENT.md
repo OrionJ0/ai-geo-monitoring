@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-06 v5 快照字段 schema-only Git Bundle 已部署 `15ee1e359da1d22eb0ea66c29d6d3a74e58dbb19`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净。该阶段只增加并审计数据库列，应用仍运行 v4/Pro；是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-06 统一发布启动桥 Git Bundle 已部署 `387ae45ae6b58bf5a89b59ed43d6e6cc52209fff`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净，两个 systemd 服务 active，v5 快照审计为 `missing_columns=[]`、`schema_mismatches=[]`、`quick_check=ok`。该桥只替换正式 Bundle 启动器及其测试，应用仍运行 v4/Pro，未切换 v5、未新增营销运行时；是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -191,6 +191,8 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 - 两个 systemd 服务都以 `ubuntu` 普通用户运行；前端只监听 `127.0.0.1:3001`，后端监听 `127.0.0.1:3002`。
 - 安装 unit、启用开机启动和首次切换见 [单机原地部署](SINGLE_HOST_DEPLOYMENT.md)。
 - 日常正式发布由 `.github/workflows/deploy-production.yml` 上传已校验 Git Bundle；服务器无需访问 GitHub。Bundle 快进完成后复用部署脚本，并在 `AI_GEO_PROCESS_MANAGER=systemd` 时通过 systemd 停止、启动和验证服务。完整配置与人工引导步骤见[单机原地部署](SINGLE_HOST_DEPLOYMENT.md)。
+- 统一 v5 候选起，正式 Bundle 启动器先在现役服务运行期间从候选不可变 revision 建立临时 worktree，并依据相邻两个 Git revision 的本地依赖闭包、正式入口叶节点、部署规则和实际使用依赖的锁文件摘要判断 v5 运行合同是否变化；不存在可写的验收状态缓存。合同未变化时只验证当前公开 revision/ready，不创建四入口业务验收数据。合同变化时，在临时 worktree 为后端和前端安装锁定依赖、预热 npm cache，并执行 `backend/scripts/geo010Acceptance.js --preflight`，验证公开 revision/ready、服务器侧 Flash 凭据、计划任务积压和历史 v4 报告/CSV 可读；预检通过后才停止现役服务、快进正式工作区，并由正式部署器使用离线依赖安装完成测试、构建、迁移和启动，再执行 `backend/scripts/geo010Acceptance.js --revision=<SHA>`。若上一次发布已使两个正式服务停止，启动器改走只读数据库与 Flash 的 `--recovery-preflight`，且同一 SHA 也必须重新执行完整验收。四入口、真实请求策略指纹、systemd 请求审计、历史 v4 读取或公开 revision任一失败都不会记录 `SUCCESS`；清理阶段最多等待 90 秒并归档、停用验收项目，失败后只允许重试同一 v5 revision 或发布其后代修复。Bundle 总 deadline 为 345 分钟；停服前保留 60 分钟部署预算，全程保留 10 分钟清理预算，不得用环境变量跳过门禁。
+- 后端 `TimeoutStopSec=60s`。收到 SIGTERM 后不再接收新运行，已排队分析返回可重试错误，活动监测与两阶段分析 HTTP 请求通过 `AbortSignal` 取消并写入可恢复失败终态；不得通过把停服等待扩大到单请求完整重试预算来掩盖不可取消调用。
 - 查看状态与日志：
 
 ```bash

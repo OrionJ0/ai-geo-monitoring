@@ -11,6 +11,7 @@ function argumentValue(name) {
 
 async function main() {
   const apply = process.argv.includes('--apply');
+  const requireReady = process.argv.includes('--require-ready');
   const backupReference = argumentValue('--backup-reference');
   await sequelize.authenticate();
 
@@ -20,6 +21,11 @@ async function main() {
       phase: 'preflight_audit',
       ...preflight
     }));
+    if (requireReady && preflight.migration_required) {
+      const error = new Error('GEO 指标语义迁移尚未就绪');
+      error.code = 'GEO_METRIC_SEMANTICS_NOT_READY';
+      throw error;
+    }
     return;
   }
 

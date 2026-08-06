@@ -5,6 +5,10 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const sqlite3 = require('sqlite3');
+const { encryptSecret } = require('../services/SecretEncryptionService');
+
+const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+const TEST_CIPHERTEXT = encryptSecret('sk-cli-test-canary', TEST_ENCRYPTION_KEY);
 
 const migrationScript = path.resolve(
   __dirname,
@@ -86,7 +90,7 @@ async function createDatabase(filename, overrides = {}) {
     name: 'DeepSeek',
     adapter_type: 'openai_chat_completions',
     base_url: 'https://api.deepseek.com/v1/chat/completions',
-    encrypted_api_key: 'encrypted-cli-key-canary',
+    encrypted_api_key: TEST_CIPHERTEXT,
     api_key_last4: '5678',
     default_model: 'deepseek-v4-pro',
     request_options: '{}',
@@ -133,6 +137,7 @@ function invoke(args, environment = {}) {
       ...process.env,
       NODE_ENV: 'test',
       DB_LOGGING: 'false',
+      CONFIG_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       ...environment
     },
     encoding: 'utf8'
@@ -164,7 +169,7 @@ test('CLI migrates only the explicit database and preserves credentials and enab
     { DB_STORAGE: other }
   );
   assert.equal(apply.status, 0, apply.stderr);
-  assert.doesNotMatch(`${apply.stdout}${apply.stderr}`, /encrypted-cli-key-canary|5678/u);
+  assert.doesNotMatch(`${apply.stdout}${apply.stderr}`, /sk-cli-test-canary|5678/u);
   assert.deepEqual(JSON.parse(apply.stdout), {
     phase: 'migration_complete',
     preset: 'deepseek',
@@ -174,7 +179,9 @@ test('CLI migrates only the explicit database and preserves credentials and enab
     credential_present: true,
     analysis_platform_code: 'deepseek',
     analysis_model: 'deepseek-v4-flash',
+    legacy_analysis_model_setting_present: false,
     migration_required: false,
+    analysis_options_migration_required: false,
     ready: true,
     applied: true
   });
@@ -188,7 +195,7 @@ test('CLI migrates only the explicit database and preserves credentials and enab
   await close(targetDb);
   assert.deepEqual(targetRow, {
     default_model: 'deepseek-v4-flash',
-    encrypted_api_key: 'encrypted-cli-key-canary',
+    encrypted_api_key: TEST_CIPHERTEXT,
     api_key_last4: '5678',
     enabled: 1,
     test_status: 'untested',
@@ -196,9 +203,8 @@ test('CLI migrates only the explicit database and preserves credentials and enab
   });
   const targetSettingsDb = openDatabase(target);
   assert.equal(
-    (await get(targetSettingsDb, "SELECT value FROM settings WHERE key = 'ai_analysis_model_name'"))
-      .value,
-    'deepseek-v4-flash'
+    await get(targetSettingsDb, "SELECT value FROM settings WHERE key = 'ai_analysis_model_name'"),
+    undefined
   );
   await close(targetSettingsDb);
 

@@ -2,6 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { AIPlatformRequestService } = require('../services/AIPlatformRequestService');
+const {
+  buildEntityPrompt,
+  buildEntityRepairPrompt
+} = require('../services/AIResponseEntityExtractionService');
+const {
+  buildSemanticPrompt,
+  buildSemanticRepairPrompt
+} = require('../services/AIResponseSemanticJudgmentService');
 
 const runtimeSettings = {
   ai_retry_count: 0,
@@ -66,18 +74,298 @@ test('emits a secret-free model audit for every outbound analysis request', asyn
 
   const result = await service.queryConfig(row, 'secret prompt canary', {
     purpose: 'analysis_entity_extract',
+    correlationId: 'record-42',
     retryCount: 0
   });
 
   assert.equal(result.success, true);
-  assert.deepEqual(audits, [{
+  assert.equal(audits.length, 1);
+  assert.deepEqual({
+    ...audits[0],
+    policy_fingerprint: '<sha256>',
+    prompt_fingerprint: '<sha256>'
+  }, {
     event: 'ai_platform_request',
     platform: 'deepseek',
     model: 'deepseek-v4-flash',
     purpose: 'analysis_entity_extract',
-    attempt: 1
-  }]);
+    attempt: 1,
+    correlation_id: 'record-42',
+    policy_revision: null,
+    policy_fingerprint: '<sha256>',
+    policy_valid: false,
+    prompt_fingerprint: '<sha256>',
+    prompt_template_fingerprint: null,
+    prompt_variant: null
+  });
+  assert.match(audits[0].policy_fingerprint, /^[a-f0-9]{64}$/u);
+  assert.match(audits[0].prompt_fingerprint, /^[a-f0-9]{64}$/u);
   assert.doesNotMatch(JSON.stringify(audits), /secret prompt|encrypted-secret/u);
+});
+
+test('audits every outbound request and keeps missing correlation explicit', async () => {
+  const audits = [];
+  const row = {
+    id: 4,
+    code: 'deepseek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted-secret-canary',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    auditLogger: (event) => audits.push(event),
+    post: async () => ({
+      data: { choices: [{ message: { content: '{}' } }] },
+      headers: {}
+    })
+  });
+
+  await service.queryConfig(row, 'generic', {
+    purpose: 'prompt_generation',
+    correlationId: 'record-42',
+    retryCount: 0
+  });
+  await service.queryConfig(row, 'missing correlation', {
+    purpose: 'analysis_entity_extract',
+    retryCount: 0
+  });
+
+  assert.equal(audits.length, 2);
+  assert.deepEqual(audits.map((event) => ({
+    purpose: event.purpose,
+    correlation_id: event.correlation_id,
+    policy_revision: event.policy_revision,
+    policy_valid: event.policy_valid,
+    prompt_present: event.prompt_fingerprint !== null,
+    prompt_template_fingerprint: event.prompt_template_fingerprint,
+    fingerprint_valid: /^[a-f0-9]{64}$/u.test(event.policy_fingerprint)
+  })), [
+    {
+      purpose: 'prompt_generation',
+      correlation_id: 'record-42',
+      policy_revision: null,
+      policy_valid: null,
+      prompt_present: false,
+      prompt_template_fingerprint: null,
+      fingerprint_valid: true
+    },
+    {
+      purpose: 'analysis_entity_extract',
+      correlation_id: null,
+      policy_revision: null,
+      policy_valid: false,
+      prompt_present: true,
+      prompt_template_fingerprint: null,
+      fingerprint_valid: true
+    }
+  ]);
+});
+
+test('derives the v5 policy revision and fingerprint from the actual outbound bodies', async () => {
+  const audits = [];
+  const row = {
+    code: 'deepseek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    auditLogger: (event) => audits.push(event),
+    post: async () => ({
+      data: { choices: [{ message: { content: '{}' } }] },
+      headers: {}
+    })
+  });
+  const fixedOptions = {
+    temperature: 0,
+    response_format: { type: 'json_object' },
+    thinking: { type: 'disabled' }
+  };
+
+  const sourceMap = {
+    version: 'answer_source_lines_v1',
+    segments: [{ source_id: 'L001', text: '广拓' }]
+  };
+  const catalog = {
+    target_entity_id: 'E001',
+    entities: [{
+      entity_id: 'E001',
+      name: '广拓',
+      type: 'brand',
+      surface_forms: ['广拓'],
+      mentions: [{ source_id: 'L001' }]
+    }]
+  };
+  await service.queryConfig(row, buildEntityPrompt(sourceMap), {
+    purpose: 'analysis_entity_extract',
+    correlationId: 'record-42',
+    retryCount: 0,
+    requestOptions: fixedOptions,
+    disableWebSearch: true,
+    omitTokenLimit: true
+  });
+  await service.queryConfig(row, buildSemanticPrompt({
+    question: '哪个品牌更适合？',
+    sourceMap,
+    catalog,
+    revision: 'rev2'
+  }), {
+    purpose: 'analysis_semantic_judge',
+    correlationId: 'record-42',
+    retryCount: 0,
+    requestOptions: fixedOptions,
+    disableWebSearch: true,
+    omitTokenLimit: true
+  });
+
+  assert.deepEqual(audits.map((event) => event.policy_revision), [
+    'grounded_entity_catalog_v1+fixed_json_no_web_v1',
+    'closed_entity_semantics_v4_evidence_roles_rev2+fixed_json_no_web_v1'
+  ]);
+  assert.deepEqual(audits.map((event) => event.policy_valid), [true, true]);
+  assert.deepEqual(audits.map((event) => event.prompt_variant), ['base', 'base']);
+  assert.match(audits[0].policy_fingerprint, /^[a-f0-9]{64}$/u);
+  assert.equal(audits[0].policy_fingerprint, audits[1].policy_fingerprint);
+  assert.deepEqual(audits.map((event) => event.prompt_template_fingerprint), [
+    '43508380a32708aab5f3815e114dbfbd19af21ec52018f58f055e2bc76ff93af',
+    'bbab0ccf31aecaa250bd24209581ef99fb9ef2c83e26c4ba90623aef741efddb'
+  ]);
+  assert.notEqual(audits[0].prompt_fingerprint, audits[1].prompt_fingerprint);
+});
+
+test('pins entity and semantic repair prompt variants instead of hiding their rules', async () => {
+  const requestModule = require('../services/AIPlatformRequestService');
+  const sourceMap = {
+    version: 'answer_source_lines_v1',
+    segments: [{ source_id: 'L001', text: '广拓表现稳定' }]
+  };
+  const catalog = {
+    target_entity_id: 'E001',
+    entities: [{
+      entity_id: 'E001',
+      name: '广拓',
+      type: 'brand',
+      surface_forms: ['广拓'],
+      mentions: [{ source_id: 'L001' }]
+    }]
+  };
+  const entityRepair = buildEntityRepairPrompt(
+    buildEntityPrompt(sourceMap),
+    { code: 'invalid', details: { field: 'mentions' } }
+  );
+  const semanticRepair = buildSemanticRepairPrompt(
+    buildSemanticPrompt({ question: '如何选择？', sourceMap, catalog, revision: 'rev2' }),
+    { code: 'invalid', message: 'invalid', details: { field: 'sentiment' } },
+    { sourceMap, catalog, revision: 'rev2' }
+  );
+  const entityEvidence = requestModule.derivePromptEvidence(
+    'analysis_entity_extract',
+    entityRepair
+  );
+  const semanticEvidence = requestModule.derivePromptEvidence(
+    'analysis_semantic_judge',
+    semanticRepair
+  );
+  assert.equal(entityEvidence.promptVariant, 'repair');
+  assert.equal(entityEvidence.promptRevision, 'grounded_entity_catalog_v1');
+  assert.equal(semanticEvidence.promptVariant, 'repair');
+  assert.equal(
+    semanticEvidence.promptRevision,
+    'closed_entity_semantics_v4_evidence_roles_rev2'
+  );
+  assert.equal(
+    requestModule.derivePromptEvidence(
+      'analysis_entity_extract',
+      entityRepair.replace('重新逐行检查 source_answer', '忽略 source_answer')
+    ).promptRevision,
+    null
+  );
+});
+
+test('rejects a marker-preserving prompt whose pinned static template changed', async () => {
+  const audits = [];
+  const row = {
+    code: 'deepseek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    auditLogger: (event) => audits.push(event),
+    post: async () => ({ data: { choices: [{ message: { content: '{}' } }] }, headers: {} })
+  });
+  const sourceMap = {
+    version: 'answer_source_lines_v1',
+    segments: [{ source_id: 'L001', text: '广拓' }]
+  };
+  const tampered = buildEntityPrompt(sourceMap).replace('不要抽取产品型号', '可以抽取产品型号');
+  await service.queryConfig(row, tampered, {
+    purpose: 'analysis_entity_extract',
+    correlationId: 'record-42',
+    retryCount: 0,
+    requestOptions: {
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      thinking: { type: 'disabled' }
+    },
+    disableWebSearch: true,
+    omitTokenLimit: true
+  });
+  assert.equal(audits[0].policy_revision, null);
+  assert.equal(audits[0].policy_valid, false);
+  assert.notEqual(
+    audits[0].prompt_template_fingerprint,
+    '43508380a32708aab5f3815e114dbfbd19af21ec52018f58f055e2bc76ff93af'
+  );
+});
+
+test('aborts an active provider request during shutdown without retrying', async () => {
+  const controller = new AbortController();
+  let attempts = 0;
+  const row = {
+    code: 'deepseek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async (_url, _body, options) => {
+      attempts += 1;
+      await new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const error = new Error('canceled');
+          error.code = 'ERR_CANCELED';
+          reject(error);
+        }, { once: true });
+      });
+    }
+  });
+  const pending = service.queryConfig(row, 'shutdown test', {
+    retryCount: 3,
+    signal: controller.signal
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  const result = await pending;
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'service_shutting_down');
+  assert.equal(attempts, 1);
 });
 
 test('loads selectable model ids from the provider models endpoint', async () => {

@@ -5,7 +5,6 @@ process.env.DB_STORAGE = ':memory:';
 
 const { sequelize, QuestionRecord } = require('../models');
 const ProjectRunService = require('../services/ProjectRunService');
-const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
 const AIResponseAnalysisV5Service = require('../services/AIResponseAnalysisV5Service');
 const { AIResponseAnalysisV5Error } = require('../services/AIResponseAnalysisV5Service');
 const {
@@ -21,7 +20,6 @@ const {
 } = require('../services/ProjectRunService');
 const migrationService = require('../services/V5SnapshotMigrationService');
 
-const ORIGINAL_V4 = AIResponseAnalysisService.analyze;
 const ORIGINAL_V5 = AIResponseAnalysisV5Service.analyze;
 
 test.before(async () => {
@@ -32,7 +30,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-  AIResponseAnalysisService.analyze = ORIGINAL_V4;
   AIResponseAnalysisV5Service.analyze = ORIGINAL_V5;
   await sequelize.close();
 });
@@ -120,13 +117,25 @@ test('metricFailureDiagnostics 识别 AIResponseAnalysisV5Error 并输出分阶�
   assert.equal(diagnostics.usage.total_tokens, 300);
 });
 
+test('metricFailureDiagnostics 保留共享队列的可重试 503 语义', () => {
+  const error = new AIResponseAnalysisV5Error(
+    'AI 分析排队超时，请稍后重试',
+    'analysis_queue_timeout',
+    { stage: 'analysis_queue', active: 2, queued: 99 },
+    { retryable: true, status: 503, retryAfterSeconds: 1 }
+  );
+  assert.deepEqual(metricFailureDiagnostics(error), {
+    status: 'failed',
+    error_code: 'analysis_queue_timeout',
+    error_detail: 'AI 分析排队超时，请稍后重试',
+    retryable: true,
+    retry_after_seconds: 1,
+    stage: 'analysis_queue'
+  });
+});
+
 test('010 硬切：buildVisibilityMetricPayload 默认调用 v5 分析器（无 v4 分派）', async () => {
-  let v4Called = false;
   let v5Called = false;
-  AIResponseAnalysisService.analyze = async () => {
-    v4Called = true;
-    throw new Error('010 硬切后默认路径不应调用 v4');
-  };
   AIResponseAnalysisV5Service.analyze = async () => {
     v5Called = true;
     return {
@@ -184,7 +193,6 @@ test('010 硬切：buildVisibilityMetricPayload 默认调用 v5 分析器（无 
     prompt: { question: target().prompt.question }
   });
   assert.ok(v5Called);
-  assert.ok(!v4Called);
   assert.equal(payload.analysis_method, CURRENT_ANALYSIS_CONTRACT);
 });
 
@@ -226,9 +234,6 @@ test('v5 快照迁移服务：模型 sync 后列存在则无需迁移（additive
 
 test('buildVisibilityMetricPayload 调用唯一 v5 分析器并传入竞品快照', async () => {
   let v5Input = null;
-  AIResponseAnalysisService.analyze = async () => {
-    throw new Error('v5 路径不应调用 v4');
-  };
   AIResponseAnalysisV5Service.analyze = async (input) => {
     v5Input = input;
     return {

@@ -25,6 +25,36 @@ test('direct and streaming detection request only direct-stream capable platform
   );
 });
 
+test('direct detection records freeze the v5 contract and competitor snapshot before execution', () => {
+  assert.match(routeSource, /analysis_contract_version:\s*V5_ANALYSIS_CONTRACT/);
+  assert.match(routeSource, /metric_semantics_version:\s*SCOPED_METRIC_SEMANTICS/);
+  assert.match(routeSource, /competitor_snapshot:\s*competitorSnapshot/);
+  assert.match(routeSource, /correlationId:\s*`record-\$\{recordId\}`/);
+});
+
+test('quota, frozen snapshot and every pending record commit atomically before dispatch', () => {
+  const transactionIndex = routeSource.indexOf('sequelize.transaction(\n        quotaBatchTransactionOptions(sequelize),');
+  const quotaIndex = routeSource.indexOf('bulkConsumeQuota(', transactionIndex);
+  const recordIndex = routeSource.indexOf('QuestionRecord.create({', quotaIndex);
+  const dispatchIndex = routeSource.indexOf('scheduleBackgroundTask(', recordIndex);
+  assert.ok(transactionIndex > 0);
+  assert.ok(quotaIndex > transactionIndex);
+  assert.ok(recordIndex > quotaIndex);
+  assert.ok(dispatchIndex > recordIndex);
+});
+
+test('SSE is record-first and correlates the upstream request to the frozen record', () => {
+  const streamIndex = routeSource.indexOf("router.get('/stream'");
+  const recordIndex = routeSource.indexOf('sseRecord = await sequelize.transaction', streamIndex);
+  const queryIndex = routeSource.indexOf('AIPlatformService.queryPlatform', recordIndex);
+  assert.ok(recordIndex > streamIndex);
+  assert.ok(queryIndex > recordIndex);
+  assert.match(
+    routeSource.slice(recordIndex, queryIndex + 500),
+    /correlationId:\s*`record-\$\{sseRecord\.id\}`/
+  );
+});
+
 test('detection routes contain no legacy provider configuration or stream fallback', () => {
   assert.doesNotMatch(routeSource, /AIPlatformService\.platforms|getModelName|getMaxTokens/);
   assert.doesNotMatch(routeSource, /DOUBAO_LEGACY_STREAM|DOUBAO_|DEEPSEEK_/);

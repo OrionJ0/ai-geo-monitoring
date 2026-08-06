@@ -176,6 +176,61 @@ test('scheduler stop waits for an active tick to finish', async () => {
   assert.equal(stopped, true);
 });
 
+test('scheduler shutdown closes admission before another tick can claim work', async () => {
+  const { SchedulerService: SchedulerClass } = require('../services/SchedulerService');
+  const scheduler = new SchedulerClass();
+  let ticks = 0;
+  scheduler._runTick = async () => { ticks += 1; };
+
+  scheduler.beginShutdown();
+  await scheduler.tick();
+
+  assert.equal(ticks, 0);
+  assert.equal(scheduler._closing, true);
+});
+
+test('scheduler finishes a durable slot already claimed when shutdown begins', async () => {
+  const { SchedulerService: SchedulerClass } = require('../services/SchedulerService');
+  const scheduler = new SchedulerClass();
+  const originalFindSchedules = DetectionSchedule.findAll;
+  const originalFindProjects = BrandProject.findAll;
+  let started = 0;
+  let submitted = 0;
+  let finalized = 0;
+  DetectionSchedule.findAll = async () => [{
+    id: 17,
+    project_id: 2,
+    next_run_at: new Date('2026-08-06T01:00:00.000Z'),
+    daily_time: '09:00',
+    timezone: 'Asia/Shanghai',
+    update: async () => {}
+  }];
+  BrandProject.findAll = async () => [];
+  scheduler.dispatchPendingQuestionSetRuns = async () => 0;
+  scheduler.recoverStalePendingRecords = async () => 0;
+  scheduler.recoverStaleScheduledExecutions = async () => 0;
+  scheduler.claimScheduledOccurrence = async () => {
+    scheduler.beginShutdown();
+    return {
+      claimed: true,
+      execution: { id: 91, execution_token: 'claimed-before-shutdown' }
+    };
+  };
+  scheduler.startScheduledExecution = async () => { started += 1; return true; };
+  scheduler.submitDetectionForSchedule = async () => { submitted += 1; return { ok: true }; };
+  scheduler.finalizeScheduledExecution = async () => { finalized += 1; return true; };
+
+  try {
+    await scheduler._runTick();
+    assert.equal(started, 1);
+    assert.equal(submitted, 1);
+    assert.equal(finalized, 1);
+  } finally {
+    DetectionSchedule.findAll = originalFindSchedules;
+    BrandProject.findAll = originalFindProjects;
+  }
+});
+
 test('scheduled runs do not consume quota or create records when all platforms are unavailable', async () => {
   let quotaCalls = 0;
   let settingsCalls = 0;
@@ -279,7 +334,7 @@ test('scheduled detection records retain their execution ledger id', async () =>
 test('scheduled query exceptions mark created records as failed', () => {
   const source = fs.readFileSync(path.join(__dirname, '../services/SchedulerService.js'), 'utf8');
 
-  assert.match(source, /let rec = null/);
+  assert.match(source, /let rec = preparedRecords\[platformIndex\] \|\| null/);
   assert.match(source, /catch \(e\)[\s\S]*ProjectRunService\.failRecord\([\s\S]*SAFE_PLATFORM_FAILURE_MESSAGE/);
   assert.match(source, /ProjectRunService\.failRecord\([\s\S]*\{ executionToken \}/);
 });
@@ -639,7 +694,10 @@ test('disables an archived project schedule after claiming its durable slot', as
   const originalClaim = SchedulerService.claimScheduledOccurrence;
   const originalStartExecution = SchedulerService.startScheduledExecution;
   const originalFinalizeExecution = SchedulerService.finalizeScheduledExecution;
+  const originalClosing = SchedulerService._closing;
   const updates = [];
+
+  SchedulerService._closing = false;
 
   DetectionSchedule.findAll = async () => [{
     id: 5,
@@ -674,6 +732,7 @@ test('disables an archived project schedule after claiming its durable slot', as
     SchedulerService.claimScheduledOccurrence = originalClaim;
     SchedulerService.startScheduledExecution = originalStartExecution;
     SchedulerService.finalizeScheduledExecution = originalFinalizeExecution;
+    SchedulerService._closing = originalClosing;
   }
 });
 

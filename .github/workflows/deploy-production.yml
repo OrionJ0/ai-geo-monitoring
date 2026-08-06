@@ -15,8 +15,22 @@ jobs:
     if: vars.AI_GEO_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ai_geo_test_password
+          POSTGRES_DB: ai_geo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ai_geo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       TZ: Asia/Shanghai
+      POSTGRES_TEST_URL: postgresql://postgres:ai_geo_test_password@127.0.0.1:5432/ai_geo_test
     steps:
       - name: 检出完整 main 历史
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -41,6 +55,7 @@ jobs:
           npm run test:marketing
           npm run test:website-data
           npm run test:consultation-records
+          npm run test:postgres:quota
 
       - name: 验证正式部署入口
         run: |
@@ -90,7 +105,7 @@ jobs:
     if: vars.AI_GEO_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 20
+    timeout-minutes: 360
     steps:
       - name: 下载已验证发布产物
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -169,6 +184,8 @@ jobs:
           ssh -F /dev/null \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
             -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
             -i "$RUNNER_TEMP/ai_geo_deploy" \

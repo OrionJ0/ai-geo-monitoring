@@ -18,10 +18,10 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 const fs = require('fs');
 const {
-  CURRENT_ANALYSIS_CONTRACT,
-  CURRENT_STRUCTURE_VERSION,
-  CURRENT_METRIC_SEMANTICS
-} = require('../services/GeoMetricSemanticsService');
+  ANALYSIS_METHOD: BASELINE_ANALYSIS_CONTRACT,
+  STRUCTURE_VERSION: BASELINE_STRUCTURE_VERSION,
+  METRIC_SEMANTICS_VERSION: BASELINE_METRIC_SEMANTICS
+} = require('../evaluation/AIResponseAnalysisV4BaselineService');
 const {
   QuestionRecord,
   ResultDetail,
@@ -98,7 +98,7 @@ function buildLabelingDoc(samples) {
   const header = `# GEO 基线测量标注表
 
 > 生成时间：${new Date().toISOString()}；样本数：${samples.length}；种子：${SEED}
-> 分析契约：${CURRENT_ANALYSIS_CONTRACT}；结构版本：${CURRENT_STRUCTURE_VERSION}；指标语义：${CURRENT_METRIC_SEMANTICS}
+> 分析契约：${BASELINE_ANALYSIS_CONTRACT}；结构版本：${BASELINE_STRUCTURE_VERSION}；指标语义：${BASELINE_METRIC_SEMANTICS}
 > 用途：测量当前分析器逐字段误差，并复核 ${multiEntityCount} 条多实体回答。请**不要**参考系统已有结果，独立盲标。
 
 human_review_confirmed: no
@@ -198,6 +198,8 @@ async function main() {
           'brand_rank',
           'sentiment',
           'analysis_method',
+          'analysis_platform',
+          'analysis_model',
           'metric_semantics_version',
           'analysis_structure',
           'answer_competitor_share',
@@ -223,9 +225,9 @@ async function main() {
         ? storedMetric.analysis_structure.entities
         : [];
       return {
-        analysis_contract_version: CURRENT_ANALYSIS_CONTRACT,
-        structure_version: CURRENT_STRUCTURE_VERSION,
-        metric_semantics_version: CURRENT_METRIC_SEMANTICS,
+        analysis_contract_version: BASELINE_ANALYSIS_CONTRACT,
+        structure_version: BASELINE_STRUCTURE_VERSION,
+        metric_semantics_version: BASELINE_METRIC_SEMANTICS,
         question_record_id: record.id,
         project_id: record.project_id,
         platform: record.platform,
@@ -249,6 +251,8 @@ async function main() {
           : null,
         stored_metric: storedMetric ? {
           analysis_method: storedMetric.analysis_method || null,
+          analysis_platform: storedMetric.analysis_platform || null,
+          analysis_model: storedMetric.analysis_model || null,
           metric_semantics_version: storedMetric.metric_semantics_version || null,
           brand_mentioned: Boolean(storedMetric.brand_mentioned),
           brand_mentions: Number(storedMetric.brand_mentions || 0),

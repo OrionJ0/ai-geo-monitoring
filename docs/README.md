@@ -60,7 +60,7 @@
 | 需求 | 当前主题 |
 | --- | --- |
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
-| [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 001–008 已完成；009 不批准硬切；011–012 已关闭；013 评测合同两轮返工完成（严格 truth schema、关系 span 对齐计分、type enum、阶段 1 失败降级、编号列表不推导排名、竞品 occurrence 计数）且 AI 内容裁决已应用为 pending_review，唯一剩余阻塞是数据所有者确认签字（见 TRUTH-REVIEW-QUEUE.md、AI-TRUTH-ADJUDICATION.md）。014/015 未启动，010 保持阻塞。正式入口仍走 v4，当前 DeepSeek 默认分析配置为 Pro；v5 显式候选固定 Flash。 |
+| [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 数据所有者裁决、v5 两阶段实现、四入口硬切、冻结快照字段与 schema-only 生产前置迁移均已完成；当前唯一剩余门禁是将统一候选正式发布并在同一不可变 revision 上完成四入口、systemd 请求审计、历史 v4 报告/CSV 和真实浏览器验收。生产启动桥 `387ae45` 仍运行 v4/Pro，不能据本地完成宣称生产已切换。 |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
 | [营销工作线主分支集成与治理收尾](active-2026-08-06-008-marketing-main-integration-closeout/prd.md) | 003→006→007→005 已安全重放，营销治理缺口已修复；`competitor_snapshot` 前置迁移已独立发布并验收，当前正在最终统一候选上迁移官方 DeepSeek Pro 配置到 Flash、重跑全量门禁并准备四入口生产验收 |
 
@@ -73,7 +73,7 @@
 | [豆包 Web 可信监测](blocked-2026-07-27-002-doubao-web-monitoring/prd.md) | 代码和本地真实采集已完成；等待目标虚拟机全流程验收与管理员正式启用 |
 | [GEO 实体份额指标](blocked-2026-07-28-001-geo-entity-share-metrics/prd.md) | 真实入口硬切验收 |
 | [营销监控系统](blocked-2026-07-29-001-marketing-monitoring/prd.md) | 历史百度第一期总需求；白名单试点可用，剩余 `READY` 凭据/契约门禁由 003 继承，页面 API、正确性和 Provider 后续分别由 006、007、005 承接；不得继续在旧目录新增同类 issue |
-| [AI 语义分析质量](blocked-2026-07-29-002-ai-semantic-analysis-quality/prd.md) | v4 仍是正式路径；等待 v5 硬切并退役 v4 运行时 |
+| [AI 语义分析质量](blocked-2026-07-29-002-ai-semantic-analysis-quality/prd.md) | v5 已在统一候选硬切，v4 基线已隔离到 `backend/evaluation/`；等待同一候选正式发布与入口级验收后更新历史阻塞状态 |
 
 ## 已关闭需求
 

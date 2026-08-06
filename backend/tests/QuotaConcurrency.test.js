@@ -54,3 +54,28 @@ test('并发直接扣减不会丢失用量', async () => {
   });
   assert.equal(counter.used_count, 10);
 });
+
+test('事务内扣减后的读取异常会回滚配额', async () => {
+  const counter = await UsageCounter.findOne({
+    where: { user_id: user.id, feature: 'detection', period: 'daily' }
+  });
+  const before = counter.used_count;
+  const failingModel = {
+    findOne: (...args) => UsageCounter.findOne(...args),
+    bulkCreate: (...args) => UsageCounter.bulkCreate(...args),
+    update: (...args) => UsageCounter.update(...args),
+    findByPk: async () => { throw new Error('injected counter read failure'); }
+  };
+
+  await assert.rejects(
+    sequelize.transaction(async (transaction) => consumeQuotaDirect(
+      user.id,
+      'detection',
+      1,
+      { transaction, model: failingModel }
+    )),
+    /injected counter read failure/u
+  );
+  await counter.reload();
+  assert.equal(counter.used_count, before);
+});

@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   },
   allowedDevOrigins: ['127.0.0.1'],
   experimental: {
-    proxyTimeout: 300_000,
+    proxyTimeout: 610_000,
   },
   turbopack: {
     root: path.join(__dirname),

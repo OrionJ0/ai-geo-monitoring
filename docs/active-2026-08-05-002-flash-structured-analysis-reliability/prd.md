@@ -279,6 +279,6 @@
 ## Handoff
 
 - PRD path: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/prd.md`
-- Current state: issue 001–008 已完成并提交；009 明确不批准硬切；011–012 已关闭。issue 013 的 55 条目标字段和全部实体/关系已由两个独立 agent 完成 AI 辅助内容裁决，原 5 个 dispute 均有明确建议，详见 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md)。但对 db097ef 的真实反例复核发现 strict truth schema 仍接受缺少版本/争议字段和非法目标类型的 confirmed 记录，关系质量仍按 canonical name 字符串而不是已对齐 truth entity ID 计分，entity type enum 也未校验；因此 013 继续 blocked，AI 裁决不得冒充人工签字。014/015 必须等待合同补修、数据所有者确认和 truth preflight。当前正式入口仍使用 `ai_structured_v4 / geo_metric_input_v4`，默认 DeepSeek 分析配置为 `deepseek-v4-pro`；v5 只有显式候选路径固定使用 `deepseek-v4-flash`。010 保持阻塞，v4 运行时和现役文档尚未退役。
+- Current state（2026-08-06）：数据所有者裁决、014/015 全量门禁、v5 两阶段硬切、竞品快照冻结和 schema-only 生产前置迁移均已完成。统一候选固定使用 `ai_structured_v5 / geo_metric_input_v5 / three_track_partial_v2` 与官方内置 `deepseek-v4-flash`，v4 基线已移出生产 `services`。当前只剩统一候选的正式发布、四入口/systemd 审计/历史报告与浏览器验收；Stage1 生产尚未切换，目录保持 active。下文关于“不批准硬切”及 v4/Pro 的描述是 009–013 当时的历史决策与证据，不是当前候选合同。
 - Validation report: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/validation-report.md`
-- Recommended next step: 先补 strict truth schema 和 relation identity alignment 的 1 个 P0、2 个 P1 回归；再把 AI-TRUTH-ADJUDICATION.md 的裁决写入模板，由数据所有者确认并由真实复核人签字。truth preflight 与 013 全部 AC 通过后，才执行 014–015；015 全部通过并经人工批准后才可执行 010。
+- Recommended next step: 发布统一候选并完成单问题、问题集、自动监测、analysis-only 四入口验收，同时核对 systemd 请求审计、历史 v4 报告/CSV 只读兼容和正式 Chrome 页面；生产证据全部成立后关闭 010 与本需求。

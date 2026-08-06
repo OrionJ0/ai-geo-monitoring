@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
+const net = require('node:net');
 const { WebSocketServer } = require('ws');
 
 const { connectCdp } = require('../services/CdpConnection');
@@ -53,4 +54,31 @@ test('allows a bounded per-command timeout for slow read-only CDP commands', asy
     connection.close();
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('aborting a pending CDP handshake closes the socket immediately', async (t) => {
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    sockets.forEach((socket) => socket.destroy());
+    await new Promise((resolve) => server.close(resolve));
+  });
+  const controller = new AbortController();
+  const pending = connectCdp(
+    `ws://127.0.0.1:${server.address().port}`,
+    30_000,
+    controller.signal
+  );
+  await once(server, 'connection');
+  controller.abort(new Error('测试关闭'));
+  await assert.rejects(pending, { code: 'renderer_shutdown' });
+  const closeDeadline = Date.now() + 1000;
+  while (sockets.size > 0 && Date.now() < closeDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(sockets.size, 0);
 });

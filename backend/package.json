@@ -11,6 +11,7 @@
     "test:consultation-records": "node --test tests/consultationRecords/*.test.js",
     "test:postgres:marketing": "node scripts/runMarketingPostgresTests.js",
     "test:postgres:scheduler": "node --test tests/integration/ScheduledExecutionPostgres.test.js",
+    "test:postgres:quota": "node --test tests/integration/QuotaConcurrencyPostgres.test.js",
     "audit:marketing": "node scripts/migrateMarketing.js",
     "migrate:marketing": "node scripts/migrateMarketing.js --apply",
     "preflight:baidu-unified-oauth": "node scripts/verifyBaiduUnifiedOAuth.js",

@@ -13,6 +13,7 @@ const {
   prepareBundleRelease,
   fastForwardPreparedRelease,
   activatePreparedRelease,
+  resolveCurrentReleaseState,
 } = bundleDeployment;
 
 const execFileAsync = promisify(execFile);
@@ -69,7 +70,7 @@ test('verified bundle fast-forwards a clean main checkout without contacting ori
   assert.equal(fs.readFileSync(path.join(server, 'version.txt'), 'utf8'), 'two\n');
 });
 
-test('verified bundle can defer the worktree fast-forward until production is stopped', async (t) => {
+test('verified bundle keeps the current worktree unchanged until candidate activation', async (t) => {
   const source = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-deferred-source-'));
   const server = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-deferred-server-'));
   const bundlePath = path.join(os.tmpdir(), `ai-geo-deferred-${process.pid}-${Date.now()}.bundle`);
@@ -111,21 +112,17 @@ test('verified bundle can defer the worktree fast-forward until production is st
 
   assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), firstRevision);
 
-  await assert.rejects(
-    activatePreparedRelease({
-      projectRoot: server,
-      prepared,
-      stopProduction: async () => ({}),
-      loadDeploy: async () => async () => {}
-    }),
-    /停服状态无效/u
-  );
-  assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), firstRevision);
-  await fastForwardPreparedRelease({ projectRoot: server, ...prepared });
+  await activatePreparedRelease({
+    projectRoot: server,
+    prepared,
+    preflight: async () => {},
+    stopProduction: async () => {},
+    loadDeploy: async () => async () => {}
+  });
   assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), secondRevision);
 });
 
-test('activation keeps HEAD unchanged on stop failure and deploys only after a verified stop', async (t) => {
+test('activation preflights online, stops once, then fast-forwards and delegates to candidate', async (t) => {
   const source = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-activate-source-'));
   const server = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-activate-server-'));
   const bundlePath = path.join(os.tmpdir(), `ai-geo-activate-${process.pid}-${Date.now()}.bundle`);
@@ -164,44 +161,110 @@ test('activation keeps HEAD unchanged on stop failure and deploys only after a v
     deferFastForward: true
   });
 
-  await assert.rejects(
-    activatePreparedRelease({
-      projectRoot: server,
-      prepared,
-      stopProduction: async () => ({
-        backend: { running: true, pid: 6201 },
-        frontend: { running: false, pid: null }
-      }),
-      loadDeploy: async () => async () => {}
-    }),
-    /生产进程未完全停止/u
-  );
-  assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), firstRevision);
-
   const events = [];
   await activatePreparedRelease({
     projectRoot: server,
     prepared,
-    stopProduction: async () => {
-      events.push('stop');
-      return {
-        backend: { running: false, pid: null },
-        frontend: { running: false, pid: null }
-      };
+    preflight: async () => {
+      events.push('preflight');
+      return { requireGeo010Acceptance: true };
+    },
+    stopProduction: async () => { events.push('stop'); },
+    fastForward: async (options) => {
+      events.push('fast-forward');
+      await fastForwardPreparedRelease(options);
     },
     loadDeploy: async () => {
       events.push('load');
       return async (revision, options) => {
-        events.push(`deploy:${revision}:${options.lockAlreadyAcquired}`);
+        events.push(
+          `deploy:${revision}:${options.lockAlreadyAcquired}:${options.requireGeo010Acceptance}`
+        );
       };
     }
   });
   assert.equal((await git(server, ['rev-parse', 'HEAD'])).stdout.trim(), secondRevision);
   assert.deepEqual(events, [
+    'preflight',
     'stop',
+    'fast-forward',
     'load',
-    `deploy:${secondRevision}:true`
+    `deploy:${secondRevision}:true:true`
   ]);
+});
+
+test('offline failed release recovery forces full acceptance instead of trusting the current HEAD', async () => {
+  const prepared = { previousRevision: 'a'.repeat(40), revision: 'b'.repeat(40) };
+  const state = await resolveCurrentReleaseState({
+    prepared,
+    deadline: Date.now() + 5_000,
+    readJson: async () => { throw new Error('connection refused'); },
+    readServiceStates: async () => ['inactive', 'failed']
+  });
+  assert.deepEqual(state, { recovery: true });
+
+  let deployOptions;
+  await activatePreparedRelease({
+    projectRoot: process.cwd(),
+    prepared,
+    preflight: async () => ({ requireGeo010Acceptance: true }),
+    stopProduction: async () => {},
+    fastForward: async () => {},
+    loadDeploy: async () => async (_revision, options) => { deployOptions = options; }
+  });
+  assert.equal(deployOptions.requireGeo010Acceptance, true);
+});
+
+test('public preflight failure is not treated as recovery while either service is active', async () => {
+  await assert.rejects(
+    resolveCurrentReleaseState({
+      prepared: { previousRevision: 'a'.repeat(40), revision: 'b'.repeat(40) },
+      deadline: Date.now() + 5_000,
+      readJson: async () => { throw new Error('revision mismatch'); },
+      readServiceStates: async () => ['active', 'inactive']
+    }),
+    /revision mismatch/u
+  );
+});
+
+test('bundle activation keeps the current release running when production preflight fails', async () => {
+  const events = [];
+  await assert.rejects(
+    activatePreparedRelease({
+      projectRoot: '/srv/ai-geo',
+      prepared: { previousRevision: 'a'.repeat(40), revision: 'b'.repeat(40) },
+      preflight: async () => {
+        events.push('preflight');
+        throw new Error('preflight failed');
+      },
+      fastForward: async () => { events.push('fast-forward'); },
+      loadDeploy: async () => async () => { events.push('deploy'); }
+    }),
+    /preflight failed/u
+  );
+  assert.deepEqual(events, ['preflight']);
+});
+
+test('bundle activation keeps services stopped when fast-forward fails', async () => {
+  const events = [];
+  await assert.rejects(
+    activatePreparedRelease({
+      projectRoot: process.cwd(),
+      prepared: {
+        previousRevision: (await git(process.cwd(), ['rev-parse', 'HEAD'])).stdout.trim(),
+        revision: 'b'.repeat(40)
+      },
+      preflight: async () => { events.push('preflight'); },
+      stopProduction: async () => { events.push('stop'); },
+      fastForward: async () => {
+        events.push('fast-forward');
+        throw new Error('fast-forward failed');
+      },
+      loadDeploy: async () => async () => {}
+    }),
+    /fast-forward failed/u
+  );
+  assert.deepEqual(events, ['preflight', 'stop', 'fast-forward', 'stop']);
 });
 
 test('bundle deployment loads the candidate deploy module after fast-forward', async (t) => {
@@ -352,8 +415,31 @@ test('bundle deployment checks the current server before fast-forwarding main', 
     'utf8'
   );
   const mainBody = source.slice(source.indexOf('async function main()'));
-  const preflightIndex = mainBody.indexOf('checkPreconditions()');
+  const preflightIndex = mainBody.indexOf('checkPreconditions({');
   const prepareIndex = mainBody.indexOf('prepareBundleRelease({');
   assert.ok(preflightIndex >= 0);
   assert.ok(prepareIndex > preflightIndex);
+});
+
+test('changed candidate preflight warms backend and frontend dependencies before acceptance', () => {
+  const source = fs.readFileSync(
+    path.join(path.resolve(import.meta.dirname, '..'), 'scripts', 'deploy-from-bundle.mjs'),
+    'utf8'
+  );
+  const preflight = source.slice(
+    source.indexOf('async function runProductionPreflight'),
+    source.indexOf('export async function activatePreparedRelease')
+  );
+  const backendDependencyIndex = preflight.indexOf("runManagedCommand('npm', ['ci', '--include=dev']");
+  const frontendDependencyIndex = preflight.indexOf(
+    "runManagedCommand('npm', ['ci', '--include=dev']",
+    backendDependencyIndex + 1
+  );
+  const acceptanceIndex = preflight.indexOf('releaseState.recovery ? \'--recovery-preflight\'');
+  const stopIndex = preflight.indexOf('stopProductionServices');
+
+  assert.ok(backendDependencyIndex >= 0);
+  assert.ok(frontendDependencyIndex > backendDependencyIndex);
+  assert.ok(acceptanceIndex > frontendDependencyIndex);
+  assert.equal(stopIndex, -1);
 });

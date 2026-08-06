@@ -8,6 +8,7 @@ const AIAnalysisConfigService = require('../services/AIAnalysisConfigService');
 const { AIAnalysisConfigError } = require('../services/AIAnalysisConfigService');
 const AIResponseAnalysisV5Service = require('../services/AIResponseAnalysisV5Service');
 const AIResponseEntityExtractionService = require('../services/AIResponseEntityExtractionService');
+const ProjectRunService = require('../services/ProjectRunService');
 const SeoAuditSettingsService = require('../services/SeoAuditSettingsService');
 
 // 允许的设置项及校验
@@ -45,10 +46,18 @@ function analysisError(res, error, fallbackMessage) {
   const isKnown = error instanceof AIAnalysisConfigError
     || error instanceof AIResponseAnalysisV5Service.AIResponseAnalysisV5Error
     || error instanceof AIResponseEntityExtractionService.AIEntityExtractionError;
+  const retryAfterSeconds = error?.retryable === true
+    ? Math.max(1, Math.min(60, Number(error.retryAfterSeconds) || 1))
+    : null;
+  if (retryAfterSeconds !== null) res.setHeader('Retry-After', String(retryAfterSeconds));
   return res.status(isKnown ? (error.status || 400) : 500).json({
     success: false,
     message: isKnown ? error.message : fallbackMessage,
-    data: { error_code: isKnown ? error.code : 'analysis_api_error' }
+    data: {
+      error_code: isKnown ? error.code : 'analysis_api_error',
+      retryable: isKnown && error?.retryable === true,
+      ...(retryAfterSeconds !== null ? { retry_after_seconds: retryAfterSeconds } : {})
+    }
   });
 }
 
@@ -112,15 +121,13 @@ router.get('/analysis-api/prompt', adminRequired, async (_req, res) => {
   try {
     platform = await AIAnalysisConfigService.getAnalysisPlatform();
   } catch (error) {
-    if (!(error instanceof AIAnalysisConfigError)) {
-      return analysisError(res, error, '获取 AI 分析 API 请求参数失败');
-    }
+    return analysisError(res, error, '获取 AI 分析 API 请求参数失败');
   }
-  // 010 硬切（2026-08-06）：v5 为唯一正式分析器，提示定义返回 v5 阶段 1
-  // （实体提取）合同，不再暴露 v4 提示词。
+  // 010 硬切（2026-08-06）：由唯一 v5 聚合器返回实体提取 + rev2 语义判断
+  // 的完整两阶段合同，不让设置页绕过正式运行入口。
   return res.json({
     success: true,
-    data: AIResponseEntityExtractionService.getPromptDefinition(platform)
+    data: AIResponseAnalysisV5Service.getPromptDefinition(platform)
   });
 });
 
@@ -160,7 +167,8 @@ router.post('/analysis-api/test', adminRequired, async (req, res) => {
     const output = await AIResponseAnalysisV5Service.analyze({
       question: questionText,
       responseText,
-      brand: { name: brandName, aliases: brandAliases }
+      brand: { name: brandName, aliases: brandAliases },
+      signal: ProjectRunService.getShutdownSignal()
     });
     return res.json({
       success: true,

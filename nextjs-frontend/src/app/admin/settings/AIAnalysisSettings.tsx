@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ReloadOutlined } from '@ant-design/icons';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Button,
@@ -10,7 +9,6 @@ import {
   Form,
   Input,
   Modal,
-  Select,
   Space,
   Tag,
   Typography,
@@ -60,6 +58,12 @@ type PromptDefinition = {
       token_limit: null;
     };
   } | null;
+  stages?: Array<{
+    version: string;
+    prompt_revision: string;
+    template: string;
+    expected_output: Record<string, unknown>;
+  }>;
 };
 
 type AnalysisConfig = {
@@ -135,40 +139,11 @@ export default function AIAnalysisSettings() {
   const [config, setConfig] = useState<AnalysisConfig | null>(null);
   const [promptDefinition, setPromptDefinition] = useState<PromptDefinition | null>(null);
   const [loading, setLoading] = useState(false);
-  const [modelLoading, setModelLoading] = useState(false);
-  const [modelOptions, setModelOptions] = useState<string[]>([]);
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<AnalysisTestResult | null>(null);
   const [configForm] = Form.useForm<AnalysisConfigValues>();
   const [testForm] = Form.useForm<TestValues>();
-  const selectedPlatformCode = Form.useWatch('platform_code', configForm);
-
-  const loadModels = useCallback(async (
-    platformId: number,
-    fallbackModel = '',
-    notifyResult = false,
-  ) => {
-    setModelLoading(true);
-    setModelOptions(fallbackModel ? [fallbackModel] : []);
-    try {
-      const response = await axios.get(`/api/admin/ai-platforms/${platformId}/models`);
-      const models = Array.isArray(response?.data?.data?.models)
-        ? response.data.data.models.map((item: unknown) => String(item || '').trim()).filter(Boolean)
-        : [];
-      setModelOptions(Array.from(new Set([fallbackModel, ...models].filter(Boolean))));
-      if (notifyResult) {
-        message.success(`已从平台读取 ${models.length} 个模型，本次读取的列表不会保存`);
-        setModelDropdownOpen(true);
-      }
-    } catch (error) {
-      message.warning(getApiErrorMessage(error, '未能获取模型列表，仍可使用当前默认模型'));
-    } finally {
-      setModelLoading(false);
-    }
-  }, []);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -191,20 +166,12 @@ export default function AIAnalysisSettings() {
         model_name: nextConfig?.model_name || undefined,
         request_options_text: stringifyRequestOptions(nextConfig?.request_options),
       });
-      const selectedPlatform = nextPlatforms.find(
-        (item: PlatformRecord) => item.code === nextConfig?.platform_code,
-      );
-      if (selectedPlatform) {
-        await loadModels(selectedPlatform.id, nextConfig?.model_name || selectedPlatform.default_model);
-      } else {
-        setModelOptions(nextConfig?.model_name ? [nextConfig.model_name] : []);
-      }
     } catch (error) {
       message.error(getApiErrorMessage(error, '获取 AI 分析 API 配置失败'));
     } finally {
       setLoading(false);
     }
-  }, [configForm, loadModels]);
+  }, [configForm]);
 
   useEffect(() => {
     load();
@@ -216,34 +183,7 @@ export default function AIAnalysisSettings() {
     });
   }, [load, testForm]);
 
-  const availablePlatforms = useMemo(
-    () => platforms.filter((item) => (
-      item.enabled
-      && item.configured
-      && !item.archived_at
-      && item.capabilities?.analysis === true
-    )),
-    [platforms],
-  );
-  const selectedPlatform = availablePlatforms.find((item) => item.code === selectedPlatformCode);
-
-  const selectPlatform = (platformCode: string) => {
-    const platform = availablePlatforms.find((item) => item.code === platformCode);
-    const nextModel = platform?.default_model || '';
-    setModelDropdownOpen(false);
-    configForm.setFieldValue('model_name', nextModel || undefined);
-    setModelOptions(nextModel ? [nextModel] : []);
-    if (platform) void loadModels(platform.id, nextModel);
-  };
-
-  const refreshAnalysisModels = () => {
-    if (!selectedPlatform) {
-      message.warning('请先选择分析平台');
-      return;
-    }
-    const currentModel = String(configForm.getFieldValue('model_name') || selectedPlatform.default_model);
-    void loadModels(selectedPlatform.id, currentModel, true);
-  };
+  const selectedPlatform = platforms.find((item) => item.code === 'deepseek');
 
   const persistConfig = async (
     values: AnalysisConfigValues,
@@ -252,8 +192,8 @@ export default function AIAnalysisSettings() {
     try {
       setSaving(true);
       const response = await axios.put('/api/settings/analysis-api', {
-        platform_code: values.platform_code,
-        model_name: values.model_name,
+        platform_code: 'deepseek',
+        model_name: 'deepseek-v4-flash',
         request_options: requestOptions,
       });
       setConfig(response?.data?.data || null);
@@ -332,7 +272,7 @@ export default function AIAnalysisSettings() {
         size="small"
         title={(
           <Space>
-            <span>当前分析提示词</span>
+            <span>当前两阶段分析提示词</span>
             {promptDefinition?.version ? <Tag>{promptDefinition.version}</Tag> : null}
             {promptDefinition?.prompt_revision ? <Tag>{promptDefinition.prompt_revision}</Tag> : null}
           </Space>
@@ -340,75 +280,41 @@ export default function AIAnalysisSettings() {
         loading={loading && !promptDefinition}
       >
         <Paragraph type="secondary">
-          这里展示正式分析运行时使用的同一份提示词模板；花括号字段会在每次分析时替换为实际品牌、竞品和模型回答。
+          这里完整展示正式 v5 运行时依次使用的实体提取与语义判断提示词；花括号字段会在每次分析时替换为实际问题、品牌和模型回答。
         </Paragraph>
-        <Input.TextArea
-          readOnly
-          value={promptDefinition?.template || '提示词加载中…'}
-          autoSize={{ minRows: 12, maxRows: 24 }}
-          spellCheck={false}
-          style={{ fontFamily: 'var(--font-geist-mono), monospace' }}
-        />
-        <Title level={5}>期望返回结构</Title>
-        <pre style={{ margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-          {JSON.stringify(promptDefinition?.expected_output || {}, null, 2)}
-        </pre>
+        {(promptDefinition?.stages || []).map((stage, index) => (
+          <React.Fragment key={stage.prompt_revision}>
+            <Title level={5}>阶段 {index + 1}：{stage.version}</Title>
+            <Input.TextArea
+              readOnly
+              aria-label={`阶段 ${index + 1} 提示词`}
+              value={stage.template}
+              autoSize={{ minRows: 10, maxRows: 20 }}
+              spellCheck={false}
+              style={{ fontFamily: 'var(--font-geist-mono), monospace' }}
+            />
+            <Title level={5}>阶段 {index + 1} 期望返回结构</Title>
+            <pre style={{ margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+              {JSON.stringify(stage.expected_output, null, 2)}
+            </pre>
+          </React.Fragment>
+        ))}
+        {!promptDefinition?.stages?.length ? (
+          <Input.TextArea readOnly value={promptDefinition?.template || '提示词加载中…'} />
+        ) : null}
       </Card>
 
       <Card size="small" title="分析 API">
         <Form form={configForm} layout="vertical" requiredMark={false}>
-          <Form.Item
-            name="platform_code"
-            label="分析平台"
-            extra="复用 AI 平台中已加密保存的连接配置；切换平台时会读取该平台可用的模型。"
-            rules={[{ required: true, message: '请选择 AI 分析 API' }]}
-          >
-            <Select
-              loading={loading}
-              placeholder="选择已启用且已配置密钥的平台"
-              onChange={selectPlatform}
-              options={availablePlatforms.map((item) => ({
-                value: item.code,
-                label: item.name,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item
-            label="分析模型"
-            extra={(
-              <Space orientation="vertical" size={0}>
-                <span>可独立于平台默认模型选择；结构化测试和正式分析都会使用这里保存的模型。</span>
-                <span>模型列表只从供应商接口临时读取，系统仅保存最终选择的模型。</span>
-              </Space>
-            )}
-          >
-            <Space.Compact block>
-              <Form.Item
-                name="model_name"
-                noStyle
-                rules={[{ required: true, message: '请选择 AI 分析模型' }]}
-              >
-                <Select
-                  showSearch
-                  open={modelDropdownOpen}
-                  onOpenChange={setModelDropdownOpen}
-                  optionFilterProp="label"
-                  loading={modelLoading}
-                  placeholder="选择分析模型"
-                  style={{ width: '100%' }}
-                  options={modelOptions.map((model) => ({ value: model, label: model }))}
-                />
-              </Form.Item>
-              <Button
-                icon={<ReloadOutlined />}
-                loading={modelLoading}
-                disabled={!selectedPlatform}
-                onClick={refreshAnalysisModels}
-              >
-                刷新模型列表
-              </Button>
-            </Space.Compact>
-          </Form.Item>
+          <Form.Item name="platform_code" hidden><Input /></Form.Item>
+          <Form.Item name="model_name" hidden><Input /></Form.Item>
+          <Paragraph role="note" style={{ marginBottom: 16 }}>
+            正式结构化分析固定使用官方内置 DeepSeek 与 deepseek-v4-flash；这里的身份和模型是只读策略，不代表凭据或当前运行已经验证成功。
+          </Paragraph>
+          <Descriptions size="small" column={2} bordered>
+            <Descriptions.Item label="分析平台">DeepSeek（官方内置）</Descriptions.Item>
+            <Descriptions.Item label="分析模型">deepseek-v4-flash</Descriptions.Item>
+          </Descriptions>
           {selectedPlatform ? (
             <Paragraph type="secondary">
               当前调用类型：{adapterLabel(selectedPlatform.adapter_type)}。平台名称不决定协议，系统按这里的平台配置调用。

@@ -490,7 +490,7 @@ test('reveals one API key only through the explicit administrator operation', as
   });
 });
 
-test('keeps the existing key for blank edits and resets test status on critical changes', async () => {
+test('keeps the existing key for blank edits and locks the official DeepSeek identity', async () => {
   const service = createService();
   await service.ensurePresets();
   const platform = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
@@ -498,18 +498,37 @@ test('keeps the existing key for blank edits and resets test status on critical 
   await platform.reload();
   await platform.update({ test_status: 'success', last_tested_at: new Date(), last_test_message: '连接成功' });
 
-  await service.updatePlatform(platform.id, { name: 'DeepSeek CN', api_key: '' });
+  await service.updatePlatform(platform.id, { api_key: '' });
   await platform.reload();
   assert.equal(service.decryptApiKey(platform), 'sk-original');
   assert.equal(platform.test_status, 'success');
 
-  await service.updatePlatform(platform.id, { default_model: 'deepseek-next' });
+  const unchangedIdentity = await service.updatePlatform(platform.id, {
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.deepseek.com/v1/chat/completions',
+    default_model: 'deepseek-v4-flash',
+    request_timeout_seconds: 75
+  });
+  assert.equal(unchangedIdentity.request_timeout_seconds, 75);
+
+  for (const payload of [
+    { name: 'DeepSeek CN' },
+    { adapter_type: 'openai_responses' },
+    { base_url: 'https://proxy.example.invalid/v1' },
+    { default_model: 'deepseek-v4-pro' }
+  ]) {
+    await assert.rejects(
+      service.updatePlatform(platform.id, payload),
+      (error) => error.code === 'deepseek_builtin_identity_immutable' && error.status === 409
+    );
+  }
   await platform.reload();
-  assert.equal(platform.test_status, 'untested');
-  assert.equal(platform.last_tested_at, null);
+  assert.equal(platform.name, 'DeepSeek');
+  assert.equal(platform.default_model, 'deepseek-v4-flash');
 });
 
-test('stores safe model request parameters and resets both test states when they change', async () => {
+test('rejects non-empty platform request parameters for builtin DeepSeek', async () => {
   const service = createService();
   await service.ensurePresets();
   const platform = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
@@ -520,28 +539,27 @@ test('stores safe model request parameters and resets both test states when they
     last_web_search_tested_at: new Date()
   });
 
-  const updated = await service.updatePlatform(platform.id, {
-    request_options: {
-      enable_search: true,
-      search_options: { forced_search: true },
-      temperature: 0.2
-    }
-  });
-  await platform.reload();
-
-  assert.deepEqual(updated.request_options, {
-    enable_search: true,
-    search_options: { forced_search: true },
-    temperature: 0.2
-  });
-  assert.equal(platform.test_status, 'untested');
-  assert.equal(platform.web_search_test_status, 'untested');
+  await assert.rejects(
+    service.updatePlatform(platform.id, {
+      request_options: { temperature: 0.2 }
+    }),
+    (error) => error.code === 'deepseek_builtin_identity_immutable' && error.status === 409
+  );
+  const unchanged = await service.updatePlatform(platform.id, { request_options: {} });
+  assert.deepEqual(unchanged.request_options, {});
 });
 
 test('rejects request parameter arrays, protected fields and prototype-pollution keys', async () => {
   const service = createService();
   await service.ensurePresets();
-  const platform = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+  const created = await service.createPlatform({
+    code: 'request-options-validation',
+    name: 'Request Options Validation',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1/chat/completions',
+    default_model: 'example-model'
+  });
+  const platform = await AIPlatformConfig.findByPk(created.id);
 
   await assert.rejects(
     service.updatePlatform(platform.id, { request_options: [] }),

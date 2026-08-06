@@ -1,5 +1,72 @@
 const { MembershipPlan, UsageCounter, User } = require('../models');
-const { Op, literal } = require('sequelize');
+const { Op, Transaction, literal } = require('sequelize');
+
+function quotaBatchTransactionOptions(database) {
+  return database?.getDialect?.() === 'sqlite'
+    ? { type: Transaction.TYPES.IMMEDIATE }
+    : {};
+}
+
+async function atomicConsumeQuotaCounter({
+  model = UsageCounter,
+  counterId,
+  requestedAmount,
+  limit,
+  queryOptions = {}
+}) {
+  const amount = Number(requestedAmount);
+  if (!Number.isInteger(amount) || amount < 0) {
+    throw new TypeError('配额消耗数量必须是非负整数');
+  }
+  const [updatedRows] = amount === 0
+    ? [1]
+    : await model.update(
+      { used_count: literal(`used_count + ${amount}`) },
+      {
+        where: {
+          id: counterId,
+          used_count: { [Op.lte]: limit - amount }
+        },
+        ...queryOptions
+      }
+    );
+  const current = await model.findByPk(counterId, queryOptions);
+  return { consumed: updatedRows === 1, current };
+}
+
+async function ensureQuotaCounter({
+  model = UsageCounter,
+  userId,
+  feature,
+  period,
+  periodStart,
+  transaction = null
+}) {
+  const queryOptions = transaction ? { transaction } : {};
+  let counter = await model.findOne({
+    where: { user_id: userId, feature, period },
+    ...(transaction ? { lock: transaction.LOCK.UPDATE } : {}),
+    ...queryOptions
+  });
+  if (counter) return counter;
+  await model.bulkCreate(
+    [{
+      user_id: userId,
+      feature,
+      period,
+      used_count: 0,
+      period_start: periodStart
+    }],
+    { ...queryOptions, ignoreDuplicates: true }
+  );
+  counter = await model.findOne({
+    where: { user_id: userId, feature, period },
+    ...(transaction ? { lock: transaction.LOCK.UPDATE } : {}),
+    ...queryOptions
+  });
+  if (!counter) throw new Error('quota_counter_initialize_failed');
+  return counter;
+}
 
 // 内存缓存 MembershipPlan（极少变动），避免每次请求都查 DB
 const planCache = new Map(); // key: level, value: { plan, ts }
@@ -120,6 +187,12 @@ function resolveQuotaUserId(req, opts = {}) {
 // 批量消耗配额（在路由内部按需调用）
 async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
   try {
+    const requestedAmount = Number(amount);
+    if (!Number.isInteger(requestedAmount) || requestedAmount < 0) {
+      throw new TypeError('配额消耗数量必须是非负整数');
+    }
+    const transaction = opts.transaction;
+    const queryOptions = transaction ? { transaction } : {};
     const userId = resolveQuotaUserId(req, opts);
     if (!userId) {
       if (opts.sse) {
@@ -159,30 +232,30 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
       return false;
     }
 
-    let counter = await UsageCounter.findOne({ where: { user_id: userId, feature, period } });
     const now = new Date();
     const shouldStart = startOfPeriod(now, period);
-
-    if (!counter) {
-      try {
-        counter = await UsageCounter.create({ user_id: userId, feature, period, used_count: 0, period_start: shouldStart });
-      } catch (e) {
-        const isUnique = String(e?.name || '').toLowerCase().includes('unique');
-        if (isUnique) {
-          counter = await UsageCounter.findOne({ where: { user_id: userId, feature, period } });
-        } else {
-          throw e;
-        }
-      }
-    } else {
+    const counter = await ensureQuotaCounter({
+      userId,
+      feature,
+      period,
+      periodStart: shouldStart,
+      transaction
+    });
+    {
       const currentPeriodStart = startOfPeriod(counter.period_start, period);
       if (currentPeriodStart.getTime() !== shouldStart.getTime()) {
-        await counter.update({ used_count: 0, period_start: shouldStart });
+        await counter.update({ used_count: 0, period_start: shouldStart }, queryOptions);
       }
     }
 
-    const nextCount = (counter.used_count || 0) + Number(amount || 0);
-    if (nextCount > limit) {
+    const quotaResult = await atomicConsumeQuotaCounter({
+      counterId: counter.id,
+      requestedAmount,
+      limit,
+      queryOptions
+    });
+    const current = quotaResult.current;
+    if (!quotaResult.consumed) {
       const msgMap = {
         detection: '今日可用检测次数不足'
       };
@@ -193,17 +266,19 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
           res.setHeader('Connection', 'keep-alive');
           if (typeof res.flushHeaders === 'function') { try { res.flushHeaders(); } catch (_) {} }
         }
-        res.write(`data: ${JSON.stringify({ event: 'error', message: msgMap[feature] || '配额不足', data: { used: counter.used_count, limit, need: Number(amount || 0) } })}\n\n`);
+        res.write(`data: ${JSON.stringify({ event: 'error', message: msgMap[feature] || '配额不足', data: { used: current?.used_count || 0, limit, need: requestedAmount } })}\n\n`);
         try { res.end(); } catch (_) {}
       } else {
-        res.status(403).json({ success: false, message: msgMap[feature] || '配额不足', data: { used: counter.used_count, limit, need: Number(amount || 0) } });
+        res.status(403).json({ success: false, message: msgMap[feature] || '配额不足', data: { used: current?.used_count || 0, limit, need: requestedAmount } });
       }
       return false;
     }
 
-    await counter.increment('used_count', { by: Number(amount || 0) });
     return true;
   } catch (error) {
+    // 事务内不得把数据库/驱动异常降级为普通业务拒绝，否则调用方会提交
+    // 已完成的周期重置或原子扣减，却没有提交对应任务记录。
+    if (opts.transaction) throw error;
     console.error('批量配额消耗失败:', error);
     if (opts.sse) {
       if (!res.headersSent) {
@@ -212,10 +287,10 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
         res.setHeader('Connection', 'keep-alive');
         if (typeof res.flushHeaders === 'function') { try { res.flushHeaders(); } catch (_) {} }
       }
-      res.write(`data: ${JSON.stringify({ event: 'error', message: '配额检查失败', error: error.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ event: 'error', message: '配额检查失败', error_code: 'quota_check_failed' })}\n\n`);
       try { res.end(); } catch (_) {}
     } else {
-      res.status(500).json({ success: false, message: '配额检查失败', error: error.message });
+      res.status(500).json({ success: false, message: '配额检查失败', error_code: 'quota_check_failed' });
     }
     return false;
   }
@@ -223,6 +298,9 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
 
 module.exports.bulkConsumeQuota = bulkConsumeQuota;
 module.exports.resolveQuotaUserId = resolveQuotaUserId;
+module.exports.quotaBatchTransactionOptions = quotaBatchTransactionOptions;
+module.exports.atomicConsumeQuotaCounter = atomicConsumeQuotaCounter;
+module.exports.ensureQuotaCounter = ensureQuotaCounter;
 
 // 非路由场景下的直接配额消耗（供定时任务使用）
 async function consumeQuotaDirect(userId, feature, amount, options = {}) {
@@ -239,34 +317,21 @@ async function consumeQuotaDirect(userId, feature, amount, options = {}) {
 
     const transaction = options.transaction;
     const queryOptions = transaction ? { transaction } : {};
-    let counter = await UsageCounter.findOne({
-      where: { user_id: userId, feature, period },
-      ...queryOptions
-    });
+    const counterModel = options.model || UsageCounter;
     const now = new Date();
     const shouldStart = startOfPeriod(now, period);
-
-    if (!counter) {
-      try {
-        counter = await UsageCounter.create(
-          { user_id: userId, feature, period, used_count: 0, period_start: shouldStart },
-          queryOptions
-        );
-      } catch (e) {
-        const isUnique = String(e?.name || '').toLowerCase().includes('unique');
-        if (isUnique) {
-          counter = await UsageCounter.findOne({
-            where: { user_id: userId, feature, period },
-            ...queryOptions
-          });
-        } else {
-          throw e;
-        }
-      }
-    } else {
+    const counter = await ensureQuotaCounter({
+      model: counterModel,
+      userId,
+      feature,
+      period,
+      periodStart: shouldStart,
+      transaction
+    });
+    {
       const currentPeriodStart = startOfPeriod(counter.period_start, period);
       if (currentPeriodStart.getTime() !== shouldStart.getTime()) {
-        await UsageCounter.update(
+        await counterModel.update(
           { used_count: 0, period_start: shouldStart },
           {
             where: {
@@ -280,25 +345,23 @@ async function consumeQuotaDirect(userId, feature, amount, options = {}) {
     }
 
     if (requestedAmount === 0) {
-      const current = await UsageCounter.findByPk(counter.id, queryOptions);
+      const current = await counterModel.findByPk(counter.id, queryOptions);
       return { ok: true, used: current?.used_count || 0, limit };
     }
-    const [updatedRows] = await UsageCounter.update(
-      { used_count: literal(`used_count + ${requestedAmount}`) },
-      {
-        where: {
-          id: counter.id,
-          used_count: { [Op.lte]: limit - requestedAmount }
-        },
-        ...queryOptions
-      }
-    );
-    const current = await UsageCounter.findByPk(counter.id, queryOptions);
-    if (updatedRows !== 1) {
+    const quotaResult = await atomicConsumeQuotaCounter({
+      model: counterModel,
+      counterId: counter.id,
+      requestedAmount,
+      limit,
+      queryOptions
+    });
+    const current = quotaResult.current;
+    if (!quotaResult.consumed) {
       return { ok: false, used: current?.used_count || 0, limit, reason: 'exceeded' };
     }
     return { ok: true, used: current?.used_count || 0, limit };
   } catch (error) {
+    if (options.transaction) throw error;
     console.error('consumeQuotaDirect 失败:', error);
     return { ok: false, used: 0, limit: 0, reason: 'error' };
   }

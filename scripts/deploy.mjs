@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -57,6 +58,46 @@ const consultationRecordMigrationScript = path.join(
   'scripts',
   'migrateConsultationRecords.js'
 );
+const geo010AcceptanceScript = path.join(
+  backendDirectory,
+  'scripts',
+  'geo010Acceptance.js'
+);
+export const GEO010_CONTRACT_PATHS = Object.freeze([
+  'backend/app.js',
+  'backend/middleware/quota.js',
+  'backend/models/AIPlatformConfig.js',
+  'backend/models/QuestionRecord.js',
+  'backend/models/Setting.js',
+  'backend/models/VisibilityMetric.js',
+  'backend/routes/detection.js',
+  'backend/routes/geoProjects.js',
+  'backend/routes/settings.js',
+  'backend/scripts/geo010Acceptance.js',
+  'backend/scripts/migrateDeepSeekFlashConfig.js',
+  'backend/scripts/migrateGeoMetricSemantics.js',
+  'backend/scripts/migrateV5SnapshotFields.js',
+  'backend/services/AIAnalysisConfigService.js',
+  'backend/services/AIAnalysisExecutionCoordinator.js',
+  'backend/services/AIPlatformConfigService.js',
+  'backend/services/AIPlatformRequestService.js',
+  'backend/services/AIPlatformService.js',
+  'backend/services/AIResponseAnalysisV5Service.js',
+  'backend/services/AIResponseEntityExtractionService.js',
+  'backend/services/AIResponseSemanticJudgmentService.js',
+  'backend/services/ApplicationShutdownService.js',
+  'backend/services/DeepSeekFlashConfigMigrationService.js',
+  'backend/services/GeoMetricSemanticsMigrationService.js',
+  'backend/services/ProjectRunService.js',
+  'backend/services/SchedulerService.js',
+  'scripts/deploy.mjs',
+  'scripts/deploy-from-bundle.mjs'
+]);
+const GEO010_CONTRACT_LEAF_PATHS = new Set([
+  'backend/app.js',
+  'scripts/deploy.mjs',
+  'scripts/deploy-from-bundle.mjs'
+]);
 const releaseRevisionPath = path.join(runtimeDirectory, 'release-revision');
 const deploymentGateSource = path.join(
   projectRoot,
@@ -65,6 +106,8 @@ const deploymentGateSource = path.join(
 );
 const deploymentGateTarget = process.env.AI_GEO_DEPLOY_GATE_PATH
   || '/home/ubuntu/.local/bin/ai-geo-deploy-gate';
+const DEPLOYMENT_MAX_RUNTIME_MS = 345 * 60 * 1000;
+let activeDeployment = null;
 
 function parseEnvFile(filename) {
   return Object.fromEntries(
@@ -143,22 +186,194 @@ function assertDatabaseEnvironmentMatchesConfig(config) {
   }
 }
 
-async function git(args) {
+async function git(args, { signal = null, deadline = null } = {}) {
   const { stdout } = await execFileAsync('git', args, {
     cwd: projectRoot,
     maxBuffer: 10 * 1024 * 1024,
+    ...(signal ? { signal } : {}),
+    ...(deadline ? { timeout: Math.max(1, deadline - Date.now()) } : {})
   });
   return stdout.trim();
 }
 
-export async function checkPreconditions() {
+export async function computeGeo010ContractFingerprint(
+  revision,
+  { root = projectRoot, paths = null, signal = null, deadline = null } = {}
+) {
+  const normalizedRevision = String(revision || '').trim().toLowerCase();
+  if (!/^[a-f0-9]{40}$/u.test(normalizedRevision)) {
+    throw new Error('GEO 010 合同指纹要求完整的 40 位 Git commit');
+  }
+  const { stdout: treeOutput } = await execFileAsync('git', [
+    'ls-tree', '-r', '--full-tree', normalizedRevision
+  ], {
+    cwd: root,
+    maxBuffer: 10 * 1024 * 1024,
+    ...(signal ? { signal } : {}),
+    ...(deadline ? { timeout: Math.max(1, deadline - Date.now()) } : {})
+  });
+  const treeRows = treeOutput.trim().split(/\r?\n/u).filter(Boolean);
+  const treeRowsByPath = new Map(treeRows.map((row) => [
+    row.slice(row.indexOf('\t') + 1),
+    row
+  ]));
+  const expanded = paths
+    ? { paths: [...paths], externalPackages: new Set() }
+    : await expandGeo010ContractDependencies({
+        revision: normalizedRevision,
+        root,
+        treePaths: new Set(treeRowsByPath.keys()),
+        signal,
+        deadline
+      });
+  const contractPaths = expanded.paths;
+  const treePaths = new Set(treeRowsByPath.keys());
+  const missing = contractPaths.filter((filename) => !treePaths.has(filename));
+  if (missing.length) {
+    throw new Error(`GEO 010 合同指纹缺少受控文件: ${missing.join(', ')}`);
+  }
+  const rows = contractPaths.map((filename) => treeRowsByPath.get(filename));
+  if (!paths) {
+    rows.push(await selectedRuntimeLockRow({
+      revision: normalizedRevision,
+      root,
+      externalPackages: expanded.externalPackages,
+      signal,
+      deadline
+    }));
+  }
+  return createHash('sha256').update(`${rows.sort().join('\n')}\n`).digest('hex');
+}
+
+function gitObjectOptions(root, signal, deadline) {
+  return {
+    cwd: root,
+    maxBuffer: 10 * 1024 * 1024,
+    ...(signal ? { signal } : {}),
+    ...(deadline ? { timeout: Math.max(1, deadline - Date.now()) } : {})
+  };
+}
+
+async function selectedRuntimeLockRow({
+  revision,
+  root,
+  externalPackages,
+  signal,
+  deadline
+}) {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['show', `${revision}:backend/package-lock.json`],
+    gitObjectOptions(root, signal, deadline)
+  );
+  const lock = JSON.parse(stdout);
+  const packageRows = lock?.packages && typeof lock.packages === 'object'
+    ? lock.packages
+    : {};
+  const selectedNames = new Set(externalPackages);
+  const selectedEntries = new Map();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [location, metadata] of Object.entries(packageRows)) {
+      if (!location.includes('node_modules/')) continue;
+      const packageName = location.split('node_modules/').at(-1);
+      if (!selectedNames.has(packageName) || selectedEntries.has(location)) continue;
+      selectedEntries.set(location, metadata);
+      for (const dependencyName of Object.keys({
+        ...(metadata?.dependencies || {}),
+        ...(metadata?.optionalDependencies || {}),
+        ...(metadata?.peerDependencies || {})
+      })) selectedNames.add(dependencyName);
+      changed = true;
+    }
+  }
+  const normalized = [...selectedEntries.entries()].sort(([left], [right]) => (
+    left.localeCompare(right)
+  ));
+  return `geo010-runtime-lock ${createHash('sha256').update(JSON.stringify(normalized)).digest('hex')}`;
+}
+
+async function expandGeo010ContractDependencies({
+  revision,
+  root,
+  treePaths,
+  signal,
+  deadline
+}) {
+  const discovered = new Set(GEO010_CONTRACT_PATHS);
+  const externalPackages = new Set();
+  const pending = GEO010_CONTRACT_PATHS.filter(
+    (filename) => !GEO010_CONTRACT_LEAF_PATHS.has(filename)
+  );
+  while (pending.length) {
+    const filename = pending.shift();
+    if (!treePaths.has(filename) || !/\.(?:c?js|mjs)$/u.test(filename)) continue;
+    const { stdout } = await execFileAsync(
+      'git',
+      ['show', `${revision}:${filename}`],
+      gitObjectOptions(root, signal, deadline)
+    );
+    const specifiers = [...stdout.matchAll(
+      /(?:require\s*\(|from\s+)\s*['"]([^'"]+)['"]/gu
+    )].map((match) => match[1]);
+    for (const specifier of specifiers) {
+      if (!specifier.startsWith('.')) {
+        if (!specifier.startsWith('node:')) {
+          externalPackages.add(specifier.startsWith('@')
+            ? specifier.split('/').slice(0, 2).join('/')
+            : specifier.split('/')[0]);
+        }
+        continue;
+      }
+      const base = path.posix.normalize(path.posix.join(path.posix.dirname(filename), specifier));
+      const candidates = path.posix.extname(base)
+        ? [base]
+        : [base, `${base}.js`, `${base}.cjs`, `${base}.mjs`, `${base}.json`, `${base}/index.js`];
+      const dependency = candidates.find((candidate) => treePaths.has(candidate));
+      if (!dependency || discovered.has(dependency)) continue;
+      discovered.add(dependency);
+      pending.push(dependency);
+    }
+  }
+  return { paths: [...discovered], externalPackages };
+}
+
+export async function isGeo010ContractChanged({
+  previousRevision,
+  revision,
+  root = projectRoot,
+  signal = null,
+  deadline = null
+}) {
+  const currentFingerprint = await computeGeo010ContractFingerprint(revision, {
+    root,
+    signal,
+    deadline
+  });
+  if (!/^[a-f0-9]{40}$/u.test(String(previousRevision || ''))) return true;
+  try {
+    const previousFingerprint = await computeGeo010ContractFingerprint(previousRevision, {
+      root,
+      signal,
+      deadline
+    });
+    return previousFingerprint !== currentFingerprint;
+  } catch (_) {
+    // 旧版本可能早于 010 合同文件；缺少旧指纹只能按“已变化”处理。
+    return true;
+  }
+}
+
+export async function checkPreconditions({ signal = null, deadline = null } = {}) {
   validateNodeVersion();
-  const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const commandOptions = { signal, deadline };
+  const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD'], commandOptions);
   if (branch !== 'main') {
     throw new Error(`当前分支是 ${branch}，只允许从 main 部署`);
   }
 
-  const worktree = await git(['status', '--porcelain']);
+  const worktree = await git(['status', '--porcelain'], commandOptions);
   if (worktree) {
     throw new Error('工作区存在未提交改动，拒绝部署');
   }
@@ -228,7 +443,7 @@ export async function checkPreconditions() {
 
   return {
     branch,
-    revision: await git(['rev-parse', 'HEAD']),
+    revision: await git(['rev-parse', 'HEAD'], commandOptions),
     databasePath,
     databaseType: config.DATABASE_URL ? 'postgres' : 'sqlite',
     node: process.versions.node,
@@ -262,18 +477,88 @@ export function buildV5SnapshotAuditArguments(databaseType, databasePath = '') {
   return ['--require-ready'];
 }
 
-function run(command, args, options = {}) {
+export function runManagedCommand(command, args, options = {}) {
+  const deployment = options.cleanup ? null : activeDeployment;
+  const controller = options.controller || deployment?.controller;
+  const deadline = Number(options.deadline) || deployment?.deadline || null;
+  if (controller?.signal.aborted) {
+    return Promise.reject(
+      controller.signal.reason instanceof Error
+        ? controller.signal.reason
+        : new Error('部署被中断')
+    );
+  }
+  if (deadline && Date.now() >= deadline) {
+    const error = new Error('部署超过服务器侧 345 分钟总 deadline');
+    controller?.abort(error);
+    return Promise.reject(error);
+  }
   return new Promise((resolve, reject) => {
+    const detached = process.platform !== 'win32';
     const child = spawn(command, args, {
       cwd: options.cwd || projectRoot,
       env: options.env || process.env,
       stdio: 'inherit',
+      detached,
     });
-    child.once('error', reject);
+    let settled = false;
+    let killTimer = null;
+    let interruptionReason = null;
+    const terminationGraceMs = Math.max(
+      1_000,
+      Number(options.terminationGraceMs) || 5_000
+    );
+    const remainingMs = deadline
+      ? Math.max(1, deadline - Date.now())
+      : null;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      if (remainingTimer) clearTimeout(remainingTimer);
+      if (killTimer) clearTimeout(killTimer);
+      controller?.signal.removeEventListener('abort', onAbort);
+      callback(value);
+    };
+    const signalProcessTree = (signal) => {
+      if (detached && Number.isInteger(child.pid) && child.pid > 0) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch (_) {}
+      }
+      child.kill(signal);
+    };
+    const interrupt = (reason) => {
+      if (settled || interruptionReason) return;
+      interruptionReason = reason;
+      signalProcessTree('SIGTERM');
+      killTimer = setTimeout(() => signalProcessTree('SIGKILL'), terminationGraceMs);
+      killTimer.unref?.();
+    };
+    const onAbort = () => interrupt(
+      controller.signal.reason instanceof Error
+        ? controller.signal.reason
+        : new Error('部署被中断')
+    );
+    const remainingTimer = remainingMs === null
+      ? null
+      : setTimeout(() => interrupt(new Error('部署超过服务器侧 345 分钟总 deadline')), remainingMs);
+    remainingTimer?.unref?.();
+    controller?.signal.addEventListener('abort', onAbort, { once: true });
+    child.once('error', (error) => finish(reject, error));
     child.once('exit', (code, signal) => {
-      if (code === 0) resolve();
+      if (settled) return;
+      if (interruptionReason) {
+        // 直接子进程可能先退出，而 npm/浏览器孙进程仍忽略 TERM；在发布锁
+        // 释放前立即清除整个独立进程组，不能让 escalation timer 被 finish 清掉。
+        signalProcessTree('SIGKILL');
+        finish(reject, interruptionReason);
+        return;
+      }
+      if (code === 0) finish(resolve);
       else {
-        reject(
+        finish(
+          reject,
           new Error(
             `${options.label || command}失败${signal ? `，信号 ${signal}` : `，退出码 ${code}`}`
           )
@@ -282,6 +567,8 @@ function run(command, args, options = {}) {
     });
   });
 }
+
+const run = runManagedCommand;
 
 export async function acquireDeploymentLock() {
   await fs.promises.mkdir(runtimeDirectory, { recursive: true });
@@ -334,39 +621,83 @@ async function installDeploymentGate() {
   }
 }
 
-export async function deploy(preparedRevision = '', { lockAlreadyAcquired = false } = {}) {
-  const initial = await checkPreconditions();
-  assertPreparedRevision(preparedRevision, initial.revision);
-  if (!lockAlreadyAcquired) await acquireDeploymentLock();
-  let servicesStopped = false;
+export async function deploy(preparedRevision = '', {
+  lockAlreadyAcquired = false,
+  deadline: inheritedDeadline = null,
+  signal: inheritedSignal = null,
+  previousRevision = '',
+  requireGeo010Acceptance = false,
+  dependenciesPreflighted = false,
+  servicesAlreadyStopped = false
+} = {}) {
+  if (activeDeployment) throw new Error('当前进程已有部署正在执行');
+  const controller = new AbortController();
+  const forwardInheritedAbort = () => controller.abort(
+    inheritedSignal?.reason instanceof Error
+      ? inheritedSignal.reason
+      : new Error('外层 Bundle 发布已中断')
+  );
+  if (inheritedSignal?.aborted) forwardInheritedAbort();
+  else inheritedSignal?.addEventListener('abort', forwardInheritedAbort, { once: true });
+  const signalHandlers = new Map(['SIGHUP', 'SIGINT', 'SIGTERM'].map((signal) => [
+    signal,
+    () => controller.abort(new Error(`部署收到 ${signal}，开始安全收敛`))
+  ]));
+  signalHandlers.forEach((handler, signal) => process.once(signal, handler));
+  activeDeployment = {
+    controller,
+    deadline: Math.min(
+      Date.now() + DEPLOYMENT_MAX_RUNTIME_MS,
+      Number(inheritedDeadline) || Number.POSITIVE_INFINITY
+    )
+  };
+  let initial;
+  let lockAcquired = lockAlreadyAcquired;
+  let servicesStopped = servicesAlreadyStopped;
+  let enteredDowntime = servicesAlreadyStopped;
   let databaseBackupReference = '';
   let databaseBackupManifest = '';
 
   try {
+    const deploymentCommandOptions = {
+      signal: controller.signal,
+      deadline: activeDeployment.deadline
+    };
+    initial = await checkPreconditions(deploymentCommandOptions);
+    assertPreparedRevision(preparedRevision, initial.revision);
+    if (!lockAlreadyAcquired) {
+      await acquireDeploymentLock();
+      lockAcquired = true;
+    }
     let revision;
     if (preparedRevision) {
       console.log('1/14 校验已上传的预置版本');
-      revision = await git(['rev-parse', 'HEAD']);
+      revision = await git(['rev-parse', 'HEAD'], deploymentCommandOptions);
       assertPreparedRevision(preparedRevision, revision);
     } else {
       console.log('1/14 拉取 origin/main');
       await run('git', ['pull', '--ff-only', 'origin', 'main'], {
         label: 'git pull',
       });
-      revision = await git(['rev-parse', 'HEAD']);
-      const remoteRevision = await git(['rev-parse', 'origin/main']);
+      revision = await git(['rev-parse', 'HEAD'], deploymentCommandOptions);
+      const remoteRevision = await git(['rev-parse', 'origin/main'], deploymentCommandOptions);
       if (revision !== remoteRevision) {
         throw new Error('HEAD 与 origin/main 不一致，拒绝部署服务器本地提交');
       }
     }
-    const checked = await checkPreconditions();
+    const checked = await checkPreconditions(deploymentCommandOptions);
     await installDeploymentGate();
 
-    console.log('2/14 停止受管生产进程');
-    await run(process.execPath, [productionScript, 'stop'], {
-      label: '停止生产进程',
-    });
-    servicesStopped = true;
+    if (servicesAlreadyStopped) {
+      console.log('2/14 启动桥已验证并停止受管生产进程');
+    } else {
+      console.log('2/14 停止受管生产进程');
+      enteredDowntime = true;
+      await run(process.execPath, [productionScript, 'stop'], {
+        label: '停止生产进程',
+      });
+      servicesStopped = true;
+    }
 
     if (checked.databaseType === 'sqlite') {
       console.log('3/14 创建不可覆盖的 release 备份并更新 SQLite 最新备份');
@@ -424,7 +755,11 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     }
 
     console.log('4/14 安装后端依赖');
-    await run('npm', ['ci', '--include=dev'], {
+    await run('npm', [
+      'ci',
+      ...(dependenciesPreflighted ? ['--offline'] : []),
+      '--include=dev'
+    ], {
       cwd: backendDirectory,
       label: '后端 npm ci',
     });
@@ -443,7 +778,11 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '后端原始咨询测试',
     });
     console.log('6/14 安装并静态检查前端依赖');
-    await run('npm', ['ci', '--include=dev'], {
+    await run('npm', [
+      'ci',
+      ...(dependenciesPreflighted ? ['--offline'] : []),
+      '--include=dev'
+    ], {
       cwd: frontendDirectory,
       label: '前端 npm ci',
     });
@@ -559,7 +898,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
         label: 'GEO 指标语义迁移',
       }
     );
-    await run(process.execPath, [geoMetricMigrationScript], {
+    await run(process.execPath, [geoMetricMigrationScript, '--require-ready'], {
       cwd: backendDirectory,
       env: migrationEnvironment,
       label: 'GEO 指标语义迁移复审',
@@ -615,21 +954,65 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     });
     servicesStopped = false;
 
+    if (requireGeo010Acceptance || await isGeo010ContractChanged({
+      previousRevision,
+      revision,
+      signal: controller.signal,
+      deadline: activeDeployment.deadline
+    })) {
+      console.log('Stage2 门禁：v5 运行合同已变化，执行四入口 v5 正式验收');
+      await run(process.execPath, [geo010AcceptanceScript, `--revision=${revision}`], {
+        cwd: backendDirectory,
+        env: {
+          ...migrationEnvironment,
+          AI_GEO_DEPLOYMENT_DEADLINE_EPOCH_MS: String(activeDeployment.deadline),
+          AI_GEO_ACCEPTANCE_STAGE: 'runtime'
+        },
+        label: '010 四入口 v5 正式验收',
+        terminationGraceMs: 90_000,
+      });
+    } else {
+      console.log('Stage2 门禁：相邻版本的 v5 运行合同未变化，无需重复四入口验收');
+    }
+
+    if (controller.signal.aborted) throw controller.signal.reason;
     const shortRevision = revision.slice(0, 12);
     await appendDeploymentLog(`SUCCESS ${shortRevision}`);
     console.log(`部署成功: ${shortRevision}`);
   } catch (error) {
     await appendDeploymentLog(`FAILED ${error.message}`).catch(() => {});
-    if (servicesStopped) {
+    if (enteredDowntime) {
+      try {
+        const cleanupController = new AbortController();
+        await run(process.execPath, [productionScript, 'stop'], {
+          label: '部署失败后核验并停止全部生产进程',
+          cleanup: true,
+          controller: cleanupController,
+          deadline: Date.now() + 90_000,
+        });
+        servicesStopped = true;
+      } catch (stopError) {
+        servicesStopped = false;
+        console.error(`部署失败且无法确认全部生产进程停止: ${stopError.message}`);
+      }
+    }
+    if (enteredDowntime && servicesStopped) {
       console.error('部署失败，网站保持停止；修复问题后重新执行部署命令。');
+    } else if (!enteredDowntime) {
+      console.error('部署在停服前失败，现役生产服务保持运行。');
     }
     throw error;
   } finally {
-    if (!lockAlreadyAcquired) await releaseDeploymentLock();
+    if (!lockAlreadyAcquired && lockAcquired) await releaseDeploymentLock();
+    signalHandlers.forEach((handler, signal) => process.removeListener(signal, handler));
+    inheritedSignal?.removeEventListener('abort', forwardInheritedAbort);
+    activeDeployment = null;
   }
 
   return initial;
 }
+
+export { DEPLOYMENT_MAX_RUNTIME_MS };
 
 async function main() {
   const checkOnly = process.argv.includes('--check');

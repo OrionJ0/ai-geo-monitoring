@@ -25,10 +25,22 @@ let user;
 let project;
 let run;
 
-async function requestRoute(method, routePath, { params = {}, body = {}, query = {} } = {}) {
+async function requestRoute(method, routePath, {
+  params = {}, body = {}, query = {}, headers = {}
+} = {}) {
   const layer = router.stack.find((item) => item.route?.path === routePath && item.route.methods?.[method]);
   assert.ok(layer, `route ${method.toUpperCase()} ${routePath} should exist`);
-  const req = { params, body, query, user: { id: user.id, role: 'user' } };
+  const normalizedHeaders = Object.fromEntries(
+    Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])
+  );
+  const req = {
+    params,
+    body,
+    query,
+    headers: normalizedHeaders,
+    get: (name) => normalizedHeaders[String(name).toLowerCase()],
+    user: { id: user.id, role: 'user' }
+  };
   const response = {
     statusCode: 200,
     payload: null,
@@ -429,7 +441,7 @@ test('完整监测重试在唯一 Web 平台登录失效时保留失败项且不
   }
 });
 
-test('结构化分析失败时复用原回答且不重新消耗监测配额', async () => {
+test('分析队列失败时复用原回答且不重新消耗监测配额', async () => {
   const failedRecord = await QuestionRecord.create({
     user_id: user.id,
     project_id: project.id,
@@ -444,8 +456,8 @@ test('结构化分析失败时复用原回答且不重新消耗监测配额', as
     error_message: 'AI 结构化分析失败，本条未计入有效样本',
     result_summary: {
       failure: {
-        stage: 'analysis_validation',
-        error_code: 'invalid_analysis_output'
+        stage: 'analysis_queue',
+        error_code: 'analysis_queue_timeout'
       },
       analysis: {
         status: 'failed',
@@ -511,7 +523,8 @@ test('结构化分析失败时复用原回答且不重新消耗监测配额', as
 
   try {
     const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
-      params: { projectId: project.id, runId: nativeRun.id }
+      params: { projectId: project.id, runId: nativeRun.id },
+      body: { idempotency_key: 'retry-analysis-only-001' }
     });
 
     assert.equal(response.statusCode, 202);
@@ -560,7 +573,8 @@ test('结构化分析失败时复用原回答且不重新消耗监测配额', as
 
 test('导入报告不可重试，非法运行 ID 会被拒绝', async () => {
   const importedResponse = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
-    params: { projectId: project.id, runId: run.id }
+    params: { projectId: project.id, runId: run.id },
+    body: { idempotency_key: 'retry-imported-001' }
   });
   assert.equal(importedResponse.statusCode, 409);
   assert.match(importedResponse.payload.message, /导入报告/);
@@ -569,6 +583,22 @@ test('导入报告不可重试，非法运行 ID 会被拒绝', async () => {
     params: { projectId: project.id, runId: 'invalid' }
   });
   assert.equal(invalidResponse.statusCode, 400);
+});
+
+test('重试接口要求请求头与请求体使用同一个幂等键', async () => {
+  const missing = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+    params: { projectId: project.id, runId: run.id }
+  });
+  assert.equal(missing.statusCode, 400);
+  assert.equal(missing.payload.data.error_code, 'INVALID_IDEMPOTENCY_KEY');
+
+  const conflict = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
+    params: { projectId: project.id, runId: run.id },
+    headers: { 'Idempotency-Key': 'retry-header-001' },
+    body: { idempotency_key: 'retry-body-002' }
+  });
+  assert.equal(conflict.statusCode, 400);
+  assert.equal(conflict.payload.data.error_code, 'INVALID_IDEMPOTENCY_KEY');
 });
 
 test('重试配额不足时恢复原报告且不留下待处理记录', async () => {
@@ -630,7 +660,8 @@ test('重试配额不足时恢复原报告且不留下待处理记录', async ()
   try {
     const beforeCount = await QuestionRecord.count({ where: { project_id: project.id } });
     const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
-      params: { projectId: project.id, runId: nativeRun.id }
+      params: { projectId: project.id, runId: nativeRun.id },
+      body: { idempotency_key: 'retry-quota-001' }
     });
 
     assert.equal(response.statusCode, 403);
@@ -750,7 +781,8 @@ test('不能从另一个项目重试不属于它的运行报告', async () => {
   });
 
   const response = await requestRoute('post', '/:projectId/question-set-runs/:runId/retry-failed', {
-    params: { projectId: otherProject.id, runId: run.id }
+    params: { projectId: otherProject.id, runId: run.id },
+    body: { idempotency_key: 'retry-other-project-001' }
   });
 
   assert.equal(response.statusCode, 404);

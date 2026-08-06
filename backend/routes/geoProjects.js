@@ -981,11 +981,19 @@ router.post('/:projectId/question-set-runs/:runId/retry-failed', loadProject, as
     if (!Number.isInteger(runId) || runId <= 0) {
       return res.status(400).json({ success: false, message: '运行报告 ID 无效' });
     }
+    const idempotency = readRequiredIdempotencyKey(req);
+    if (!idempotency.ok) {
+      return res.status(400).json({
+        success: false,
+        message: '必须提供唯一且一致的 Idempotency-Key',
+        data: { error_code: 'INVALID_IDEMPOTENCY_KEY' }
+      });
+    }
     const result = await ProjectRunService.retryFailedQuestionSetRun({
       project: req.brandProject,
       runId,
       user: req.user,
-      idempotencyKey: req.body?.idempotency_key || req.get?.('Idempotency-Key')
+      idempotencyKey: idempotency.value
     });
     return res.status(result.status).json({
       success: true,

@@ -1,5 +1,6 @@
 const AIPlatformConfigService = require('./AIPlatformConfigService');
 const AIPlatformRequestService = require('./AIPlatformRequestService');
+const { emitRequestAudit } = require('./AIPlatformRequestService');
 const WebPlatformRegistry = require('./WebPlatformRegistry');
 const {
   getUnavailableReason,
@@ -36,6 +37,9 @@ class AIPlatformService {
     this.requestService = options.requestService || AIPlatformRequestService;
     this.configService = options.configService || AIPlatformConfigService;
     this.webPlatformRegistry = options.webPlatformRegistry || WebPlatformRegistry;
+    this.auditLogger = options.auditLogger || ((event) => {
+      console.info(`AI_PLATFORM_REQUEST_AUDIT ${JSON.stringify(event)}`);
+    });
   }
 
   async queryPlatform(platform, question, options = {}) {
@@ -81,7 +85,15 @@ class AIPlatformService {
           `${definition.displayName} 查询缺少记录归属`
         );
       }
+      emitRequestAudit(this.auditLogger, {
+        platform: definition.code,
+        model: options.config?.default_model,
+        purpose: options.purpose,
+        attempt: 1,
+        correlationId: options.correlationId
+      });
       return this.webPlatformRegistry.getService(definition.code).queryPlatform(question, {
+        signal: options.signal,
         capture_owner: {
           record_id: recordId,
           user_id: userId,

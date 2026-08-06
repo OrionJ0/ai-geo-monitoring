@@ -233,19 +233,53 @@ class AIResponseEntityExtractionService {
     return buildEntityPrompt(sourceMap);
   }
 
-  getPromptDefinition() {
+  getPromptDefinition(platform = null) {
+    const requestOptions = effectiveRequestOptions(platform);
     return {
+      version: 'ai_structured_v5_entity_stage_v1',
       prompt_revision: ENTITY_PROMPT_REVISION,
       template: buildEntityPrompt({
         version: 'answer_source_lines_v1',
         segments: [{ source_id: 'L001', text: '{{待分析回答原文片段}}' }]
       }),
-      request_options: { ...FIXED_REQUEST_OPTIONS },
-      max_attempts: ENTITY_MAX_ATTEMPTS
+      runtime_fields: ['source_answer.segments'],
+      expected_output: {
+        mentions: [{
+          source_id: 'L001',
+          surface_form: '原文实体文本',
+          canonical_name: '规范实体名称',
+          entity_type: 'brand | company | other_organization'
+        }]
+      },
+      request_options: requestOptions,
+      max_attempts: ENTITY_MAX_ATTEMPTS,
+      request_profile: {
+        temperature: FIXED_REQUEST_OPTIONS.temperature,
+        timeout_seconds: ANALYSIS_TIMEOUT_SECONDS,
+        max_attempts: ENTITY_MAX_ATTEMPTS,
+        web_search: false,
+        token_limit: null,
+        json_mode: 'chat_completions_only',
+        deepseek_thinking: 'disabled'
+      },
+      request_parameters: {
+        adapter_type: platform?.adapter_type || 'openai_chat_completions',
+        request_body: {
+          ...requestOptions,
+          model: platform?.default_model || 'deepseek-v4-flash',
+          messages: [{ role: 'user', content: '{{运行时实体抽取提示词}}' }]
+        },
+        runtime_policy: {
+          timeout_seconds: ANALYSIS_TIMEOUT_SECONDS,
+          max_attempts: ENTITY_MAX_ATTEMPTS,
+          web_search: false,
+          token_limit: null
+        }
+      }
     };
   }
 
-  async extract({ answer, sourceMap, validateMentions = null }) {
+  async extract({ answer, sourceMap, validateMentions = null, correlationId = null, signal = undefined }) {
     if (!String(answer || '').trim() || !Array.isArray(sourceMap?.segments)) {
       throw new AIEntityExtractionError(
         '实体抽取缺少完整回答或 source map',
@@ -262,11 +296,13 @@ class AIResponseEntityExtractionService {
         : buildEntityRepairPrompt(basePrompt, lastError);
       const connection = await this.requestService.queryConfig(platform, prompt, {
         purpose: 'analysis_entity_extract',
+        correlationId,
         retryCount: 0,
         requestOptions: effectiveRequestOptions(platform),
         disableWebSearch: true,
         omitTokenLimit: true,
-        timeoutSeconds: ANALYSIS_TIMEOUT_SECONDS
+        timeoutSeconds: ANALYSIS_TIMEOUT_SECONDS,
+        signal
       });
       const diagnostics = requestDiagnostics(connection, platform, attempt);
       if (!connection?.success) {
@@ -345,6 +381,7 @@ module.exports.ENTITY_MAX_ATTEMPTS = ENTITY_MAX_ATTEMPTS;
 module.exports.FIXED_REQUEST_OPTIONS = FIXED_REQUEST_OPTIONS;
 module.exports.parseEntityOutput = parseEntityOutput;
 module.exports.buildEntityPrompt = buildEntityPrompt;
+module.exports.buildEntityRepairPrompt = buildEntityRepairPrompt;
 module.exports.assertFlashPlatform = assertFlashPlatform;
 module.exports.effectiveRequestOptions = effectiveRequestOptions;
 module.exports.ANALYSIS_TIMEOUT_SECONDS = ANALYSIS_TIMEOUT_SECONDS;

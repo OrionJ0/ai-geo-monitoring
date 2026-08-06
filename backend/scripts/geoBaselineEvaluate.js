@@ -16,26 +16,54 @@
  *     --experiment-name prompt-revision-check --refresh          # 隔离输出的评测实验
  */
 const path = require('path');
+const crypto = require('node:crypto');
 
 process.env.DB_STORAGE = path.resolve(__dirname, '../database.sqlite');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 const fs = require('fs');
-const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
-const { AIResponseAnalysisService: AnalyzerClass } = require('../services/AIResponseAnalysisService');
-const AIPlatformConfigService = require('../services/AIPlatformConfigService');
-const { Setting, VisibilityMetric } = require('../models');
+const { AIResponseAnalysisService: AnalyzerClass } = require('../evaluation/AIResponseAnalysisV4BaselineService');
 const {
-  CURRENT_ANALYSIS_CONTRACT,
-  CURRENT_STRUCTURE_VERSION,
-  CURRENT_METRIC_SEMANTICS
-} = require('../services/GeoMetricSemanticsService');
+  ANALYSIS_METHOD,
+  STRUCTURE_VERSION: CURRENT_STRUCTURE_VERSION,
+  METRIC_SEMANTICS_VERSION: CURRENT_METRIC_SEMANTICS
+} = require('../evaluation/AIResponseAnalysisV4BaselineService');
+const AIPlatformConfigService = require('../services/AIPlatformConfigService');
+const { VisibilityMetric } = require('../models');
 
 const DEFAULT_DIR = path.resolve(__dirname, '../../work/geo-baseline-2026-07-28');
 const CONCURRENCY = 3;
-const ANALYSIS_METHOD = CURRENT_ANALYSIS_CONTRACT;
-const CURRENT_PROMPT_DEFINITION = AIResponseAnalysisService.getPromptDefinition();
+const DEFAULT_V4_BASELINE_ANALYZER = new AnalyzerClass();
+const CURRENT_PROMPT_DEFINITION = DEFAULT_V4_BASELINE_ANALYZER.getPromptDefinition();
 const CURRENT_PROMPT_REVISION = CURRENT_PROMPT_DEFINITION.prompt_revision;
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => (
+      `${JSON.stringify(key)}:${stableSerialize(value[key])}`
+    )).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function requestPolicyFingerprint(analyzer, platform) {
+  const definition = analyzer.getPromptDefinition(platform);
+  return crypto.createHash('sha256').update(stableSerialize({
+    prompt_revision: definition.prompt_revision,
+    template: definition.template,
+    request_profile: definition.request_profile,
+    request_parameters: definition.request_parameters
+  })).digest('hex');
+}
+
+function analysisInputFingerprint(sample) {
+  return crypto.createHash('sha256').update(stableSerialize({
+    question: sample.question,
+    response_text: sample.response_text,
+    brand: sample.brand
+  })).digest('hex');
+}
 
 // main() 起始时按 --dir 覆盖；其余函数统一引用 PATHS
 const PATHS = {};
@@ -91,18 +119,40 @@ async function buildAnalyzer(options) {
     `thinking=${CURRENT_PROMPT_DEFINITION.request_profile.deepseek_thinking}`
   ].join(',');
   if (!options.platform) {
+    const configService = options.analysisConfigService
+      || require('../services/AIAnalysisConfigService');
+    const platform = options.resolveIdentity
+      ? await configService.getAnalysisPlatform()
+      : null;
+    const plain = platform?.get ? platform.get({ plain: true }) : platform;
+    const frozenPlatform = plain
+      ? JSON.parse(JSON.stringify(plain))
+      : null;
+    const analyzer = frozenPlatform
+      ? new AnalyzerClass({
+          configService: {
+            getAnalysisPlatform: async () => JSON.parse(JSON.stringify(frozenPlatform))
+          }
+        })
+      : DEFAULT_V4_BASELINE_ANALYZER;
     return {
-      analyzer: AIResponseAnalysisService,
-      via: `production_config:${analysisLabel}`
+      analyzer,
+      via: `production_config:${analysisLabel}`,
+      identity: frozenPlatform
+        ? {
+            platform: frozenPlatform.code,
+            model: frozenPlatform.default_model,
+            requestPolicyFingerprint: requestPolicyFingerprint(
+              analyzer,
+              frozenPlatform
+            )
+          }
+        : null
     };
   }
   const platform = await AIPlatformConfigService.getPlatformByCode(options.platform);
   const plain = platform.get ? platform.get({ plain: true }) : { ...platform };
-  let modelName = options.model;
-  if (!modelName) {
-    const row = await Setting.findOne({ where: { key: 'ai_analysis_model_name' } });
-    modelName = String(row?.value || plain.default_model || '').trim();
-  }
+  const modelName = String(options.model || plain.default_model || '').trim();
   const analyzer = new AnalyzerClass({
     configService: {
       // enabled 覆写仅存在于内存对象中：queryConfig 对已停用平台直接拒绝，
@@ -112,7 +162,16 @@ async function buildAnalyzer(options) {
   });
   return {
     analyzer,
-    via: `readonly_override:${options.platform}/${modelName},${analysisLabel}`
+    via: `readonly_override:${options.platform}/${modelName},${analysisLabel}`,
+    identity: {
+      platform: options.platform,
+      model: modelName,
+      requestPolicyFingerprint: requestPolicyFingerprint(analyzer, {
+        ...plain,
+        default_model: modelName,
+        enabled: true
+      })
+    }
   };
 }
 
@@ -285,15 +344,25 @@ function cachePath(sampleId) {
   return path.join(PATHS.raw, `${sampleId}.json`);
 }
 
-function readCache(sampleId) {
+function readCache(sampleId, identity, inputFingerprint) {
+  if (
+    !identity?.platform
+    || !identity?.model
+    || !identity?.requestPolicyFingerprint
+    || !inputFingerprint
+  ) return null;
   try {
     const cached = JSON.parse(fs.readFileSync(cachePath(sampleId), 'utf8'));
     const schema_version = cached?.result?.analysis_structure?.schema_version
       || cached.structure_version;
     if (
       cached.ok === true
-      && cached.analysis_method === CURRENT_ANALYSIS_CONTRACT
+      && cached.analysis_method === ANALYSIS_METHOD
       && cached.analysis_prompt_revision === CURRENT_PROMPT_REVISION
+      && cached.analysis_platform === identity.platform
+      && cached.analysis_model === identity.model
+      && cached.analysis_request_policy_fingerprint === identity.requestPolicyFingerprint
+      && cached.analysis_input_fingerprint === inputFingerprint
       && schema_version === CURRENT_STRUCTURE_VERSION
       && cached.metric_semantics_version === CURRENT_METRIC_SEMANTICS
     ) return cached;
@@ -317,9 +386,10 @@ function recalculateCachedResult(cached, analyzer, responseText = '') {
   };
 }
 
-async function analyzeSample(sample, refresh, analyzer, via) {
+async function analyzeSample(sample, refresh, analyzer, via, identity) {
+  const inputFingerprint = analysisInputFingerprint(sample);
   if (!refresh) {
-    const cached = readCache(sample.sample_id);
+    const cached = readCache(sample.sample_id, identity, inputFingerprint);
     if (cached) {
       try {
         const refreshed = recalculateCachedResult(
@@ -349,6 +419,8 @@ async function analyzeSample(sample, refresh, analyzer, via) {
       metric_semantics_version: result.metric_semantics_version,
       analysis_platform: result.analysis_platform,
       analysis_model: result.analysis_model,
+      analysis_request_policy_fingerprint: identity?.requestPolicyFingerprint || null,
+      analysis_input_fingerprint: inputFingerprint,
       analysis_attempts: result.analysis_attempts,
       analyzer_via: via,
       cached_at: startedAt,
@@ -360,7 +432,7 @@ async function analyzeSample(sample, refresh, analyzer, via) {
   } catch (error) {
     const entry = {
       sample_id: sample.sample_id,
-      analysis_method: CURRENT_ANALYSIS_CONTRACT,
+      analysis_method: ANALYSIS_METHOD,
       analysis_prompt_revision: CURRENT_PROMPT_REVISION,
       structure_version: CURRENT_STRUCTURE_VERSION,
       metric_semantics_version: CURRENT_METRIC_SEMANTICS,
@@ -823,7 +895,7 @@ ${storedCount ? fieldStatsSummary(storedStats, storedCount) : '样本中没有�
 
 ## 三、复现性：生产已存指标 vs 当前重跑（同方法、同模型）
 
-${reproducibility.total ? `共 ${reproducibility.total} 条双料样本。逐字段一致率：
+${reproducibility.total ? `共 ${reproducibility.total} 条同属冻结 v4 合同的双料样本。逐字段一致率：
 ${Object.entries(reproducibility.fields).map(([field, value]) => `- ${field}：${pct(value.agree, reproducibility.total)}`).join('\n')}
 
 > 一致率 <100% 的字段即"temperature=0 不等于确定性"的实测证据。` : '无双料样本。'}
@@ -886,7 +958,18 @@ async function main() {
   }
   fs.mkdirSync(PATHS.raw, { recursive: true });
   const samples = JSON.parse(fs.readFileSync(PATHS.samples, 'utf8'));
-  const { analyzer, via } = await buildAnalyzer(options);
+  const incompatibleSamples = samples.filter((sample) => (
+    sample.analysis_contract_version !== ANALYSIS_METHOD
+    || sample.structure_version !== CURRENT_STRUCTURE_VERSION
+    || sample.metric_semantics_version !== CURRENT_METRIC_SEMANTICS
+  ));
+  if (incompatibleSamples.length) {
+    throw new Error('样本合同与冻结 v4 评测器不一致；请使用 v4 抽样工具重新生成');
+  }
+  const { analyzer, via, identity } = await buildAnalyzer({
+    ...options,
+    resolveIdentity: true
+  });
   console.log(`分析器来源：${via}`);
 
   let targetSamples = samples;
@@ -921,7 +1004,7 @@ async function main() {
 
   const analyses = await runWithConcurrency(
     targetSamples,
-    (sample) => analyzeSample(sample, options.refresh, analyzer, via),
+    (sample) => analyzeSample(sample, options.refresh, analyzer, via, identity),
     CONCURRENCY
   );
 
@@ -990,7 +1073,15 @@ async function main() {
     .map((sample) => {
       const analysis = analyses.find((item) => item.sample_id === sample.sample_id);
       const stored = storedMap.get(sample.question_record_id);
-      return analysis?.ok && stored ? { sample, stored, rerun: analysis.result } : null;
+      const sameFrozenContract = stored?.analysis_method === ANALYSIS_METHOD
+        && stored?.metric_semantics_version === CURRENT_METRIC_SEMANTICS
+        && Boolean(stored?.analysis_platform)
+        && Boolean(stored?.analysis_model)
+        && stored.analysis_platform === analysis?.analysis_platform
+        && stored.analysis_model === analysis?.analysis_model;
+      return analysis?.ok && stored && sameFrozenContract
+        ? { sample, stored, rerun: analysis.result }
+        : null;
     })
     .filter(Boolean);
   const reproducibility = computeReproducibility(reproPairs);
@@ -1046,6 +1137,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  analysisInputFingerprint,
   buildAnalyzer,
   buildReport,
   buildFailedMultiEntityReview,
@@ -1054,7 +1146,9 @@ module.exports = {
   parseArgs,
   parseEntityLabels,
   parseLabels,
+  readCache,
   recalculateCachedResult,
+  requestPolicyFingerprint,
   reviewMultiEntitySample,
   summarizeMultiEntityReviews,
   validateLabels,

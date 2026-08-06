@@ -78,9 +78,10 @@ Authorization: Bearer <token>
 
 ## 问题库与问题集（需认证）
 
-### 当前 GEO 指标契约
+### 统一发布候选 GEO 指标契约
 
-- 新运行的 `analysis_contract_version` 固定为 `ai_structured_v4`，结构版本为 `geo_metric_input_v4`，`metric_semantics_version` 固定为 `contextual_competitor_mentions_sov_v1`。v4 的竞争关系、候选顺序和目标品牌情绪均保留可定位的原文证据；v3 及更早记录只按已存历史结构读取。
+- 新运行的 `analysis_contract_version` 固定为 `ai_structured_v5`，结构版本为 `geo_metric_input_v5`、结构合同 revision 为 `three_track_partial_v2`，`metric_semantics_version` 固定为 `contextual_competitor_mentions_sov_v2_scoped`。两阶段诊断与冻结竞品快照随记录持久化；v4/v1 及更早记录只按已存历史结构、问题集报告和 CSV 导出兼容读取。
+- 本节描述本地统一候选的接口合同；生产启动桥 `387ae45` 仍运行 v4/Pro，完成统一候选发布和四入口验收前不得把本节称为生产正式真值。
 - 单条 `sov` 是判别联合：`status=calculated` 时提供 `value`、`numerator` 和 `denominator`；目标品牌与竞品均未提及时返回 `status=not_applicable`、`value=null` 和 `0/0`。
 - 聚合 `sov_summary.average` 是可计算单回答 SOV 的等权平均，`calculable_answers` 是参与平均的回答数。分析失败不进入品牌指标，只进入 `analysis_coverage_rate`。
 - 当前接口不会为新记录返回无版本含义的旧 SOV 标量。历史运行和历史快照继续按已存版本展示原值与“历史竞品配置口径”，不参与新版聚合。
@@ -121,7 +122,7 @@ Authorization: Bearer <token>
   - 重复暂停返回 `200` 和 `idempotent_replay=true`；终态或只读报告仍拒绝操作
 - `POST /api/geo-projects/:projectId/question-set-runs/:runId/resume` 继续原生运行
   - 条件更新保证只有一个并发请求取得恢复权并启动调度；重复继续返回 `200` 和 `idempotent_replay=true`，不会创建第二次调度
-- `POST /api/geo-projects/:projectId/question-set-runs/:runId/retry-failed` 重新提交原生运行中的失败项
+- `POST /api/geo-projects/:projectId/question-set-runs/:runId/retry-failed` 重新提交原生运行中的失败项；必须提供 `Idempotency-Key` 请求头或同值 `idempotency_key` 请求体，二者同时存在时必须一致
   - 请求体可传 `idempotency_key`（8–128 位字母、数字、点、下划线、冒号或连字符），也可使用 `Idempotency-Key` 请求头；同一运行和同一键只创建一批重试记录
   - 返回 `202 Accepted`；结构化分析失败且已保存完整原回答时，只调用独立分析 API，不再调用监测平台且不消耗检测配额
   - 监测调用失败、原回答缺失等其他失败项，使用设置中心当前的监测平台模型、平台专用参数和全局运行参数，不复用失败时的旧模型配置
@@ -143,7 +144,7 @@ Authorization: Bearer <token>
 - `GET /api/geo-projects/:projectId/dashboard` 获取当前项目的新版指标看板
   - Query 参数：`days` 为 1–365 天；`platform` 默认为 `all`，也可指定周期内实际出现的平台代码
   - 平台列表来自查询周期内实际历史记录，不受项目当前平台配置删减影响
-  - 只聚合 `contextual_competitor_mentions_sov_v1`，返回分析覆盖率、品牌提及率、推荐率、有效排名回答数、`sov_summary`、实际竞品提及次数和趋势
+  - 新运行只聚合 `contextual_competitor_mentions_sov_v2_scoped`，返回分析覆盖率、品牌提及率、推荐率、有效排名回答数、带开放发现范围状态的 `sov_summary`、实际竞品提及次数和趋势；历史 v1 只读且不与 v2 静默拼接
 - `POST /api/geo-projects/:projectId/reports/generate` 生成不可变项目报告快照
   - 请求体：`days` 为 1–365 天
   - 同一批查询结果一次固化 `all` 与各实际平台的 `metric_views`；切换平台不重新查询或修改快照
@@ -284,7 +285,7 @@ Authorization: Bearer <token>
   - **权限验证**：只能操作自己的任务
 - `DELETE /api/schedules/:id` 删除定时任务
   - **权限验证**：只能删除自己的任务
-- `POST /api/schedules/:id/run` 立即执行一次
+- `POST /api/schedules/:id/run` 立即执行一次历史独立定时任务；该管理操作是显式非幂等的人工触发，不属于项目 `monitoring_enabled` 自动监测正式验收入口
   - **权限验证**：只能执行自己的任务
 
 ## AI 平台目录（需认证）

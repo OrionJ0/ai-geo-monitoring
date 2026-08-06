@@ -650,3 +650,30 @@ test('2026-08-06 排名链路修复：梯队+编号无法确定性提取名次�
   assert.equal(result.analysis_structure.target_semantics.rank.status, 'unavailable');
   assert.equal(result.brand_rank, null);
 });
+
+test('正式分析配置错误必须 fail-closed，不能伪装为字段降级成功', async () => {
+  const { AIAnalysisConfigError } = require('../services/AIAnalysisConfigService');
+  const { AIResponseAnalysisV5Service } = require('../services/AIResponseAnalysisV5Service');
+  const service = new AIResponseAnalysisV5Service({
+    executionCoordinator: { run: (work) => work() },
+    entityExtractionService: {
+      extract: async () => {
+        throw new AIAnalysisConfigError(
+          'DeepSeek Flash 正式配置尚未就绪',
+          'analysis_platform_policy_mismatch',
+          503
+        );
+      }
+    },
+    semanticJudgmentService: { judge: async () => ({}) }
+  });
+  await assert.rejects(
+    service.analyze({
+      question: '测试问题',
+      responseText: '测试回答',
+      brand: { name: '测试品牌' },
+      competitors: []
+    }),
+    (error) => error.code === 'analysis_platform_policy_mismatch' && error.status === 503
+  );
+});

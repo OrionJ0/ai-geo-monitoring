@@ -37,6 +37,7 @@ function codedError(code, message, cause) {
 
 function normalizeWebRuntimeError(error, displayName = 'DeepSeek Web') {
   const rawCode = String(error?.code || '');
+  if (rawCode === 'service_shutting_down') return error;
   if (rawCode.startsWith('web_')) return error;
   const rendererErrors = {
     renderer_timeout: [
@@ -318,8 +319,32 @@ async function prepareRuntime(runtimeConfig, displayName = 'DeepSeek Web') {
   }
 }
 
-function waitForDevTools(child, timeoutMs) {
+function shutdownError(displayName = 'DeepSeek Web') {
+  return codedError('service_shutting_down', `${displayName} 服务正在安全关闭`);
+}
+
+function throwIfAborted(signal, displayName) {
+  if (signal?.aborted) throw shutdownError(displayName);
+}
+
+function abortableDelay(milliseconds, signal, displayName) {
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(finish, milliseconds);
+    const onAbort = () => finish(shutdownError(displayName), true);
+    function finish(value, failed = false) {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (failed) reject(value);
+      else resolve();
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+
+function waitForDevTools(child, timeoutMs, signal, displayName) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
     let stderr = '';
     const timer = setTimeout(() => {
       finish(
@@ -328,10 +353,13 @@ function waitForDevTools(child, timeoutMs) {
       );
     }, Math.min(timeoutMs, 30_000));
     const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       child.stderr?.off('data', onData);
       child.off('exit', onExit);
       child.off('error', onError);
+      signal?.removeEventListener('abort', onAbort);
       callback(value);
     };
     const onData = (chunk) => {
@@ -347,9 +375,12 @@ function waitForDevTools(child, timeoutMs) {
       reject,
       codedError('web_browser_launch_failed', '无法启动 Chrome', error)
     );
+    const onAbort = () => finish(reject, shutdownError(displayName));
     child.stderr?.on('data', onData);
     child.once('exit', onExit);
     child.once('error', onError);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 
@@ -403,12 +434,18 @@ async function waitForControlledTarget(
   httpOrigin,
   timeoutMs,
   allowedOrigins = selectors.allowedOrigins,
-  displayName = 'DeepSeek Web'
+  displayName = 'DeepSeek Web',
+  signal
 ) {
   const deadline = Date.now() + Math.min(timeoutMs, 30_000);
   while (Date.now() < deadline) {
+    throwIfAborted(signal, displayName);
     try {
-      const response = await fetch(`${httpOrigin}/json/list`);
+      const response = await fetch(`${httpOrigin}/json/list`, {
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(2_000)])
+          : AbortSignal.timeout(2_000)
+      });
       if (response.ok) {
         const targets = await response.json();
         const controlled = targets.find((target) => (
@@ -421,7 +458,7 @@ async function waitForControlledTarget(
     } catch {
       // Chrome 的 HTTP 调试端点可能尚未就绪。
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await abortableDelay(100, signal, displayName);
   }
   throw codedError('web_browser_launch_failed', `Chrome 未能打开 ${displayName} 官方页面`);
 }
@@ -535,30 +572,47 @@ function buildChromeArguments(runtimeConfig, targetUrl) {
 }
 
 const defaultLauncher = {
-  async launch({ runtimeConfig, targetUrl, definition = DEFAULT_DEEPSEEK_DEFINITION }) {
+  async launch({
+    runtimeConfig,
+    targetUrl,
+    definition = DEFAULT_DEEPSEEK_DEFINITION,
+    signal
+  }) {
+    throwIfAborted(signal, definition.displayName);
     const child = spawn(runtimeConfig.chromeExecutable, buildChromeArguments(
       runtimeConfig,
       targetUrl
     ), {
       stdio: ['ignore', 'ignore', 'pipe']
     });
+    let connection = null;
     try {
-      const webSocketUrl = await waitForDevTools(child, runtimeConfig.timeoutMs);
+      const webSocketUrl = await waitForDevTools(
+        child,
+        runtimeConfig.timeoutMs,
+        signal,
+        definition.displayName
+      );
       const httpOrigin = browserHttpOrigin(webSocketUrl);
       const target = await waitForControlledTarget(
         httpOrigin,
         runtimeConfig.timeoutMs,
         definition.allowedOrigins,
-        definition.displayName
+        definition.displayName,
+        signal
       );
-      const connection = await connectCdp(
+      throwIfAborted(signal, definition.displayName);
+      connection = await connectCdp(
         target.webSocketDebuggerUrl,
-        runtimeConfig.cdpTimeoutMs || DEFAULT_CDP_TIMEOUT_MS
+        runtimeConfig.cdpTimeoutMs || DEFAULT_CDP_TIMEOUT_MS,
+        signal
       );
+      throwIfAborted(signal, definition.displayName);
       await Promise.all([
         connection.send('Page.enable'),
         connection.send('Runtime.enable')
       ]);
+      throwIfAborted(signal, definition.displayName);
       return new ChromePageSession({
         child,
         connection,
@@ -566,6 +620,7 @@ const defaultLauncher = {
         displayName: definition.displayName
       });
     } catch (error) {
+      connection?.close();
       if (child.exitCode === null) child.kill('SIGKILL');
       if (error.code) throw error;
       throw codedError('web_browser_launch_failed', '无法建立 Chrome 页面会话', error);
@@ -608,6 +663,8 @@ class WebPlatformService {
     this.adapterFactory = options.adapterFactory || this.definition.adapterFactory;
     this.state = 'stopped';
     this.session = null;
+    this.sessionClosePromise = null;
+    this.launchCleanupPromise = null;
     this.profileLock = new ProfileLock(
       this.runtimeConfig.profileDir,
       this.definition.displayName
@@ -620,6 +677,7 @@ class WebPlatformService {
     this.lastVerifiedAt = null;
     this.activeCaptureCount = 0;
     this.closing = false;
+    this.shutdownController = new AbortController();
   }
 
   runExclusive(task) {
@@ -649,20 +707,53 @@ class WebPlatformService {
     return execution;
   }
 
-  async ensureSession() {
+  async ensureSession(signal) {
     if (this.session) return this.session;
+    const launchSignal = signal
+      ? AbortSignal.any([signal, this.shutdownController.signal])
+      : this.shutdownController.signal;
+    throwIfAborted(launchSignal, this.definition.displayName);
     this.state = 'starting';
     await prepareRuntime(this.runtimeConfig, this.definition.displayName);
+    throwIfAborted(launchSignal, this.definition.displayName);
     await this.profileLock.acquire();
+    let onLateSession = null;
     try {
-      this.session = await this.launcher.launch({
+      throwIfAborted(launchSignal, this.definition.displayName);
+      const launchPromise = Promise.resolve(this.launcher.launch({
         runtimeConfig: this.runtimeConfig,
         targetUrl: this.definition.officialUrl,
-        definition: this.definition
+        definition: this.definition,
+        signal: launchSignal
+      }));
+      onLateSession = launchPromise.then(async (session) => {
+        if (launchSignal.aborted) await session?.close?.().catch(() => {});
+        return session;
       });
+      this.session = await Promise.race([
+        onLateSession,
+        new Promise((_, reject) => {
+          const onAbort = () => reject(shutdownError(this.definition.displayName));
+          launchSignal.addEventListener('abort', onAbort, { once: true });
+          onLateSession.finally(() => (
+            launchSignal.removeEventListener('abort', onAbort)
+          )).catch(() => {});
+        })
+      ]);
+      throwIfAborted(launchSignal, this.definition.displayName);
       return this.session;
     } catch (error) {
-      await this.profileLock.release();
+      if (launchSignal.aborted && onLateSession) {
+        const cleanup = onLateSession
+          .catch(() => null)
+          .then(() => this.profileLock.release());
+        const trackedCleanup = cleanup.finally(() => {
+          if (this.launchCleanupPromise === trackedCleanup) this.launchCleanupPromise = null;
+        });
+        this.launchCleanupPromise = trackedCleanup;
+      } else {
+        await this.profileLock.release();
+      }
       this.state = 'stopped';
       if (error.code) throw error;
       throw codedError(
@@ -679,9 +770,19 @@ class WebPlatformService {
     this.preflightCache = null;
     this.circuitErrorCode = null;
     this.blockingErrorCode = null;
-    await session?.close().catch(() => {});
+    await this.closeSession(session);
     await this.profileLock.release();
     this.state = 'stopped';
+  }
+
+  closeSession(session) {
+    if (!session) return this.sessionClosePromise || Promise.resolve();
+    const closing = Promise.resolve(session.close()).catch(() => {});
+    const trackedClosing = closing.finally(() => {
+      if (this.sessionClosePromise === trackedClosing) this.sessionClosePromise = null;
+    });
+    this.sessionClosePromise = trackedClosing;
+    return trackedClosing;
   }
 
   validateProbe(result) {
@@ -707,7 +808,7 @@ class WebPlatformService {
     throw error;
   }
 
-  async preflight({ force = false, verifyInteractive = false } = {}) {
+  async preflight({ force = false, verifyInteractive = false, signal } = {}) {
     if (this.circuitErrorCode && !force) {
       throw codedError(
         this.circuitErrorCode,
@@ -734,7 +835,7 @@ class WebPlatformService {
         ) {
           return this.preflightCache.result;
         }
-        const session = await this.ensureSession();
+        const session = await this.ensureSession(signal);
         const deadline = Date.now() + this.preflightStabilizationMs;
         let probe;
         do {
@@ -763,10 +864,7 @@ class WebPlatformService {
         this.preflightCache = { checkedAt: this.now(), result };
         return result;
       } catch (error) {
-        const normalized = normalizeWebRuntimeError(
-          error,
-          this.definition.displayName
-        );
+        const normalized = normalizeWebRuntimeError(error, this.definition.displayName);
         if (normalized.code === 'web_login_required') this.state = 'login_required';
         if (normalized.code === 'web_verification_required') {
           this.state = 'verification_required';
@@ -903,10 +1001,7 @@ class WebPlatformService {
         this.preflightCache = null;
         return this.getAdminSessionSnapshot();
       } catch (error) {
-        const normalized = normalizeWebRuntimeError(
-          error,
-          this.definition.displayName
-        );
+        const normalized = normalizeWebRuntimeError(error, this.definition.displayName);
         this.blockingErrorCode = isPersistentBlockingError(normalized.code)
           ? normalized.code
           : null;
@@ -930,7 +1025,22 @@ class WebPlatformService {
 
   async queryPlatform(question, options = {}) {
     const startedAt = this.now();
+    if (options.signal?.aborted) {
+      return {
+        success: false,
+        platform: this.definition.code,
+        error_code: 'service_shutting_down',
+        error: `${this.definition.displayName} 服务正在安全关闭`,
+        web_capture: {
+          schema_version: this.definition.captureSchemaVersion,
+          status: 'failed',
+          failure: { stage: 'shutdown', error_code: 'service_shutting_down' }
+        },
+        responseTime: 0
+      };
+    }
     return this.runExclusive(async () => {
+      let abortCapture;
       try {
         if (this.circuitErrorCode) {
           throw codedError(
@@ -938,7 +1048,7 @@ class WebPlatformService {
             `${this.definition.displayName} 运行通道已熔断`
           );
         }
-        const session = await this.ensureSession();
+        const session = await this.ensureSession(options.signal);
         this.blockingErrorCode = null;
         const page = this.pageFactory(session);
         const adapter = this.adapterFactory({
@@ -949,8 +1059,24 @@ class WebPlatformService {
         this.activeCaptureCount = 1;
         let result;
         try {
-          result = await adapter.capture(question, options.capture_owner);
+          abortCapture = () => {
+            const activeSession = this.session;
+            this.session = null;
+            this.closeSession(activeSession);
+          };
+          options.signal?.addEventListener('abort', abortCapture, { once: true });
+          if (options.signal?.aborted) {
+            abortCapture();
+            throw codedError(
+              'service_shutting_down',
+              `${this.definition.displayName} 服务正在安全关闭`
+            );
+          }
+          result = await adapter.capture(question, options.capture_owner, {
+            signal: options.signal
+          });
         } finally {
+          options.signal?.removeEventListener('abort', abortCapture);
           this.activeCaptureCount = 0;
         }
         this.blockingErrorCode = null;
@@ -960,10 +1086,13 @@ class WebPlatformService {
           responseTime: Math.max(0, this.now() - startedAt)
         };
       } catch (error) {
-        const normalized = normalizeWebRuntimeError(
-          error,
-          this.definition.displayName
-        );
+        const normalized = options.signal?.aborted
+          ? codedError(
+              'service_shutting_down',
+              `${this.definition.displayName} 服务正在安全关闭`,
+              error
+            )
+          : normalizeWebRuntimeError(error, this.definition.displayName);
         const errorCode = normalized.code;
         this.blockingErrorCode = isPersistentBlockingError(errorCode)
           ? errorCode
@@ -985,7 +1114,9 @@ class WebPlatformService {
             schema_version: this.definition.captureSchemaVersion,
             status: 'failed',
             failure: {
-              stage: String(normalized.stage || 'request').slice(0, 80),
+              stage: String(
+                errorCode === 'service_shutting_down' ? 'shutdown' : (normalized.stage || 'request')
+              ).slice(0, 80),
               error_code: errorCode
             }
           },
@@ -1023,6 +1154,7 @@ class WebPlatformService {
     if (this.closing) return;
     this.closing = true;
     this.state = 'closing';
+    this.shutdownController.abort(shutdownError(this.definition.displayName));
     await new Promise((resolve) => {
       let settled = false;
       const finish = () => {
@@ -1035,9 +1167,22 @@ class WebPlatformService {
       timer.unref?.();
       this.tail.then(finish, finish);
     });
-    await this.session?.close().catch(() => {});
+    const activeSession = this.session;
     this.session = null;
-    await this.profileLock.release();
+    await Promise.race([
+      Promise.all([
+        this.closeSession(activeSession),
+        this.sessionClosePromise,
+        this.launchCleanupPromise
+      ]),
+      new Promise((resolve) => {
+        const timer = setTimeout(resolve, 10_000);
+        timer.unref?.();
+      })
+    ]);
+    if (!this.sessionClosePromise && !this.launchCleanupPromise) {
+      await this.profileLock.release();
+    }
     this.state = 'stopped';
   }
 }

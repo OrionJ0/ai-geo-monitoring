@@ -23,7 +23,7 @@ const {
   SCOPED_METRIC_SEMANTICS
 } = require('./GeoMetricSemanticsService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
-const { consumeQuotaDirect } = require('../middleware/quota');
+const { consumeQuotaDirect, quotaBatchTransactionOptions } = require('../middleware/quota');
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
 
 async function frozenCompetitorSnapshot(projectId, transaction = null) {
@@ -167,11 +167,46 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   }
 
   const runtimeSettings = await settingsService.getSettings();
-  const competitorSnapshot = await frozenCompetitorSnapshot(schedule.project_id);
+  let competitorSnapshot = [];
+  let preparedRecords = [];
 
-  // 配额检查：严格按会员控制，每次按平台数量扣减
+  // 配额、冻结竞品快照和整批 pending 记录必须原子提交；提交后才允许外部调用。
   try {
-    const consume = await quotaConsumer(user_id, 'detection', runnablePlatforms.length);
+    const prepared = await sequelize.transaction(
+      quotaBatchTransactionOptions(sequelize),
+      async (transaction) => {
+      const snapshot = await frozenCompetitorSnapshot(schedule.project_id, transaction);
+      const consume = await quotaConsumer(
+        user_id,
+        'detection',
+        runnablePlatforms.length,
+        { transaction }
+      );
+      if (!consume.ok) return { consume, snapshot, records: [] };
+      const records = [];
+      for (const platformStatus of runnablePlatforms) {
+        records.push(await QuestionRecord.create({
+          user_id,
+          project_id: schedule.project_id || null,
+          tracked_prompt_id: schedule.tracked_prompt_id || null,
+          scheduled_execution_id: scheduledExecutionId,
+          platform: platformStatus.code,
+          platform_name: platformStatus.platform_name,
+          model_name: platformStatus.model_name,
+          question,
+          brand: schedule.brand,
+          brand_keywords: keywordsArr.join(','),
+          analysis_contract_version: V5_ANALYSIS_CONTRACT,
+          metric_semantics_version: SCOPED_METRIC_SEMANTICS,
+          competitor_snapshot: snapshot
+        }, { transaction }));
+      }
+      return { consume, snapshot, records };
+      }
+    );
+    competitorSnapshot = prepared.snapshot;
+    preparedRecords = prepared.records;
+    const { consume } = prepared;
     if (!consume.ok) {
       console.warn(`定时任务配额不足或不可用: user=${user_id}, need=${runnablePlatforms.length}, limit=${consume.limit}, used=${consume.used}`);
       const reasonMap = {
@@ -218,29 +253,13 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   let attempted = 0;
   let completed = 0;
   let failed = 0;
-  for (const platformStatus of runnablePlatforms) {
+  for (const [platformIndex, platformStatus] of runnablePlatforms.entries()) {
     const platform = platformStatus.code;
-    let rec = null;
+    let rec = preparedRecords[platformIndex] || null;
     let executionToken = null;
     let leaseHeartbeat = null;
     attempted += 1;
     try {
-      rec = await QuestionRecord.create({
-        user_id,
-        project_id: schedule.project_id || null,
-        tracked_prompt_id: schedule.tracked_prompt_id || null,
-        scheduled_execution_id: scheduledExecutionId,
-        platform,
-        platform_name: platformStatus.platform_name,
-        model_name: platformStatus.model_name,
-        question,
-        brand: schedule.brand,
-        brand_keywords: keywordsArr.join(','),
-        analysis_contract_version: V5_ANALYSIS_CONTRACT,
-        metric_semantics_version: SCOPED_METRIC_SEMANTICS,
-        competitor_snapshot: competitorSnapshot
-      });
-
       const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
         target: { platformConfig: platformStatus.config },
         runtimeSettings
@@ -267,7 +286,9 @@ async function submitDetectionForSchedule(schedule, options = {}) {
       const result = await platformService.queryPlatform(platform, question, {
         config: platformStatus.config,
         runtimeSettings,
-        purpose: 'legacy_schedule'
+        purpose: 'legacy_schedule',
+        correlationId: `record-${rec.id}`,
+        signal: ProjectRunService.getShutdownSignal()
       });
       if (!result.success) {
         console.warn('定时任务平台调用失败:', result.error || result.message || platform);
@@ -388,6 +409,7 @@ class SchedulerService {
     this._timer = null;
     this._tickPromise = null;
     this._started = false;
+    this._closing = false;
     this._lastRecoveryAt = null;
     this._lastErrorCode = null;
     this._ownerId = options.ownerId || `${os.hostname()}:${process.pid}`;
@@ -404,6 +426,7 @@ class SchedulerService {
 
   async start() {
     if (this._started) return;
+    this._closing = false;
     try {
       await this.refresh();
       await this.dispatchPendingQuestionSetRuns();
@@ -511,10 +534,15 @@ class SchedulerService {
   }
 
   async stop() {
+    this.beginShutdown();
+    if (this._tickPromise) await this._tickPromise;
+  }
+
+  beginShutdown() {
+    this._closing = true;
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     this._started = false;
-    if (this._tickPromise) await this._tickPromise;
   }
 
   async dispatchPendingQuestionSetRuns() {
@@ -709,6 +737,7 @@ class SchedulerService {
   }
 
   tick() {
+    if (this._closing) return Promise.resolve();
     if (this._tickPromise) return this._tickPromise;
     const tickPromise = this._runTick().finally(() => {
       if (this._tickPromise === tickPromise) this._tickPromise = null;
@@ -720,8 +749,11 @@ class SchedulerService {
   async _runTick() {
     const now = new Date();
     await this.dispatchPendingQuestionSetRuns();
+    if (this._closing) return;
     await this.recoverStalePendingRecords({ now });
+    if (this._closing) return;
     await this.recoverStaleScheduledExecutions({ now });
+    if (this._closing) return;
     const due = await DetectionSchedule.findAll({
       where: {
         enabled: true,
@@ -729,6 +761,7 @@ class SchedulerService {
       }
     });
     for (const s of due) {
+      if (this._closing) break;
       let execution = null;
       try {
         const dueAt = new Date(s.next_run_at);
@@ -777,6 +810,7 @@ class SchedulerService {
       }
     });
     for (const project of dueProjects) {
+      if (this._closing) break;
       let execution = null;
       try {
         const dueAt = new Date(project.monitoring_next_run_at);

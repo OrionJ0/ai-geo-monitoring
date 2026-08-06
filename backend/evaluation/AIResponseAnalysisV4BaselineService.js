@@ -5,11 +5,12 @@
  * 调用（ProjectRunService 分派点、settings.js 测试端点均已移除 v4 引用）。
  * 常量冻结在 v4 历史值，不得跟随 CURRENT_* 变更。
  */
-const AIPlatformRequestService = require('./AIPlatformRequestService');
-const AIAnalysisConfigService = require('./AIAnalysisConfigService');
+const AIPlatformRequestService = require('../services/AIPlatformRequestService');
+const AIAnalysisConfigService = require('../services/AIAnalysisConfigService');
 
 const ANALYSIS_METHOD = 'ai_structured_v4';
 const STRUCTURE_VERSION = 'geo_metric_input_v4';
+const METRIC_SEMANTICS_VERSION = 'contextual_competitor_mentions_sov_v1';
 const PROMPT_REVISION = 'semantic_evidence_field_repair_v8';
 const VALID_ENTITY_TYPES = new Set(['brand', 'company', 'other_organization']);
 const VALID_COMPETITOR_RELATIONS = new Set(['competitor', 'non_competitor']);
@@ -1504,7 +1505,7 @@ class AIResponseAnalysisService {
       .reduce((total, item) => total + item.mentions, 0);
     const mentionTotal = target.mentions + competitorMentionTotal;
     return {
-      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+      metric_semantics_version: METRIC_SEMANTICS_VERSION,
       brand_mentioned: target.mentioned,
       brand_mentions: target.mentions,
       brand_position: target.list_rank,
@@ -1630,6 +1631,7 @@ class AIResponseAnalysisService {
         platform,
         prompt,
         {
+          purpose: 'evaluation_v4_baseline',
           retryCount: 0,
           requestOptions: this.buildAnalysisRequestOptions(platform),
           disableWebSearch: true,
@@ -1687,6 +1689,7 @@ class AIResponseAnalysisService {
                 fields: repaired.unresolved
               }),
               {
+                purpose: 'evaluation_v4_baseline',
                 retryCount: 0,
                 requestOptions: this.buildAnalysisRequestOptions(platform),
                 disableWebSearch: true,
@@ -1795,13 +1798,13 @@ class AIResponseAnalysisService {
   }
 }
 
-const service = new AIResponseAnalysisService();
-
-module.exports = service;
-module.exports.AIResponseAnalysisService = AIResponseAnalysisService;
-module.exports.AIResponseAnalysisError = AIResponseAnalysisError;
-module.exports.ANALYSIS_METHOD = ANALYSIS_METHOD;
-module.exports.STRUCTURE_VERSION = STRUCTURE_VERSION;
-module.exports.PROMPT_RUNTIME_FIELDS = PROMPT_RUNTIME_FIELDS;
-module.exports.EXPECTED_OUTPUT = EXPECTED_OUTPUT;
-module.exports.ANALYSIS_REQUEST_PROFILE = ANALYSIS_REQUEST_PROFILE;
+module.exports = {
+  AIResponseAnalysisService,
+  AIResponseAnalysisError,
+  ANALYSIS_METHOD,
+  STRUCTURE_VERSION,
+  METRIC_SEMANTICS_VERSION,
+  PROMPT_RUNTIME_FIELDS,
+  EXPECTED_OUTPUT,
+  ANALYSIS_REQUEST_PROFILE
+};

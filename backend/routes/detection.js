@@ -4,10 +4,11 @@ const {
   QuestionRecord,
   ResultDetail,
   User,
+  BrandCompetitor,
   sequelize,
   VisibilityMetric
 } = require('../models');
-const { bulkConsumeQuota } = require('../middleware/quota');
+const { bulkConsumeQuota, quotaBatchTransactionOptions } = require('../middleware/quota');
 const {
   adminRequired,
   authRequired,
@@ -17,6 +18,7 @@ const { Op } = require('sequelize');
 const AIPlatformService = require('../services/AIPlatformService');
 const ResultParserService = require('../services/ResultParserService');
 const ProjectRunService = require('../services/ProjectRunService');
+const { normalizeCompetitorSnapshot } = require('../services/ProjectRunService');
 const ProjectRecordFinalizationService = require('../services/ProjectRecordFinalizationService');
 const ScheduleProjectContextService = require('../services/ScheduleProjectContextService');
 const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService');
@@ -25,8 +27,22 @@ const { WebCaptureAccessError } = require('../services/WebCaptureAccessService')
 const WebCaptureDeletionService = require('../services/WebCaptureDeletionService');
 const { WebCaptureCleanupError } = require('../services/WebCaptureDeletionService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('../services/AIPlatformRequestService');
+const {
+  V5_ANALYSIS_CONTRACT,
+  SCOPED_METRIC_SEMANTICS
+} = require('../services/GeoMetricSemanticsService');
 
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
+
+async function frozenCompetitorSnapshot(projectId, options = {}) {
+  if (!Number(projectId)) return [];
+  const rows = await BrandCompetitor.findAll({
+    where: { project_id: Number(projectId) },
+    order: [['id', 'ASC']],
+    ...(options.transaction ? { transaction: options.transaction } : {})
+  });
+  return normalizeCompetitorSnapshot(rows);
+}
 
 function runtimePlatformFailureMessage(result) {
   return AI_PLATFORM_ERROR_MESSAGES[result?.error_code] || SAFE_PLATFORM_FAILURE_MESSAGE;
@@ -131,57 +147,25 @@ async function resolveProjectContext(req, source) {
   });
 }
 
-async function saveCompletedDetectionResult({
-  user_id,
-  platform,
-  question,
-  brand,
+async function finalizeDetectionRecord({
+  record,
+  executionToken,
   brandKeywordsStr,
-  projectContext,
   responseText,
-  aiResponse = null,
-  platformName = null,
-  modelName = null
+  aiResponse = null
 }) {
-  const record = await QuestionRecord.create({
-    user_id: projectContext?.user_id || user_id,
-    project_id: projectContext?.project_id || null,
-    tracked_prompt_id: projectContext?.tracked_prompt_id || null,
-    platform,
-    platform_name: platformName || platform,
-    model_name: modelName,
-    question,
-    brand: brand ? String(brand).trim() : null,
-    brand_keywords: brandKeywordsStr || ''
+  const keywordsArr = typeof brandKeywordsStr === 'string'
+    ? brandKeywordsStr.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+    : [];
+  return ProjectRecordFinalizationService.finalize({
+    record,
+    executionToken,
+    persistResponseDetail: true,
+    responseText,
+    aiResponse,
+    providerCitations: ProjectRunService.snapshotProviderCitations(aiResponse),
+    keywords: keywordsArr
   });
-  const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
-    retryMode: 'analysis_only'
-  });
-  const lease = await ProjectRunService.claimRecordExecution(record.id, { leaseMs });
-  if (!lease.claimed) throw new Error('record_lease_claim_rejected');
-  const heartbeat = ProjectRunService.startRecordLeaseHeartbeat({
-    recordId: record.id,
-    executionToken: lease.executionToken,
-    leaseMs: lease.leaseMs
-  });
-  try {
-    const keywordsArr = typeof brandKeywordsStr === 'string'
-      ? brandKeywordsStr.split(/[,，]/).map(s => s.trim()).filter(Boolean)
-      : [];
-    await ProjectRecordFinalizationService.finalize({
-      record,
-      executionToken: lease.executionToken,
-      persistResponseDetail: true,
-      responseText,
-      aiResponse,
-      providerCitations: ProjectRunService.snapshotProviderCitations(aiResponse),
-      keywords: keywordsArr
-    });
-  } finally {
-    await heartbeat.stop();
-    await ProjectRunService.releaseRecordExecution(record.id, lease.executionToken);
-  }
-  return record;
 }
 
 // 创建检测任务
@@ -286,49 +270,85 @@ router.post('/create', authRequired, async (req, res) => {
       brandKeywordsStr = highlight_keywords.map(s => String(s || '').trim()).filter(Boolean).join(',');
     }
 
-    // 按平台数量进行配额扣减（一次请求可能创建多个任务）
-    const ok = await bulkConsumeQuota(req, res, 'detection', Array.isArray(platforms) ? platforms.length : 0, { userId: user_id });
-    if (!ok) return; // bulkConsumeQuota 已写入响应
-
-    const results = [];
-
-    for (const platformStatus of runnablePlatforms) {
-      const platform = platformStatus.code;
-      // 创建问题记录
-      const questionRecord = await QuestionRecord.create({
-        user_id,
-        project_id: projectContext.project_id,
-        tracked_prompt_id: projectContext.tracked_prompt_id,
-        platform,
-        platform_name: platformStatus.platform_name,
-        model_name: platformStatus.model_name,
-        question,
-        brand: brand ? String(brand).trim() : null,
-        // 保存本次任务的关键词（用于前端历史高亮与计数）
-        brand_keywords: brandKeywordsStr || ''
-      });
-
-      // 异步处理AI查询
-      processAIQuery(questionRecord.id, platform, question, platformStatus.config, runtimeSettings);
-
-      results.push({
-        record_id: questionRecord.id,
-        platform,
-        status: 'pending'
+    // 配额与同一批 pending 记录在一个事务中提交；任一快照读取或记录创建失败时
+    // 不扣配额，也不会留下不完整的平台集合。
+    const releaseDispatchAdmission = ProjectRunService.registerBackgroundActivity();
+    if (!releaseDispatchAdmission) {
+      return res.status(503).json({
+        success: false,
+        message: '服务正在关闭，请稍后重试',
+        data: { error_code: 'project_run_shutdown' }
       });
     }
+    let quotaAccepted = false;
+    let createdRecords;
+    try {
+      createdRecords = await sequelize.transaction(
+        quotaBatchTransactionOptions(sequelize),
+        async (transaction) => {
+        const competitorSnapshot = await frozenCompetitorSnapshot(
+          projectContext.project_id,
+          { transaction }
+        );
+        quotaAccepted = await bulkConsumeQuota(
+          req,
+          res,
+          'detection',
+          runnablePlatforms.length,
+          { userId: user_id, transaction }
+        );
+        if (!quotaAccepted) return [];
+        return Promise.all(runnablePlatforms.map((platformStatus) => QuestionRecord.create({
+          user_id,
+          project_id: projectContext.project_id,
+          tracked_prompt_id: projectContext.tracked_prompt_id,
+          platform: platformStatus.code,
+          platform_name: platformStatus.platform_name,
+          model_name: platformStatus.model_name,
+          question,
+          brand: brand ? String(brand).trim() : null,
+          brand_keywords: brandKeywordsStr || '',
+          analysis_contract_version: V5_ANALYSIS_CONTRACT,
+          metric_semantics_version: SCOPED_METRIC_SEMANTICS,
+          competitor_snapshot: competitorSnapshot
+        }, { transaction })));
+        }
+      );
+      if (!quotaAccepted) return;
 
-    res.json({
-      success: true,
-      message: skippedPlatforms.length
-        ? `已加入 ${results.length} 个运行任务；${skippedPlatforms.map((item) => item.message).join('；')}，已跳过。`
-        : '检测任务创建成功',
-      data: {
-        task_count: results.length,
-        skipped_platforms: skippedPlatforms,
-        results
-      }
-    });
+      const results = createdRecords.map((questionRecord, index) => {
+        const platformStatus = runnablePlatforms[index];
+        ProjectRunService.scheduleBackgroundTask(
+          () => processAIQuery(
+            questionRecord.id,
+            platformStatus.code,
+            question,
+            platformStatus.config,
+            runtimeSettings
+          ),
+          { label: 'direct_detection', admitted: true }
+        );
+        return {
+          record_id: questionRecord.id,
+          platform: platformStatus.code,
+          status: 'pending'
+        };
+      });
+
+      res.json({
+        success: true,
+        message: skippedPlatforms.length
+          ? `已加入 ${results.length} 个运行任务；${skippedPlatforms.map((item) => item.message).join('；')}，已跳过。`
+          : '检测任务创建成功',
+        data: {
+          task_count: results.length,
+          skipped_platforms: skippedPlatforms,
+          results
+        }
+      });
+    } finally {
+      releaseDispatchAdmission();
+    }
 
   } catch (error) {
     console.error('创建检测任务失败:', error);
@@ -370,7 +390,9 @@ async function processAIQuery(recordId, platform, question, platformConfig, runt
     const aiResult = await AIPlatformService.queryPlatform(platform, question, {
       config: platformConfig,
       runtimeSettings,
-      purpose: 'direct_stream'
+      purpose: 'direct_stream',
+      correlationId: `record-${recordId}`,
+      signal: ProjectRunService.getShutdownSignal()
     });
 
     if (!aiResult.success) {
@@ -700,7 +722,15 @@ router.delete('/history/:userId', authRequired, async (req, res) => {
 
 // 流式获取AI原文（SSE方式）
 router.get('/stream', authSseRequired, async (req, res) => {
+  const releaseBackgroundActivity = ProjectRunService.registerBackgroundActivity();
+  let sseRecord = null;
+  let executionToken = null;
+  let leaseHeartbeat = null;
   try {
+    if (!releaseBackgroundActivity) {
+      res.status(503).json({ success: false, message: '服务正在关闭，请稍后重试' });
+      return;
+    }
     const { platform, question, brand } = req.query;
     const user_id = req.user.id; // 已通过 authRequired 验证
     let brandKeywordsStr = '';
@@ -777,14 +807,62 @@ router.get('/stream', authSseRequired, async (req, res) => {
       return res.end();
     }
 
-    const ok = await bulkConsumeQuota(req, res, 'detection', 1, { sse: true, userId: projectContext.user_id });
-    if (!ok) return;
+    let quotaAccepted = false;
+    sseRecord = await sequelize.transaction(
+      quotaBatchTransactionOptions(sequelize),
+      async (transaction) => {
+      const competitorSnapshot = await frozenCompetitorSnapshot(
+        projectContext.project_id,
+        { transaction }
+      );
+      quotaAccepted = await bulkConsumeQuota(req, res, 'detection', 1, {
+        sse: true,
+        userId: projectContext.user_id,
+        transaction
+      });
+      if (!quotaAccepted) return null;
+      return QuestionRecord.create({
+        user_id: projectContext.user_id || user_id,
+        project_id: projectContext.project_id || null,
+        tracked_prompt_id: projectContext.tracked_prompt_id || null,
+        platform: platformCode,
+        platform_name: platformStatus.platform_name,
+        model_name: platformStatus.model_name,
+        question: String(question),
+        brand: brand ? String(brand).trim() : null,
+        brand_keywords: brandKeywordsStr || '',
+        analysis_contract_version: V5_ANALYSIS_CONTRACT,
+        metric_semantics_version: SCOPED_METRIC_SEMANTICS,
+        competitor_snapshot: competitorSnapshot
+      }, { transaction });
+      }
+    );
+    if (!quotaAccepted || !sseRecord) return;
 
+    const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
+      target: { platformConfig: platformStatus.config }
+    });
+    const lease = await ProjectRunService.claimRecordExecution(sseRecord.id, { leaseMs });
+    if (!lease.claimed) throw new Error('record_lease_claim_rejected');
+    executionToken = lease.executionToken;
+    leaseHeartbeat = ProjectRunService.startRecordLeaseHeartbeat({
+      recordId: sseRecord.id,
+      executionToken,
+      leaseMs: lease.leaseMs
+    });
+
+    const shutdownSignal = ProjectRunService.getShutdownSignal();
     const result = await AIPlatformService.queryPlatform(platformCode, String(question), {
       config: platformStatus.config,
-      purpose: 'direct_stream'
+      purpose: 'direct_stream',
+      correlationId: `record-${sseRecord.id}`,
+      signal: shutdownSignal
     });
     if (!result.success) {
+      await ProjectRunService.failRecord(sseRecord, runtimePlatformFailureMessage(result), {
+        stage: 'monitoring_request',
+        error_code: result.error_code || 'provider_error'
+      }, { executionToken });
       res.write(`data: ${JSON.stringify({
         event: 'error',
         message: runtimePlatformFailureMessage(result),
@@ -795,6 +873,10 @@ router.get('/stream', authSseRequired, async (req, res) => {
 
     const fullText = result.text || ResultParserService.extractResponseText(result.data);
     if (!String(fullText || '').trim()) {
+      await ProjectRunService.failRecord(sseRecord, '监测平台返回内容为空', {
+        stage: 'monitoring_response',
+        error_code: 'empty_provider_response'
+      }, { executionToken });
       res.write(`data: ${JSON.stringify({ event: 'error', message: '监测平台返回内容为空' })}\n\n`);
       return res.end();
     }
@@ -813,6 +895,11 @@ router.get('/stream', authSseRequired, async (req, res) => {
       }
     }
     for (const piece of chunks) {
+      if (shutdownSignal.aborted || res.destroyed || res.writableEnded) {
+        const error = new Error('服务正在安全关闭或客户端已断开');
+        error.code = shutdownSignal.aborted ? 'service_shutting_down' : 'client_disconnected';
+        throw error;
+      }
       res.write(`data: ${JSON.stringify({ event: 'delta', content: piece })}\n\n`);
       if (typeof res.flush === 'function') {
         try { res.flush(); } catch (_) { }
@@ -820,27 +907,44 @@ router.get('/stream', authSseRequired, async (req, res) => {
       await new Promise((resolve) => setTimeout(resolve, 45));
     }
 
-    await saveCompletedDetectionResult({
-      user_id,
-      platform: platformCode,
-      platformName: platformStatus.platform_name,
-      modelName: platformStatus.model_name,
-      question,
-      brand,
+    const finalization = await finalizeDetectionRecord({
+      record: sseRecord,
+      executionToken,
       brandKeywordsStr,
-      projectContext,
       responseText: fullText,
       aiResponse: result.data
     });
+    if (!finalization?.ok) {
+      res.write(`data: ${JSON.stringify({
+        event: 'error',
+        message: SAFE_PLATFORM_FAILURE_MESSAGE,
+        error_code: finalization?.error_code || 'metric_persist_failed'
+      })}\n\n`);
+      return res.end();
+    }
     res.write(`data: ${JSON.stringify({ event: 'done' })}\n\n`);
     res.end();
 
   } catch (error) {
     console.error('SSE流式接口异常:', error);
+    if (sseRecord && executionToken) {
+      try {
+        await ProjectRunService.failRecord(sseRecord, SAFE_PLATFORM_FAILURE_MESSAGE, {
+          stage: 'execution_interrupted',
+          error_code: String(error?.code || 'direct_stream_failed').slice(0, 80)
+        }, { executionToken });
+      } catch (_) {}
+    }
     try {
       res.write(`data: ${JSON.stringify({ event: 'error', message: SAFE_PLATFORM_FAILURE_MESSAGE })}\n\n`);
     } catch (_) { }
     res.end();
+  } finally {
+    if (leaseHeartbeat) await leaseHeartbeat.stop();
+    if (sseRecord && executionToken) {
+      await ProjectRunService.releaseRecordExecution(sseRecord.id, executionToken);
+    }
+    releaseBackgroundActivity?.();
   }
 });
 

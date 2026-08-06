@@ -710,6 +710,8 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
     },
   ];
 
+  const lockedBuiltinDeepSeek = Boolean(editing?.builtin && editing.code === 'deepseek');
+
   return (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Alert
@@ -734,7 +736,9 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
       />
 
       <Modal
-        title={editing ? `编辑平台：${editing.name}` : '新增 AI 平台'}
+        title={lockedBuiltinDeepSeek
+          ? '配置官方 DeepSeek'
+          : (editing ? `编辑平台：${editing.name}` : '新增 AI 平台')}
         open={open}
         onOk={savePlatform}
         confirmLoading={saving}
@@ -750,9 +754,16 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
         destroyOnHidden
       >
         <Form form={form} layout="vertical" requiredMark={false}>
+          {lockedBuiltinDeepSeek ? (
+            <div role="note" style={{ marginBottom: 16 }}>
+              <Text>
+                官方内置 DeepSeek 的名称、唯一标识、接口类型、Base URL、默认模型和平台级请求参数由系统锁定；你仍可查看并复制这些值，也可更新 API Key、超时、Token 上限和启用状态。正式结构化分析的附加参数请在“分析 API”设置中管理。
+              </Text>
+            </div>
+          ) : null}
           <Space align="start" size="middle" style={{ width: '100%' }}>
             <Form.Item name="name" label="平台名称" rules={[{ required: true, message: '请输入平台名称' }]} style={{ flex: 1 }}>
-              <Input placeholder="例如 Example AI" />
+              <Input readOnly={lockedBuiltinDeepSeek} aria-readonly={lockedBuiltinDeepSeek} placeholder="例如 Example AI" />
             </Form.Item>
             <Form.Item
               name="code"
@@ -763,23 +774,35 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
               ]}
               style={{ flex: 1 }}
             >
-              <Input disabled={Boolean(editing)} placeholder="example-ai" />
+              <Input
+                readOnly={lockedBuiltinDeepSeek}
+                aria-readonly={lockedBuiltinDeepSeek}
+                aria-label="唯一标识"
+                disabled={Boolean(editing) && !lockedBuiltinDeepSeek}
+                placeholder="example-ai"
+              />
             </Form.Item>
           </Space>
           <Form.Item name="adapter_type" label="接口类型" rules={[{ required: true }]}>
-            <Select options={adapterOptions} disabled={Boolean(editing?.builtin)} />
+            {lockedBuiltinDeepSeek ? (
+              <Input readOnly aria-readonly="true" aria-label="接口类型" />
+            ) : (
+              <Select options={adapterOptions} disabled={Boolean(editing?.builtin)} />
+            )}
           </Form.Item>
           <Form.Item
             name="base_url"
             label="Base URL"
             rules={[{ required: true, message: '请输入 Base URL' }, { type: 'url', message: '请输入有效 URL' }]}
-            extra="可填写 API 根地址或完整请求地址；系统会按接口类型补全 /chat/completions 或 /responses。千问若需返回可提取的联网来源，请选 OpenAI Responses 兼容并确认当前模型支持。"
+            extra={lockedBuiltinDeepSeek
+              ? '官方地址由系统锁定；此值可聚焦、选择和复制。'
+              : '可填写 API 根地址或完整请求地址；系统会按接口类型补全 /chat/completions 或 /responses。千问若需返回可提取的联网来源，请选 OpenAI Responses 兼容并确认当前模型支持。'}
           >
-            <Input placeholder="https://api.example.com/v1" />
+            <Input readOnly={lockedBuiltinDeepSeek} aria-readonly={lockedBuiltinDeepSeek} placeholder="https://api.example.com/v1" />
           </Form.Item>
           <Form.Item
             label="默认模型"
-            extra={(
+            extra={lockedBuiltinDeepSeek ? '官方 Flash 模型固定为 deepseek-v4-flash。' : (
               <Space orientation="vertical" size={0}>
                 <span>可从供应商接口临时读取可用模型；系统仅保存最终选择的模型名称，不缓存模型列表。</span>
               </Space>
@@ -791,21 +814,29 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
                 noStyle
                 rules={[{ required: true, message: '请选择或输入默认模型' }]}
               >
-                <AutoComplete
-                  open={modelDropdownOpen}
-                  onOpenChange={setModelDropdownOpen}
-                  filterOption={(inputValue, option) => (
-                    String(option?.value || '').toLowerCase().includes(inputValue.toLowerCase())
-                  )}
-                  placeholder="选择或输入模型名称"
-                  style={{ width: '100%' }}
-                  options={modelOptions.map((model) => ({ value: model, label: model }))}
-                />
+                {lockedBuiltinDeepSeek ? (
+                  <Input readOnly aria-readonly="true" aria-label="默认模型" />
+                ) : (
+                  <AutoComplete
+                    open={modelDropdownOpen}
+                    onOpenChange={setModelDropdownOpen}
+                    filterOption={(inputValue, option) => (
+                      String(option?.value || '').toLowerCase().includes(inputValue.toLowerCase())
+                    )}
+                    placeholder="选择或输入模型名称"
+                    style={{ width: '100%' }}
+                    options={modelOptions.map((model) => ({ value: model, label: model }))}
+                  />
+                )}
               </Form.Item>
               <Button
                 icon={<ReloadOutlined />}
                 loading={modelLoading}
-                disabled={!editing || !editing.capabilities.model_listing}
+                disabled={
+                  !editing
+                  || !editing.capabilities.model_listing
+                  || lockedBuiltinDeepSeek
+                }
                 onClick={refreshModels}
               >
                 刷新模型
@@ -837,7 +868,9 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
           <Form.Item
             name="request_options_text"
             label="模型请求参数（JSON）"
-            extra="没有明确需要时保留 {}。系统会按接口类型添加必要字段和联网工具，不需要重复填写。"
+            extra={lockedBuiltinDeepSeek
+              ? '官方 DeepSeek 的平台级请求参数固定为 {}；正式分析附加参数由“分析 API”设置单独管理。'
+              : '没有明确需要时保留 {}。系统会按接口类型添加必要字段和联网工具，不需要重复填写。'}
             rules={[
               { required: true, message: '请输入 JSON 对象，未配置时填写 {}' },
               {
@@ -855,6 +888,8 @@ export default function AIPlatformSettings({ refreshSignal = 0 }: { refreshSigna
             ]}
           >
             <Input.TextArea
+              readOnly={lockedBuiltinDeepSeek}
+              aria-readonly={lockedBuiltinDeepSeek}
               rows={7}
               spellCheck={false}
               placeholder="{}"

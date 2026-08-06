@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const analysisPath = path.resolve(__dirname, '../services/AIResponseAnalysisService.js');
+const analysisPath = path.resolve(__dirname, '../evaluation/AIResponseAnalysisV4BaselineService.js');
 const runPath = path.resolve(__dirname, '../services/ProjectRunService.js');
 const schedulerPath = path.resolve(__dirname, '../services/SchedulerService.js');
 const v5Path = path.resolve(__dirname, '../services/AIResponseAnalysisV5Service.js');
@@ -27,7 +27,7 @@ test('010 硬切：SchedulerService 只有 v5 契约且没有可选 provider 分
   assert.doesNotMatch(source, /analysisProvider|\|\| 'v4'/);
 });
 
-test('010 硬切：v4 运行时已退役，冻结在历史常量且只供评测对照（非生产引用）', () => {
+test('010 硬切：v4 基线已移出生产 services，冻结在 evaluation 目录只供评测', () => {
   const source = fs.readFileSync(analysisPath, 'utf8');
 
   assert.match(source, /已退役/);
@@ -35,6 +35,27 @@ test('010 硬切：v4 运行时已退役，冻结在历史常量且只供评测�
   assert.match(source, /STRUCTURE_VERSION = 'geo_metric_input_v4'/);
   assert.match(source, /contextual_competitor_mentions_sov_v1/);
   assert.doesNotMatch(source, /CURRENT_ANALYSIS_CONTRACT|CURRENT_STRUCTURE_VERSION|CURRENT_METRIC_SEMANTICS/);
+  assert.doesNotMatch(source, /module\.exports\s*=\s*service/u);
+});
+
+test('010 硬切：生产模块不得依赖 evaluation 目录', () => {
+  const productionRoots = ['app.js', 'routes', 'services', 'middleware'];
+  const files = productionRoots.flatMap((entry) => {
+    const absolute = path.resolve(__dirname, '..', entry);
+    if (!fs.existsSync(absolute)) return [];
+    if (fs.statSync(absolute).isFile()) return [absolute];
+    return fs.readdirSync(absolute, { recursive: true })
+      .filter((name) => /\.js$/u.test(name))
+      .map((name) => path.join(absolute, name));
+  });
+  const offenders = files.filter((filename) => (
+    /(?:require\(|from\s+)['"][^'"]*evaluation\//u.test(fs.readFileSync(filename, 'utf8'))
+  ));
+  assert.deepEqual(offenders, []);
+});
+
+test('010 硬切：生产 services 目录不存在可执行 v4 单体', () => {
+  assert.equal(fs.existsSync(path.resolve(__dirname, '../services/AIResponseAnalysisService.js')), false);
 });
 
 test('010 硬切：设置页测试端点不再引用 v4 运行时', () => {

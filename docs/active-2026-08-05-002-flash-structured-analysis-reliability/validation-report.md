@@ -1,5 +1,7 @@
 # DeepSeek Flash 结构化分析真实验证报告
 
+> 历史证据说明：本报告主体记录 009–013 当时“不批准硬切”的阶段结论。2026-08-06 后的现役候选与剩余生产门禁以同目录 `prd.md`、`TECH-SPEC.md` 的 Current state 及 `docs/DEPLOYMENT.md` 为准；下文“正式入口仍走 v4/Pro”不得作为当前推荐路径引用。
+
 > 阅读规则：本报告按时间保留两轮真实实验。首轮旧候选及当时状态是历史证据；issue 001–008 完成后的 `three_track_partial_v1` 结果从“2026-08-05 新合同 41×3”一节开始，是当前硬切判定依据。009 的失败结果保持不可变，后续使用独立 `three_track_partial_v2 / semantic_evidence_v2` 实验，不回写旧报告为 PASS。
 
 ## 结论

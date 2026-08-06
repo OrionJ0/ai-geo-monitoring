@@ -67,7 +67,7 @@ _避免使用_：循环重试登录错误、登录后自动发送、无限等待
 _避免使用_：只显示执行失败、用空报告表示登录错误、隐藏下一次执行时间
 
 **当前 API 预置默认值**：
-全新初始化时，豆包 Web、DeepSeek Web、豆包 API、DeepSeek API、千问 API 和腾讯混元 API 只作为预置写入，启用状态全部为关闭，必须由管理员主动启用；设置页固定按上述 Web 优先顺序展示，自定义平台排在预置之后。已有数据库继续保留管理员保存的启停状态与密文凭据。DeepSeek API 平台 `deepseek` 的唯一正式分析模型为 `deepseek-v4-flash`；从旧官方 builtin `deepseek-v4-pro` 升级时必须通过显式发布迁移同时更新平台默认值和 `ai_analysis_model_name`，自定义 URL、未知模型、停用或缺少凭据均 fail-closed。正式结构化分析不设置应用层输入或输出 Token 上限，DeepSeek 思考模式默认关闭，管理员修改分析专用请求参数时必须二次确认。千问 `qwen` 使用 Responses 协议并预置强制搜索参数，腾讯混元 `hunyuan` 使用 TokenHub Chat `hy3-preview` 并预置 `web_search_options.enable=true`；这些请求参数不会令停用平台自动启用。只有供应商实际返回 `search_results` 才算联网已验证，账号还必须在 TokenHub“工具管理”具备可用的联网搜索资源。API 平台与同品牌 Web 平台仍是独立样本。
+全新初始化时，豆包 Web、DeepSeek Web、豆包 API、DeepSeek API、千问 API 和腾讯混元 API 只作为预置写入，启用状态全部为关闭，必须由管理员主动启用；设置页固定按上述 Web 优先顺序展示，自定义平台排在预置之后。已有数据库继续保留管理员保存的启停状态与密文凭据。统一发布候选中，DeepSeek API 平台 `deepseek` 的唯一分析模型为 `deepseek-v4-flash`；生产启动桥 `387ae45` 仍运行 v4/Pro。从旧官方 builtin `deepseek-v4-pro` 升级时，显式发布迁移只更新平台默认模型并保留 API Key、启用状态和其他凭据；旧 `ai_analysis_model_name` 在校验为受支持的历史值后删除，不再作为第二份运行真值。自定义 URL、未知模型、停用或缺少凭据均 fail-closed。候选结构化分析不设置应用层输入或输出 Token 上限，DeepSeek 思考模式默认关闭，管理员修改分析专用请求参数时必须二次确认。千问 `qwen` 使用 Responses 协议并预置强制搜索参数，腾讯混元 `hunyuan` 使用 TokenHub Chat `hy3-preview` 并预置 `web_search_options.enable=true`；这些请求参数不会令停用平台自动启用。只有供应商实际返回 `search_results` 才算联网已验证，账号还必须在 TokenHub“工具管理”具备可用的联网搜索资源。API 平台与同品牌 Web 平台仍是独立样本。
 _避免使用_：把 DeepSeek API 停用理解为 DeepSeek 网页版停用
 
 **全局启用平台范围**：
@@ -104,8 +104,9 @@ _避免使用_：营销数据 AI 分析报告、通用 AI 报告
 对单条 GEO 监测问题的完整 AI 回答进行证据化结构提取，并形成品牌提及、竞品关系、候选顺序与情绪等 GEO 指标输入。它不读取或解释营销数据。
 _避免使用_：营销数据 AI 分析、通用 AI 分析
 
-**当前正式分析契约**：
-新建的单问题、问题集、自动监测和已有完整原回答的 analysis-only 重试统一使用 `ai_structured_v4` / `geo_metric_input_v4`，指标语义统一为 `contextual_competitor_mentions_sov_v1`。分析器接收当前问题、完整原回答和目标品牌，不接收项目竞品清单；输入超限、输出截断、证据或结构无效时整条分析失败，不回退 v3、旧分析器、旧 SOV、截断输入或分段计算。v3 及更早结果只按历史记录读取。
+**统一发布候选分析契约**：
+新建的单问题、问题集、项目自动监测和已有完整原回答的 analysis-only 重试统一使用 `ai_structured_v5` / `geo_metric_input_v5` / `three_track_partial_v2`，指标语义统一为 `contextual_competitor_mentions_sov_v2_scoped`。模型提示只接收当前问题、完整原回答、目标品牌和阶段间生成的封闭实体目录；记录创建时冻结的竞品注册表快照不会进入模型提示，只由程序用于阶段间身份归一和引用归类。官方内置 DeepSeek `deepseek-v4-flash` 完成实体抽取与封闭目录语义判断；阶段失败只按字段诚实降级，不回退 v4、Pro、旧 SOV、截断输入或分段计算。analysis-only 不重新调用监测上游；v4/v1 及更早结果只按历史记录、报告和 CSV 导出兼容读取。
+该合同已在本地统一候选中硬切；生产启动桥 `387ae45` 仍运行 v4/Pro，只有统一候选发布并通过四入口验收后才能改称当前正式分析契约。
 _避免使用_：把模块存在称为正式生效、把分析失败回答计入品牌指标
 
 **品牌提及率**：

@@ -502,6 +502,109 @@ test('shutdown rejects new Web work with a stable error', async (t) => {
   await assert.rejects(service.runExclusive(async () => true), { code: 'web_shutdown' });
 });
 
+test('an abort signal closes an active managed Web capture and returns a stable shutdown error', async (t) => {
+  const runtimeConfig = await makeRuntimeDirectory();
+  t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+  const controller = new AbortController();
+  let rejectCapture;
+  let sessionClosed = false;
+  const captureStarted = new Promise((resolve) => {
+    rejectCapture = (error) => {
+      resolve.started = true;
+      resolve(error);
+    };
+  });
+  let markStarted;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const service = new WebPlatformService({
+    runtimeConfig,
+    launcher: {
+      async launch() {
+        return {
+          async probe() {
+            return { status: 'ready', origin: 'https://chat.deepseek.com', composerCount: 1 };
+          },
+          async close() {
+            sessionClosed = true;
+            rejectCapture?.(Object.assign(new Error('closed'), { code: 'renderer_connection_closed' }));
+          }
+        };
+      }
+    },
+    pageFactory: () => ({}),
+    adapterFactory: () => ({
+      async capture() {
+        markStarted();
+        const error = await captureStarted;
+        throw error;
+      }
+    })
+  });
+
+  const query = service.queryPlatform('测试问题', {
+    capture_owner: { record_id: 1, user_id: 7 },
+    signal: controller.signal
+  });
+  await started;
+  controller.abort();
+  const result = await query;
+
+  assert.equal(sessionClosed, true);
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'service_shutting_down');
+  assert.equal(result.web_capture.failure.stage, 'shutdown');
+  await service.shutdown();
+});
+
+test('an abort during managed Chrome startup releases the profile lock and closes a late session', async (t) => {
+  const runtimeConfig = await makeRuntimeDirectory();
+  t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));
+  const controller = new AbortController();
+  let resolveLaunch;
+  let markLaunchStarted;
+  let lateSessionClosed = false;
+  let finishLateClose;
+  const lateClose = new Promise((resolve) => { finishLateClose = resolve; });
+  const launchStarted = new Promise((resolve) => { markLaunchStarted = resolve; });
+  const service = new WebPlatformService({
+    runtimeConfig,
+    launcher: {
+      launch({ signal }) {
+        assert.equal(signal.aborted, false);
+        markLaunchStarted();
+        return new Promise((resolve) => { resolveLaunch = resolve; });
+      }
+    }
+  });
+
+  const query = service.queryPlatform('启动中取消', {
+    capture_owner: { record_id: 2, user_id: 7 },
+    signal: controller.signal
+  });
+  await launchStarted;
+  controller.abort();
+  const result = await query;
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'service_shutting_down');
+
+  resolveLaunch({
+    async close() {
+      lateSessionClosed = true;
+      await lateClose;
+    }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lateSessionClosed, true);
+  assert.notEqual(service.profileLock.handle, null);
+  finishLateClose();
+  const releaseDeadline = Date.now() + 1000;
+  while (service.profileLock.handle && Date.now() < releaseDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(service.profileLock.handle, null);
+  await service.shutdown();
+});
+
 test('interactive login keeps polling through login and verification until one composer is ready', async (t) => {
   const runtimeConfig = await makeRuntimeDirectory();
   t.after(() => fs.promises.rm(runtimeConfig.root, { recursive: true, force: true }));

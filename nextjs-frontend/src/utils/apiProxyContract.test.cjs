@@ -45,14 +45,18 @@ test('development server accepts the IPv4 loopback origin', () => {
 
 test('same-origin proxy covers the complete AI analysis retry budget', () => {
   const nextConfig = source('../../next.config.ts');
-  const analysisService = source('../../../backend/services/AIResponseAnalysisService.js');
+  const entityService = source('../../../backend/services/AIResponseEntityExtractionService.js');
+  const semanticService = source('../../../backend/services/AIResponseSemanticJudgmentService.js');
+  const coordinator = source('../../../backend/services/AIAnalysisExecutionCoordinator.js');
   const proxyTimeout = Number(nextConfig.match(/proxyTimeout:\s*([\d_]+)/)?.[1]?.replaceAll('_', ''));
-  const timeoutSeconds = Number(analysisService.match(/timeout_seconds:\s*(\d+)/)?.[1]);
-  const maxAttempts = Number(analysisService.match(/max_attempts:\s*(\d+)/)?.[1]);
+  const timeoutSeconds = Number(entityService.match(/ANALYSIS_TIMEOUT_SECONDS\s*=\s*(\d+)/)?.[1]);
+  const entityAttempts = Number(entityService.match(/ENTITY_MAX_ATTEMPTS\s*=\s*(\d+)/)?.[1]);
+  const semanticAttempts = Number(semanticService.match(/SEMANTIC_MAX_ATTEMPTS\s*=\s*(\d+)/)?.[1]);
+  const queueTimeoutMs = Number(coordinator.match(/MAX_QUEUE_TIMEOUT_MS\s*=\s*(\d+)/)?.[1]);
 
   assert.ok(Number.isFinite(proxyTimeout), 'Next.js 同源代理必须显式配置超时');
   assert.ok(
-    proxyTimeout >= (timeoutSeconds * maxAttempts * 1000) + 10_000,
-    '代理超时必须覆盖全部分析尝试并保留响应开销',
+    proxyTimeout >= queueTimeoutMs + (timeoutSeconds * (entityAttempts + semanticAttempts) * 1000) + 10_000,
+    '代理超时必须覆盖共享排队和 v5 两阶段全部分析尝试并保留响应开销',
   );
 });

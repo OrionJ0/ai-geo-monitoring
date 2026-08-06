@@ -77,6 +77,19 @@ function buildService(row, settingValues = {}) {
       settingValues.ai_analysis_model_name ?? PRO_MODEL
     )
   };
+  if (settingValues.ai_analysis_request_options !== undefined) {
+    settings.ai_analysis_request_options = buildSetting(
+      'ai_analysis_request_options',
+      settingValues.ai_analysis_request_options
+    );
+  }
+  for (const [key, setting] of Object.entries(settings)) {
+    setting.destroyed = 0;
+    setting.destroy = async () => {
+      setting.destroyed += 1;
+      delete settings[key];
+    };
+  }
   const model = {
     async findAll(options = {}) {
       assert.deepEqual(options.where, { code: 'deepseek' });
@@ -96,11 +109,27 @@ function buildService(row, settingValues = {}) {
     }
   };
   return {
-    service: new DeepSeekFlashConfigMigrationService({ model, settingModel, sequelize }),
+    service: new DeepSeekFlashConfigMigrationService({
+      model,
+      settingModel,
+      sequelize,
+      credentialValidator: () => true
+    }),
     settings,
     transactions
   };
 }
+
+test('fails closed when the stored credential cannot be decrypted by the active key', async () => {
+  const row = buildRow();
+  const { service } = buildService(row);
+  service.credentialValidator = () => false;
+  await assert.rejects(
+    service.audit(),
+    (error) => error.code === 'DEEPSEEK_FLASH_CREDENTIAL_INVALID'
+  );
+  assert.equal(row.updates.length, 0);
+});
 
 test('only upgrades the exact official builtin Pro preset and preserves every other field', async () => {
   const row = buildRow();
@@ -133,9 +162,7 @@ test('only upgrades the exact official builtin Pro preset and preserves every ot
     last_web_search_test_error_code: null,
     last_web_search_test_message: null
   });
-  assert.deepEqual(settings.ai_analysis_model_name.updates[0].patch, {
-    value: FLASH_MODEL
-  });
+  assert.equal(settings.ai_analysis_model_name, undefined);
 
   for (const [key, value] of Object.entries(before)) {
     if (key === 'default_model' || key.startsWith('test_') || key.startsWith('last_test') || key.startsWith('web_search_test') || key.startsWith('last_web_search')) continue;
@@ -143,14 +170,33 @@ test('only upgrades the exact official builtin Pro preset and preserves every ot
   }
 });
 
-test('an already migrated official Flash preset is an idempotent no-op', async () => {
+test('removes only fixed analysis policy overrides while preserving allowed options', async () => {
+  const row = buildRow();
+  const { service, settings } = buildService(row, {
+    ai_analysis_request_options: JSON.stringify({
+      temperature: 0.8,
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'low'
+    })
+  });
+  const before = await service.audit();
+  assert.equal(before.ready, false);
+  assert.equal(before.analysis_options_migration_required, true);
+  const result = await service.apply();
+  assert.equal(result.ready, true);
+  assert.equal(settings.ai_analysis_request_options.value, '{"reasoning_effort":"low"}');
+});
+
+test('an already migrated official Flash preset removes the legacy model key then becomes idempotent', async () => {
   const row = buildRow({ default_model: FLASH_MODEL });
   const { service } = buildService(row, { ai_analysis_model_name: FLASH_MODEL });
 
+  const first = await service.apply();
+  assert.equal(first.ready, true);
+  assert.equal(first.applied, true);
   const result = await service.apply();
   assert.equal(result.ready, true);
   assert.equal(result.applied, false);
-  assert.equal(result.current_model, FLASH_MODEL);
   assert.equal(row.enabled, true);
   assert.equal(row.updates.length, 0);
 });

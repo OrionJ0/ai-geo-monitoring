@@ -498,6 +498,22 @@ class AIPlatformConfigService {
         );
       }
     }
+    if (row.code === 'deepseek' && row.builtin) {
+      const immutableKeys = ['name', 'adapter_type', 'base_url', 'default_model'];
+      const identityChanged = immutableKeys.some((key) => (
+        Object.prototype.hasOwnProperty.call(payload, key)
+        && String(payload[key] ?? '') !== String(row[key] ?? '')
+      ));
+      const requestOptionsChanged = Object.prototype.hasOwnProperty.call(payload, 'request_options')
+        && JSON.stringify(payload.request_options || {}) !== JSON.stringify({});
+      if (identityChanged || requestOptionsChanged) {
+        throw new PlatformConfigError(
+          'DeepSeek 正式身份、Flash 模型和平台级请求参数不可修改',
+          'deepseek_builtin_identity_immutable',
+          409
+        );
+      }
+    }
     const values = await this.validateEditableFields(payload, { creating: false, current: row });
     const updates = {};
     const allowed = [

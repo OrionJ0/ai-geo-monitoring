@@ -34,6 +34,14 @@ test('application shutdown drains scheduler, project runs and Web session before
         await projectRunsDrained;
       }
     },
+    analysisExecutionCoordinator: {
+      beginShutdown() {
+        events.push('analysis-stop');
+      },
+      async drain() {
+        events.push('analysis-drain');
+      }
+    },
     webPlatformRegistry: {
       async shutdown() {
         events.push('web');
@@ -52,11 +60,13 @@ test('application shutdown drains scheduler, project runs and Web session before
 
   assert.equal(first, second);
   assert.deepEqual(events, [
-    'http',
+    'analysis-stop',
     'project-stop',
+    'http',
     'scheduler',
     'web',
-    'project-drain'
+    'project-drain',
+    'analysis-drain'
   ]);
   assert.equal(events.includes('database'), false);
 
