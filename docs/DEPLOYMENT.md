@@ -30,6 +30,20 @@ curl -f https://insight.guangtuo.com/api/ready
 ssh ubuntu@182.254.140.163 'cd /opt/ai-geo-monitoring && git status --short --branch && git rev-parse HEAD && git rev-parse origin/main'
 ```
 
+### 2026-08-07 统一候选发布前门禁
+
+- Stage1 数据库前置版本 `a2c1fa15800314adc7f4bcf888964e6e355d3599` 已在生产完成
+  v5 快照列迁移并保持 v4/Pro 应用运行；v5 audit 为 `missing_columns=[]`、
+  `schema_mismatches=[]`、`migration_required=false`，公开 `/api/ready` 为 `ready`。
+- Stage2 代码/测试候选 `89234bd46b0777b9f2cf80b82e3f4179c40e335a` 已通过后端
+  1202、营销 252、官网 31、咨询 35、部署 48、前端 127、utils 316、lint、TypeScript、
+  OpenAPI、40 路由生产构建、真实 Chrome 65 和一次性 PostgreSQL 集成。该 SHA 尚未
+  发布，生产仍是上一条 Stage1 revision；本记录不能替代正式 Bundle 和入口验收。
+- 发布候选必须是上述代码树和本次证据文档的后代，并在最终 SHA 上重新执行完整门禁。
+  正式部署后还必须记录 Bundle checksum、数据库备份、DeepSeek 配置迁移 audit、四类
+  v5 HTTP 入口、v4/Pro 零调用、历史 v4 报告/CSV、正式登录态 Chrome、systemd 与公开
+  revision；任一缺失时 002 和营销 008 继续保持 `active`。
+
 百度开发者控制台中的 callback 属于外部人工配置。截至本次文档收敛，服务器
 环境已经切换，但控制台新地址尚未得到人工确认；完成确认前，现有服务器密文
 Token 应继续保留，但不得宣称在新域名上重新授权已经通过。

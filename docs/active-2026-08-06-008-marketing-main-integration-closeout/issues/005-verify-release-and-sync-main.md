@@ -12,79 +12,32 @@ blocked_by: []
 - [x] 后端、营销、前端、部署测试全通过；
 - [x] lint、TypeScript、OpenAPI 生成漂移和生产构建通过；
 - [x] 真实 Chrome 验收营销页面交互、取消、分页和 revision 钉扎；
-- [x] 秘密、旧路径、fallback、旧文档和 Flash 无关修改扫描通过；
-- [x] 本轮营销 diff 的基础及风险专项对抗审查 P0/P1/P2 清零；
-- [ ] 发布前确认 0805-002 不在发布/硬切/生产观察；
+- [x] PostgreSQL 营销迁移和 GEO 指标语义集成通过；
+- [x] 秘密、旧路径、fallback、旧文档和无关修改扫描通过；
+- [x] 代码、API、安全、数据库、架构、性能、无障碍、SRE、现实证据和最小变更审查的代码候选 P0/P1/P2 清零；
 - [ ] 正式 Git Bundle、systemd、迁移 audit、公开健康和登录态入口验收通过；
 - [ ] 本地 `main`、`origin/main`、服务器 `HEAD`、公开前后端 revision 完全一致。
 
-## 本地验收证据
+## 2026-08-07 最终本地候选证据
 
-- 阻塞检查点 `7bc1e9e` 已提交；随后合并当时最新本地 `main=b41da59`，最终候选为 `0a16228`，`main` 是候选祖先；
-- 合并只带入 9 个 Flash 文件，这 9 个文件逐一与 `main` 比较为零差异，营销工作没有改写 0805-002；
-- 最终候选后端全仓：`1133 passed / 1 skipped / 0 failed`；营销：`250/250`；前端营销：`127/127`；部署：`30/30`；
-- 后端全仓在一次与浏览器/部署并行的压力运行中出现 `DatabaseConfig` 临时端口连接拒绝；该用例聚焦重跑通过，随后串行全仓复验零失败，未修改业务代码掩盖瞬时端口竞争；
-- lint 通过；Next.js 生产构建和 TypeScript 通过，共生成 40 个路由；
-- 真实 Chrome 对最终候选的生产构建全套 `59/59`、测试进程零退出，覆盖上期请求跨日期及时取消、stale snapshot 日期钉扎后不重复请求、分页/错误/焦点状态；阻塞解除后仍须在最终发布 SHA 上重跑；
-- 四个广告读取入口的真实 Express 成功响应与典型错误响应使用同一 OpenAPI 3.1 schema 校验；未知内部错误被公开错误合同脱敏；
-- SQLite 精确比率排序受 2,000 身份/5,000 事实硬上限保护，预热后三样本 P95 门禁为 750ms；
-- 关键词上期请求只使用 `previousKey` 一套取消真值，页码、页大小和排序不重复读取上期 summary；
-- 报告 URL 只来自 manifest；未重新引入旧 Provider、旧 Dashboard 明细数组、双 Token 或 fallback。
+- 代码与测试候选为 `89234bd46b0777b9f2cf80b82e3f4179c40e335a`，工作区干净；候选包含当前 `main` 的完整 v5 硬切和已发布营销工作线，不删除 Flash 代码，也不恢复 v4/Pro 或旧营销 fallback。
+- 后端全仓 `1202/1202`；营销 `252/252`；官网表单 `31/31`；咨询详情 `35/35`；部署 `48/48`。
+- 前端营销 `127/127`，全量 utils `316/316`；lint、TypeScript、OpenAPI 生成漂移均通过；以完整候选 SHA 注入 revision 的 Next.js 生产构建成功并生成 40 个路由。
+- 真实 Chrome 使用生产构建和单 worker 完成 `65/65`。首次多 worker 运行在 44 项后挂起，串行诊断进一步发现搜索词 fixture 未回显新合同要求的筛选字段；fixture 修复后，搜索词聚焦 `3/3` 与最终全套 `65/65` 均通过。没有把挂起或旧 SHA 证据算作通过。
+- PostgreSQL 一次性测试库完成营销迁移 `001`–`016`、原子快照/失败保留和 GEO 指标语义迁移；测试容器随后删除。
+- 四个广告读取入口的真实 Express 成功响应和典型错误响应使用同一 OpenAPI 3.1 schema 校验；`Vary: Authorization`、缓存/重试头和搜索词全部已应用筛选回显均受合同约束。
+- v5 CSV 信任边界已加固：文件级 HMAC 覆盖来源项目、来源完整性状态、表头和有序完整行；未收敛/缺记录原生运行不能签名；无签名历史导入始终保持 `unverified_import`，服务端 KPI 为 unavailable/null，页面隐藏指标并将逐行引用标记为“未验证”。
 
 ## 对抗式审查
 
-- 代码、API、安全、数据库、架构、性能、无障碍和最小变更：无 P0/P1/P2；
-- 现实证据与 SRE：发现一个不属于本营销范围、但会阻断整体候选正式发布的 P0，见下节；
-- 0805-002 文档状态不在本需求授权范围内，本需求不修改其代码、测试、fixture 或状态文档。
+- `engineering-code-reviewer`、`testing-api-tester`、`security-appsec-engineer` 对最终代码候选均返回 P0=0、P1=0、P2=0；最后两次 SHA 变化只涉及测试隔离密钥和浏览器 fixture，复核确认未改变生产运行时或削弱断言。
+- `engineering-minimal-change-engineer`、`engineering-software-architect`、`testing-accessibility-auditor`、`engineering-database-optimizer`、`testing-performance-benchmarker`、`engineering-sre` 已返回 P0=0、P1=0、P2=0。
+- `testing-reality-checker` 先前保留的缺口是“尚未正式发布、文档仍引用旧候选”；本节已修正旧候选证据，但生产部分只有 Git Bundle 发布、四入口 v5、正式 Chrome 和 revision 对齐后才能清零。
 
-## 正式发布阻塞
+## 当前正式路径与下一门禁
 
-当前候选运行模型及调度路径会读取 `question_records.competitor_snapshot`，但正式部署入口
-尚未应用 `backend/scripts/migrateV5SnapshotFields.js`。旧生产数据库缺列时可能造成 scheduler
-初始化失败、`/ready=503` 并触发 systemd 停服，因此不得制作或发布本营销 Bundle。
-
-解除条件全部归属 0805-002 独立交付：
-
-1. 把该迁移的 apply + audit 纳入正式备份后、启动前流程，或独立移除正式 ORM 对该列的依赖；
-2. 证明旧生产 schema 升级后 `missing_columns=[]`、`migration_required=false`；
-3. 用升级后的数据库启动候选，证明 scheduler started、`/ready=200`，并从默认 v4 入口完成一条记录冒烟；
-4. 生产先完成该独立发布，再把营销候选重新桥接到届时最新 `main` 并重跑全部门禁。
-
-当前正式路径仍为 `https://insight.guangtuo.com` 上的生产 revision `2c6a36e`。新营销治理
-修复尚未设为生产默认；既有生产中的资源化 API 与模块化 Provider 不受本轮暂停影响。
-2026-08-06 只读复核时 `/health`、`/frontend-health` 和 `/ready` 均正常并返回该 revision；
-`origin/main` 仍为 `98467f0`，未在发布阻塞期间推动远端或生产真值。
-
-## 2026-08-06 最新 main 再桥接与生产复核
-
-- 最新本地 `main=8179d63509e386428252048c50a52e11e49fd677` 已使用无提交 merge
-  合入候选，自动合并无冲突；002/010 的运行代码、后端测试和状态文档在合并结果中
-  与 `main` 零差异；唯一共享的 `keyword-analysis.spec.ts` 因营销资源化测试继续演进而
-  相对 `main` 有预期差异，但 `main` 新增的三处类型收窄均已保留；
-- 002 当前不是生产关闭状态：目录仍为 `active`，Issue 010 仍为 `in_progress`，最新
-  记录明确写明 Git Bundle 部署未执行；`scripts/deploy.mjs` 仍没有 v5 快照字段迁移；
-- 服务器只读 SSH 复核：`HEAD=2c6a36e`、工作区干净、两个 systemd 服务 active、
-  `backend/database.sqlite` 的 `PRAGMA quick_check=ok`，但
-  `question_records.competitor_snapshot` 列不存在；公开 `/api/health` 与
-  `/api/frontend-health` 同为 `2c6a36e`，`/api/ready` 返回 200；
-- 因本机 swap 使用约 `24740/25600 MB`，最终候选的 `npm run test:marketing` 启动进程
-  在执行用例前进入不可中断系统等待，没有测试子进程或结果；本次未把它记为测试失败，
-  也未沿用旧候选测试证据宣称新 SHA 已通过；
-- 下一门禁保持不变：002 必须先独立完成生产迁移与四入口验收；本机资源恢复后，在最终
-  候选 SHA 上重跑后端、营销、前端、部署、构建与真实 Chrome，再制作营销 Bundle。
-
-## 最新候选对抗式复审
-
-- 代码与最小变更：无 P0/P1/P2；相对最新 `main` 的营销有效差异未修改 v5 共享
-  services、routes、models；002/010 运行路径与 `main` 零差异，共享浏览器测试的三处
-  类型收窄也已保留；
-- P0（现实、数据库、SRE）：生产缺少 `competitor_snapshot`，scheduler 启动查询会读取
-  新 ORM 列，而正式部署未执行 v5 migration；当前候选不得制作或发布 Bundle；
-- P1（数据库）：`migrateV5SnapshotFields.js` 会无条件覆盖 `DB_STORAGE`，必须先修正
-  数据库目标选择，并用两个临时数据库证明只迁移显式目标；
-- P1（现实）：最终合并组合尚无测试、构建或浏览器结果；002 目录/Issue 状态和现役文档
-  仍互相矛盾，不能支持“002 已生产完成”的结论；
-- P1（SRE）：生产现有 DeepSeek 配置尚无显式 Pro→Flash 预检/迁移及四入口现场验收；
-  readiness 为 200 不能证明分析入口可用；
-- P1（发布）：必须先形成不可变候选 SHA，并在该 SHA 上完成验收后才能制包；发布失败
-  只允许候选后代的前向修复，不接受重新引入 v4/Pro 的旧路径恢复建议。
+- 生产仍为 `https://insight.guangtuo.com` 上的 `a2c1fa15800314adc7f4bcf888964e6e355d3599`，仍运行 v4/Pro；两个 systemd 单元和 `/api/ready` 正常。
+- Stage1 数据库前置迁移已经独立完成：v5 快照审计为 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`，旧 v4 应用保持正常。此前 `competitor_snapshot` 缺列和迁移脚本错误目标风险不再阻塞 Stage2。
+- 下一步只允许把本节文档作为候选后代提交后，在该最终发布 SHA 上重跑完整矩阵；随后重新核对生产锁、服务器/远端/公开 revision、工作区和 migration audit，制作正式 Git Bundle。
+- 统一发布必须迁移官方 builtin DeepSeek 的 `deepseek-v4-pro` 到 `deepseek-v4-flash`，保留 API Key、enabled 和凭据；自定义 base URL 或未知身份继续 fail-closed。发布后必须从单问题、问题集、自动监测和 analysis-only 四个 HTTP 入口证明 v5/Flash 生效、v4/Pro 调用数为 0，并证明历史 v4 报告/CSV 仍可读。
+- 在上述生产证据成立前，002 和本目录继续保持 `active`，不得宣称生产硬切或删除现有营销分支。

@@ -60,6 +60,8 @@ SQLite 的 CTR/CPC 精确排序固定为最多 2,000 个事实身份、5,000 行
 正式发布使用 Git Bundle、systemd 和项目部署入口。生产通过后将本地 `main` 与
 `origin/main` 快进到同一已发布提交；禁止强推、非快进回退和服务器源码直改。
 
-当前发布被 0805-002 的 `competitor_snapshot` 正式迁移门禁阻塞。本需求不得跨范围修改
-该迁移；只能在 0805-002 独立证明旧生产 schema 可升级、audit 无缺列、scheduler 与
-`/ready` 正常且默认 v4 冒烟通过后重新桥接并发布。
+`competitor_snapshot` 的 Stage1 数据库前置迁移已经独立发布并通过 audit、SQLite
+`quick_check`、旧 v4 应用和 `/api/ready` 验证。Stage2 统一候选在正式 Git Bundle 前仍须
+重新核对生产锁、服务器/远端/公开 revision 和全部 migration audit，并在最终发布 SHA
+上完成测试、构建和真实 Chrome。停服后的正式流程负责安全迁移 builtin DeepSeek
+Pro→Flash 并执行四入口 v5 acceptance；自定义或未知 DeepSeek 身份必须 fail-closed。

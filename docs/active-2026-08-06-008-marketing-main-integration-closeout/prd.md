@@ -66,29 +66,13 @@ depends_on:
 
 ## Handoff
 
-- 当前状态：Issue 001–004 已关闭；Issue 005 已无冲突吸收最新本地
-  `main=8179d63509e386428252048c50a52e11e49fd677`；002/010 的运行代码、后端测试和
-  状态文档与 `main` 零差异，共享营销浏览器测试保留了 `main` 新增的三处类型收窄，
-  同时继续承载营销资源化验收；最终候选回归和正式发布仍被门禁阻塞；
-- 旧候选的代码、API、安全、数据库、架构、性能和无障碍问题已清零；本次相对最新
-  `main` 的营销有效 diff 经代码与最小变更复审仍无 P0/P1/P2，但发布现实、数据库和
-  SRE 复审确认下列 002 生产门禁仍为 P0/P1，不能把“营销 diff 无问题”表述成候选可发布；
-- 正式生产仍运行既有营销 revision `2c6a36e`，本目录的新收尾修复尚未发布；
-- 2026-08-06 只读生产复核确认服务器 `HEAD=2c6a36e`、工作区干净、两个
-  systemd 服务 active、SQLite `quick_check=ok`，但
-  `pragma_table_info('question_records')` 中没有 `competitor_snapshot`；公开后端和前端
-  revision 同为 `2c6a36e`，`/api/ready=200`。这证明缺列风险仍真实存在；
-- 外部阻塞来自并行 0805-002：最新 `main` 已硬切 v5，但 002 目录仍为 `active`、
-  Issue 010 仍为 `in_progress` 且明确记录未部署；正式部署入口仍未应用并审计
-  `migrateV5SnapshotFields.js`，脚本还会无条件覆盖 `DB_STORAGE`。在 0805-002 独立完成
-  生产迁移、`missing_columns=[]`、scheduler 启动、`/ready=200` 和四入口验收前，不得
-  发布本营销候选；
-- 本次合并后的营销聚焦测试尚未形成结果：本机 swap 使用量约
-  `24740/25600 MB`，Node/npm 在启动任何用例前进入不可中断等待且没有子测试进程或
-  输出；不得沿用旧 SHA 的绿灯冒充最终候选验收；
-- 生产还必须在停服前显式预检并迁移现有 DeepSeek 分析配置到
-  `deepseek-v4-flash`，再从四类正式入口证明新配置生效；通用 readiness 不能替代该
-  业务入口验收；
-- 发布失败只允许使用候选后代的前向修复并保留 additive 列；不得为恢复运行重新引入
-  v4/Pro 运行时、隐藏开关或 fallback；
-- 阻塞解除后：重新吸收最新 `main`，重跑全量回归和 Bundle 门禁，执行正式发布，再快进并推送 `main`，使本地、远端、服务器和公开 revision 完全一致。
+- Issue 001–004 已关闭；Issue 005 的代码候选 `89234bd46b0777b9f2cf80b82e3f4179c40e335a`
+  已包含最新 v5 `main`、完整营销工作线和治理修复，代码/API/安全等审查 P0/P1/P2 清零；
+- 该候选已通过后端 1202、营销 252、官网 31、咨询 35、部署 48、前端 127、utils 316、
+  lint、TypeScript、OpenAPI、40 路由生产构建、真实 Chrome 65 和 PostgreSQL 集成；
+- Stage1 数据库前置迁移已在生产独立完成，生产当前 `a2c1fa15800314adc7f4bcf888964e6e355d3599`
+  健康但仍运行 v4/Pro；此前缺列风险已解除，统一候选尚未发布；
+- 下一步是提交本次证据、在该文档后代发布 SHA 上重跑完整门禁，再通过正式 Git Bundle
+  发布。发布必须完成 DeepSeek Pro→Flash 安全配置迁移、四类 HTTP 入口 v5 验收、
+  v4/Pro 调用数为 0、历史 v4 报告/CSV 可读、正式 Chrome 和全部 revision 对齐；
+- 发布失败只允许候选后代前向修复，不得重新引入 v4/Pro、旧营销实现、隐藏开关或 fallback。
