@@ -15,6 +15,7 @@ const scriptDirectory = path.dirname(scriptPath);
 const OFFICIAL_BASE_URL = 'https://insight.guangtuo.com';
 const BOOTSTRAP_MAX_RUNTIME_MS = 345 * 60 * 1000;
 const ACTIVATION_RESERVE_MS = 70 * 60 * 1000;
+const LAUNCHER_ONLY_BRIDGE_BASE_REVISION = '387ae45ae6b58bf5a89b59ed43d6e6cc52209fff';
 
 function remainingTimeout(deadline) {
   const remaining = deadline - Date.now();
@@ -349,9 +350,11 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
       deadline
     });
     const launcherOnlyBridge = candidateDeploy.LAUNCHER_ONLY_BRIDGE === true
+      && candidateDeploy.LAUNCHER_ONLY_BRIDGE_BASE_REVISION
+        === LAUNCHER_ONLY_BRIDGE_BASE_REVISION
       && await isVerifiedLauncherOnlyBridge({
         projectRoot: checkout,
-        previousRevision: prepared.previousRevision,
+        previousRevision: LAUNCHER_ONLY_BRIDGE_BASE_REVISION,
         revision: prepared.revision,
         signal,
         deadline

@@ -491,6 +491,9 @@ export async function deploy(preparedRevision = '', {
       && changedDependencyFiles === ''
       && fs.existsSync(path.join(backendDirectory, 'node_modules'))
       && fs.existsSync(path.join(frontendDirectory, 'node_modules'));
+    if (LAUNCHER_ONLY_BRIDGE && !reusableBridgeDependencies) {
+      throw new Error('launcher-only bridge 依赖复用门禁失败，拒绝停服后联网安装');
+    }
     console.log('4/13 安装后端依赖');
     if (!reusableBridgeDependencies) {
       await run('npm', ['ci', ...(dependenciesPreflighted ? ['--offline'] : []), '--include=dev'], {
@@ -700,6 +703,7 @@ export async function isGeo010ContractChanged() {
 }
 
 export const LAUNCHER_ONLY_BRIDGE = true;
+export const LAUNCHER_ONLY_BRIDGE_BASE_REVISION = '387ae45ae6b58bf5a89b59ed43d6e6cc52209fff';
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   main().catch((error) => {

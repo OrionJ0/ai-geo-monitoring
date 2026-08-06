@@ -33,10 +33,11 @@ test('dynamic-budget bridge explicitly keeps the v4 runtime contract unchanged',
 test('launcher-only recovery exemption is bound to an exact file allowlist', async () => {
   const root = path.resolve(import.meta.dirname, '..');
   const deadline = Date.now() + 30_000;
+  const currentRevision = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
   assert.equal(await isVerifiedLauncherOnlyBridge({
     projectRoot: root,
     previousRevision: '387ae45ae6b58bf5a89b59ed43d6e6cc52209fff',
-    revision: 'a45ad59e8b035adc1ee93bd4107fedb72b86382c',
+    revision: currentRevision,
     deadline
   }), true);
   assert.equal(await isVerifiedLauncherOnlyBridge({
@@ -45,6 +46,11 @@ test('launcher-only recovery exemption is bound to an exact file allowlist', asy
     revision: '864b236',
     deadline
   }), false);
+  const launcher = fs.readFileSync(
+    path.join(root, 'scripts', 'deploy-from-bundle.mjs'),
+    'utf8'
+  );
+  assert.match(launcher, /previousRevision:\s*LAUNCHER_ONLY_BRIDGE_BASE_REVISION/u);
 });
 
 test('launcher-only self deployment reuses unchanged installed dependencies', () => {
