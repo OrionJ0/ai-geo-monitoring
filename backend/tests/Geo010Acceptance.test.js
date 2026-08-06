@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const jwt = require('jsonwebtoken');
 
 const {
   OFFICIAL_BASE,
@@ -27,7 +28,9 @@ const {
   acceptanceProjectWebsite,
   isMarkedAcceptanceProject,
   writePreflightBudgetResult,
-  writeSecureEvidence
+  writeSecureEvidence,
+  createAcceptanceSession,
+  withAcceptanceModels
 } = require('../scripts/geo010Acceptance');
 const projectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
 
@@ -50,6 +53,79 @@ test('production preflight rejects due or actively leased scheduler backlog', as
     due_projects: 0,
     active_scheduled_executions: 0
   });
+});
+
+test('production acceptance signs a short-lived server token for an existing active admin', async () => {
+  const secret = 'a'.repeat(64);
+  const session = await createAcceptanceSession({
+    User: {
+      findOne: async (options) => {
+        assert.deepEqual(options.where, { username: 'release-admin' });
+        return {
+          id: 17,
+          username: 'release-admin',
+          role: 'admin',
+          status: 'active',
+          membership_level: 'pro',
+          membership_expires_at: null
+        };
+      }
+    }
+  }, {
+    DEFAULT_ADMIN_USERNAME: 'release-admin',
+    JWT_SECRET: secret
+  });
+
+  assert.equal(session.userId, 17);
+  const payload = jwt.verify(session.token, secret);
+  assert.equal(payload.userId, 17);
+  assert.equal(payload.username, 'release-admin');
+  assert.equal(payload.role, 'admin');
+  assert.equal(payload.purpose, 'geo010-acceptance');
+  assert.ok(payload.exp - payload.iat <= 6 * 60 * 60);
+});
+
+test('production acceptance refuses missing, inactive or non-admin identities', async () => {
+  const environment = {
+    GEO010_ACCEPTANCE_USERNAME: 'acceptance',
+    JWT_SECRET: 'b'.repeat(64)
+  };
+  await assert.rejects(
+    createAcceptanceSession({ User: { findOne: async () => null } }, environment),
+    /不存在/u
+  );
+  await assert.rejects(
+    createAcceptanceSession({
+      User: {
+        findOne: async () => ({
+          id: 1,
+          username: 'acceptance',
+          role: 'user',
+          status: 'active'
+        })
+      }
+    }, environment),
+    /active admin/u
+  );
+});
+
+test('production acceptance always closes models when authentication setup fails', async () => {
+  let closed = 0;
+  const models = {
+    sequelize: {
+      close: async () => {
+        closed += 1;
+      }
+    }
+  };
+  await assert.rejects(
+    withAcceptanceModels(async (loaded) => {
+      assert.equal(loaded, models);
+      throw new Error('authentication rejected');
+    }, () => models),
+    /authentication rejected/u
+  );
+  assert.equal(closed, 1);
 });
 
 test('preflight janitor atomically archives only known acceptance projects', async () => {

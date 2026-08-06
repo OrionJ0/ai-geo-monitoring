@@ -4,13 +4,14 @@
  *
  * 本脚本只能在正式服务器运行，只访问唯一受支持的 HTTPS 入口。它不会启动
  * 第二套应用、修改 AI 平台配置、读取/传递 API Key，也不会创建临时数据库。
- * 登录凭据只从服务器环境读取，验收证据写入 /tmp 且不包含凭据、问题正文或
- * 上游原始响应。
+ * 验收 JWT 只在服务器进程内短期签发和使用，验收证据写入 /tmp 且不包含
+ * JWT、问题正文或上游原始响应。
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const jwt = require('jsonwebtoken');
 
 const BACKEND_ROOT = path.resolve(__dirname, '..');
 require('dotenv').config({ path: path.join(BACKEND_ROOT, '.env'), quiet: true });
@@ -833,16 +834,56 @@ function writePreflightBudgetResult(budget, filename = process.env.AI_GEO_PREFLI
   }
 }
 
+async function createAcceptanceSession(models, environment = process.env) {
+  const username = String(
+    environment.GEO010_ACCEPTANCE_USERNAME
+      || environment.DEFAULT_ADMIN_USERNAME
+      || 'admin'
+  ).trim();
+  const secret = String(environment.JWT_SECRET || '');
+  if (!username) throw new Error('缺少服务器侧验收管理员用户名');
+  if (secret.length < 32) throw new Error('服务器 JWT_SECRET 缺失或少于 32 个字符');
+
+  const user = await models.User.findOne({
+    where: { username },
+    attributes: [
+      'id',
+      'username',
+      'role',
+      'status',
+      'membership_level',
+      'membership_expires_at'
+    ]
+  });
+  if (!user) throw new Error('服务器侧验收管理员不存在');
+  if (user.status !== 'active' || user.role !== 'admin') {
+    throw new Error('服务器侧验收身份必须是 active admin');
+  }
+
+  let effectiveLevel = user.membership_level || 'free';
+  if (
+    effectiveLevel !== 'free'
+    && user.membership_expires_at
+    && new Date(user.membership_expires_at) < new Date()
+  ) {
+    effectiveLevel = 'free';
+  }
+  return {
+    userId: Number(user.id),
+    token: jwt.sign({
+      userId: user.id,
+      username: user.username,
+      role: user.role,
+      level: effectiveLevel,
+      membershipExpiresAt: user.membership_expires_at || null,
+      purpose: 'geo010-acceptance'
+    }, secret, { expiresIn: '6h' })
+  };
+}
+
 async function runPreflight() {
   if (process.env.NODE_ENV !== 'production') {
     throw new Error('geo010Acceptance 只允许在 NODE_ENV=production 的正式服务器运行');
-  }
-  const username = String(process.env.GEO010_ACCEPTANCE_USERNAME || 'admin').trim();
-  const password = String(
-    process.env.GEO010_ACCEPTANCE_PASSWORD || process.env.DEFAULT_ADMIN_PASSWORD || ''
-  );
-  if (!username || !password) {
-    throw new Error('缺少服务器侧 GEO010_ACCEPTANCE_PASSWORD/DEFAULT_ADMIN_PASSWORD');
   }
   const [backendRevision, frontendRevision, readiness] = await Promise.all([
     readPublicRevisionValue(`${OFFICIAL_BASE}/health`),
@@ -852,14 +893,10 @@ async function runPreflight() {
   if (backendRevision !== frontendRevision) {
     throw new Error('正式前后端 revision 不一致');
   }
-  const login = await api('POST', '/users/login', { body: { username, password } });
-  const token = login?.data?.token || login?.token;
-  const userId = Number(login?.data?.user?.id || login?.user?.id);
-  if (!token || !Number.isInteger(userId)) throw new Error('正式入口登录响应无效');
-  const platformResponse = await api('GET', '/admin/ai-platforms', { token });
-
   const models = require('../models');
   try {
+    const { token, userId } = await createAcceptanceSession(models);
+    const platformResponse = await api('GET', '/admin/ai-platforms', { token });
     const acceptanceCleanup = await cleanupAcceptanceProjects(models, {
       acceptanceUserId: userId
     });
@@ -932,6 +969,15 @@ async function runRecoveryPreflight() {
   }
 }
 
+async function withAcceptanceModels(work, loadModels = () => require('../models')) {
+  const models = loadModels();
+  try {
+    return await work(models);
+  } finally {
+    await models.sequelize.close();
+  }
+}
+
 async function main() {
   if (process.env.NODE_ENV !== 'production') {
     throw new Error('geo010Acceptance 只允许在 NODE_ENV=production 的正式服务器运行');
@@ -949,29 +995,19 @@ async function main() {
     encoding: 'utf8'
   });
   if (serverWorktree.trim()) throw new Error('服务器 Git 工作区不干净，拒绝生成 revision 验收证据');
-  const username = String(process.env.GEO010_ACCEPTANCE_USERNAME || 'admin').trim();
-  const password = String(
-    process.env.GEO010_ACCEPTANCE_PASSWORD || process.env.DEFAULT_ADMIN_PASSWORD || ''
-  );
-  if (!username || !password) {
-    throw new Error('缺少服务器侧 GEO010_ACCEPTANCE_PASSWORD/DEFAULT_ADMIN_PASSWORD');
-  }
-
   const publicChecks = {
     health: await readPublicRevision(`${OFFICIAL_BASE}/health`, expectedRevision),
     frontend_health: await readPublicRevision(FRONTEND_HEALTH_URL, expectedRevision),
     ready: await readPublicReadiness(`${OFFICIAL_BASE}/ready`)
   };
 
-  const login = await api('POST', '/users/login', { body: { username, password } });
-  const token = login?.data?.token || login?.token;
-  const userId = Number(login?.data?.user?.id || login?.user?.id);
-  if (!token || !Number.isInteger(userId)) throw new Error('正式入口登录响应无效');
+  return withAcceptanceModels(async (models) => {
+    const { token, userId } = await createAcceptanceSession(models);
 
-  const [platformResponse, analysisResponse] = await Promise.all([
-    api('GET', '/admin/ai-platforms', { token }),
-    api('GET', '/settings/analysis-api', { token })
-  ]);
+    const [platformResponse, analysisResponse] = await Promise.all([
+      api('GET', '/admin/ai-platforms', { token }),
+      api('GET', '/settings/analysis-api', { token })
+    ]);
   const deepseek = (platformResponse?.data || []).find((row) => row.code === 'deepseek');
   const analysisConfig = analysisResponse?.data || {};
   if (
@@ -987,9 +1023,7 @@ async function main() {
   }
 
   const auditSince = new Date().toISOString();
-  const models = require('../models');
   const {
-    sequelize,
     BrandProject,
     TrackedPrompt,
     QuestionRecord,
@@ -1311,13 +1345,13 @@ async function main() {
         cleanupError = new Error(`验收清理失败，project_id=${projectId}`);
       }
     }
-    await sequelize.close();
     if (cleanupError) throw cleanupError;
   }
   finalEvidence.cleanup = cleanup;
   finalEvidence.acceptance_budget = acceptanceBudget;
   const outputPath = writeSecureEvidence(finalEvidence, expectedRevision);
   console.log(JSON.stringify({ ...finalEvidence, evidence_path: outputPath }, null, 2));
+  });
 }
 
 if (require.main === module) {
@@ -1371,6 +1405,8 @@ module.exports = {
   acceptanceProjectWebsite,
   isMarkedAcceptanceProject,
   writePreflightBudgetResult,
+  createAcceptanceSession,
+  withAcceptanceModels,
   runPreflight,
   runRecoveryPreflight,
   toEvidence,
