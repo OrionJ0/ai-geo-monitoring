@@ -2,6 +2,9 @@ const { AIPlatformConfig } = require('../models');
 const { Op } = require('sequelize');
 const { encryptSecret, decryptSecret } = require('./SecretEncryptionService');
 const { validatePlatformUrl } = require('./PlatformUrlPolicyService');
+const {
+  inspectDeepSeekFlashConfigRow
+} = require('./DeepSeekFlashConfigMigrationService');
 
 const ADAPTER_TYPES = new Set(['openai_responses', 'openai_chat_completions']);
 const RESERVED_PLATFORM_CODES = new Set(['deepseek-web', 'doubao-web']);
@@ -382,6 +385,25 @@ class AIPlatformConfigService {
       if (isObsoleteDoubaoPreset) {
         await row.update({ request_options: {}, ...this.untestedState() });
       }
+    }
+
+    const deepSeek = await this.model.findOne({ where: { code: 'deepseek' } });
+    let deepSeekState;
+    try {
+      deepSeekState = inspectDeepSeekFlashConfigRow(deepSeek);
+    } catch (error) {
+      throw new PlatformConfigError(
+        'DeepSeek 正式配置不满足 Flash builtin 身份合同',
+        'deepseek_flash_config_invalid',
+        503
+      );
+    }
+    if (!deepSeekState.ready) {
+      throw new PlatformConfigError(
+        'DeepSeek 正式配置尚未完成 Flash 发布迁移',
+        'deepseek_flash_config_migration_required',
+        503
+      );
     }
   }
 

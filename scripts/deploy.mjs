@@ -36,6 +36,11 @@ const v5SnapshotMigrationScript = path.join(
   'scripts',
   'migrateV5SnapshotFields.js'
 );
+const deepSeekFlashConfigMigrationScript = path.join(
+  backendDirectory,
+  'scripts',
+  'migrateDeepSeekFlashConfig.js'
+);
 const marketingMigrationScript = path.join(
   backendDirectory,
   'scripts',
@@ -340,11 +345,11 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
   try {
     let revision;
     if (preparedRevision) {
-      console.log('1/13 校验已上传的预置版本');
+      console.log('1/14 校验已上传的预置版本');
       revision = await git(['rev-parse', 'HEAD']);
       assertPreparedRevision(preparedRevision, revision);
     } else {
-      console.log('1/13 拉取 origin/main');
+      console.log('1/14 拉取 origin/main');
       await run('git', ['pull', '--ff-only', 'origin', 'main'], {
         label: 'git pull',
       });
@@ -357,14 +362,14 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     const checked = await checkPreconditions();
     await installDeploymentGate();
 
-    console.log('2/13 停止受管生产进程');
+    console.log('2/14 停止受管生产进程');
     await run(process.execPath, [productionScript, 'stop'], {
       label: '停止生产进程',
     });
     servicesStopped = true;
 
     if (checked.databaseType === 'sqlite') {
-      console.log('3/13 创建不可覆盖的 release 备份并更新 SQLite 最新备份');
+      console.log('3/14 创建不可覆盖的 release 备份并更新 SQLite 最新备份');
       const backupPath =
         process.env.AI_GEO_SQLITE_BACKUP_PATH ||
         path.join(
@@ -407,7 +412,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       databaseBackupReference = releaseBackupPath;
       databaseBackupManifest = releaseBackupManifest;
     } else {
-      console.log('3/13 使用外部 Postgres，检查外部备份确认');
+      console.log('3/14 使用外部 Postgres，检查外部备份确认');
       databaseBackupReference = String(
         process.env.AI_GEO_DATABASE_BACKUP_REFERENCE || ''
       ).trim();
@@ -418,12 +423,12 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       }
     }
 
-    console.log('4/13 安装后端依赖');
+    console.log('4/14 安装后端依赖');
     await run('npm', ['ci', '--include=dev'], {
       cwd: backendDirectory,
       label: '后端 npm ci',
     });
-    console.log('5/13 运行后端测试');
+    console.log('5/14 运行后端测试');
     await run('npm', ['test'], { cwd: backendDirectory, label: '后端测试' });
     await run('npm', ['run', 'test:marketing'], {
       cwd: backendDirectory,
@@ -437,7 +442,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       cwd: backendDirectory,
       label: '后端原始咨询测试',
     });
-    console.log('6/13 安装并静态检查前端依赖');
+    console.log('6/14 安装并静态检查前端依赖');
     await run('npm', ['ci', '--include=dev'], {
       cwd: frontendDirectory,
       label: '前端 npm ci',
@@ -450,7 +455,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       cwd: frontendDirectory,
       label: '前端 lint',
     });
-    console.log('7/13 构建并验收前端生产产物');
+    console.log('7/14 构建并验收前端生产产物');
     await run('npm', ['run', 'build'], {
       cwd: frontendDirectory,
       env: { ...process.env, AI_GEO_BUILD_REVISION: revision },
@@ -469,7 +474,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     } else {
       migrationEnvironment.DATABASE_URL = backendConfig.DATABASE_URL;
     }
-    console.log('8/13 迁移并复审 v5 快照字段');
+    console.log('8/14 迁移并复审 v5 快照字段');
     const v5SnapshotTargetArguments = checked.databaseType === 'sqlite'
       ? [`--db=${checked.databasePath}`]
       : [];
@@ -509,7 +514,38 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       }
     );
 
-    console.log('9/13 迁移并复审 GEO 指标语义');
+    console.log('9/14 迁移并复审 DeepSeek Flash 正式配置');
+    const deepSeekConfigTargetArguments = checked.databaseType === 'sqlite'
+      ? [`--db=${checked.databasePath}`]
+      : [];
+    await run(
+      process.execPath,
+      [
+        deepSeekFlashConfigMigrationScript,
+        '--apply',
+        ...deepSeekConfigTargetArguments,
+      ],
+      {
+        cwd: backendDirectory,
+        env: migrationEnvironment,
+        label: 'DeepSeek Flash 配置迁移',
+      }
+    );
+    await run(
+      process.execPath,
+      [
+        deepSeekFlashConfigMigrationScript,
+        '--require-ready',
+        ...deepSeekConfigTargetArguments,
+      ],
+      {
+        cwd: backendDirectory,
+        env: migrationEnvironment,
+        label: 'DeepSeek Flash 配置迁移复审',
+      }
+    );
+
+    console.log('10/14 迁移并复审 GEO 指标语义');
     await run(
       process.execPath,
       [
@@ -529,7 +565,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: 'GEO 指标语义迁移复审',
     });
 
-    console.log('10/13 应用并复审营销模块迁移');
+    console.log('11/14 应用并复审营销模块迁移');
     await run(process.execPath, [
       marketingMigrationScript,
       '--apply',
@@ -545,7 +581,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '营销模块迁移复审',
     });
 
-    console.log('11/13 应用并复审官网数据迁移');
+    console.log('12/14 应用并复审官网数据迁移');
     await run(process.execPath, [websiteDataMigrationScript, '--apply'], {
       cwd: backendDirectory,
       env: migrationEnvironment,
@@ -557,7 +593,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '官网数据迁移复审',
     });
 
-    console.log('12/13 应用并复审原始咨询迁移');
+    console.log('13/14 应用并复审原始咨询迁移');
     await run(process.execPath, [consultationRecordMigrationScript, '--apply'], {
       cwd: backendDirectory,
       env: migrationEnvironment,
@@ -569,7 +605,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '原始咨询迁移复审',
     });
 
-    console.log('13/13 启动并检查前后端');
+    console.log('14/14 启动并检查前后端');
     await fs.promises.mkdir(runtimeDirectory, { recursive: true });
     await fs.promises.writeFile(releaseRevisionPath, `${revision}\n`, {
       mode: 0o600

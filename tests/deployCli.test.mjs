@@ -210,6 +210,10 @@ test('deployment builds the current frontend before browser acceptance and migra
     "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `v5-snapshot-migration:${process.argv.slice(2).join(' ')}\\n`); if (process.argv.includes('--require-ready') && process.env.AI_GEO_V5_AUDIT_FAIL === 'true') process.exit(9);\n"
   );
   fs.writeFileSync(
+    path.join(directory, 'backend', 'scripts', 'migrateDeepSeekFlashConfig.js'),
+    "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `deepseek-flash-config-migration:${process.argv.slice(2).join(' ')}\\n`); if (process.argv.includes('--require-ready') && process.env.AI_GEO_DEEPSEEK_CONFIG_AUDIT_FAIL === 'true') process.exit(9);\n"
+  );
+  fs.writeFileSync(
     path.join(directory, 'backend', 'scripts', 'migrateMarketing.js'),
     "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `marketing-migration:${process.argv.slice(2).join(' ')}\\n`);\n"
   );
@@ -281,6 +285,12 @@ test('deployment builds the current frontend before browser acceptance and migra
   const v5SnapshotAuditIndex = trace.indexOf(
     `v5-snapshot-migration:--require-ready --quick-check --db=${path.join(directory, 'backend', 'database.sqlite')}`
   );
+  const deepSeekConfigApplyIndex = trace.indexOf(
+    `deepseek-flash-config-migration:--apply --db=${path.join(directory, 'backend', 'database.sqlite')}`
+  );
+  const deepSeekConfigAuditIndex = trace.indexOf(
+    `deepseek-flash-config-migration:--require-ready --db=${path.join(directory, 'backend', 'database.sqlite')}`
+  );
   const applyIndex = trace.findIndex((line) => line.startsWith('migration:--apply '));
   const auditIndex = trace.indexOf('migration:');
   const marketingApplyIndex = trace.indexOf(
@@ -306,7 +316,9 @@ test('deployment builds the current frontend before browser acceptance and migra
   assert.ok(v5SnapshotApplyIndex > releaseBackupIndex);
   assert.ok(v5SnapshotApplyIndex > browserAcceptanceIndex);
   assert.ok(v5SnapshotAuditIndex > v5SnapshotApplyIndex);
-  assert.ok(applyIndex > v5SnapshotAuditIndex);
+  assert.ok(deepSeekConfigApplyIndex > v5SnapshotAuditIndex);
+  assert.ok(deepSeekConfigAuditIndex > deepSeekConfigApplyIndex);
+  assert.ok(applyIndex > deepSeekConfigAuditIndex);
   assert.ok(applyIndex > releaseBackupIndex);
   assert.ok(applyIndex > browserAcceptanceIndex);
   assert.ok(auditIndex > applyIndex);

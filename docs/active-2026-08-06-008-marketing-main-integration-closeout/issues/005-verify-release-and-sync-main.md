@@ -1,9 +1,8 @@
 ---
 title: "完整验收发布并对齐 main"
-status: blocked
+status: in_progress
 type: release
-blocked_by:
-  - "004-use-manifest-report-endpoint.md"
+blocked_by: []
 ---
 
 # 完整验收发布并对齐 main

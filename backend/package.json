@@ -24,6 +24,8 @@
     "migrate:geo-metric-semantics": "node scripts/migrateGeoMetricSemantics.js --apply",
     "audit:v5-snapshot": "node scripts/migrateV5SnapshotFields.js --require-ready",
     "migrate:v5-snapshot": "node scripts/migrateV5SnapshotFields.js --apply",
+    "audit:deepseek-flash-config": "node scripts/migrateDeepSeekFlashConfig.js --require-ready",
+    "migrate:deepseek-flash-config": "node scripts/migrateDeepSeekFlashConfig.js --apply",
     "setup:local-key": "node scripts/setupLocalEncryptionKey.js",
     "web:login": "node scripts/webLogin.js"
   },

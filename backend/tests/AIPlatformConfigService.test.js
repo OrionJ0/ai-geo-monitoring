@@ -384,6 +384,56 @@ test('010 硬切：DeepSeek 分析预设保持 deepseek-v4-flash，不再迁移�
   assert.equal(deepseek.default_model, 'deepseek-v4-flash');
 });
 
+test('startup fails closed on the known Pro preset until the explicit release migration runs', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'deepseek',
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.deepseek.com/v1/chat/completions',
+    encrypted_api_key: 'already-encrypted',
+    api_key_last4: '1234',
+    default_model: 'deepseek-v4-pro',
+    request_options: {},
+    enabled: true,
+    builtin: true
+  });
+
+  await assert.rejects(service.ensurePresets(), (error) => {
+    assert.equal(error.code, 'deepseek_flash_config_migration_required');
+    return true;
+  });
+  const deepseek = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+  assert.equal(deepseek.default_model, 'deepseek-v4-pro');
+  assert.equal(deepseek.encrypted_api_key, 'already-encrypted');
+  assert.equal(deepseek.enabled, true);
+});
+
+test('startup fails closed on a custom DeepSeek identity without overwriting it', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'deepseek',
+    name: 'DeepSeek 企业代理',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://proxy.example.invalid/v1',
+    encrypted_api_key: 'custom-encrypted',
+    api_key_last4: '9999',
+    default_model: 'deepseek-v4-flash',
+    request_options: {},
+    enabled: true,
+    builtin: true
+  });
+
+  await assert.rejects(service.ensurePresets(), (error) => {
+    assert.equal(error.code, 'deepseek_flash_config_invalid');
+    return true;
+  });
+  const deepseek = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+  assert.equal(deepseek.name, 'DeepSeek 企业代理');
+  assert.equal(deepseek.base_url, 'https://proxy.example.invalid/v1');
+  assert.equal(deepseek.encrypted_api_key, 'custom-encrypted');
+});
+
 test('stores an encrypted API key and never exposes stored secret fields', async () => {
   const service = createService();
   await service.ensurePresets();

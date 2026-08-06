@@ -4,7 +4,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Op } = require('sequelize');
 
-const { BrandProject, DetectionSchedule, QuestionRecord, TrackedPrompt, User } = require('../models');
+const {
+  BrandCompetitor,
+  BrandProject,
+  DetectionSchedule,
+  QuestionRecord,
+  TrackedPrompt,
+  User
+} = require('../models');
 const ProjectRunService = require('../services/ProjectRunService');
 const SchedulerService = require('../services/SchedulerService');
 
@@ -214,9 +221,11 @@ test('scheduled runs do not consume quota or create records when all platforms a
 });
 
 test('scheduled detection records retain their execution ledger id', async () => {
+  const originalFindCompetitors = BrandCompetitor.findAll;
   const originalCreateRecord = QuestionRecord.create;
   const originalUpdateRecord = QuestionRecord.update;
   const createdPayloads = [];
+  BrandCompetitor.findAll = async () => [];
   QuestionRecord.create = async (payload) => {
     createdPayloads.push(payload);
     return { id: 91 };
@@ -261,6 +270,7 @@ test('scheduled detection records retain their execution ledger id', async () =>
       'contextual_competitor_mentions_sov_v2_scoped'
     );
   } finally {
+    BrandCompetitor.findAll = originalFindCompetitors;
     QuestionRecord.create = originalCreateRecord;
     QuestionRecord.update = originalUpdateRecord;
   }

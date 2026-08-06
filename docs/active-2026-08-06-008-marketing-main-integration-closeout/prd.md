@@ -1,6 +1,6 @@
 ---
 title: "营销工作线主分支集成与治理收尾"
-status: blocked
+status: active
 owner: Codex
 depends_on:
   - "../closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md"
