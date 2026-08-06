@@ -227,8 +227,13 @@ test('recovers a pre-upgrade claimed record that has no lease expiry', async () 
 test('heartbeat renews a long-running lease until explicitly stopped', async () => {
   const originalRenew = ProjectRunService.renewRecordExecutionLease;
   let renewals = 0;
+  let resolveTwoRenewals;
+  const twoRenewals = new Promise((resolve) => {
+    resolveTwoRenewals = resolve;
+  });
   ProjectRunService.renewRecordExecutionLease = async () => {
     renewals += 1;
+    if (renewals >= 2) resolveTwoRenewals();
     return true;
   };
 
@@ -239,7 +244,14 @@ test('heartbeat renews a long-running lease until explicitly stopped', async () 
       leaseMs: 90,
       heartbeatMs: 10
     });
-    await new Promise((resolve) => setTimeout(resolve, 35));
+    let timeout;
+    await Promise.race([
+      twoRenewals,
+      new Promise((resolve) => {
+        timeout = setTimeout(resolve, 500);
+      })
+    ]);
+    clearTimeout(timeout);
     await heartbeat.stop();
     assert.ok(renewals >= 2);
   } finally {
