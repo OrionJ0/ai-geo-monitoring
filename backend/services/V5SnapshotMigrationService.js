@@ -1,24 +1,11 @@
 const { DataTypes } = require('sequelize');
 
-function migrationError(message, code) {
-  const error = new Error(message);
+function migrationError(message, code, cause) {
+  const error = new Error(message, cause ? { cause } : undefined);
   error.code = code;
   return error;
 }
 
-function quote(database, identifier) {
-  return database.getQueryInterface().queryGenerator.quoteIdentifier(identifier);
-}
-
-function quoteTable(database, tableName) {
-  return database.getQueryInterface().queryGenerator.quoteTable(tableName);
-}
-
-/**
- * v5 候选分析的 additive 迁移：为 question_records 增加 competitor_snapshot
- * 列。只新增列，不改写已存在的行；SQLite 与 Postgres 均使用
- * `ALTER TABLE ADD COLUMN`，历史数据保持原样。
- */
 class V5SnapshotMigrationService {
   expectedColumns() {
     return {
@@ -32,13 +19,58 @@ class V5SnapshotMigrationService {
   }
 
   async describe(database) {
+    const queryInterface = database.getQueryInterface();
+    let tableNames;
+    try {
+      tableNames = await queryInterface.showAllTables();
+    } catch (error) {
+      throw migrationError(
+        '数据库表清单读取失败',
+        'V5_SNAPSHOT_DATABASE_AUDIT_FAILED',
+        error
+      );
+    }
+    const existingTables = new Set(tableNames.map((entry) => (
+      typeof entry === 'string'
+        ? entry
+        : entry?.tableName || entry?.table_name || entry?.name
+    )));
     const descriptions = {};
     for (const tableName of Object.keys(this.expectedColumns())) {
-      descriptions[tableName] = await database
-        .getQueryInterface()
-        .describeTable(tableName);
+      if (!existingTables.has(tableName)) {
+        throw migrationError(
+          `缺少必须的现有数据表：${tableName}`,
+          'V5_SNAPSHOT_REQUIRED_TABLE_MISSING'
+        );
+      }
+      try {
+        descriptions[tableName] = await queryInterface.describeTable(tableName);
+      } catch (error) {
+        throw migrationError(
+          `数据表结构读取失败：${tableName}`,
+          'V5_SNAPSHOT_DATABASE_AUDIT_FAILED',
+          error
+        );
+      }
     }
     return descriptions;
+  }
+
+  columnMismatches(tableName, columnName, actual) {
+    if (!actual) return [];
+    const qualifiedName = `${tableName}.${columnName}`;
+    const type = String(actual.type || '').trim().toUpperCase();
+    const mismatches = [];
+    if (type !== 'JSON' && type !== 'JSONB') {
+      mismatches.push(`${qualifiedName}:type`);
+    }
+    if (actual.allowNull !== true) {
+      mismatches.push(`${qualifiedName}:nullable`);
+    }
+    if (actual.defaultValue !== null && actual.defaultValue !== undefined) {
+      mismatches.push(`${qualifiedName}:default`);
+    }
+    return mismatches;
   }
 
   async audit(options = {}) {
@@ -48,17 +80,26 @@ class V5SnapshotMigrationService {
     }
     const descriptions = await this.describe(database);
     const missingColumns = [];
+    const schemaMismatches = [];
     for (const [tableName, columns] of Object.entries(this.expectedColumns())) {
       for (const columnName of Object.keys(columns)) {
         if (!descriptions[tableName][columnName]) {
           missingColumns.push(`${tableName}.${columnName}`);
+          continue;
         }
+        schemaMismatches.push(...this.columnMismatches(
+          tableName,
+          columnName,
+          descriptions[tableName][columnName]
+        ));
       }
     }
     return {
       dialect: database.getDialect(),
       missing_columns: missingColumns,
-      migration_required: missingColumns.length > 0
+      schema_mismatches: schemaMismatches,
+      migration_required: missingColumns.length > 0,
+      ready: missingColumns.length === 0 && schemaMismatches.length === 0
     };
   }
 
@@ -70,9 +111,8 @@ class V5SnapshotMigrationService {
     const descriptions = await this.describe(database);
     const applied = [];
     for (const [tableName, columns] of Object.entries(this.expectedColumns())) {
-      for (const columnName of Object.keys(columns)) {
+      for (const [columnName, column] of Object.entries(columns)) {
         if (descriptions[tableName][columnName]) continue;
-        const column = columns[columnName];
         await database.getQueryInterface().addColumn(
           tableName,
           columnName,
@@ -82,9 +122,22 @@ class V5SnapshotMigrationService {
       }
     }
     const audit = await this.audit({ sequelize: database });
+    if (!audit.ready) {
+      const error = migrationError(
+        'v5 快照字段迁移后复审未通过',
+        'V5_SNAPSHOT_MIGRATION_INCOMPLETE'
+      );
+      error.missing_columns = audit.missing_columns;
+      error.schema_mismatches = audit.schema_mismatches;
+      throw error;
+    }
     return {
+      dialect: audit.dialect,
       applied_columns: applied,
-      migration_required: audit.migration_required
+      missing_columns: audit.missing_columns,
+      schema_mismatches: audit.schema_mismatches,
+      migration_required: audit.migration_required,
+      ready: audit.ready
     };
   }
 }

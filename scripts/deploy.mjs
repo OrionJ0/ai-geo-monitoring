@@ -31,6 +31,11 @@ const geoMetricMigrationScript = path.join(
   'scripts',
   'migrateGeoMetricSemantics.js'
 );
+const v5SnapshotMigrationScript = path.join(
+  backendDirectory,
+  'scripts',
+  'migrateV5SnapshotFields.js'
+);
 const marketingMigrationScript = path.join(
   backendDirectory,
   'scripts',
@@ -103,6 +108,36 @@ function requirePrivateFile(filename, description) {
   }
 }
 
+function assertDatabaseEnvironmentMatchesConfig(config) {
+  const configuredDatabaseUrl = String(config.DATABASE_URL || '').trim();
+  const environmentDatabaseUrl = String(process.env.DATABASE_URL || '').trim();
+  if (environmentDatabaseUrl && environmentDatabaseUrl !== configuredDatabaseUrl) {
+    throw new Error('运行环境 DATABASE_URL 与已校验 .env 不一致');
+  }
+  if (configuredDatabaseUrl) {
+    if (String(process.env.DB_STORAGE || '').trim()) {
+      throw new Error('Postgres 部署环境不得同时覆盖 DB_STORAGE');
+    }
+    return;
+  }
+  if (environmentDatabaseUrl) {
+    throw new Error('SQLite 部署环境不得覆盖 DATABASE_URL');
+  }
+  const environmentStorage = String(process.env.DB_STORAGE || '').trim();
+  if (!environmentStorage) return;
+  const configuredStorage = path.resolve(
+    backendDirectory,
+    config.DB_STORAGE || 'database.sqlite'
+  );
+  const resolvedEnvironmentStorage = path.resolve(
+    backendDirectory,
+    environmentStorage
+  );
+  if (resolvedEnvironmentStorage !== configuredStorage) {
+    throw new Error('运行环境 DB_STORAGE 与已校验 .env 不一致');
+  }
+}
+
 async function git(args) {
   const { stdout } = await execFileAsync('git', args, {
     cwd: projectRoot,
@@ -129,6 +164,7 @@ export async function checkPreconditions() {
   }
   const config = parseEnvFile(backendEnvPath);
   requirePrivateFile(backendEnvPath, '后端环境文件');
+  assertDatabaseEnvironmentMatchesConfig(config);
   if ((process.env.NODE_ENV || config.NODE_ENV) !== 'production') {
     throw new Error('NODE_ENV 必须显式设置为 production');
   }
@@ -214,6 +250,13 @@ function assertPreparedRevision(expectedRevision, actualRevision) {
   }
 }
 
+export function buildV5SnapshotAuditArguments(databaseType, databasePath = '') {
+  if (databaseType === 'sqlite') {
+    return ['--require-ready', '--quick-check', `--db=${databasePath}`];
+  }
+  return ['--require-ready'];
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -292,15 +335,16 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
   if (!lockAlreadyAcquired) await acquireDeploymentLock();
   let servicesStopped = false;
   let databaseBackupReference = '';
+  let databaseBackupManifest = '';
 
   try {
     let revision;
     if (preparedRevision) {
-      console.log('1/12 校验已上传的预置版本');
+      console.log('1/13 校验已上传的预置版本');
       revision = await git(['rev-parse', 'HEAD']);
       assertPreparedRevision(preparedRevision, revision);
     } else {
-      console.log('1/12 拉取 origin/main');
+      console.log('1/13 拉取 origin/main');
       await run('git', ['pull', '--ff-only', 'origin', 'main'], {
         label: 'git pull',
       });
@@ -313,14 +357,14 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
     const checked = await checkPreconditions();
     await installDeploymentGate();
 
-    console.log('2/12 停止受管生产进程');
+    console.log('2/13 停止受管生产进程');
     await run(process.execPath, [productionScript, 'stop'], {
       label: '停止生产进程',
     });
     servicesStopped = true;
 
     if (checked.databaseType === 'sqlite') {
-      console.log('3/12 创建不可覆盖的 release 备份并更新 SQLite 最新备份');
+      console.log('3/13 创建不可覆盖的 release 备份并更新 SQLite 最新备份');
       const backupPath =
         process.env.AI_GEO_SQLITE_BACKUP_PATH ||
         path.join(
@@ -330,21 +374,40 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       const releaseBackupDirectory =
         process.env.AI_GEO_SQLITE_RELEASE_BACKUP_DIR ||
         path.join(path.dirname(backupPath), 'releases');
-      const releaseBackupPath = path.join(
+      const conventionalReleaseBackupPath = path.join(
         releaseBackupDirectory,
         `database.pre-${revision}.sqlite`
       );
-      await run(
-        process.execPath,
-        [backupScript, checked.databasePath, releaseBackupPath, '--if-absent'],
-        { label: 'SQLite release 备份' }
-      );
+      const conventionalReleaseManifest = `${conventionalReleaseBackupPath}.manifest.json`;
+      const releaseBackupPath = (
+        fs.existsSync(conventionalReleaseBackupPath)
+        || fs.existsSync(conventionalReleaseManifest)
+      )
+        ? path.join(
+            releaseBackupDirectory,
+            `database.retry-${revision}.sqlite`
+          )
+        : conventionalReleaseBackupPath;
+      const releaseBackupManifest = `${releaseBackupPath}.manifest.json`;
       await run(process.execPath, [backupScript, checked.databasePath, backupPath], {
         label: 'SQLite 最新备份',
       });
+      await run(
+        process.execPath,
+        [
+          backupScript,
+          checked.databasePath,
+          releaseBackupPath,
+          '--if-absent',
+          `--manifest=${releaseBackupManifest}`,
+          `--revision=${revision}`,
+        ],
+        { label: 'SQLite release 备份' }
+      );
       databaseBackupReference = releaseBackupPath;
+      databaseBackupManifest = releaseBackupManifest;
     } else {
-      console.log('3/12 使用外部 Postgres，检查外部备份确认');
+      console.log('3/13 使用外部 Postgres，检查外部备份确认');
       databaseBackupReference = String(
         process.env.AI_GEO_DATABASE_BACKUP_REFERENCE || ''
       ).trim();
@@ -355,12 +418,12 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       }
     }
 
-    console.log('4/12 安装后端依赖');
+    console.log('4/13 安装后端依赖');
     await run('npm', ['ci', '--include=dev'], {
       cwd: backendDirectory,
       label: '后端 npm ci',
     });
-    console.log('5/12 运行后端测试');
+    console.log('5/13 运行后端测试');
     await run('npm', ['test'], { cwd: backendDirectory, label: '后端测试' });
     await run('npm', ['run', 'test:marketing'], {
       cwd: backendDirectory,
@@ -374,7 +437,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       cwd: backendDirectory,
       label: '后端原始咨询测试',
     });
-    console.log('6/12 安装并静态检查前端依赖');
+    console.log('6/13 安装并静态检查前端依赖');
     await run('npm', ['ci', '--include=dev'], {
       cwd: frontendDirectory,
       label: '前端 npm ci',
@@ -387,7 +450,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       cwd: frontendDirectory,
       label: '前端 lint',
     });
-    console.log('7/12 构建并验收前端生产产物');
+    console.log('7/13 构建并验收前端生产产物');
     await run('npm', ['run', 'build'], {
       cwd: frontendDirectory,
       env: { ...process.env, AI_GEO_BUILD_REVISION: revision },
@@ -397,9 +460,56 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       cwd: frontendDirectory,
       label: '前端营销浏览器验收',
     });
-    console.log('8/12 迁移并复审 GEO 指标语义');
     const backendConfig = parseEnvFile(path.join(backendDirectory, '.env'));
     const migrationEnvironment = { ...backendConfig, ...process.env };
+    delete migrationEnvironment.DB_STORAGE;
+    delete migrationEnvironment.DATABASE_URL;
+    if (checked.databaseType === 'sqlite') {
+      migrationEnvironment.DB_STORAGE = checked.databasePath;
+    } else {
+      migrationEnvironment.DATABASE_URL = backendConfig.DATABASE_URL;
+    }
+    console.log('8/13 迁移并复审 v5 快照字段');
+    const v5SnapshotTargetArguments = checked.databaseType === 'sqlite'
+      ? [`--db=${checked.databasePath}`]
+      : [];
+    await run(
+      process.execPath,
+      [
+        v5SnapshotMigrationScript,
+        '--apply',
+        ...v5SnapshotTargetArguments,
+        `--backup-reference=${databaseBackupReference}`,
+        ...(checked.databaseType === 'sqlite'
+          ? [
+              `--backup-manifest=${databaseBackupManifest}`,
+              `--release-revision=${revision}`,
+            ]
+          : []),
+      ],
+      {
+        cwd: backendDirectory,
+        env: migrationEnvironment,
+        label: 'v5 快照字段迁移',
+      }
+    );
+    await run(
+      process.execPath,
+      [
+        v5SnapshotMigrationScript,
+        ...buildV5SnapshotAuditArguments(
+          checked.databaseType,
+          checked.databasePath
+        ),
+      ],
+      {
+        cwd: backendDirectory,
+        env: migrationEnvironment,
+        label: 'v5 快照字段迁移复审',
+      }
+    );
+
+    console.log('9/13 迁移并复审 GEO 指标语义');
     await run(
       process.execPath,
       [
@@ -419,7 +529,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: 'GEO 指标语义迁移复审',
     });
 
-    console.log('9/12 应用并复审营销模块迁移');
+    console.log('10/13 应用并复审营销模块迁移');
     await run(process.execPath, [
       marketingMigrationScript,
       '--apply',
@@ -435,7 +545,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '营销模块迁移复审',
     });
 
-    console.log('10/12 应用并复审官网数据迁移');
+    console.log('11/13 应用并复审官网数据迁移');
     await run(process.execPath, [websiteDataMigrationScript, '--apply'], {
       cwd: backendDirectory,
       env: migrationEnvironment,
@@ -447,7 +557,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '官网数据迁移复审',
     });
 
-    console.log('11/12 应用并复审原始咨询迁移');
+    console.log('12/13 应用并复审原始咨询迁移');
     await run(process.execPath, [consultationRecordMigrationScript, '--apply'], {
       cwd: backendDirectory,
       env: migrationEnvironment,
@@ -459,7 +569,7 @@ export async function deploy(preparedRevision = '', { lockAlreadyAcquired = fals
       label: '原始咨询迁移复审',
     });
 
-    console.log('12/12 启动并检查前后端');
+    console.log('13/13 启动并检查前后端');
     await fs.promises.mkdir(runtimeDirectory, { recursive: true });
     await fs.promises.writeFile(releaseRevisionPath, `${revision}\n`, {
       mode: 0o600

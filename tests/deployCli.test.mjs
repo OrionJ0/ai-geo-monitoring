@@ -10,6 +10,18 @@ const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const deployScript = path.join(projectRoot, 'scripts', 'deploy.mjs');
 
+test('v5 snapshot audit adds quick_check only for SQLite', async () => {
+  const { buildV5SnapshotAuditArguments } = await import(deployScript);
+  assert.deepEqual(
+    buildV5SnapshotAuditArguments('sqlite', '/srv/app.sqlite'),
+    ['--require-ready', '--quick-check', '--db=/srv/app.sqlite']
+  );
+  assert.deepEqual(
+    buildV5SnapshotAuditArguments('postgres', ''),
+    ['--require-ready']
+  );
+});
+
 async function git(cwd, args) {
   return execFileAsync('git', args, { cwd });
 }
@@ -158,7 +170,7 @@ test('deployment builds the current frontend before browser acceptance and migra
   fs.mkdirSync(path.join(directory, 'scripts'), { recursive: true });
   fs.writeFileSync(
     path.join(directory, '.gitignore'),
-    'backend/.env\nbackend/database.sqlite\nbackend/database.latest.sqlite\n.runtime/\nlogs/\ndeploy-trace.log\n'
+    'backend/.env\nbackend/database.sqlite\nbackend/database.latest.sqlite\nbackend/releases/\n.runtime/\nlogs/\ndeploy-trace.log\ninstalled-deploy-gate\n'
   );
   fs.writeFileSync(path.join(directory, 'README.md'), 'fixture\n');
   fs.writeFileSync(
@@ -192,6 +204,10 @@ test('deployment builds the current frontend before browser acceptance and migra
   fs.writeFileSync(
     path.join(directory, 'backend', 'scripts', 'migrateGeoMetricSemantics.js'),
     "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `migration:${process.argv.slice(2).join(' ')}\\n`);\n"
+  );
+  fs.writeFileSync(
+    path.join(directory, 'backend', 'scripts', 'migrateV5SnapshotFields.js'),
+    "const fs = require('node:fs'); fs.appendFileSync(process.env.AI_GEO_DEPLOY_TRACE, `v5-snapshot-migration:${process.argv.slice(2).join(' ')}\\n`); if (process.argv.includes('--require-ready') && process.env.AI_GEO_V5_AUDIT_FAIL === 'true') process.exit(9);\n"
   );
   fs.writeFileSync(
     path.join(directory, 'backend', 'scripts', 'migrateMarketing.js'),
@@ -238,6 +254,8 @@ test('deployment builds the current frontend before browser acceptance and migra
         AI_GEO_PROJECT_ROOT: directory,
         AI_GEO_DEPLOY_TRACE: tracePath,
         AI_GEO_DEPLOY_GATE_PATH: path.join(directory, 'installed-deploy-gate'),
+        DB_STORAGE: '',
+        DATABASE_URL: '',
       }
     }
   );
@@ -248,13 +266,21 @@ test('deployment builds the current frontend before browser acceptance and migra
     2
   );
   const releaseBackupIndex = trace.findIndex((line) => (
-    line.includes('/releases/database.pre-') && line.endsWith(':--if-absent')
+    line.includes('/releases/database.pre-')
+    && line.includes(':--if-absent --manifest=')
+    && line.includes(' --revision=')
   ));
   const latestBackupIndex = trace.findIndex((line) => (
     line.endsWith('/backend/database.latest.sqlite:')
   ));
   const frontendBuildIndex = trace.indexOf('npm:run build');
   const browserAcceptanceIndex = trace.indexOf('npm:run test:marketing:browser');
+  const v5SnapshotApplyIndex = trace.findIndex((line) => (
+    line.startsWith('v5-snapshot-migration:--apply ')
+  ));
+  const v5SnapshotAuditIndex = trace.indexOf(
+    `v5-snapshot-migration:--require-ready --quick-check --db=${path.join(directory, 'backend', 'database.sqlite')}`
+  );
   const applyIndex = trace.findIndex((line) => line.startsWith('migration:--apply '));
   const auditIndex = trace.indexOf('migration:');
   const marketingApplyIndex = trace.indexOf(
@@ -269,10 +295,19 @@ test('deployment builds the current frontend before browser acceptance and migra
   const consultationAuditIndex = trace.indexOf('consultation-migration:');
   const startIndex = trace.indexOf('production:start');
   assert.ok(releaseBackupIndex >= 0);
-  assert.ok(latestBackupIndex > releaseBackupIndex);
-  assert.ok(frontendBuildIndex > latestBackupIndex);
+  assert.ok(releaseBackupIndex > latestBackupIndex);
+  assert.ok(frontendBuildIndex > releaseBackupIndex);
   assert.ok(browserAcceptanceIndex > frontendBuildIndex);
-  assert.ok(applyIndex > latestBackupIndex);
+  assert.ok(trace[v5SnapshotApplyIndex].includes(
+    `--db=${path.join(directory, 'backend', 'database.sqlite')}`
+  ));
+  assert.ok(trace[v5SnapshotApplyIndex].includes('--backup-manifest='));
+  assert.ok(trace[v5SnapshotApplyIndex].includes('--release-revision='));
+  assert.ok(v5SnapshotApplyIndex > releaseBackupIndex);
+  assert.ok(v5SnapshotApplyIndex > browserAcceptanceIndex);
+  assert.ok(v5SnapshotAuditIndex > v5SnapshotApplyIndex);
+  assert.ok(applyIndex > v5SnapshotAuditIndex);
+  assert.ok(applyIndex > releaseBackupIndex);
   assert.ok(applyIndex > browserAcceptanceIndex);
   assert.ok(auditIndex > applyIndex);
   assert.ok(marketingApplyIndex > auditIndex);
@@ -291,6 +326,96 @@ test('deployment builds the current frontend before browser acceptance and migra
   assert.equal(
     fs.statSync(path.join(directory, 'installed-deploy-gate')).mode & 0o777,
     0o755
+  );
+
+  const startsBeforeFailedAudit = trace.filter(
+    (line) => line === 'production:start'
+  ).length;
+  const conflictingDatabasePath = path.join(binDirectory, 'other.sqlite');
+  fs.writeFileSync(conflictingDatabasePath, 'other database\n');
+  await assert.rejects(
+    execFileAsync(
+      process.execPath,
+      [deployScript],
+      {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          PATH: `${binDirectory}:${process.env.PATH}`,
+          AI_GEO_PROJECT_ROOT: directory,
+          AI_GEO_DEPLOY_TRACE: tracePath,
+          AI_GEO_DEPLOY_GATE_PATH: path.join(directory, 'installed-deploy-gate'),
+          DB_STORAGE: conflictingDatabasePath
+        }
+      }
+    ),
+    /DB_STORAGE 与已校验 \.env 不一致/u
+  );
+  assert.equal(
+    fs.readFileSync(tracePath, 'utf8').trim().split('\n')
+      .filter((line) => line === 'production:stop').length,
+    1
+  );
+  await assert.rejects(
+    execFileAsync(
+      process.execPath,
+      [deployScript],
+      {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          PATH: `${binDirectory}:${process.env.PATH}`,
+          AI_GEO_PROJECT_ROOT: directory,
+          AI_GEO_DEPLOY_TRACE: tracePath,
+          AI_GEO_DEPLOY_GATE_PATH: path.join(directory, 'installed-deploy-gate'),
+          AI_GEO_V5_AUDIT_FAIL: 'true'
+        }
+      }
+    ),
+    /v5 快照字段迁移复审失败/u
+  );
+  const failedTrace = fs.readFileSync(tracePath, 'utf8').trim().split('\n');
+  const releaseBackups = failedTrace.filter((line) => (
+    line.includes('/releases/database.')
+    && line.includes(':--if-absent --manifest=')
+  ));
+  assert.equal(releaseBackups.length, 2);
+  assert.notEqual(releaseBackups[0], releaseBackups[1]);
+  assert.equal(
+    failedTrace.filter((line) => line === 'production:start').length,
+    startsBeforeFailedAudit
+  );
+  await assert.rejects(
+    execFileAsync(
+      process.execPath,
+      [deployScript],
+      {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          PATH: `${binDirectory}:${process.env.PATH}`,
+          AI_GEO_PROJECT_ROOT: directory,
+          AI_GEO_DEPLOY_TRACE: tracePath,
+          AI_GEO_DEPLOY_GATE_PATH: path.join(directory, 'installed-deploy-gate'),
+          AI_GEO_V5_AUDIT_FAIL: 'true'
+        }
+      }
+    ),
+    /v5 快照字段迁移复审失败/u
+  );
+  const thirdTrace = fs.readFileSync(tracePath, 'utf8').trim().split('\n');
+  const retryReleaseBackups = thirdTrace.filter((line) => (
+    line.includes('/releases/database.')
+    && line.includes(':--if-absent --manifest=')
+  ));
+  assert.equal(retryReleaseBackups.length, 3);
+  const retryBackupPaths = retryReleaseBackups.map((line) => (
+    line.slice('backup:'.length, line.indexOf(':--if-absent'))
+  ));
+  assert.equal(new Set(retryBackupPaths).size, 2);
+  assert.equal(
+    thirdTrace.filter((line) => line === 'production:start').length,
+    startsBeforeFailedAudit
   );
 });
 
