@@ -111,6 +111,15 @@ blocked_by:
 
 按四组门禁合同：**任一硬门槛失败 → "不批准硬切"，010 保持阻塞**。本次硬门槛关系 precision 92.39% < 95% 失败；语义门槛推荐 F1 83.69% < 95% 失败。排名按 NOT_EVALUABLE 发布口径标注"排名能力证据不足"（非阻塞观察项，不代表能力已认证）。v5-json-rev2 结构轨道全绿（完成率 100%、target_fact 100%、evidence/grounding 0、成本 PASS），真实缺口定位在推荐口径（过宽）与竞品关系判定——按用户裁决不重开提示词（无 rev3/rev4）、不引入多数投票。正式入口仍 v4，v5 未默认，010 继续阻塞。
 
+## 确定性问题修复与定向回归（2026-08-06，数据所有者指令，非 rev3/rev4）
+
+数据所有者裁决：v5 实际明显优于 v4（完成率 100% vs 87.65%、核心稳定率 97.53% vs 67.18%、Token 5510 vs 7535、延迟 7.0s vs 10.2s、v4 20 条结构化失败 vs v5 0），"015 未过"不等于"v4 更好"。停止提示词调优，改产品目标导向切换；处理两个确定性问题（不修改语义提示词、不引入多数投票）：
+
+1. **S53 法律主体冲突识别**（`AIEntityCatalogService.buildEntityCatalog`）：不同法律主体不得映射为目标品牌——命中实体 canonical_name 不含完整目标别名（如"上海广拓"）且呈公司法律主体形态（公司/集团/股份/科技/技术/有限/实业）时 `target_mapping=conflicting_identity`、`target_entity_id=null`；V5 服务把 conflicting_identity 并入语义轨 unavailable。目标自身全称（含完整别名）不受影响。**定向回归：S53 3/3 conflicting_identity + 语义轨 unavailable，与 truth 完全对齐（target_mapping 状态判断/成功映射 0/3 → 3/3）。**
+2. **排名 0/6 数据链路**（`AIResponseAnalysisV5Service`）：名次支持中文数字（"排名第一"，S49）；显式名次扫描扩展至目标 mention 行（行文本必须含目标 surface，防独立声明误纳入；空格与 markdown 加粗连接容忍，S50"首选 **上海广拓**"）；梯队/排序声明无法确定性提取名次时排名输出 **unavailable**（诚实关闭，不伪装 assessed null；不含首选类——"首选"提取失败=修饰其他实体=明确无排名）。**定向回归：S49/S50/S02 rank=1 正确提取（3/3），S01/S46 诚实 unavailable，S55 保持 unavailable——0/6 全错 → 3/6 正确 + 3/6 诚实关闭。**
+
+定向回归：S53/S01/S02/S46/S49/S50/S55 × 3 = 21 次真实调用（`work/geo-flash-015-fix-regression-2026-08-06/`），无整条失败、无降级。后端全量测试 1142/1142。发布合同修订见 [010 硬切与发布合同](010-hard-cut-v5-and-retire-v4.md)（核心事实硬门槛 + 最佳努力指标）。
+
 ## Blocked by
 
 - [014-targeted-flash-evidence-probe.md](014-targeted-flash-evidence-probe.md)（结构探针已通过 2026-08-06；rev2 最后一轮定向回归仅决定候选冻结为 rev2 或回退基线——不再有 rev3/rev4，不引入多数表决）

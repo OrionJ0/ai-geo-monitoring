@@ -281,12 +281,29 @@ function buildEntityCatalog({ answer: inputAnswer, sourceMap, extractedMentions,
   const targetAliases = [targetBrand?.name, ...(Array.isArray(targetBrand?.aliases) ? targetBrand.aliases : [])]
     .map(normalizedName)
     .filter(Boolean);
+  // 2026-08-06 数据所有者指令：不同法律主体不得映射成目标品牌。
+  // 第三轮裁决规则 4：完整法律主体中的同名短词不自动映射为目标；没有同位
+  // 证据时，"深圳市广拓科技有限公司"≠ 目标"上海广拓/Gato"（S53）。
+  // 判定：命中实体的 canonical_name 不含任一完整目标别名（≥4 字符的完整
+  // 中文形式或英文 alias），仅靠短词子串命中，且实体名呈公司法律主体形态
+  // （公司/集团/股份/科技/技术/有限/实业）→ conflicting_identity。
+  // 目标自身全称（如"上海广拓信息技术有限公司"，含完整别名"上海广拓"）
+  // 不受影响，仍按 resolved 映射。
+  const isConflictingLegalEntity = (entity) => {
+    const name = normalizedName(entity?.name || '');
+    if (!name) return false;
+    if (!/(?:有限公司|集团|股份|科技|技术|实业)/u.test(name)) return false;
+    return !targetAliases.some((alias) => alias.length >= 4 && name.includes(alias));
+  };
   const targetMatches = entities.filter((entity) => (
     entity.surface_forms.some((surfaceForm) => targetAliasMatchesSurface(surfaceForm, targetAliases))
   ));
+  const conflictingMatches = targetMatches.filter((entity) => isConflictingLegalEntity(entity));
   // 目标事实轨与目标映射分离：presence/count 由确定性 buildTargetMentions 决定，
   // 映射歧义只关闭需要唯一实体 ID 的目标语义，不清空目标事实、不抛整条错误。
-  const targetEntityId = targetMatches.length === 1 ? targetMatches[0].entity_id : null;
+  const targetEntityId = targetMatches.length === 1 && conflictingMatches.length === 0
+    ? targetMatches[0].entity_id
+    : null;
   const targetMentions = targetAliases.length > 0
     ? buildTargetMentions(sourceMap, targetBrand)
     : [];
@@ -294,7 +311,9 @@ function buildEntityCatalog({ answer: inputAnswer, sourceMap, extractedMentions,
     ? 'invalid_input'
     : (targetMatches.length === 0
       ? 'not_applicable'
-      : (targetMatches.length === 1 ? 'resolved' : 'ambiguous'));
+      : (conflictingMatches.length === targetMatches.length && conflictingMatches.length > 0
+        ? 'conflicting_identity'
+        : (targetMatches.length === 1 ? 'resolved' : 'ambiguous')));
   const targetMapping = {
     status: targetMappingStatus,
     target_entity_id: targetEntityId,
