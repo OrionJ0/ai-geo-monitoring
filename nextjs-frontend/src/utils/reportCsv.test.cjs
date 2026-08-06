@@ -257,6 +257,26 @@ test('新版 summary 缺少同版本外层报告时拒绝导出', () => {
   }), /项目报告与 summary 的指标语义版本不一致/);
 });
 
+test('迁移后的 legacy 外层版本兼容未改写的历史 summary', () => {
+  const csv = buildReportCsv({
+    reportMetricSemanticsVersion: 'configured_competitor_sov_v1',
+    summary: {
+      total_checks: 2,
+      brand_mention_rate: 50,
+      platforms: [],
+      categories: [],
+      competitors: [],
+      trend: [],
+      source_domains: [],
+      source_urls: [],
+      opportunities: []
+    }
+  });
+
+  assert.match(csv, /有效分析数,2/);
+  assert.match(csv, /品牌提及率,50%/);
+});
+
 test('项目报告外层与 summary 指标版本不一致时拒绝导出', () => {
   assert.throws(() => buildReportCsv({
     reportMetricSemanticsVersion: 'contextual_competitor_mentions_sov_v1',

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  LEGACY_CONFIGURED_SOV_V1,
   isAnswerLevelSovSemantics,
   isCurrentReportSnapshot,
   getSovPresentationTitle,
@@ -10,6 +11,10 @@ const {
 
 const V1 = 'contextual_competitor_mentions_sov_v1';
 const V2 = 'contextual_competitor_mentions_sov_v2_scoped';
+
+test('共享语义常量冻结迁移后的 legacy 报告版本', () => {
+  assert.equal(LEGACY_CONFIGURED_SOV_V1, 'configured_competitor_sov_v1');
+});
 
 test('v1 与 v2 scoped 都属于回答级 SOV，但旧配置口径不属于', () => {
   assert.equal(isAnswerLevelSovSemantics(V1), true);
