@@ -138,10 +138,14 @@ function assertDatabaseEnvironmentMatchesConfig(config) {
   }
 }
 
-async function git(args) {
+async function git(args, options = {}) {
+  const signal = options.signal || activeDeploymentSignal;
+  const deadline = Number(options.deadline) || activeDeploymentDeadline;
   const { stdout } = await execFileAsync('git', args, {
     cwd: projectRoot,
     maxBuffer: 10 * 1024 * 1024,
+    ...(signal ? { signal } : {}),
+    ...(deadline ? { timeout: Math.max(1, deadline - Date.now()) } : {}),
   });
   return stdout.trim();
 }
@@ -378,6 +382,7 @@ export async function deploy(preparedRevision = '', {
   lockAlreadyAcquired = false,
   deadline = null,
   signal = null,
+  previousRevision = '',
   dependenciesPreflighted = false,
   servicesAlreadyStopped = false
 } = {}) {
@@ -475,11 +480,26 @@ export async function deploy(preparedRevision = '', {
       }
     }
 
+    const changedDependencyFiles = previousRevision && /^[a-f0-9]{40}$/u.test(previousRevision)
+      ? await git([
+          'diff', '--name-only', previousRevision, revision, '--',
+          'backend/package.json', 'backend/package-lock.json',
+          'nextjs-frontend/package.json', 'nextjs-frontend/package-lock.json'
+        ])
+      : 'unknown';
+    const reusableBridgeDependencies = LAUNCHER_ONLY_BRIDGE
+      && changedDependencyFiles === ''
+      && fs.existsSync(path.join(backendDirectory, 'node_modules'))
+      && fs.existsSync(path.join(frontendDirectory, 'node_modules'));
     console.log('4/13 安装后端依赖');
-    await run('npm', ['ci', ...(dependenciesPreflighted ? ['--offline'] : []), '--include=dev'], {
-      cwd: backendDirectory,
-      label: '后端 npm ci',
-    });
+    if (!reusableBridgeDependencies) {
+      await run('npm', ['ci', ...(dependenciesPreflighted ? ['--offline'] : []), '--include=dev'], {
+        cwd: backendDirectory,
+        label: '后端 npm ci',
+      });
+    } else {
+      console.log('launcher-only bridge 锁文件未变，复用现役后端依赖');
+    }
     console.log('5/13 运行后端测试');
     await run('npm', ['test'], { cwd: backendDirectory, label: '后端测试' });
     await run('npm', ['run', 'test:marketing'], {
@@ -495,10 +515,14 @@ export async function deploy(preparedRevision = '', {
       label: '后端原始咨询测试',
     });
     console.log('6/13 安装并静态检查前端依赖');
-    await run('npm', ['ci', ...(dependenciesPreflighted ? ['--offline'] : []), '--include=dev'], {
-      cwd: frontendDirectory,
-      label: '前端 npm ci',
-    });
+    if (!reusableBridgeDependencies) {
+      await run('npm', ['ci', ...(dependenciesPreflighted ? ['--offline'] : []), '--include=dev'], {
+        cwd: frontendDirectory,
+        label: '前端 npm ci',
+      });
+    } else {
+      console.log('launcher-only bridge 锁文件未变，复用现役前端依赖');
+    }
     await run('npm', ['test'], {
       cwd: frontendDirectory,
       label: '前端营销单元测试',

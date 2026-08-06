@@ -44,6 +44,33 @@ function readAcceptanceBudgetResult(filename) {
   return requiredAcceptanceMs;
 }
 
+export async function isVerifiedLauncherOnlyBridge({
+  projectRoot,
+  previousRevision,
+  revision,
+  signal,
+  deadline
+}) {
+  const allowed = new Set([
+    '.github/workflows/deploy-production.yml',
+    'scripts/deploy-from-bundle.mjs',
+    'scripts/deploy.mjs',
+    'tests/deployBundle.test.mjs'
+  ]);
+  const { stdout } = await execFileAsync(
+    'git',
+    ['diff', '--name-only', previousRevision, revision],
+    {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      ...(signal ? { signal } : {}),
+      timeout: remainingTimeout(deadline)
+    }
+  );
+  const changed = stdout.split(/\r?\n/u).filter(Boolean);
+  return changed.length > 0 && changed.every((filename) => allowed.has(filename));
+}
+
 export function runManagedCommand(command, args, {
   cwd,
   env = process.env,
@@ -321,7 +348,14 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
       signal,
       deadline
     });
-    const launcherOnlyBridge = candidateDeploy.LAUNCHER_ONLY_BRIDGE === true;
+    const launcherOnlyBridge = candidateDeploy.LAUNCHER_ONLY_BRIDGE === true
+      && await isVerifiedLauncherOnlyBridge({
+        projectRoot: checkout,
+        previousRevision: prepared.previousRevision,
+        revision: prepared.revision,
+        signal,
+        deadline
+      });
     await runManagedCommand('npm', ['ci', '--include=dev'], {
       cwd: path.join(checkout, 'backend'),
       signal,

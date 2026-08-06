@@ -17,6 +17,7 @@ const {
   resolveCurrentReleaseState,
   runManagedCommand,
   assertActivationBudget,
+  isVerifiedLauncherOnlyBridge,
 } = bundleDeployment;
 
 const execFileAsync = promisify(execFile);
@@ -27,6 +28,33 @@ async function git(cwd, args) {
 
 test('dynamic-budget bridge explicitly keeps the v4 runtime contract unchanged', async () => {
   assert.equal(await isGeo010ContractChanged(), false);
+});
+
+test('launcher-only recovery exemption is bound to an exact file allowlist', async () => {
+  const root = path.resolve(import.meta.dirname, '..');
+  const deadline = Date.now() + 30_000;
+  assert.equal(await isVerifiedLauncherOnlyBridge({
+    projectRoot: root,
+    previousRevision: '387ae45ae6b58bf5a89b59ed43d6e6cc52209fff',
+    revision: 'a45ad59e8b035adc1ee93bd4107fedb72b86382c',
+    deadline
+  }), true);
+  assert.equal(await isVerifiedLauncherOnlyBridge({
+    projectRoot: root,
+    previousRevision: '387ae45ae6b58bf5a89b59ed43d6e6cc52209fff',
+    revision: '864b236',
+    deadline
+  }), false);
+});
+
+test('launcher-only self deployment reuses unchanged installed dependencies', () => {
+  const source = fs.readFileSync(
+    path.join(path.resolve(import.meta.dirname, '..'), 'scripts', 'deploy.mjs'),
+    'utf8'
+  );
+  assert.match(source, /changedDependencyFiles === ''/u);
+  assert.match(source, /fs\.existsSync\(path\.join\(backendDirectory, 'node_modules'\)\)/u);
+  assert.match(source, /if \(!reusableBridgeDependencies\)/u);
 });
 
 test('verified bundle fast-forwards a clean main checkout without contacting origin', async (t) => {
