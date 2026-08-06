@@ -2,7 +2,7 @@
 
 ## 当前正式单机实例
 
-> 本节记录 2026-07-31 域名切换完成时已经验证的生产真值。运行状态会变化；
+> 本节记录截至 2026-08-07 00:34 CST 现场复核的生产真值。运行状态会变化；
 > 回答“现在是否正常”或“服务器是否最新”前，仍需按本节命令重新检查。
 
 | 项目 | 当前值与边界 |
@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-06 统一发布启动桥 Git Bundle 已部署 `387ae45ae6b58bf5a89b59ed43d6e6cc52209fff`；公开前后端 revision、服务器 `HEAD` 一致且工作区干净，两个 systemd 服务 active，v5 快照审计为 `missing_columns=[]`、`schema_mismatches=[]`、`quick_check=ok`。该桥只替换正式 Bundle 启动器及其测试，应用仍运行 v4/Pro，未切换 v5、未新增营销运行时；是否仍为最新必须现场比较服务器 `HEAD`、`origin/main` 与工作区状态 |
+| 当前已验证源码版本 | 2026-08-07 00:34 CST 现场确认：服务器 `HEAD`、公开后端与前端 revision 均为数据库前置/统一发布桥 `a2c1fa15800314adc7f4bcf888964e6e355d3599`，工作区变更数为 0，两个 systemd 服务均为 `active`，`/api/ready` 为 `ready`。v5 快照审计返回 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`；该版本仍运行 v4/Pro，尚未切换统一 v5 候选。服务器 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629` 只是落后的远端跟踪引用，不是运行真值；是否仍为最新必须现场复核 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
