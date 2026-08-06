@@ -204,6 +204,9 @@ test('新版项目报告导出版本化回答级 SOV、样本数和实际竞品�
       avg_brand_rank: 2,
       sov_summary: {
         metric_semantics_version: current,
+        kind: 'observed_competitor_mentions',
+        scope: 'open_discovery',
+        completeness: 'not_proven',
         average: null,
         calculable_answers: 0
       },
@@ -236,7 +239,7 @@ test('新版项目报告导出版本化回答级 SOV、样本数和实际竞品�
   });
 
   assert.match(csv, /指标语义版本,contextual_competitor_mentions_sov_v2_scoped/);
-  assert.match(csv, /回答内竞品提及占比（SOV）,N\/A（有效回答 0）/);
+  assert.match(csv, /开放发现 SOV（仅基于本次已发现实体，不代表完整市场）,N\/A（有效回答 0）/);
   assert.match(csv, /分析覆盖率,75%（3 \/ 4）/);
   assert.match(csv, /品牌提及率,100%（2 \/ 2）/);
   assert.match(csv, /推荐率（AI 语义分析）,50%（1 \/ 2）/);

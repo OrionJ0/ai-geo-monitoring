@@ -61,6 +61,14 @@ function formatSov(summary) {
     : `${value}%（有效回答 ${count}）`;
 }
 
+function formatSovTitle(summary) {
+  return summary?.kind === 'observed_competitor_mentions'
+    && summary?.scope === 'open_discovery'
+    && summary?.completeness === 'not_proven'
+    ? '开放发现 SOV（仅基于本次已发现实体，不代表完整市场）'
+    : '回答内竞品提及占比（SOV）';
+}
+
 function formatCitationRate(value, row) {
   return Number(row?.citation_eligible_checks || 0) > 0 ? `${percent(value)}%` : '暂无可验证样本';
 }
@@ -196,6 +204,7 @@ export default function GeoReportsPage() {
         ? metricViews.platforms.find((item) => item.platform === platform)
         : null);
   const metricSummary = isCurrentReport ? (selectedPlatformView?.summary || {}) : summary;
+  const currentSovTitle = formatSovTitle(metricSummary.sov_summary);
   const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];
   const competitors = Array.isArray(summary.competitors) ? summary.competitors : [];
   const categories = Array.isArray(summary.categories) ? summary.categories : [];
@@ -264,7 +273,7 @@ export default function GeoReportsPage() {
         : `${percent(value)}%`
     },
     {
-      title: isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）',
+      title: isCurrentReport ? currentSovTitle : '平均声量占比（SOV）',
       dataIndex: isCurrentReport ? 'sov_summary' : 'avg_share_of_voice',
       width: 210,
       render: (value) => isCurrentReport ? formatSov(value) : `${percent(value)}%`
@@ -309,7 +318,7 @@ export default function GeoReportsPage() {
         : `${percent(value)}%`
     },
     {
-      title: isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）',
+      title: isCurrentReport ? currentSovTitle : '平均声量占比（SOV）',
       dataIndex: isCurrentReport ? 'sov_summary' : 'avg_share_of_voice',
       width: 210,
       render: (value) => isCurrentReport ? formatSov(value) : `${percent(value)}%`
@@ -342,7 +351,7 @@ export default function GeoReportsPage() {
         : `${percent(value)}%`
     },
     {
-      title: isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）',
+      title: isCurrentReport ? currentSovTitle : '平均声量占比（SOV）',
       dataIndex: isCurrentReport ? 'sov_summary' : 'avg_share_of_voice',
       width: 210,
       render: (value) => isCurrentReport ? formatSov(value) : `${percent(value)}%`
@@ -546,7 +555,7 @@ export default function GeoReportsPage() {
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="总运行数" value={metricSummary.total_runs ?? metricSummary.total_checks ?? 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '有效回答' : '有效分析数'} value={metricSummary.valid_answers ?? metricSummary.total_checks ?? 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="品牌提及率" value={isCurrentReport ? formatRate(metricSummary.brand_mention_rate, metricSummary.brand_mentioned_answers, metricSummary.brand_mention_assessed_answers ?? metricSummary.valid_answers) : `${percent(metricSummary.brand_mention_rate)}%`} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）'} value={isCurrentReport ? formatSov(metricSummary.sov_summary) : `${percent(metricSummary.avg_share_of_voice)}%`} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? currentSovTitle : '平均声量占比（SOV）'} value={isCurrentReport ? formatSov(metricSummary.sov_summary) : `${percent(metricSummary.avg_share_of_voice)}%`} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="分析覆盖率" value={isCurrentReport ? formatRate(metricSummary.analysis_coverage_rate, metricSummary.valid_answers, metricSummary.acquired_answers) : '历史报告未记录'} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="失败数" value={metricSummary.failed_runs || 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="竞品提及次数" value={(isCurrentReport ? metricSummary.competitors || [] : competitors).reduce((sum, item) => sum + Number(item.mentions || 0), 0)} /></Card></Col>

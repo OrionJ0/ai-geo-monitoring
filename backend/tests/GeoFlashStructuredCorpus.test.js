@@ -218,7 +218,7 @@ test('冻结语料加载后输出与语料清单可追溯（sample_id、question
   assert.equal(corpus.samples[0].answer_sha256, answerSha256(samples[0].response_text));
 });
 
-test('脱敏冻结语料哈希清单在干净仓库强制满足 40+ 唯一回答、六类问题与分层门槛', () => {
+test('脱敏冻结语料哈希清单在干净仓库冻结 56 个样本、54 个唯一回答及其分层', () => {
   const manifest = JSON.parse(fs.readFileSync(CORPUS_HASH_MANIFEST, 'utf8'));
   assert.equal(manifest.schema_version, 'geo_flash_corpus_hash_manifest_v1');
   assert.equal(manifest.privacy, 'raw_text_omitted');
@@ -226,9 +226,9 @@ test('脱敏冻结语料哈希清单在干净仓库强制满足 40+ 唯一回答
 
   const hashes = Object.values(manifest.answer_sha256_by_sample_id || {});
   const sampleIds = new Set(Object.keys(manifest.answer_sha256_by_sample_id || {}));
-  assert.ok(hashes.length >= 40, `清单至少 40 条，实际 ${hashes.length}`);
+  assert.equal(hashes.length, 56, `冻结清单应有 56 个样本，实际 ${hashes.length}`);
   assert.ok(hashes.every((hash) => /^[0-9a-f]{64}$/u.test(hash)), '答案哈希必须是 SHA-256');
-  assert.ok(new Set(hashes).size >= 40, `去重后至少 40 条，实际 ${new Set(hashes).size}`);
+  assert.equal(new Set(hashes).size, 54, `冻结清单应有 54 个唯一回答，实际 ${new Set(hashes).size}`);
 
   const expectedQuestionClasses = [
     'tension_fence',

@@ -55,6 +55,14 @@ function formatCurrentSov(summary) {
   return `${percent(value)}%（有效回答 ${count}）`;
 }
 
+function formatCurrentSovTitle(summary) {
+  return summary?.kind === 'observed_competitor_mentions'
+    && summary?.scope === 'open_discovery'
+    && summary?.completeness === 'not_proven'
+    ? '开放发现 SOV（仅基于本次已发现实体，不代表完整市场）'
+    : '回答内竞品提及占比（SOV）';
+}
+
 function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }) {
   const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];
   const competitors = Array.isArray(summary.competitors) ? summary.competitors : [];
@@ -66,6 +74,7 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
   const sourceChanges = summary.source_changes || {};
   const sourceSummary = summary.source_summary || {};
   const opportunities = Array.isArray(summary.opportunities) ? summary.opportunities : [];
+  const sovTitle = formatCurrentSovTitle(summary.sov_summary);
 
   return [
     ['整体概览'],
@@ -84,7 +93,7 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
       summary.brand_mentioned_answers,
       summary.brand_mention_assessed_answers ?? summary.valid_answers
     )],
-    ['回答内竞品提及占比（SOV）', formatCurrentSov(summary.sov_summary)],
+    [sovTitle, formatCurrentSov(summary.sov_summary)],
     ['推荐率（AI 语义分析）', formatCurrentRate(
       summary.recommendation_rate,
       summary.recommended_answers,
@@ -106,7 +115,7 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
     ['来源域名数', sourceSummary.source_domain_count || 0],
     [],
     ['平台表现'],
-    ['平台', '有效回答', '品牌提及率', '回答内竞品提及占比（SOV）', '引用率', '推荐率（AI 语义分析）', '明确有序榜单平均排名'],
+    ['平台', '有效回答', '品牌提及率', sovTitle, '引用率', '推荐率（AI 语义分析）', '明确有序榜单平均排名'],
     ...platforms.map((item) => [
       platformLabel[item.platform] || item.platform || '未知',
       item.valid_answers || 0,
@@ -120,7 +129,7 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
     ]),
     [],
     ['分类覆盖'],
-    ['分类', '问题数', '启用问题数', '运行数', '失败数', '有效回答', '品牌提及率', '回答内竞品提及占比（SOV）', '引用率', '推荐率（AI 语义分析）'],
+    ['分类', '问题数', '启用问题数', '运行数', '失败数', '有效回答', '品牌提及率', sovTitle, '引用率', '推荐率（AI 语义分析）'],
     ...categories.map((item) => [
       item.category || '未分类',
       item.prompt_count || 0,
@@ -143,7 +152,7 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
     ]),
     [],
     ['趋势'],
-    ['日期', '有效回答', '品牌提及率', '回答内竞品提及占比（SOV）', '引用率', '推荐率（AI 语义分析）'],
+    ['日期', '有效回答', '品牌提及率', sovTitle, '引用率', '推荐率（AI 语义分析）'],
     ...trend.map((item) => [
       item.date,
       item.valid_answers || 0,

@@ -58,6 +58,14 @@ function formatSov(summary) {
   return value === null ? `—（有效回答 ${count}）` : `${value}%（有效回答 ${count}）`;
 }
 
+function formatSovTitle(summary) {
+  return summary?.kind === 'observed_competitor_mentions'
+    && summary?.scope === 'open_discovery'
+    && summary?.completeness === 'not_proven'
+    ? '开放发现 SOV（仅基于本次已发现实体，不代表完整市场）'
+    : '回答内竞品提及占比（SOV）';
+}
+
 function formatDate(value) {
   if (!value) return '—';
   const d = new Date(value);
@@ -150,6 +158,7 @@ export default function GeoProjectDashboardPage() {
   useEffect(() => { fetchDashboard(projectId, days, platform); }, [fetchDashboard, projectId, days, platform]);
 
   const summary = useMemo(() => dashboard?.summary || {}, [dashboard]);
+  const sovMetricTitle = formatSovTitle(summary.sov_summary);
   const recentMetrics = useMemo(() => (
     Array.isArray(dashboard?.recent_metrics) ? dashboard.recent_metrics : []
   ), [dashboard]);
@@ -203,7 +212,7 @@ export default function GeoProjectDashboardPage() {
     return rows.flatMap((item) => {
       const values = [
         ['品牌提及率', item.brand_mention_rate],
-        ['回答内竞品提及占比（SOV）', item.sov_summary?.average],
+        [sovMetricTitle, item.sov_summary?.average],
         ['推荐率（AI 语义分析）', item.recommendation_rate],
       ];
       if (Number(item.citation_eligible_checks || 0) > 0) values.push(['引用率', item.citation_rate]);
@@ -212,14 +221,14 @@ export default function GeoProjectDashboardPage() {
         return normalized === null ? [] : [{ date: item.date, type, value: normalized }];
       });
     });
-  }, [dashboard]);
+  }, [dashboard, sovMetricTitle]);
 
   const platformRateChartData = useMemo(() => (
     platforms.flatMap((item) => {
       const label = platformLabel[item.platform] || item.platform || '未知';
       const values = [
         ['提及率', item.brand_mention_rate],
-        ['回答内竞品提及占比（SOV）', item.sov_summary?.average],
+        [sovMetricTitle, item.sov_summary?.average],
         ['推荐率（AI 语义分析）', item.recommendation_rate],
       ];
       if (Number(item.citation_eligible_checks || 0) > 0) values.push(['引用率', item.citation_rate]);
@@ -228,7 +237,7 @@ export default function GeoProjectDashboardPage() {
         return normalized === null ? [] : [{ platform: label, type, value: normalized }];
       });
     })
-  ), [platforms, platformLabel]);
+  ), [platforms, platformLabel, sovMetricTitle]);
   const platformCheckChartData = useMemo(() => (
     platforms.map((item) => ({
       platform: platformLabel[item.platform] || item.platform || '未知',
@@ -275,7 +284,7 @@ export default function GeoProjectDashboardPage() {
       render: (value) => Number(value || 0),
     },
     {
-      title: '回答内竞品提及占比（SOV）',
+      title: sovMetricTitle,
       dataIndex: 'sov',
       width: 180,
       render: (value) => value?.status === 'calculated'
@@ -371,7 +380,7 @@ export default function GeoProjectDashboardPage() {
       render: (value, row) => formatRate(value, row.brand_mentioned_answers, row.brand_mention_assessed_answers ?? row.valid_answers)
     },
     {
-      title: '回答内竞品提及占比（SOV）',
+      title: sovMetricTitle,
       dataIndex: 'sov_summary',
       width: 210,
       render: formatSov
@@ -514,7 +523,7 @@ export default function GeoProjectDashboardPage() {
               <Card className={styles.coreMetricCard}><Statistic title={metricTitle('品牌提及率', '目标事实已完成的回答中，提及目标品牌的回答数 ÷ 目标事实已完成回答数。')} value={formatRate(summary.brand_mention_rate, summary.brand_mentioned_answers, summary.brand_mention_assessed_answers ?? summary.valid_answers)} loading={dashboardLoading} /></Card>
             </Col>
             <Col xs={24} sm={12} lg={8}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('回答内竞品提及占比（SOV）', '目标品牌提及数 ÷ 品牌与竞品提及总数，再按回答取平均。')} value={formatSov(summary.sov_summary)} loading={dashboardLoading} /></Card>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle(sovMetricTitle, '目标品牌提及数 ÷ 品牌与本次开放发现的竞品提及总数，再按回答取平均；未证明竞品集合完整。')} value={formatSov(summary.sov_summary)} loading={dashboardLoading} /></Card>
             </Col>
             <Col xs={24} sm={12} lg={8}>
               <Card className={styles.coreMetricCard}><Statistic title={metricTitle('推荐率（AI 语义分析）', '明确推荐目标品牌的回答数 ÷ 推荐语义已评估回答数；未解决或不可用不进入分母。')} value={formatRate(summary.recommendation_rate, summary.recommended_answers, summary.recommendation_assessed_answers ?? summary.valid_answers)} loading={dashboardLoading} /></Card>

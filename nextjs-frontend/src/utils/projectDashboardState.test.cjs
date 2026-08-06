@@ -93,7 +93,8 @@ test('project dashboard presents existing metrics in a clear decision hierarchy'
 
   const coreSection = source.slice(coreIndex, runIndex);
   assert.match(coreSection, /品牌提及率/);
-  assert.match(coreSection, /回答内竞品提及占比（SOV）/);
+  assert.match(coreSection, /metricTitle\(sovMetricTitle/);
+  assert.match(source, /开放发现 SOV（仅基于本次已发现实体，不代表完整市场）/);
   assert.match(coreSection, /推荐率/);
   assert.doesNotMatch(coreSection, /平均排名/);
   assert.doesNotMatch(coreSection, /title="(?:总运行数|有效分析数|失败数|新增引用域名)"/);
@@ -101,7 +102,8 @@ test('project dashboard presents existing metrics in a clear decision hierarchy'
 
 test('project dashboard explains how each core metric is currently calculated', () => {
   assert.match(source, /目标事实已完成的回答中/);
-  assert.match(source, /目标品牌提及数 ÷ 品牌与竞品提及总数/);
+  assert.match(source, /目标品牌提及数 ÷ 品牌与本次开放发现的竞品提及总数/);
+  assert.match(source, /未证明竞品集合完整/);
   assert.match(source, /再按回答取平均/);
   assert.match(source, /推荐语义已评估回答数/);
   assert.match(source, /未解决或不可用不进入分母/);
