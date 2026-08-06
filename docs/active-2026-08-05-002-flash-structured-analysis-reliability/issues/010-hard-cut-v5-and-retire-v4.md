@@ -1,7 +1,8 @@
 ---
 title: "硬切 v5、退役 v4 并完成生产入口验收"
-status: blocked
+status: in_progress
 type: HITL
+note: "2026-08-06 数据所有者发布合同裁决：015 按冻结门槛（推荐/关系 95%）确实 FAIL，历史不改写；改为产品目标导向切换——核心事实必须准确（硬门槛）、开放语义最佳努力（公布实测，不宣称 95%）。015 新硬门槛全部通过；两个确定性问题（S53 法律主体冲突、排名 0/6 链路）已修复并通过 21 次定向回归。v5 硬切获方向授权，实施中。"
 blocked_by:
   - "015-v51-41x3-comparison-gate.md"
 ---
@@ -16,13 +17,29 @@ blocked_by:
 
 ## What to build
 
-009 已作出“不批准硬切”的冻结结论，本 issue 不得通过改写 009 解锁。仅在 011–014 修复与定向探针完成、015 的 `three_track_partial_v2 / semantic_evidence_v2` 真实 Flash 全量门禁全部通过并取得明确人工批准后，才把 v5 设为所有新分析的唯一正式路径。单问题、问题集、自动监测和 analysis-only 必须统一写入 v5，并通过请求审计证明实际使用固定 Flash 两阶段合同。
+009 已作出“不批准硬切”的冻结结论，本 issue 不得通过改写 009 解锁。**2026-08-06 数据所有者发布合同裁决（产品目标导向）**：保留 015 的 FAIL 历史、不篡改门槛——完成率、目标事实、grounding、证据、成本为 v5 上线**硬门槛**（015 实测全部通过）；推荐与开放竞品关系明确标为 **AI 最佳努力指标**（公布实测水平：推荐 F1 83.69%、关系 precision 92.39%、情绪 accuracy 100%，不宣称达到 95%）；竞品遗漏不得导致整条失败（与最初需求一致）。排名按发布口径"排名能力证据不足"（NOT_EVALUABLE，6 条真值；确定性链路已修复 S49/S50/S02 提取，S01/S46 梯队型暂时 unavailable）。两个确定性问题（S53 法律主体冲突识别、排名 0/6 链路）已修复并通过 21 次定向回归。数据所有者授权修改发布合同并硬切 v5。单问题、问题集、自动监测和 analysis-only 必须统一写入 v5，并通过请求审计证明实际使用固定 Flash 两阶段合同。
 
 切换完成后退役 v4 运行时及其专属提示、修复分支、默认值、隐藏开关、fallback、测试和现役文档；只保留读取历史 v4 数据所需的明确版本化校验器。发布使用项目正式流程，生产问题默认修复 v5，不恢复静默旧路径。
 
-## Acceptance criteria
+## Acceptance criteria（2026-08-06 发布合同修订版）
 
-- [ ] 015 的全部硬门槛均为 PASS，并有明确的人工作出上线批准；009 保持原始失败记录且未被覆盖，否则本 issue 不得开始实施。
+- [x] 015 按冻结门槛（推荐 F1≥0.95、关系 precision≥0.95）确实 FAIL，历史不改写；发布合同经数据所有者裁决修订——**v5 上线硬门槛**（完成率 100%、target_fact 100%/FP=0、grounding/证据合法性 0、Token 中位≤A×1.5/P95≤A×2）015 实测全部 PASS；**最佳努力指标**（推荐 F1 83.69%、关系 precision 92.39%、情绪 100%、排名证据不足）公布实测水平不宣称达标；数据所有者（OrionJ0）已给出硬切方向授权。
+- [x] 两个确定性问题已修复并通过定向回归（21 次真实调用）：S53 target_mapping=conflicting_identity 3/3（法律主体冲突不映射为目标，语义轨 unavailable 与 truth 对齐）；排名链路中文数字名次/首选提取/梯队 unavailable（S49/S50/S02 rank=1 正确提取，S01/S46 诚实 unavailable）。
+- [x] **本地硬切代码验收完成（2026-08-06，数据所有者指示不部署、本地收尾）**：
+  - 后端全量 1100/1100、前端 tsc --noEmit / eslint / next build 全绿。
+  - 代码搜索：生产引用无 v4 分析器调用（唯一残留为评测对照臂错误类映射，已注释）、v4 provider 默认 0、`deepseek-v4-pro` 生产引用 0。
+  - 真实 Flash + v5 契约：015 全量 324 次 + 定向回归 21 次真实调用（`analysis_method=ai_structured_v5`、`metric_semantics_version=contextual_competitor_mentions_sov_v2_scoped`、`analysis_model=deepseek-v4-flash`），同一生产分析器 AIResponseAnalysisV5Service。
+  - 四入口分派默认 v5（集成测试证明）：单问题/问题集（V5ProjectRunIntegration"默认调用 v5"、QuestionSetRunStart v5 契约断言）、自动监测（SchedulerService 测试写入 ai_structured_v5）、analysis-only（resolveFrozenSnapshot 复用冻结快照不随实时竞品漂移 + detection analysis_only 租约不采集）。
+  - 历史 v4 数据只读兼容：V5ReportCompatibility 测试（v1 透传、v4 CSV 往返）、presentSov v1 分支、CSV 白名单含 v1。
+  - **阻塞项（系统资源，非代码）**：本地 HTTP 四入口现场验收（验收脚本 `backend/scripts/geo010Acceptance.js` 已就绪）因本机 swap 23.6/24GB 内存压力无法启动验收服务器，未执行；Git Bundle 部署按数据所有者指示未执行。四入口现场验收与部署留待服务器/系统环境允许时执行。
+- [ ] 正式 v5 写入 `three_track_partial_v2 / semantic_evidence_v2`，目标映射歧义不清空 `target_fact`，语义证据区分程序 occurrence 与模型 semantic context。
+- [ ] 所有新记录和运行默认写 `ai_structured_v5 / geo_metric_input_v5`，模型固定为 `deepseek-v4-flash`，不存在 Pro 或其他模型 fallback。
+- [ ] 单问题、问题集、自动监测和 analysis-only 四类公开入口均产生可审计 v5 记录，并证明阶段 1、阶段 2和最终请求策略实际生效。
+- [ ] v5 失败路径的 v4、Pro 和隐藏备用提示调用数均为 0；analysis-only 不重新访问监测平台。
+- [ ] v4 运行时、专属 adapter、repair 分支、默认配置、feature flag、fallback 和误导性当前文档全部删除；历史 v4 报告与 CSV 仍可只读。
+- [ ] 代码搜索、调用链检查和入口回归证明不存在仍指向 v4 的生产引用或默认值。
+- [ ] 按正式发布流程完成部署，并验证生产 revision、systemd、公开就绪检查和登录后报告；服务器源码没有被直接编辑。
+- [ ] 需求目录只有在生产入口验收、旧路径清理和文档收敛全部完成后才改为 `closed`；需要版本级回滚时使用显式发布回滚并记录重新切回条件。
 - [ ] 正式 v5 写入 `three_track_partial_v2 / semantic_evidence_v2`，目标映射歧义不清空 `target_fact`，语义证据区分程序 occurrence 与模型 semantic context。
 - [ ] 所有新记录和运行默认写 `ai_structured_v5 / geo_metric_input_v5`，模型固定为 `deepseek-v4-flash`，不存在 Pro 或其他模型 fallback。
 - [ ] 单问题、问题集、自动监测和 analysis-only 四类公开入口均产生可审计 v5 记录，并证明阶段 1、阶段 2和最终请求策略实际生效。

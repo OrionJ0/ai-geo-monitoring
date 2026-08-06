@@ -13,8 +13,8 @@ const WebPlatformRegistry = require('../services/WebPlatformRegistry');
 const ProjectRunService = require('../services/ProjectRunService');
 const { ProjectRunService: ProjectRunServiceClass } = require('../services/ProjectRunService');
 const { AIAnalysisConfigError } = require('../services/AIAnalysisConfigService');
-const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
-const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
+const AIResponseAnalysisV5Service = require('../services/AIResponseAnalysisV5Service');
+const { AIResponseAnalysisV5Error } = require('../services/AIResponseAnalysisV5Service');
 const AlertEvaluationService = require('../services/AlertEvaluationService');
 
 const originalAnalysisConfigService = ProjectRunService.analysisConfigService;
@@ -321,7 +321,7 @@ test('explains that invalid AI structure is excluded instead of falling back to 
     }
   };
   ProjectRunService.buildVisibilityMetricPayload = async () => {
-    throw new AIResponseAnalysisError(
+    throw new AIResponseAnalysisV5Error(
       '证据不在原回答中',
       'invalid_analysis_output',
       {
@@ -418,7 +418,7 @@ test('preserves the full answer and citations when analysis input exceeds the mo
   const persistedDetails = [];
   let metricWrites = 0;
   ProjectRunService.buildVisibilityMetricPayload = async () => {
-    throw new AIResponseAnalysisError(
+    throw new AIResponseAnalysisV5Error(
       '提交内容超出模型可处理范围。',
       'analysis_input_too_long',
       {
@@ -545,32 +545,53 @@ test('counts compact brand spellings in record keyword counts without exposing c
 });
 
 test('builds complete visibility metric payload for any project detection path', async () => {
-  const originalAnalyze = AIResponseAnalysisService.analyze;
-  AIResponseAnalysisService.analyze = async () => ({
+  const originalAnalyze = AIResponseAnalysisV5Service.analyze;
+  AIResponseAnalysisV5Service.analyze = async () => ({
     brand_mentioned: true,
     brand_mentions: 1,
-    brand_position: 1,
+    brand_position: null,
     brand_rank: 1,
     brand_recommended: true,
     visibility_score: 1,
-    competitor_mentions: [],
-    share_of_voice: 50,
+    answer_competitor_share: 50,
+    sov_numerator: 1,
+    sov_denominator: 2,
+    sov_status: 'observed_only',
+    sov_scope: 'open_discovery',
+    sov_completeness: 'not_proven',
+    competition_entities: [],
+    competition_scope: 'open_discovery',
+    competition_completeness: 'not_proven',
+    competition_analysis_status: 'complete',
     sentiment: 'positive',
     sentiment_reason: '明确推荐品牌',
     sentiment_risk_terms: ['价格高'],
-    analysis_method: 'ai_structured_v2',
+    analysis_method: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
     analysis_platform: 'analysis-ai',
     analysis_model: 'analysis-model',
     analysis_structure: {
-      schema_version: 'geo_metric_input_v2',
-      entities: [{ name: '米其林', type: 'brand' }],
-      mentions: [{ entity_name: '米其林', surface_forms: ['米其林'] }],
-      candidate_lists: [{ ordered: true, entries: ['米其林'] }],
-      recommendations: [{ entity_name: '米其林', kind: 'explicit' }],
-      claims: [],
-      sentiment: { label: 'positive', reason: '明确推荐品牌', risk_terms: ['价格高'] },
-      target_entity_name: '米其林',
-      competitor_matches: [{ configured_name: '马牌', entity_name: null }]
+      schema_version: 'geo_metric_input_v5',
+      target_fact: { status: 'complete', brand_mentioned: true, brand_mentions: 1, mentions: [] },
+      target_mapping: { status: 'resolved', target_entity_id: 'E001', candidate_entity_ids: [] },
+      target_semantics: {
+        status: 'complete',
+        recommendation: { status: 'assessed', value: true },
+        rank: { status: 'assessed', value: 1 },
+        sentiment: { status: 'assessed', value: 'positive' }
+      },
+      entities: [{ entity_id: 'E001', name: '米其林', type: 'brand', surface_forms: ['米其林'] }],
+      mentions: [{ entity_id: 'E001', source_id: 'L001', start: 0, end: 3, surface_form: '米其林' }],
+      competitor_relations: [],
+      candidate_groups: [],
+      recommendations: [{ entity_id: 'E001', kind: 'explicit' }],
+      claims: { status: 'not_collected', items: [] },
+      sentiment: { status: 'assessed', label: 'positive', reason: '明确推荐品牌', risk_terms: ['价格高'], semantic_context_source_ids: ['L001'] },
+      diagnostics: { stages: [] },
+      competition_analysis: { status: 'complete', entities: ['E001'], relations: [], unresolved_entity_ids: [] },
+      sov: { status: 'observed_only', scope: 'open_discovery', completeness: 'not_proven', numerator: 1, denominator: 2, value: 50 },
+      target_entity_id: 'E001',
+      target_mentions: []
     }
   });
 
@@ -617,7 +638,7 @@ test('builds complete visibility metric payload for any project detection path',
     assert.equal(payload.sentiment, 'positive');
     assert.equal(payload.sentiment_reason, '明确推荐品牌');
     assert.deepEqual(payload.sentiment_risk_terms, ['价格高']);
-    assert.equal(payload.analysis_method, 'ai_structured_v2');
+    assert.equal(payload.analysis_method, 'ai_structured_v5');
     assert.equal(payload.analysis_platform, 'analysis-ai');
     assert.equal(payload.analysis_model, 'analysis-model');
     assert.equal(payload.analysis_structure.citations.count, 1);
@@ -630,7 +651,7 @@ test('builds complete visibility metric payload for any project detection path',
     );
     assert.deepEqual(payload.analysis_evidence, {});
   } finally {
-    AIResponseAnalysisService.analyze = originalAnalyze;
+    AIResponseAnalysisV5Service.analyze = originalAnalyze;
   }
 });
 
@@ -716,41 +737,60 @@ test('preserves explicit citation when the same URL also appears as a retrieval 
 });
 
 test('uses the structured analysis result when the target brand is absent', async () => {
-  const originalAnalyze = AIResponseAnalysisService.analyze;
-  AIResponseAnalysisService.analyze = async () => ({
+  const originalAnalyze = AIResponseAnalysisV5Service.analyze;
+  AIResponseAnalysisV5Service.analyze = async () => ({
     brand_mentioned: false,
     brand_mentions: 0,
     brand_position: null,
     brand_rank: null,
     brand_recommended: false,
     visibility_score: 0,
-    competitor_mentions: [{
-      id: null,
+    answer_competitor_share: null,
+    sov_numerator: 0,
+    sov_denominator: 0,
+    sov_status: 'observed_only',
+    sov_scope: 'open_discovery',
+    sov_completeness: 'not_proven',
+    competition_entities: [{
+      entity_id: 'E002',
       name: '马牌',
-      mentioned: true,
+      relation: 'competitor',
+      reason: '提供同类静音轮胎方案',
       mentions: 1,
-      recommended: true,
-      position: 1,
-      rank: 1,
-      evidence: ['马牌']
+      surface_forms: ['马牌']
     }],
-    share_of_voice: 0,
+    competition_scope: 'open_discovery',
+    competition_completeness: 'not_proven',
+    competition_analysis_status: 'complete',
     sentiment: 'neutral',
     sentiment_reason: '未提及目标品牌',
     sentiment_risk_terms: [],
-    analysis_method: 'ai_structured_v2',
+    analysis_method: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
     analysis_platform: 'analysis-ai',
     analysis_model: 'analysis-model',
     analysis_structure: {
-      schema_version: 'geo_metric_input_v2',
-      entities: [{ name: '马牌', type: 'brand' }],
-      mentions: [{ entity_name: '马牌', surface_forms: ['马牌'] }],
-      candidate_lists: [],
-      recommendations: [{ entity_name: '马牌', kind: 'explicit' }],
-      claims: [],
-      sentiment: { label: 'neutral', reason: '未提及目标品牌', risk_terms: [] },
-      target_entity_name: null,
-      competitor_matches: [{ configured_name: '马牌', entity_name: '马牌' }]
+      schema_version: 'geo_metric_input_v5',
+      target_fact: { status: 'complete', brand_mentioned: false, brand_mentions: 0, mentions: [] },
+      target_mapping: { status: 'not_applicable', target_entity_id: null, candidate_entity_ids: [] },
+      target_semantics: {
+        status: 'complete',
+        recommendation: { status: 'not_applicable', value: null },
+        rank: { status: 'not_applicable', value: null },
+        sentiment: { status: 'not_applicable', value: null }
+      },
+      entities: [{ entity_id: 'E002', name: '马牌', type: 'brand', surface_forms: ['马牌'] }],
+      mentions: [{ entity_id: 'E002', source_id: 'L001', start: 0, end: 2, surface_form: '马牌' }],
+      competitor_relations: [{ entity_id: 'E002', relation: 'competitor', reason: '提供同类静音轮胎方案' }],
+      candidate_groups: [],
+      recommendations: [],
+      claims: { status: 'not_collected', items: [] },
+      sentiment: { status: 'assessed', label: 'neutral', reason: '未提及目标品牌', risk_terms: [] },
+      diagnostics: { stages: [] },
+      competition_analysis: { status: 'complete', entities: ['E002'], relations: ['E002'], unresolved_entity_ids: [] },
+      sov: { status: 'observed_only', scope: 'open_discovery', completeness: 'not_proven', numerator: 0, denominator: 0, value: null },
+      target_entity_id: null,
+      target_mentions: []
     }
   });
 
@@ -783,19 +823,19 @@ test('uses the structured analysis result when the target brand is absent', asyn
 
     assert.equal(payload.brand_mentioned, false);
     assert.equal(payload.sentiment, 'neutral');
-    assert.equal(payload.analysis_method, 'ai_structured_v2');
+    assert.equal(payload.analysis_method, 'ai_structured_v5');
   } finally {
-    AIResponseAnalysisService.analyze = originalAnalyze;
+    AIResponseAnalysisV5Service.analyze = originalAnalyze;
   }
 });
 
-test('persists the v4 answer-level SOV contract without passing project competitors into semantic analysis', async () => {
-  const originalAnalyze = AIResponseAnalysisService.analyze;
+test('persists the v5 scoped SOV contract without passing project competitors into semantic analysis', async () => {
+  const originalAnalyze = AIResponseAnalysisV5Service.analyze;
   let analysisInput;
-  AIResponseAnalysisService.analyze = async (input) => {
+  AIResponseAnalysisV5Service.analyze = async (input) => {
     analysisInput = input;
     return {
-      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
       brand_mentioned: true,
       brand_mentions: 2,
       brand_position: null,
@@ -805,7 +845,11 @@ test('persists the v4 answer-level SOV contract without passing project competit
       answer_competitor_share: 50,
       sov_numerator: 2,
       sov_denominator: 4,
+      sov_status: 'observed_only',
+      sov_scope: 'open_discovery',
+      sov_completeness: 'not_proven',
       competition_entities: [{
+        entity_id: 'E002',
         name: '海康',
         relation: 'competitor',
         reason: '提供同类周界方案',
@@ -813,27 +857,54 @@ test('persists the v4 answer-level SOV contract without passing project competit
         mentions: 2,
         surface_forms: ['海康', '海康']
       }],
+      competition_scope: 'open_discovery',
+      competition_completeness: 'not_proven',
+      competition_analysis_status: 'complete',
       sentiment: 'neutral',
       sentiment_reason: '客观列举',
       sentiment_risk_terms: [],
-      analysis_method: 'ai_structured_v4',
+      analysis_method: 'ai_structured_v5',
       analysis_platform: 'analysis-ai',
       analysis_model: 'analysis-model',
       analysis_structure: {
-        schema_version: 'geo_metric_input_v4',
+        schema_version: 'geo_metric_input_v5',
+        target_fact: { status: 'complete', brand_mentioned: true, brand_mentions: 2, mentions: [] },
+        target_mapping: { status: 'resolved', target_entity_id: 'E001', candidate_entity_ids: [] },
+        target_semantics: {
+          status: 'complete',
+          recommendation: { status: 'assessed', value: false },
+          rank: { status: 'assessed', value: null },
+          sentiment: { status: 'assessed', value: 'neutral' }
+        },
+        entities: [
+          { entity_id: 'E001', name: '广拓', type: 'brand', surface_forms: ['广拓'] },
+          { entity_id: 'E002', name: '海康', type: 'company', surface_forms: ['海康'] }
+        ],
+        mentions: [
+          { entity_id: 'E001', source_id: 'L001', start: 0, end: 2, surface_form: '广拓' },
+          { entity_id: 'E002', source_id: 'L001', start: 3, end: 5, surface_form: '海康' }
+        ],
         competitor_relations: [{
-          entity_name: '海康',
+          entity_id: 'E002',
           relation: 'competitor',
           reason: '提供同类周界方案',
           evidence: ['海康都提供周界方案']
         }],
-        candidate_lists: [],
+        candidate_groups: [],
+        recommendations: [],
+        claims: { status: 'not_collected', items: [] },
         sentiment: {
+          status: 'assessed',
           label: 'neutral',
           reason: '客观列举',
           evidence: ['广拓与海康都提供周界方案'],
           risk_terms: []
-        }
+        },
+        diagnostics: { stages: [] },
+        competition_analysis: { status: 'complete', entities: ['E001', 'E002'], relations: ['E002'], unresolved_entity_ids: [] },
+        sov: { status: 'observed_only', scope: 'open_discovery', completeness: 'not_proven', numerator: 2, denominator: 4, value: 50 },
+        target_entity_id: 'E001',
+        target_mentions: []
       }
     };
   };
@@ -868,7 +939,7 @@ test('persists the v4 answer-level SOV contract without passing project competit
     assert.equal(Object.hasOwn(analysisInput, 'competitorHints'), false);
     assert.equal(
       payload.metric_semantics_version,
-      'contextual_competitor_mentions_sov_v1'
+      'contextual_competitor_mentions_sov_v2_scoped'
     );
     assert.equal(payload.answer_competitor_share, 50);
     assert.equal(payload.sov_numerator, 2);
@@ -885,7 +956,7 @@ test('persists the v4 answer-level SOV contract without passing project competit
       ['广拓与海康都提供周界方案']
     );
   } finally {
-    AIResponseAnalysisService.analyze = originalAnalyze;
+    AIResponseAnalysisV5Service.analyze = originalAnalyze;
   }
 });
 

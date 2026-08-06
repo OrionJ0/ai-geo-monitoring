@@ -570,3 +570,83 @@ test('第三轮反例 P1："首选"只给被直接修饰的目标 rank=1，"备�
   assert.equal(result2.brand_rank, 1, '被"首选"直接修饰的目标应 rank=1');
   assert.equal(result2.analysis_structure.target_semantics.rank.value, 1);
 });
+
+test('2026-08-06 排名链路修复：中文数字名次（"排名第一"）在目标 mention 行可提取', () => {
+  const { calculate } = require('../services/AIResponseAnalysisV5Service');
+  const answer = [
+    '1. 上海广拓信息技术有限公司（广拓Gato）：在2023年电子围栏十大品牌中排名第一。',
+    '2. 杭州海康威视（HIKVISION）：位列第二。'
+  ].join('\n');
+  const sourceMap = createSourceMap(answer);
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap,
+    extractedMentions: [
+      { source_id: 'L001', surface_form: '上海广拓信息技术有限公司', canonical_name: '上海广拓信息技术有限公司', entity_type: 'company' },
+      { source_id: 'L002', surface_form: '杭州海康威视', canonical_name: '杭州海康威视', entity_type: 'brand' }
+    ],
+    targetBrand: { name: '广拓', aliases: ['广拓', '上海广拓', 'Gato'] }
+  });
+  const semantic = {
+    competitor_relations: [],
+    candidate_groups: [{ ordered: false, entries: ['E001', 'E002'], reason: '候选', evidence_source_ids: ['L001', 'L002'] }],
+    recommendations: [],
+    sentiment: { status: 'assessed', label: 'neutral', reason: '中性', evidence_source_ids: ['L001'], risk_terms: [] }
+  };
+  const result = calculate({ sourceMap, catalog, semantic, diagnostics: [] });
+  // 中文数字"排名第一"→ rank=1（S49 形态）
+  assert.equal(result.brand_rank, 1);
+  assert.equal(result.analysis_structure.target_semantics.rank.status, 'assessed');
+});
+
+test('2026-08-06 排名链路修复："首选"在目标 mention 行可提取（S50 形态）', () => {
+  const { calculate } = require('../services/AIResponseAnalysisV5Service');
+  const answer = '首选 上海广拓 或 上海炎荣。';
+  const sourceMap = createSourceMap(answer);
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap,
+    extractedMentions: [
+      { source_id: 'L001', surface_form: '上海广拓', canonical_name: '上海广拓', entity_type: 'company' },
+      { source_id: 'L001', surface_form: '上海炎荣', canonical_name: '上海炎荣', entity_type: 'company' }
+    ],
+    targetBrand: { name: '广拓', aliases: ['上海广拓', 'Gato'] }
+  });
+  const semantic = {
+    competitor_relations: [],
+    candidate_groups: [{ ordered: false, entries: ['E001', 'E002'], reason: '并列第一', evidence_source_ids: ['L001'] }],
+    recommendations: [],
+    sentiment: { status: 'assessed', label: 'neutral', reason: '中性', evidence_source_ids: ['L001'], risk_terms: [] }
+  };
+  const result = calculate({ sourceMap, catalog, semantic, diagnostics: [] });
+  assert.equal(result.brand_rank, 1);
+});
+
+test('2026-08-06 排名链路修复：梯队+编号无法确定性提取名次时输出 unavailable（S01/S02/S46 形态）', () => {
+  const { calculate } = require('../services/AIResponseAnalysisV5Service');
+  const answer = [
+    '第一梯队（行业头部）：',
+    '1. 上海广拓（GATO）',
+    '2. 海康威视'
+  ].join('\n');
+  const sourceMap = createSourceMap(answer);
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap,
+    extractedMentions: [
+      { source_id: 'L002', surface_form: '上海广拓', canonical_name: '上海广拓', entity_type: 'company' },
+      { source_id: 'L003', surface_form: '海康威视', canonical_name: '海康威视', entity_type: 'brand' }
+    ],
+    targetBrand: { name: '广拓', aliases: ['上海广拓', 'Gato'] }
+  });
+  const semantic = {
+    competitor_relations: [],
+    candidate_groups: [{ ordered: false, entries: ['E001', 'E002'], reason: '第一梯队', evidence_source_ids: ['L001'] }],
+    recommendations: [],
+    sentiment: { status: 'assessed', label: 'neutral', reason: '中性', evidence_source_ids: ['L001'], risk_terms: [] }
+  };
+  const result = calculate({ sourceMap, catalog, semantic, diagnostics: [] });
+  // 有排序意图（第一梯队）但无法确定性提取名次 → unavailable（诚实关闭，不伪装 assessed null）
+  assert.equal(result.analysis_structure.target_semantics.rank.status, 'unavailable');
+  assert.equal(result.brand_rank, null);
+});

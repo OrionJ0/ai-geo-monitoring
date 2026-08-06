@@ -66,8 +66,29 @@ depends_on:
 
 ## Handoff
 
-- 当前状态：Issue 001–004 已关闭；Issue 005 的本地实现、回归和对抗审查已完成，正式发布门禁阻塞；
-- 本轮营销 diff 的代码、现实证据、最小变更、API、安全、数据库、架构、性能和无障碍审查均无 P0/P1/P2；
+- 当前状态：Issue 001–004 已关闭；Issue 005 已无冲突吸收最新本地
+  `main=8179d63509e386428252048c50a52e11e49fd677`；002/010 的运行代码、后端测试和
+  状态文档与 `main` 零差异，共享营销浏览器测试保留了 `main` 新增的三处类型收窄，
+  同时继续承载营销资源化验收；最终候选回归和正式发布仍被门禁阻塞；
+- 旧候选的代码、API、安全、数据库、架构、性能和无障碍问题已清零；本次相对最新
+  `main` 的营销有效 diff 经代码与最小变更复审仍无 P0/P1/P2，但发布现实、数据库和
+  SRE 复审确认下列 002 生产门禁仍为 P0/P1，不能把“营销 diff 无问题”表述成候选可发布；
 - 正式生产仍运行既有营销 revision `2c6a36e`，本目录的新收尾修复尚未发布；
-- 外部阻塞来自并行 0805-002：候选运行模型会读取 `question_records.competitor_snapshot`，但正式部署入口尚未应用并审计 `migrateV5SnapshotFields.js`。在 0805-002 独立完成旧生产 schema → 新迁移、`missing_columns=[]`、scheduler 启动、`/ready=200` 和默认 v4 冒烟前，不得发布本营销候选；
+- 2026-08-06 只读生产复核确认服务器 `HEAD=2c6a36e`、工作区干净、两个
+  systemd 服务 active、SQLite `quick_check=ok`，但
+  `pragma_table_info('question_records')` 中没有 `competitor_snapshot`；公开后端和前端
+  revision 同为 `2c6a36e`，`/api/ready=200`。这证明缺列风险仍真实存在；
+- 外部阻塞来自并行 0805-002：最新 `main` 已硬切 v5，但 002 目录仍为 `active`、
+  Issue 010 仍为 `in_progress` 且明确记录未部署；正式部署入口仍未应用并审计
+  `migrateV5SnapshotFields.js`，脚本还会无条件覆盖 `DB_STORAGE`。在 0805-002 独立完成
+  生产迁移、`missing_columns=[]`、scheduler 启动、`/ready=200` 和四入口验收前，不得
+  发布本营销候选；
+- 本次合并后的营销聚焦测试尚未形成结果：本机 swap 使用量约
+  `24740/25600 MB`，Node/npm 在启动任何用例前进入不可中断等待且没有子测试进程或
+  输出；不得沿用旧 SHA 的绿灯冒充最终候选验收；
+- 生产还必须在停服前显式预检并迁移现有 DeepSeek 分析配置到
+  `deepseek-v4-flash`，再从四类正式入口证明新配置生效；通用 readiness 不能替代该
+  业务入口验收；
+- 发布失败只允许使用候选后代的前向修复并保留 additive 列；不得为恢复运行重新引入
+  v4/Pro 运行时、隐藏开关或 fallback；
 - 阻塞解除后：重新吸收最新 `main`，重跑全量回归和 Bundle 门禁，执行正式发布，再快进并推送 `main`，使本地、远端、服务器和公开 revision 完全一致。

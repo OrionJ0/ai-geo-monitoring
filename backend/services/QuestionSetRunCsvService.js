@@ -2,7 +2,8 @@ const SCHEMA_VERSION = 'question_set_run_v1';
 const {
   CURRENT_METRIC_SEMANTICS,
   LEGACY_METRIC_SEMANTICS,
-  SCOPED_METRIC_SEMANTICS
+  SCOPED_METRIC_SEMANTICS,
+  V1_METRIC_SEMANTICS
 } = require('./GeoMetricSemanticsService');
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_ROWS = 5000;
@@ -509,7 +510,9 @@ function parseCsv(csv) {
     const currentMetricSemanticsVersion = hasMetricSemanticsHeaders
       ? valueAt(row, 'metric_semantics_version').trim()
       : LEGACY_METRIC_SEMANTICS;
-    if (![CURRENT_METRIC_SEMANTICS, LEGACY_METRIC_SEMANTICS, SCOPED_METRIC_SEMANTICS].includes(currentMetricSemanticsVersion)) {
+    // 010 硬切（2026-08-06）：历史 v1（contextual_competitor_mentions_sov_v1）
+    // 只读导入兼容，与当前 v2_scoped 并列接受；CURRENT 翻 v5 后不得拒绝旧 CSV。
+    if (![CURRENT_METRIC_SEMANTICS, LEGACY_METRIC_SEMANTICS, SCOPED_METRIC_SEMANTICS, V1_METRIC_SEMANTICS].includes(currentMetricSemanticsVersion)) {
       throw fieldError(
         'UNSUPPORTED_METRIC_SEMANTICS',
         line,
@@ -589,9 +592,13 @@ function parseCsv(csv) {
           }
         )
       : [];
+    // 010 硬切（2026-08-06）：历史 v1（contextual_competitor_mentions_sov_v1）
+    // 与当前 v2_scoped 一样携带新版指标字段（v4 时代即带 competition_entities/
+    // 分子分母），走同一校验；legacy（configured_competitor_sov_v1）才拒绝。
     if (
       currentMetricSemanticsVersion === CURRENT_METRIC_SEMANTICS
       || currentMetricSemanticsVersion === SCOPED_METRIC_SEMANTICS
+      || currentMetricSemanticsVersion === V1_METRIC_SEMANTICS
     ) {
       if (shareOfVoice !== null) {
         throw fieldError(

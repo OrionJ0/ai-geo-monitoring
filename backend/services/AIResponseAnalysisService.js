@@ -1,13 +1,15 @@
+/**
+ * v4 运行时（已退役，010 硬切 2026-08-06）。
+ * 本文件仅保留作历史评测对照（backend/scripts/geoBaselineEvaluate.js 与
+ * geoFlashStructuredBenchmark.js 的 v4-current 对照臂），不再被任何生产入口
+ * 调用（ProjectRunService 分派点、settings.js 测试端点均已移除 v4 引用）。
+ * 常量冻结在 v4 历史值，不得跟随 CURRENT_* 变更。
+ */
 const AIPlatformRequestService = require('./AIPlatformRequestService');
 const AIAnalysisConfigService = require('./AIAnalysisConfigService');
-const {
-  CURRENT_ANALYSIS_CONTRACT,
-  CURRENT_STRUCTURE_VERSION,
-  CURRENT_METRIC_SEMANTICS
-} = require('./GeoMetricSemanticsService');
 
-const ANALYSIS_METHOD = CURRENT_ANALYSIS_CONTRACT;
-const STRUCTURE_VERSION = CURRENT_STRUCTURE_VERSION;
+const ANALYSIS_METHOD = 'ai_structured_v4';
+const STRUCTURE_VERSION = 'geo_metric_input_v4';
 const PROMPT_REVISION = 'semantic_evidence_field_repair_v8';
 const VALID_ENTITY_TYPES = new Set(['brand', 'company', 'other_organization']);
 const VALID_COMPETITOR_RELATIONS = new Set(['competitor', 'non_competitor']);
@@ -1502,7 +1504,7 @@ class AIResponseAnalysisService {
       .reduce((total, item) => total + item.mentions, 0);
     const mentionTotal = target.mentions + competitorMentionTotal;
     return {
-      metric_semantics_version: CURRENT_METRIC_SEMANTICS,
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
       brand_mentioned: target.mentioned,
       brand_mentions: target.mentions,
       brand_position: target.list_rank,

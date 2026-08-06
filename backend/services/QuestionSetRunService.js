@@ -618,7 +618,14 @@ function normalizeNativeRow(record) {
   let sov = null;
   if (metric) {
     sov = metricSemanticsVersion === SCOPED_METRIC_SEMANTICS
-      ? GeoMetricSemanticsService.presentScopedSov(metric)
+      // 010 硬切 P0 修复（2026-08-06）：v2_scoped 记录的 observed_only 状态
+      // 保存在 analysis_structure.sov 内（扁平列未落库），读取侧兜底恢复，
+      // 防止 v5 native 记录在 getReport 时抛"开放发现 SOV 状态必须为 observed_only"。
+      ? GeoMetricSemanticsService.presentScopedSov({
+          ...metric,
+          sov_status: String(metric.sov_status || '')
+            || String(row.analysis_structure?.sov?.status || '')
+        })
       : GeoMetricSemanticsService.presentSov(metric);
   }
   const analysisDiagnostics = normalizeAnalysisDiagnostics(row.result_summary?.analysis);

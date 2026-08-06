@@ -284,7 +284,9 @@ test('existing SQLite schemas add indexed execution columns before model index s
   });
 
   try {
-    const response = await waitForResponse(`http://127.0.0.1:${port}/api/ready`, 3000);
+    // 010 硬切后模块加载更多（v5 两阶段服务），app.js 冷启动可能超过 3 秒；
+    // 放宽到 15 秒与真实启动时间匹配（手动复现约 10-14 秒）。
+    const response = await waitForResponse(`http://127.0.0.1:${port}/api/ready`, 15000);
     assert.equal(response.status, 200, stderr);
   } finally {
     child.kill('SIGTERM');

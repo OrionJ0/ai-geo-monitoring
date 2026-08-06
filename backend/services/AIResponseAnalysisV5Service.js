@@ -106,7 +106,38 @@ function isGroundedTargetRecommendation(recommendation, targetEntity) {
 
 // 明确排序声明：数字编号、表格顺序、梯队内顺序不构成排名（AI 真值裁决规则），
 // 只有"排名第X / 第X名 / 首选 / 优先推荐"等明确排序表达才产生排名。
-const EXPLICIT_RANK_RE = /(?:排名第?\s*(\d+)|第\s*(\d+)\s*名|位列第?\s*(\d+)|排行第?\s*(\d+)|首选|第一优先|优先推荐)/u;
+// 2026-08-06 数据所有者指令（排名 0/6 链路修复）：名次支持中文数字
+// （S49"在2023年电子围栏十大品牌中排名第一"），阿拉伯数字保持兼容。
+const EXPLICIT_RANK_RE = /(?:排名\s*第?\s*([0-9一二三四五六七八九十两]+)|第\s*([0-9一二三四五六七八九十两]+)\s*名|位列\s*第?\s*([0-9一二三四五六七八九十两]+)|排行\s*第?\s*([0-9一二三四五六七八九十两]+)|首选|第一优先|优先推荐)/u;
+// 排序意图：回答对候选存在梯队/排序声明/名次等排序结构但确定性链路无法
+// 提取目标名次时，排名输出 unavailable（诚实关闭），不伪装 assessed null。
+// 不含首选类——"首选"提取失败意味着排序词修饰的是其他实体（explicitRankForTarget
+// 已排除），目标明确无排名（assessed null，第三轮 P1 反例合同）。
+const RANK_INTENT_RE = /梯队|排序|排名|名次|位列|排行|第\s*[0-9一二三四五六七八九十两]+\s*名/u;
+const CN_NUMERALS = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+
+function chineseRankToArabic(text) {
+  const value = String(text || '').trim();
+  if (/^\d+$/.test(value)) return Number(value);
+  if (value === '十') return 10;
+  const parts = value.split('十');
+  if (parts.length === 2) {
+    const tens = parts[0] === '' ? 1 : CN_NUMERALS[parts[0]];
+    const unit = parts[1] === '' ? 0 : CN_NUMERALS[parts[1]];
+    if (tens === undefined || (parts[1] !== '' && unit === undefined)) return null;
+    return tens * 10 + unit;
+  }
+  return CN_NUMERALS[value] !== undefined ? CN_NUMERALS[value] : null;
+}
+
+function hasRankIntent({ sourceMap, semantic, targetEntityId }) {
+  if (!Array.isArray(semantic?.candidate_groups)) return false;
+  const sourceById = new Map(sourceMap.segments.map((segment) => [segment.source_id, segment.text]));
+  return semantic.candidate_groups.some((group) => (
+    Array.isArray(group?.entries) && group.entries.includes(targetEntityId)
+    && semanticContextOf(group).some((sourceId) => RANK_INTENT_RE.test(sourceById.get(sourceId) || ''))
+  ));
+}
 
 function targetRank({ sourceMap, targetEntity, semantic, targetEntityId, entities = [] }) {
   const sourceById = new Map(sourceMap.segments.map((segment) => [segment.source_id, segment.text]));
@@ -125,6 +156,25 @@ function targetRank({ sourceMap, targetEntity, semantic, targetEntityId, entitie
     const explicitRank = explicitRankForTarget(contextTexts, targetSurfaces, otherSurfaces);
     if (explicitRank !== null) return explicitRank;
     if (group.ordered) return group.entries.indexOf(targetEntityId) + 1;
+  }
+  // 2026-08-06：显式名次可能只出现在目标实体 mention 所在行（同句主语修饰，
+  // 不在 candidate_group 语义 context 内，如 S49"…在2023年电子围栏十大品牌中
+  // 排名第一"、S50"首选 上海广拓 或 上海炎荣"）——扩展扫描目标 mention 行，
+  // 仍执行"排序表达必须直接修饰目标"检查（既有 mentionsOther 排除机制防误配）。
+  // 只扫描行文本确实包含目标 surface 的行（真实 mention 行天然满足），
+  // 防止把"综合排名第2名"等与目标不同行的独立声明误纳入。
+  if (targetEntityId && Array.isArray(targetEntity?.mentions) && targetEntity.mentions.length) {
+    const mentionLines = [...new Set(
+      targetEntity.mentions
+        .map((mention) => ({
+          line: sourceById.get(mention?.source_id) || '',
+          surface: String(mention?.surface_form || '').trim()
+        }))
+        .filter(({ line, surface }) => line && surface && line.includes(surface))
+        .map(({ line }) => line)
+    )];
+    const explicitRank = explicitRankForTarget(mentionLines, targetSurfaces, otherSurfaces);
+    if (explicitRank !== null) return explicitRank;
   }
   return null;
 }
@@ -146,16 +196,19 @@ function explicitRankForTarget(contextTexts, targetSurfaces, otherSurfaces) {
       if (!match) break;
       const matchStart = offset + match.index;
       const matchEnd = matchStart + match[0].length;
-      // 数字型匹配才有捕获组；首选型（首选/第一优先/优先推荐）digits 为空，
-      // 必须保持 null——Number(undefined) 是 NaN，会误入数字分支返回 NaN
+      // 数字型匹配才有捕获组（支持阿拉伯数字与中文数字"排名第一"）；
+      // 首选型（首选/第一优先/优先推荐）digits 为空，必须保持 null——
+      // Number(undefined) 是 NaN，会误入数字分支返回 NaN
       const digits = match[1] || match[2] || match[3] || match[4];
-      const rankNumber = digits ? Number(digits) : null;
+      const rankNumber = digits ? chineseRankToArabic(digits) : null;
       const before = text.slice(Math.max(0, matchStart - 12), matchStart);
       const after = text.slice(matchEnd, Math.min(text.length, matchEnd + 12));
-      const leadingConnector = /^(?:的|是|为|：|:)*/u.exec(after)[0];
-      const trailingConnector = /(?:的|是|为|：|:)*$/u.exec(before)[0];
-      const targetAfter = after.slice(leadingConnector.length);
-      const targetBefore = before.slice(0, before.length - trailingConnector.length);
+      // 2026-08-06：连接词允许空格（S50"首选 上海广拓 或 上海炎荣"），
+      // 修饰检查剥离 markdown 加粗/斜体标记（"首选 **上海广拓**"）。
+      const leadingConnector = /^\s*(?:的|是|为|：|:)*/u.exec(after)[0];
+      const trailingConnector = /(?:的|是|为|：|:)*\s*$/u.exec(before)[0];
+      const targetAfter = after.slice(leadingConnector.length).replace(/\*\*?/gu, '');
+      const targetBefore = before.slice(0, before.length - trailingConnector.length).replace(/\*\*?/gu, '');
       const mentionsTarget = targetSurfaces.some((surface) => (
         targetAfter.startsWith(surface) || targetBefore.endsWith(surface)
       ));
@@ -251,9 +304,11 @@ function calculate({
   const mappingAmbiguous = mappingStatus === 'ambiguous';
   const semanticAvailable = !semantic?.degraded;
   const targetAppears = brandMentioned;
-  // 映射歧义（多个实体命中）或阶段 1 失败（无实体可映射）都使目标语义 unavailable
+  // 映射歧义（多个实体命中）、阶段 1 失败（无实体可映射）或法律主体冲突
+  // （conflicting_identity，2026-08-06 数据所有者指令：S53 深圳广拓≠上海广拓）
+  // 都使目标语义 unavailable——冲突主体不得被当作目标品牌做推荐/排名/情绪判断。
   const semanticsUnavailable = targetAppears
-    && (mappingAmbiguous || mappingStatus === 'unavailable');
+    && (mappingAmbiguous || mappingStatus === 'unavailable' || mappingStatus === 'conflicting_identity');
   const recommendationField = !targetAppears
     ? { status: 'not_applicable', value: null }
     : (semanticsUnavailable
@@ -261,12 +316,18 @@ function calculate({
       : (semanticAvailable
         ? { status: 'assessed', value: targetRecommended }
         : { status: 'unresolved', value: null }));
+  // 2026-08-06 排名链路修复：candidate_group 存在排序意图（梯队/排序声明/
+  // 名次/首选）但确定性链路无法提取名次时，排名输出 unavailable（诚实关闭，
+  // 不伪装 assessed null）——S01/S02/S46 梯队+编号形态；无排序意图的回答
+  // 仍为 assessed null（明确判断无排名）。
+  const rankUnavailable = calculatedTargetRank === null
+    && hasRankIntent({ sourceMap, semantic, targetEntityId: catalog.target_entity_id });
   const rankField = !targetAppears
     ? { status: 'not_applicable', value: null }
     : (semanticsUnavailable
       ? { status: 'unavailable', value: null }
       : (semanticAvailable
-        ? { status: 'assessed', value: calculatedTargetRank }
+        ? (rankUnavailable ? { status: 'unavailable', value: null } : { status: 'assessed', value: calculatedTargetRank })
         : { status: 'unresolved', value: null }));
   const sentimentField = !targetAppears
     ? { status: 'not_applicable', value: null }

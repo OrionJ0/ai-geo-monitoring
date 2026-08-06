@@ -64,11 +64,11 @@ function parseReport(overrides = {}, rowOverrides = {}) {
 
 function currentReport(rowOverrides = {}) {
   return reportWith({
-    analysis_contract_version: 'ai_structured_v4',
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
+    analysis_contract_version: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped'
   }, {
-    analysis_method: 'ai_structured_v4',
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    analysis_method: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
     share_of_voice: null,
     answer_competitor_share: 50,
     sov_numerator: 1,
@@ -82,7 +82,7 @@ function currentReport(rowOverrides = {}) {
       surface_forms: ['海康']
     }],
     analysis_structure: {
-      schema_version: 'geo_metric_input_v4',
+      schema_version: 'geo_metric_input_v5',
       candidate_lists: [{
         ordered: true,
         entries: ['上海广拓', '海康'],
@@ -111,7 +111,7 @@ test('新版 CSV 在旧列尾部追加可判定语义并保持旧 SOV 列为空'
     'sov_denominator',
     'competition_entities_json'
   ]);
-  assert.equal(parsed.metricSemanticsVersion, 'contextual_competitor_mentions_sov_v1');
+  assert.equal(parsed.metricSemanticsVersion, 'contextual_competitor_mentions_sov_v2_scoped');
   assert.equal(parsed.rows[0].share_of_voice, null);
   assert.equal(parsed.rows[0].answer_competitor_share, 50);
   assert.equal(parsed.rows[0].sov_numerator, 1);
@@ -138,17 +138,21 @@ test('回答格式通过兼容追加列往返', () => {
 });
 
 test('新版 CSV 拒绝旧列值、混合语义、非法分母和非法竞争实体证据', () => {
+  // v5 契约下竞争实体证据由 source_id 封闭引用（CSV 不强制 evidence 数组）；
+  // 历史 v4 契约仍强制 evidence（010 只读兼容路径），显式构造 v4 契约报告验证。
+  const v4ForcedReport = currentReport({
+    competition_entities: [{
+      name: '海康',
+      relation: 'competitor',
+      mentions: 1,
+      reason: '提供同类周界方案',
+      surface_forms: ['海康']
+    }]
+  });
+  v4ForcedReport.analysis_contract_version = 'ai_structured_v4';
   assert.throws(
     () => QuestionSetRunCsvService.parseCsv(
-      QuestionSetRunCsvService.buildCsv(currentReport({
-        competition_entities: [{
-          name: '海康',
-          relation: 'competitor',
-          mentions: 1,
-          reason: '提供同类周界方案',
-          surface_forms: ['海康']
-        }]
-      }))
+      QuestionSetRunCsvService.buildCsv(v4ForcedReport)
     ),
     (error) => error.code === 'INVALID_COMPETITION_ENTITY'
   );

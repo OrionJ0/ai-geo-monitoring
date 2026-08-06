@@ -101,6 +101,12 @@ function parseArgs(argv = process.argv.slice(2)) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+  // 重复簇去重运行设施（issue 015 冻结执行）：按 manifest duplicate_group 规则，
+  // 同一回答只保留代表样本（如 S18/S19/S20 dup1 → 排除 S19/S20），簇权重 1。
+  const excludeSampleIds = String(value('--exclude-sample-ids') || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 10) {
     throw new Error('--repeats 必须是 1 至 10 的整数');
   }
@@ -116,6 +122,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     concurrency,
     limit,
     sampleIds: [...new Set(sampleIds)],
+    excludeSampleIds: [...new Set(excludeSampleIds)],
     refresh: argv.includes('--refresh'),
     recalculateCached: argv.includes('--recalculate-cached'),
     baselineDir: path.resolve(value('--dir') || DEFAULT_BASELINE_DIR),
@@ -521,7 +528,7 @@ function buildReport({ options, samples, labels, entries, summaries, truthBySamp
     const evidence = groundingEvidenceStats(armEntries, sampleById);
     lines.push(`### ${arm}`, '');
     lines.push(`- 推荐：${rec.status}；precision=${percentage(rec.precision)}，recall=${percentage(rec.recall)}，F1=${percentage(rec.f1)}，assessed coverage=${percentage(rec.coverage)}；可评估真值 ${rec.evaluated_samples}，降级 ${rec.degraded_count} 条${rec.status_reason ? `（${rec.status_reason}）` : ''}`);
-    lines.push(`- 情绪：${sent.status}；accuracy=${percentage(sent.accuracy)}（${sent.correct}/${sent.evaluated_samples}），混淆矩阵=${JSON.stringify(sent.confusion_matrix)}；降级 ${sent.degraded_count} 条${sent.status_reason ? `（${sent.status_reason}）` : ''}`);
+    lines.push(`- 情绪：${sent.status}；accuracy=${percentage(sent.accuracy)}（${sent.correct} 次 assessed 预测，覆盖 ${sent.evaluated_samples} 个唯一真值样本），混淆矩阵=${JSON.stringify(sent.confusion_matrix)}；降级 ${sent.degraded_count} 条${sent.status_reason ? `（${sent.status_reason}）` : ''}`);
     lines.push(`- 排名：${rank.status}；exact accuracy=${percentage(rank.exact_accuracy)}（${rank.exact_matches}/${rank.denominator_samples}），coverage=${percentage(rank.coverage)}；降级 ${rank.degraded_count} 条${rank.status_reason ? `（${rank.status_reason}）` : ''}；真值样本 ID=${rank.sample_ids.join(',') || '—'}`);
     lines.push(`- target_mapping：${mapping.status}；状态判断 accuracy=${percentage(mapping.status_accuracy)}（${mapping.status_evaluated_samples} 条），成功映射 accuracy=${percentage(mapping.mapped_accuracy)}（${mapping.mapped_evaluated_samples} 条）；降级 ${mapping.degraded_count} 条${mapping.status_reason ? `（${mapping.status_reason}）` : ''}`);
     lines.push(`- 证据合法性：evidence_reference_invalid=${evidence.evidence_invalid_count}；grounding 错误=${evidence.grounding_error_count}（mention span 与原文逐字校验）`);
@@ -595,7 +602,13 @@ async function main() {
     const missing = options.sampleIds.filter((sampleId) => !found.has(sampleId));
     throw new Error(`--sample-ids 包含未知样本：${missing.join(',')}`);
   }
-  const samples = options.limit ? selectedSamples.slice(0, options.limit) : selectedSamples;
+  // 重复簇去重：排除非代表样本（S18/S19/S20 dup1 只保留 S18），簇权重 1
+  const excluded = new Set(options.excludeSampleIds);
+  const dedupedSamples = selectedSamples.filter((sample) => !excluded.has(sample.sample_id));
+  if (dedupedSamples.length !== selectedSamples.length - excluded.size) {
+    throw new Error(`--exclude-sample-ids 包含未知样本：${[...excluded].filter((id) => !selectedSamples.some((sample) => sample.sample_id === id)).join(',')}`);
+  }
+  const samples = options.limit ? dedupedSamples.slice(0, options.limit) : dedupedSamples;
   fs.mkdirSync(options.outputDir, { recursive: true });
   fs.writeFileSync(path.join(options.outputDir, 'manifest.json'), JSON.stringify({
     generated_at: new Date().toISOString(),

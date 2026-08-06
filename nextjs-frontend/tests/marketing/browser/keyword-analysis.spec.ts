@@ -249,7 +249,7 @@ function alignDashboardFilterToRequest<
   const request = new URL(requestUrl);
   const from = request.searchParams.get('from');
   const to = request.searchParams.get('to');
-  if (from && to) body.filter = { from, to };
+  if (from && to) body.filter = { from, to } as T['filter'];
   return body;
 }
 
@@ -1075,7 +1075,7 @@ test('search-term page rejects a current response for a different requested peri
   await page.unroute('**/api/marketing/projects/11/dashboard**');
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
     const body = dashboardFixture();
-    body.filter = { from: '2026-07-01', to: '2026-07-07' };
+    body.filter = { from: '2026-07-01', to: '2026-07-07' } as unknown as typeof body.filter;
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(body)
@@ -1505,7 +1505,7 @@ test('stale snapshot clamps a crossed-day default to the last completed coverage
       });
     }
     const response = dashboardFixture(true);
-    if (from && to) response.filter = { from, to };
+    if (from && to) response.filter = { from, to } as typeof response.filter;
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(response)

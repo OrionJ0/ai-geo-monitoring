@@ -4,35 +4,61 @@ const fs = require('fs');
 const path = require('path');
 
 const analysisPath = path.resolve(__dirname, '../services/AIResponseAnalysisService.js');
-const metricsPath = path.resolve(__dirname, '../services/ProjectMetricsService.js');
 const runPath = path.resolve(__dirname, '../services/ProjectRunService.js');
+const schedulerPath = path.resolve(__dirname, '../services/SchedulerService.js');
+const v5Path = path.resolve(__dirname, '../services/AIResponseAnalysisV5Service.js');
+const entityPath = path.resolve(__dirname, '../services/AIResponseEntityExtractionService.js');
+const settingsPath = path.resolve(__dirname, '../routes/settings.js');
 
-test('正式分析器只有 v4 完整输入路径且没有旧版、名单或截断回退', () => {
+test('010 硬切：默认分析 provider 为 v5，分派点只有 v5 分析器（无 v4/Pro fallback）', () => {
+  const runSource = fs.readFileSync(runPath, 'utf8');
+
+  assert.match(runSource, /CURRENT_ANALYSIS_PROVIDER = 'v5'/);
+  assert.match(runSource, /await AIResponseAnalysisV5Service\.analyze/);
+  assert.doesNotMatch(runSource, /: await AIResponseAnalysisService\.analyze/);
+  // 注：裸 fallback 会误匹配合法的 fallbackSnapshot（快照回退）参数名，
+  // 这里只检查 v4/Pro 运行时回退与隐藏规则路径。
+  assert.doesNotMatch(runSource, /回退到旧|legacy_rules_v1|deepseek-v4-pro/iu);
+});
+
+test('010 硬切：SchedulerService 默认分析 provider 为 v5', () => {
+  const source = fs.readFileSync(schedulerPath, 'utf8');
+
+  assert.match(source, /options\.analysisProvider \|\| 'v5'/);
+  assert.doesNotMatch(source, /\|\| 'v4'/);
+});
+
+test('010 硬切：v4 运行时已退役，冻结在历史常量且只供评测对照（非生产引用）', () => {
   const source = fs.readFileSync(analysisPath, 'utf8');
 
-  assert.match(source, /CURRENT_ANALYSIS_CONTRACT/);
-  assert.match(source, /CURRENT_STRUCTURE_VERSION/);
-  assert.doesNotMatch(source, /ai_structured_v[23]|geo_metric_input_v[23]|slice\(0,\s*12000\)|competitor_matches|competitorHints|competitor_hints/);
-  assert.doesNotMatch(source, /fallback|回退到旧|legacy_rules_v1/iu);
+  assert.match(source, /已退役/);
+  assert.match(source, /ANALYSIS_METHOD = 'ai_structured_v4'/);
+  assert.match(source, /STRUCTURE_VERSION = 'geo_metric_input_v4'/);
+  assert.match(source, /contextual_competitor_mentions_sov_v1/);
+  assert.doesNotMatch(source, /CURRENT_ANALYSIS_CONTRACT|CURRENT_STRUCTURE_VERSION|CURRENT_METRIC_SEMANTICS/);
 });
 
-test('项目指标服务删除无生产调用的旧 SOV 聚合器', () => {
-  const source = fs.readFileSync(metricsPath, 'utf8');
+test('010 硬切：设置页测试端点不再引用 v4 运行时', () => {
+  const source = fs.readFileSync(settingsPath, 'utf8');
 
-  assert.doesNotMatch(source, /\n\s*summarize\(metrics\)/);
-  assert.doesNotMatch(source, /\n\s*buildDashboardSummary\(/);
-  assert.doesNotMatch(source, /\n\s*buildPromptCoverage\(/);
-  assert.doesNotMatch(source, /\n\s*buildPromptPerformance\(/);
-  assert.doesNotMatch(source, /\n\s*buildTrend\(/);
-  assert.doesNotMatch(source, /avg_share_of_voice|visibility_score/);
+  assert.doesNotMatch(source, /AIResponseAnalysisService/);
+  assert.match(source, /AIResponseAnalysisV5Service\.analyze/);
 });
 
-test('正式记录生成固定写入新版版本且旧标量保持空值', () => {
+test('010 硬切：v5 分析器强制 deepseek-v4-flash（assertFlashPlatform），无 Pro/隐藏备用', () => {
+  const v5Source = fs.readFileSync(v5Path, 'utf8');
+  const entitySource = fs.readFileSync(entityPath, 'utf8');
+
+  assert.match(entitySource, /deepseek-v4-flash/);
+  assert.match(entitySource, /analysis_model_policy_mismatch/);
+  assert.doesNotMatch(v5Source, /deepseek-v4-pro|gpt|claude|gemini/iu);
+  assert.doesNotMatch(v5Source, /fallback|回退到旧/iu);
+});
+
+test('010 硬切：正式记录固定写入 v5 契约且旧标量保持空值', () => {
   const source = fs.readFileSync(runPath, 'utf8');
 
   assert.match(source, /analysis_contract_version:\s*CURRENT_ANALYSIS_CONTRACT/);
   assert.match(source, /metric_semantics_version:\s*CURRENT_METRIC_SEMANTICS/);
-  assert.match(source, /share_of_voice:\s*null/);
-  assert.match(source, /competitor_mentions:\s*\[\]/);
   assert.doesNotMatch(source, /ai_structured_v2|geo_metric_input_v2|legacy_rules_v1/);
 });

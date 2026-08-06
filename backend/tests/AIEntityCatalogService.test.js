@@ -347,3 +347,66 @@ test('S55 同形：短名与公司全称被拆成多个实体时不抛错，targ
   assert.equal(catalog.entities.length, 3);
   assert.equal(catalog.entities.some((entity) => entity.entity_id === 'E003'), true);
 });
+
+test('S53 法律主体冲突：完整法律主体中的同名短词不映射为目标（conflicting_identity）', () => {
+  const answer = '推荐深圳市广拓科技有限公司的周界产品。';
+  const sourceMap = createSourceMap(answer);
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap,
+    extractedMentions: [
+      {
+        source_id: 'L001',
+        surface_form: '深圳市广拓科技有限公司',
+        canonical_name: '深圳市广拓科技有限公司',
+        entity_type: 'company'
+      }
+    ],
+    targetBrand: { name: '广拓', aliases: ['广拓', '上海广拓', 'Gato'] }
+  });
+  // 确定性 target_fact 保持命中（buildTargetMentions 扫描"广拓"子串）
+  assert.equal(catalog.target_mentions.length, 1);
+  // 法律主体冲突：不映射为目标
+  assert.equal(catalog.target_mapping.status, 'conflicting_identity');
+  assert.equal(catalog.target_entity_id, null);
+});
+
+test('目标自身全称（含完整别名"上海广拓"）不受冲突判定影响，仍 resolved', () => {
+  const answer = '上海广拓信息技术有限公司是国标起草单位。';
+  const sourceMap = createSourceMap(answer);
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap,
+    extractedMentions: [
+      {
+        source_id: 'L001',
+        surface_form: '上海广拓信息技术有限公司',
+        canonical_name: '上海广拓信息技术有限公司',
+        entity_type: 'company'
+      }
+    ],
+    targetBrand: { name: '广拓', aliases: ['广拓', '上海广拓', 'Gato'] }
+  });
+  assert.equal(catalog.target_mapping.status, 'resolved');
+  assert.ok(catalog.target_entity_id);
+});
+
+test('非公司形态的短词命中不受冲突判定影响（如普通品牌列举）', () => {
+  const answer = '广拓和海康都是成熟品牌。';
+  const sourceMap = createSourceMap(answer);
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap,
+    extractedMentions: [
+      {
+        source_id: 'L001',
+        surface_form: '广拓',
+        canonical_name: '广拓',
+        entity_type: 'brand'
+      }
+    ],
+    targetBrand: { name: '广拓', aliases: ['广拓', '上海广拓', 'Gato'] }
+  });
+  assert.equal(catalog.target_mapping.status, 'resolved');
+  assert.ok(catalog.target_entity_id);
+});

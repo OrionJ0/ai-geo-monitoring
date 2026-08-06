@@ -122,11 +122,15 @@ test('metricFailureDiagnostics 识别 AIResponseAnalysisV5Error 并输出分阶�
   assert.equal(diagnostics.usage.total_tokens, 300);
 });
 
-test('buildVisibilityMetricPayload 默认调用 v4 分析器', async () => {
+test('010 硬切：buildVisibilityMetricPayload 默认调用 v5 分析器（无 v4 分派）', async () => {
   let v4Called = false;
   let v5Called = false;
-  AIResponseAnalysisService.analyze = async (input) => {
+  AIResponseAnalysisService.analyze = async () => {
     v4Called = true;
+    throw new Error('010 硬切后默认路径不应调用 v4');
+  };
+  AIResponseAnalysisV5Service.analyze = async () => {
+    v5Called = true;
     return {
       brand_mentioned: false,
       brand_mentions: 0,
@@ -137,18 +141,42 @@ test('buildVisibilityMetricPayload 默认调用 v4 分析器', async () => {
       answer_competitor_share: null,
       sov_numerator: 0,
       sov_denominator: 0,
+      sov_status: 'observed_only',
+      sov_scope: 'open_discovery',
+      sov_completeness: 'not_proven',
       competition_entities: [],
+      competition_scope: 'open_discovery',
+      competition_completeness: 'not_proven',
+      competition_analysis_status: 'complete',
       sentiment: 'neutral',
       analysis_method: CURRENT_ANALYSIS_CONTRACT,
       metric_semantics_version: CURRENT_METRIC_SEMANTICS,
       analysis_platform: 'deepseek',
       analysis_model: 'deepseek-v4-flash',
-      analysis_structure: {}
+      analysis_structure: {
+        schema_version: 'geo_metric_input_v5',
+        target_fact: { status: 'complete', brand_mentioned: false, brand_mentions: 0, mentions: [] },
+        target_mapping: { status: 'not_applicable', target_entity_id: null, candidate_entity_ids: [] },
+        target_semantics: {
+          status: 'complete',
+          recommendation: { status: 'not_applicable', value: null },
+          rank: { status: 'not_applicable', value: null },
+          sentiment: { status: 'not_applicable', value: null }
+        },
+        entities: [],
+        mentions: [],
+        competitor_relations: [],
+        candidate_groups: [],
+        recommendations: [],
+        claims: { status: 'not_collected', items: [] },
+        sentiment: { status: 'assessed', label: 'neutral', reason: '未提及目标品牌', risk_terms: [] },
+        diagnostics: { stages: [] },
+        competition_analysis: { status: 'complete', entities: [], relations: [], unresolved_entity_ids: [] },
+        sov: { status: 'observed_only', scope: 'open_discovery', completeness: 'not_proven', numerator: 0, denominator: 0, value: null },
+        target_entity_id: null,
+        target_mentions: []
+      }
     };
-  };
-  AIResponseAnalysisV5Service.analyze = async () => {
-    v5Called = true;
-    throw new Error('默认路径不应调用 v5');
   };
   const payload = await ProjectRunService.buildVisibilityMetricPayload({
     record: { tracked_prompt_id: 2, user_id: 1, platform: 'deepseek', question: target().prompt.question },
@@ -157,8 +185,8 @@ test('buildVisibilityMetricPayload 默认调用 v4 分析器', async () => {
     competitors: [],
     prompt: { question: target().prompt.question }
   });
-  assert.ok(v4Called);
-  assert.ok(!v5Called);
+  assert.ok(v5Called);
+  assert.ok(!v4Called);
   assert.equal(payload.analysis_method, CURRENT_ANALYSIS_CONTRACT);
 });
 

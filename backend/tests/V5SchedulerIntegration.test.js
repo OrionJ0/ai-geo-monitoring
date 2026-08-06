@@ -91,8 +91,9 @@ test('自动监测 v5 记录冻结竞品快照与 v5 契约', async () => {
   await QuestionRecord.destroy({ where: { id: rec.id }, force: true });
 });
 
-test('v5 租约预算覆盖两阶段最多 4 次 Flash 调用，且不小于 v4 预算', () => {
-  const v4 = ProjectRunService.getRecordExecutionLeaseMs({
+test('010 硬切：租约预算覆盖 v5 两阶段最多 4 次 Flash 调用（默认路径即 v5）', () => {
+  // 010 后默认路径即 v5：不传 analysisProvider 与显式 v5 预算一致
+  const def = ProjectRunService.getRecordExecutionLeaseMs({
     target: {},
     runtimeSettings: {},
     retryMode: 'full_monitoring'
@@ -103,7 +104,7 @@ test('v5 租约预算覆盖两阶段最多 4 次 Flash 调用，且不小于 v4 
     retryMode: 'full_monitoring',
     analysisProvider: 'v5'
   });
-  assert.ok(v5 > v4, 'v5 两阶段预算应大于 v4 单阶段预算');
+  assert.equal(def, v5, '默认路径应与 v5 预算一致');
   // 最坏 4 次 × 120 秒 + 60 秒缓冲
   assert.ok(v5 >= (4 * 120 + 60) * 1000, `v5 预算至少覆盖 4×120s+60s，实际 ${v5}`);
 });
