@@ -2,6 +2,12 @@ const defaultPlatformLabel = {
   doubao: '豆包',
   deepseek: 'DeepSeek'
 };
+/* eslint-disable @typescript-eslint/no-require-imports */
+const {
+  getSovPresentationTitle,
+  isAnswerLevelSovSemantics
+} = require('./metricSemantics.cjs');
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 function percent(value) {
   const n = Number(value || 0);
@@ -55,14 +61,6 @@ function formatCurrentSov(summary) {
   return `${percent(value)}%（有效回答 ${count}）`;
 }
 
-function formatCurrentSovTitle(summary) {
-  return summary?.kind === 'observed_competitor_mentions'
-    && summary?.scope === 'open_discovery'
-    && summary?.completeness === 'not_proven'
-    ? '开放发现 SOV（仅基于本次已发现实体，不代表完整市场）'
-    : '回答内竞品提及占比（SOV）';
-}
-
 function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }) {
   const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];
   const competitors = Array.isArray(summary.competitors) ? summary.competitors : [];
@@ -74,7 +72,7 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
   const sourceChanges = summary.source_changes || {};
   const sourceSummary = summary.source_summary || {};
   const opportunities = Array.isArray(summary.opportunities) ? summary.opportunities : [];
-  const sovTitle = formatCurrentSovTitle(summary.sov_summary);
+  const sovTitle = getSovPresentationTitle(summary.sov_summary);
 
   return [
     ['整体概览'],
@@ -244,10 +242,7 @@ function buildReportCsvRows({
   platformLabel = defaultPlatformLabel,
   websiteConfigured
 } = {}) {
-  if (
-    summary.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
-    || summary.metric_semantics_version === 'contextual_competitor_mentions_sov_v2_scoped'
-  ) {
+  if (isAnswerLevelSovSemantics(summary.metric_semantics_version)) {
     return buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured });
   }
   const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];

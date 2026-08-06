@@ -7,6 +7,7 @@ import axios from 'axios';
 import { getSelectableProjects, resolveSelectedProjectId } from '@/utils/projectSelection.cjs';
 import { buildReportCsv } from '@/utils/reportCsv.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { getSovPresentationTitle, isCurrentReportSnapshot } from '@/utils/metricSemantics.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 
 const { Text, Title } = Typography;
@@ -59,14 +60,6 @@ function formatSov(summary) {
   return value === null
     ? `—（有效回答 ${count}）`
     : `${value}%（有效回答 ${count}）`;
-}
-
-function formatSovTitle(summary) {
-  return summary?.kind === 'observed_competitor_mentions'
-    && summary?.scope === 'open_discovery'
-    && summary?.completeness === 'not_proven'
-    ? '开放发现 SOV（仅基于本次已发现实体，不代表完整市场）'
-    : '回答内竞品提及占比（SOV）';
 }
 
 function formatCitationRate(value, row) {
@@ -193,9 +186,10 @@ export default function GeoReportsPage() {
 
   const selectedProject = useMemo(() => projects.find((item) => item.id === projectId), [projects, projectId]);
   const summary = report?.summary || {};
-  const isCurrentReport = report?.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
-    && summary?.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
-    && summary?.metric_views;
+  const isCurrentReport = isCurrentReportSnapshot(
+    report?.metric_semantics_version,
+    summary?.metric_semantics_version
+  ) && summary?.metric_views;
   const availablePlatforms = Array.isArray(summary.available_platforms) ? summary.available_platforms : [];
   const metricViews = summary.metric_views || {};
   const selectedPlatformView = platform === 'all'
@@ -204,7 +198,7 @@ export default function GeoReportsPage() {
         ? metricViews.platforms.find((item) => item.platform === platform)
         : null);
   const metricSummary = isCurrentReport ? (selectedPlatformView?.summary || {}) : summary;
-  const currentSovTitle = formatSovTitle(metricSummary.sov_summary);
+  const currentSovTitle = getSovPresentationTitle(metricSummary.sov_summary);
   const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];
   const competitors = Array.isArray(summary.competitors) ? summary.competitors : [];
   const categories = Array.isArray(summary.categories) ? summary.categories : [];

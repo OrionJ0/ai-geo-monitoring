@@ -29,10 +29,11 @@ test('report page guards async report requests from stale project or period resp
 test('新版项目报告从不可变快照切换全部和单平台核心视图', () => {
   assert.match(source, /metric_semantics_version/);
   assert.match(source, /metric_views/);
+  assert.match(source, /isCurrentReportSnapshot/);
   assert.match(source, /available_platforms/);
   assert.match(source, /全部平台（合并）/);
-  assert.match(source, /回答内竞品提及占比（SOV）/);
-  assert.match(source, /开放发现 SOV（仅基于本次已发现实体，不代表完整市场）/);
+  assert.match(source, /getSovPresentationTitle/);
+  assert.match(source, /getSovPresentationTitle\(metricSummary\.sov_summary\)/);
   assert.match(source, /sov_summary/);
   assert.match(source, /analysis_coverage_rate/);
   assert.match(source, /value === null[\s\S]*—（有效回答/);

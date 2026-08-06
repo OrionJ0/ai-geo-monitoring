@@ -100,6 +100,24 @@ test('formats current zero-over-zero SOV as N/A instead of zero', () => {
   assert.equal(display.metricSemanticsLabel, '当前回答级竞品提及口径');
 });
 
+test('formats v2 scoped history as current open-discovery SOV instead of legacy zero', () => {
+  const display = getHistoryAnalysisDisplay({
+    status: 'completed',
+    visibilityMetric: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+      answer_competitor_share: 40,
+      sov_numerator: 2,
+      sov_denominator: 5,
+      share_of_voice: null,
+      brand_mentioned: true
+    }
+  });
+
+  assert.equal(display.sov, '40.00%（2 / 5）');
+  assert.equal(display.sovLabel, '开放发现 SOV（仅基于本次已发现实体，不代表完整市场）');
+  assert.equal(display.metricSemanticsLabel, '当前回答级竞品提及口径');
+});
+
 test('formats brand sentiment only for mentioned metrics', () => {
   assert.deepEqual(getBrandSentimentDisplay({ sentiment: 'positive', brand_mentioned: true }), {
     sentimentLabel: '正向',

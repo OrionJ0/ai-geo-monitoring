@@ -213,6 +213,70 @@ const v5Report = {
   }]
 };
 
+const scopedProjectReport = {
+  id: 801,
+  project_id: 11,
+  metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+  period_start: '2026-08-01T00:00:00.000Z',
+  period_end: '2026-08-06T00:00:00.000Z',
+  created_at: '2026-08-06T12:00:00.000Z',
+  project: { id: 11, name: '上海广拓', website: 'https://gato.com.cn' },
+  summary: {
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+    period_days: 30,
+    available_platforms: ['deepseek'],
+    metric_views: {
+      all: {
+        summary: {
+          metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+          valid_answers: 1,
+          acquired_answers: 1,
+          brand_mentioned_answers: 1,
+          brand_mention_assessed_answers: 1,
+          brand_mention_rate: 100,
+          sov_summary: {
+            metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+            kind: 'observed_competitor_mentions',
+            scope: 'open_discovery',
+            completeness: 'not_proven',
+            average: 33.33,
+            calculable_answers: 1
+          }
+        },
+        trend: []
+      },
+      platforms: [{
+        platform: 'deepseek',
+        summary: {
+          metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+          valid_answers: 1,
+          acquired_answers: 1,
+          brand_mentioned_answers: 1,
+          brand_mention_assessed_answers: 1,
+          brand_mention_rate: 100,
+          sov_summary: {
+            metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+            kind: 'observed_competitor_mentions',
+            scope: 'open_discovery',
+            completeness: 'not_proven',
+            average: 50,
+            calculable_answers: 1
+          }
+        },
+        trend: []
+      }]
+    },
+    platforms: [],
+    competitors: [],
+    categories: [],
+    trend: [],
+    source_types: [],
+    source_domains: [],
+    source_urls: [],
+    opportunities: []
+  }
+};
+
 async function installRoutes(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('agd_token', 'playwright.v5-admin.signature');
@@ -295,6 +359,20 @@ async function installV5ReportRoutes(page: Page) {
   await page.route('**/api/geo-projects/11/question-set-runs/501*', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ success: true, data: v5Report })
+  }));
+}
+
+async function installScopedProjectReportRoutes(page: Page) {
+  await page.route('**/api/geo-projects', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      data: [{ id: 11, name: '上海广拓', status: 'active', website: 'https://gato.com.cn' }]
+    })
+  }));
+  await page.route('**/api/geo-projects/11/reports/latest*', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: scopedProjectReport })
   }));
 }
 
@@ -527,4 +605,21 @@ test('v5 scoped report renders observed-only facts and long identities accessibl
     path: path.join(artifactDirectory, 'question-set-report-v5-mobile.png'),
     fullPage: false
   });
+});
+
+test('v2 scoped project report stays on the current metric view and switches platform snapshots', async ({ page }) => {
+  await installScopedProjectReportRoutes(page);
+  await page.goto('/geo/reports');
+
+  await expect(page.getByText('当前回答级竞品提及口径', { exact: true })).toBeVisible();
+  await expect(page.getByText('开放发现 SOV（仅基于本次已发现实体，不代表完整市场）', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('33.33%（有效回答 1）', { exact: true })).toBeVisible();
+  await expect(page.getByText('历史竞品配置口径', { exact: true })).toHaveCount(0);
+
+  const platformScope = page.getByLabel('报告核心指标平台范围');
+  await platformScope.focus();
+  await platformScope.press('ArrowDown');
+  await platformScope.press('ArrowDown');
+  await platformScope.press('Enter');
+  await expect(page.getByText('50%（有效回答 1）', { exact: true })).toBeVisible();
 });

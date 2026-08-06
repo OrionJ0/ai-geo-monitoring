@@ -1,3 +1,10 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+const {
+  getSovPresentationTitle,
+  isAnswerLevelSovSemantics
+} = require('./metricSemantics.cjs');
+/* eslint-enable @typescript-eslint/no-require-imports */
+
 function getBrandSentimentDisplay(metric = {}) {
   if (!metric.brand_mentioned) {
     return { sentimentLabel: '-', sentimentColor: 'default', sentimentReason: '', sentimentRiskTerms: [] };
@@ -57,7 +64,7 @@ function getHistoryAnalysisDisplay(row = {}) {
   const metric = row.visibilityMetric || {};
   const sentimentDisplay = getBrandSentimentDisplay(metric);
   const mentioned = !!metric.brand_mentioned;
-  const isCurrent = metric.metric_semantics_version === 'contextual_competitor_mentions_sov_v1';
+  const isCurrent = isAnswerLevelSovSemantics(metric.metric_semantics_version);
   const denominator = Number(metric.sov_denominator);
   const numerator = Number(metric.sov_numerator);
   const currentValue = metric.answer_competitor_share;
@@ -75,7 +82,7 @@ function getHistoryAnalysisDisplay(row = {}) {
       : 'N/A');
   return {
     sov,
-    sovLabel: isCurrent ? '回答内竞品提及占比（SOV）' : '声量占比（SOV）',
+    sovLabel: isCurrent ? getSovPresentationTitle(metric) : '声量占比（SOV）',
     metricSemanticsLabel: isCurrent ? '当前回答级竞品提及口径' : '历史竞品配置口径',
     sentimentLabel: sentimentDisplay.sentimentLabel,
     sentimentColor: sentimentDisplay.sentimentColor,

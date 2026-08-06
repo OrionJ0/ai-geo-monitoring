@@ -40,7 +40,7 @@ test('project dashboard defaults to merged platforms and renders versioned answe
   assert.match(source, /available_platforms/);
   assert.match(source, /selected_platform/);
   assert.match(source, /全部平台（合并）/);
-  assert.match(source, /回答内竞品提及占比（SOV）/);
+  assert.match(source, /getSovPresentationTitle/);
   assert.match(source, /sov_summary/);
   assert.match(source, /analysis_coverage_rate/);
   assert.match(source, /有效回答/);
@@ -94,7 +94,7 @@ test('project dashboard presents existing metrics in a clear decision hierarchy'
   const coreSection = source.slice(coreIndex, runIndex);
   assert.match(coreSection, /品牌提及率/);
   assert.match(coreSection, /metricTitle\(sovMetricTitle/);
-  assert.match(source, /开放发现 SOV（仅基于本次已发现实体，不代表完整市场）/);
+  assert.match(source, /getSovPresentationTitle\(summary\.sov_summary\)/);
   assert.match(coreSection, /推荐率/);
   assert.doesNotMatch(coreSection, /平均排名/);
   assert.doesNotMatch(coreSection, /title="(?:总运行数|有效分析数|失败数|新增引用域名)"/);

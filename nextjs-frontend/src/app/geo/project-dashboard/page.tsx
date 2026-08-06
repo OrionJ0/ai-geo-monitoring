@@ -9,6 +9,7 @@ import { Column, Line } from '@ant-design/plots';
 import { shouldRenderMetricChart } from '@/utils/dashboardChartState.cjs';
 import { getBrandSentimentDisplay } from '@/utils/historyAnalysisDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { getSovPresentationTitle } from '@/utils/metricSemantics.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import WorkspacePageHeader from '@/components/WorkspacePageHeader';
@@ -56,14 +57,6 @@ function formatSov(summary) {
   const value = nullablePercent(summary?.average);
   const count = Number(summary?.calculable_answers || 0);
   return value === null ? `—（有效回答 ${count}）` : `${value}%（有效回答 ${count}）`;
-}
-
-function formatSovTitle(summary) {
-  return summary?.kind === 'observed_competitor_mentions'
-    && summary?.scope === 'open_discovery'
-    && summary?.completeness === 'not_proven'
-    ? '开放发现 SOV（仅基于本次已发现实体，不代表完整市场）'
-    : '回答内竞品提及占比（SOV）';
 }
 
 function formatDate(value) {
@@ -158,7 +151,7 @@ export default function GeoProjectDashboardPage() {
   useEffect(() => { fetchDashboard(projectId, days, platform); }, [fetchDashboard, projectId, days, platform]);
 
   const summary = useMemo(() => dashboard?.summary || {}, [dashboard]);
-  const sovMetricTitle = formatSovTitle(summary.sov_summary);
+  const sovMetricTitle = getSovPresentationTitle(summary.sov_summary);
   const recentMetrics = useMemo(() => (
     Array.isArray(dashboard?.recent_metrics) ? dashboard.recent_metrics : []
   ), [dashboard]);
