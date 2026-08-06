@@ -1,9 +1,14 @@
-const CURRENT_ANALYSIS_CONTRACT = 'ai_structured_v4';
-const CURRENT_STRUCTURE_VERSION = 'geo_metric_input_v4';
-const CURRENT_METRIC_SEMANTICS = 'contextual_competitor_mentions_sov_v1';
+// 010 硬切（2026-08-06 数据所有者授权）：v5 为唯一正式契约。
+// 历史 v4 记录（ai_structured_v4 / geo_metric_input_v4 /
+// contextual_competitor_mentions_sov_v1 / configured_competitor_sov_v1）
+// 仍可按只读兼容读取（QuestionSetRunService / CsvService / ProjectMetricsService）。
+const CURRENT_ANALYSIS_CONTRACT = 'ai_structured_v5';
+const CURRENT_STRUCTURE_VERSION = 'geo_metric_input_v5';
+const CURRENT_METRIC_SEMANTICS = 'contextual_competitor_mentions_sov_v2_scoped';
 const SCOPED_METRIC_SEMANTICS = 'contextual_competitor_mentions_sov_v2_scoped';
 const LEGACY_METRIC_SEMANTICS = 'configured_competitor_sov_v1';
-// v5 候选分阶段分析契约（硬切前不作为正式默认）
+// 历史 v1（ai_structured_v4 时代）：010 硬切后只读透传
+const V1_METRIC_SEMANTICS = 'contextual_competitor_mentions_sov_v1';
 const V5_ANALYSIS_CONTRACT = 'ai_structured_v5';
 const V5_STRUCTURE_VERSION = 'geo_metric_input_v5';
 
@@ -16,7 +21,9 @@ function finiteNumberOrNull(value) {
 class GeoMetricSemanticsService {
   presentSov(metric = {}) {
     const version = String(metric.metric_semantics_version || '').trim();
-    if (version === CURRENT_METRIC_SEMANTICS) {
+    // 010 硬切后：历史 v1（contextual_competitor_mentions_sov_v1）只读透传，
+    // 与当前 v2_scoped 共享分子/分母校验，返回值保留原版本号。
+    if (version === CURRENT_METRIC_SEMANTICS || version === V1_METRIC_SEMANTICS) {
       const value = finiteNumberOrNull(metric.answer_competitor_share);
       const numerator = Number(metric.sov_numerator);
       const denominator = Number(metric.sov_denominator);
@@ -51,7 +58,7 @@ class GeoMetricSemanticsService {
         throw error;
       }
       return {
-        metric_semantics_version: CURRENT_METRIC_SEMANTICS,
+        metric_semantics_version: version,
         kind: 'contextual_competitor_mentions',
         status: denominator === 0 ? 'not_applicable' : 'calculated',
         value,
@@ -133,5 +140,6 @@ module.exports.CURRENT_STRUCTURE_VERSION = CURRENT_STRUCTURE_VERSION;
 module.exports.CURRENT_METRIC_SEMANTICS = CURRENT_METRIC_SEMANTICS;
 module.exports.SCOPED_METRIC_SEMANTICS = SCOPED_METRIC_SEMANTICS;
 module.exports.LEGACY_METRIC_SEMANTICS = LEGACY_METRIC_SEMANTICS;
+module.exports.V1_METRIC_SEMANTICS = V1_METRIC_SEMANTICS;
 module.exports.V5_ANALYSIS_CONTRACT = V5_ANALYSIS_CONTRACT;
 module.exports.V5_STRUCTURE_VERSION = V5_STRUCTURE_VERSION;

@@ -16,7 +16,8 @@ const AIPlatformService = require('./AIPlatformService');
 const WebPlatformRegistry = require('./WebPlatformRegistry');
 const ResultParserService = require('./ResultParserService');
 const VisibilityAnalysisService = require('./VisibilityAnalysisService');
-const AIResponseAnalysisService = require('./AIResponseAnalysisService');
+// 010 硬切（2026-08-06）：v4 运行时已退役，仅保留其错误类用于历史错误消息
+// 映射兼容（评测对照臂可能抛 v4 错误）；分析分派不再引用 v4 服务。
 const { AIResponseAnalysisError } = require('./AIResponseAnalysisService');
 const AIAnalysisConfigService = require('./AIAnalysisConfigService');
 const { AIAnalysisConfigError } = require('./AIAnalysisConfigService');
@@ -38,7 +39,7 @@ const WebCaptureAnswerQualityService = require('./WebCaptureAnswerQualityService
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
 
-const CURRENT_ANALYSIS_PROVIDER = 'v4';
+const CURRENT_ANALYSIS_PROVIDER = 'v5';
 const V5_ANALYSIS_PROVIDER = 'v5';
 
 function isV5Provider(analysisProvider) {
@@ -141,10 +142,15 @@ function metricFailureMessage(error) {
     analysis_relation_reason_invalid: '竞品判断理由无效，本条未计入品牌指标',
     invalid_analysis_output: 'AI 结构化结果无效，本条未计入品牌指标'
   };
-  if (error instanceof AIResponseAnalysisError && messages[error.code]) {
+  // 010 硬切（2026-08-06）：v5 为唯一分析器，错误映射同时识别 v5 错误类；
+  // v4 错误类保留（评测对照臂与历史路径仍可能抛 v4 错误）。
+  if ((error instanceof AIResponseAnalysisError || error instanceof AIResponseAnalysisV5Error)
+    && messages[error.code]) {
     return messages[error.code];
   }
-  if (error instanceof AIAnalysisConfigError || error instanceof AIResponseAnalysisError) {
+  if (error instanceof AIAnalysisConfigError
+    || error instanceof AIResponseAnalysisError
+    || error instanceof AIResponseAnalysisV5Error) {
     return 'AI 结构化分析失败，本条未计入有效样本';
   }
   return '指标生成失败，请稍后重试';
@@ -522,18 +528,14 @@ class ProjectRunService {
       ? competitors.map((item) => (item.toJSON ? item.toJSON() : item))
       : [];
     const question = String(prompt?.question || record?.question || '').trim();
-    const analysis = isV5Provider(analysisProvider)
-      ? await AIResponseAnalysisV5Service.analyze({
-          question,
-          responseText,
-          brand: projectData,
-          competitors: Array.isArray(competitorSnapshot) ? competitorSnapshot : []
-        })
-      : await AIResponseAnalysisService.analyze({
-          question,
-          responseText,
-          brand: projectData
-        });
+    // 010 硬切（2026-08-06）：v5 为唯一分析器，不再分派 v4；
+    // v5 分阶段分析强制 deepseek-v4-flash（assertFlashPlatform），无 v4/Pro fallback。
+    const analysis = await AIResponseAnalysisV5Service.analyze({
+      question,
+      responseText,
+      brand: projectData,
+      competitors: Array.isArray(competitorSnapshot) ? competitorSnapshot : []
+    });
     const citationAnalysis = providedCitationAnalysis || this.buildCitationAnalysis({
       responseText,
       aiResponse,
@@ -1028,18 +1030,11 @@ class ProjectRunService {
         (_, index) => Math.min(5, 2 ** index)
       ).reduce((sum, seconds) => sum + seconds, 0)
       : 0;
-    // v5 分阶段分析：两阶段 × 每阶段最多 2 次 = 最多 4 次 Flash 调用，
-    // 每次 120 秒；正常 2 次也处于预算内。
-    let analysisSeconds;
-    if (isV5Provider(analysisProvider)) {
-      const { ANALYSIS_TIMEOUT_SECONDS } = require('./AIResponseEntityExtractionService');
-      const v5StageSeconds = Math.max(10, Number(ANALYSIS_TIMEOUT_SECONDS) || 120);
-      analysisSeconds = v5StageSeconds * 4;
-    } else {
-      const analysisProfile = AIResponseAnalysisService.ANALYSIS_REQUEST_PROFILE || {};
-      analysisSeconds = Math.max(10, Number(analysisProfile.timeout_seconds) || 120)
-        * Math.max(1, Number(analysisProfile.max_attempts) || 2);
-    }
+    // 010 硬切（2026-08-06）：v5 分阶段分析——两阶段 × 每阶段最多 2 次 =
+    // 最多 4 次 Flash 调用，每次 120 秒；正常 2 次也处于预算内。v4 profile 不再使用。
+    const { ANALYSIS_TIMEOUT_SECONDS } = require('./AIResponseEntityExtractionService');
+    const v5StageSeconds = Math.max(10, Number(ANALYSIS_TIMEOUT_SECONDS) || 120);
+    const analysisSeconds = v5StageSeconds * 4;
     return Math.max(
       MIN_RECORD_LEASE_MS,
       (monitoringSeconds + retryDelaySeconds + analysisSeconds + RECORD_LEASE_BUFFER_SECONDS) * 1000

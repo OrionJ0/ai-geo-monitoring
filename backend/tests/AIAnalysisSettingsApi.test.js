@@ -7,7 +7,7 @@ process.env.JWT_SECRET = 'analysis-settings-api-test-secret';
 const settingsRouter = require('../routes/settings');
 const User = require('../models/User');
 const AIAnalysisConfigService = require('../services/AIAnalysisConfigService');
-const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
+const AIResponseAnalysisV5Service = require('../services/AIResponseAnalysisV5Service');
 
 const originalFindByPk = User.findByPk;
 
@@ -128,59 +128,55 @@ test('returns the versioned runtime analysis prompt template to administrators',
 
     assert.equal(response.status, 200);
     assert.equal(response.headers['cache-control'], 'no-store');
-    assert.equal(response.json.data.version, 'ai_structured_v4');
-    assert.equal(response.json.data.prompt_revision, 'semantic_evidence_field_repair_v8');
-    assert.match(response.json.data.template, /\{\{目标品牌\}\}/);
-    assert.match(response.json.data.template, /\{\{当前问题\}\}/);
-    assert.match(response.json.data.template, /完整抽取/);
-    assert.match(response.json.data.template, /competitor_relations/);
+    // 010 硬切：/analysis-api/prompt 返回 v5 阶段 1（实体提取）提示定义，
+    // 不再暴露 v4 运行时提示词。
+    assert.equal(response.json.data.prompt_revision, 'grounded_entity_catalog_v1');
+    assert.match(response.json.data.template, /<source_answer>/);
+    assert.match(response.json.data.template, /\{\{待分析回答原文片段\}\}/);
+    assert.match(response.json.data.template, /只从 source_answer\.segments 的 text 中抽取/);
+    assert.match(response.json.data.template, /<output_contract>/);
     assert.match(response.json.data.template, /other_organization/);
-    assert.match(response.json.data.template, /evidence/);
+    assert.doesNotMatch(response.json.data.template, /\{\{目标品牌\}\}/);
     assert.doesNotMatch(response.json.data.template, /competitor_hints|竞品提示/);
-    assert.equal(response.json.data.request_profile.token_limit, null);
-    assert.equal(response.json.data.request_profile.timeout_seconds, 120);
-    assert.equal(response.json.data.request_profile.max_attempts, 2);
-    assert.equal(response.json.data.request_profile.web_search, false);
-    assert.equal(response.json.data.request_profile.deepseek_thinking, 'disabled');
-    assert.deepEqual(response.json.data.request_parameters, {
-      adapter_type: 'openai_chat_completions',
-      request_body: {
-        model: 'deepseek-v4-pro',
-        messages: [{
-          role: 'user',
-          content: '<运行时注入完整结构化提示词>'
-        }],
-        response_format: { type: 'json_object' },
-        thinking: { type: 'disabled' }
-      },
-      runtime_policy: {
-        timeout_seconds: 120,
-        max_attempts: 2,
-        web_search: false,
-        token_limit: null
-      }
+    assert.deepEqual(response.json.data.request_options, {
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      thinking: { type: 'disabled' }
     });
-    assert.doesNotMatch(response.json.data.template, /逐字原文/);
+    assert.equal(response.json.data.max_attempts, 2);
   } finally {
     AIAnalysisConfigService.getAnalysisPlatform = originalGetAnalysisPlatform;
   }
 });
 
 test('returns temporary analysis test input and output without a persistence contract', async () => {
-  const originalAnalyze = AIResponseAnalysisService.analyze;
+  const originalAnalyze = AIResponseAnalysisV5Service.analyze;
   let analysisInput;
-  AIResponseAnalysisService.analyze = async (input) => {
+  AIResponseAnalysisV5Service.analyze = async (input) => {
     analysisInput = input;
+    // 010 硬切：测试端点走 v5 分阶段分析器，输出为 v5 顶层结构
     return {
-    brand_mentioned: true,
-    brand_mentions: 1,
-    brand_recommended: false,
-    brand_rank: 3,
-    analysis_structure: {
-      schema_version: 'geo_metric_input_v4',
-      entities: [{ name: '广拓', type: 'brand' }]
-    },
-    raw_output: '{"entities":[{"name":"广拓","type":"brand"}]}'
+      brand_mentioned: true,
+      brand_mentions: 1,
+      brand_recommended: false,
+      brand_rank: 3,
+      sentiment: 'neutral',
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+      analysis_structure: {
+        schema_version: 'geo_metric_input_v5',
+        target_fact: { target: '广拓', appeared: true, mention_count: 1 },
+        target_mapping: { status: 'unavailable', target_entity_id: null, candidate_entity_ids: [] },
+        entities: [{
+          entity_id: 'E001',
+          name: '广拓',
+          type: 'brand',
+          surface_forms: ['上海广拓', 'GATO'],
+          registry_match: null
+        }],
+        mentions: [],
+        competition_analysis: { competitors: [], status: 'observed_only', completeness: 'not_proven' },
+        sentiment: { status: 'resolved', label: 'neutral', evidence_source_ids: [] }
+      }
     };
   };
 
@@ -197,6 +193,8 @@ test('returns temporary analysis test input and output without a persistence con
     assert.equal(response.status, 200);
     assert.equal(analysisInput.question, '周界安防厂商有哪些？');
     assert.equal(Object.hasOwn(analysisInput, 'competitorHints'), false);
+    assert.deepEqual(analysisInput.brand, { name: '广拓', aliases: ['GATO'] });
+    assert.equal(analysisInput.responseText, '3. 上海广拓（GATO）');
     assert.equal(
       response.json.data.input.question_text,
       '周界安防厂商有哪些？'
@@ -204,10 +202,12 @@ test('returns temporary analysis test input and output without a persistence con
     assert.equal(response.json.data.input.brand_name, '广拓');
     assert.equal(response.json.data.input.response_text, '3. 上海广拓（GATO）');
     assert.equal(
-      response.json.data.output.raw_output,
-      '{"entities":[{"name":"广拓","type":"brand"}]}'
+      response.json.data.output.metric_semantics_version,
+      'contextual_competitor_mentions_sov_v2_scoped'
     );
+    assert.equal(response.json.data.output.analysis_structure.schema_version, 'geo_metric_input_v5');
+    assert.equal(response.json.data.output.analysis_structure.entities[0].name, '广拓');
   } finally {
-    AIResponseAnalysisService.analyze = originalAnalyze;
+    AIResponseAnalysisV5Service.analyze = originalAnalyze;
   }
 });

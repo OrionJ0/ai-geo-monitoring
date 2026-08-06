@@ -181,7 +181,7 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   }
 
   const runtimeSettings = await settingsService.getSettings();
-  const analysisProvider = options.analysisProvider || 'v4';
+  const analysisProvider = options.analysisProvider || 'v5';
   const competitorSnapshot = isV5Provider(analysisProvider)
     ? await frozenCompetitorSnapshot(schedule.project_id)
     : null;

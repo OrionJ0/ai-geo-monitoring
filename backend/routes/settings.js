@@ -6,8 +6,8 @@ const AIRuntimeSettingsService = require('../services/AIRuntimeSettingsService')
 const { AI_RUNTIME_SETTING_DEFINITIONS } = require('../services/AIRuntimeSettingsService');
 const AIAnalysisConfigService = require('../services/AIAnalysisConfigService');
 const { AIAnalysisConfigError } = require('../services/AIAnalysisConfigService');
-const AIResponseAnalysisService = require('../services/AIResponseAnalysisService');
-const { AIResponseAnalysisError } = require('../services/AIResponseAnalysisService');
+const AIResponseAnalysisV5Service = require('../services/AIResponseAnalysisV5Service');
+const AIResponseEntityExtractionService = require('../services/AIResponseEntityExtractionService');
 const SeoAuditSettingsService = require('../services/SeoAuditSettingsService');
 
 // 允许的设置项及校验
@@ -42,7 +42,9 @@ const allowedKeys = {
 };
 
 function analysisError(res, error, fallbackMessage) {
-  const isKnown = error instanceof AIAnalysisConfigError || error instanceof AIResponseAnalysisError;
+  const isKnown = error instanceof AIAnalysisConfigError
+    || error instanceof AIResponseAnalysisV5Service.AIResponseAnalysisV5Error
+    || error instanceof AIResponseEntityExtractionService.AIEntityExtractionError;
   return res.status(isKnown ? (error.status || 400) : 500).json({
     success: false,
     message: isKnown ? error.message : fallbackMessage,
@@ -114,9 +116,11 @@ router.get('/analysis-api/prompt', adminRequired, async (_req, res) => {
       return analysisError(res, error, '获取 AI 分析 API 请求参数失败');
     }
   }
+  // 010 硬切（2026-08-06）：v5 为唯一正式分析器，提示定义返回 v5 阶段 1
+  // （实体提取）合同，不再暴露 v4 提示词。
   return res.json({
     success: true,
-    data: AIResponseAnalysisService.getPromptDefinition(platform)
+    data: AIResponseEntityExtractionService.getPromptDefinition(platform)
   });
 });
 
@@ -151,11 +155,12 @@ router.post('/analysis-api/test', adminRequired, async (req, res) => {
     return res.status(400).json({ success: false, message: '测试回答不能为空' });
   }
   try {
-    const output = await AIResponseAnalysisService.analyze({
+    // 010 硬切（2026-08-06）：设置页测试端点走 v5 分阶段分析器（强制
+    // deepseek-v4-flash），不再调用 v4 运行时。
+    const output = await AIResponseAnalysisV5Service.analyze({
       question: questionText,
       responseText,
-      brand: { name: brandName, aliases: brandAliases },
-      includeRawOutput: true
+      brand: { name: brandName, aliases: brandAliases }
     });
     return res.json({
       success: true,

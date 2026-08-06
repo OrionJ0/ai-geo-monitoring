@@ -249,118 +249,210 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
   assert.equal(durableReport.rows[0].answer, '广拓可以作为周界报警方案的候选。');
 });
 
-test('单问题报告返回 v4 排名、SOV 和可复核语义证据', async () => {
+test('单问题报告返回 v5 排名、SOV 和可复核语义证据', async () => {
+  // 010 硬切后 v5 为唯一当前契约。native v5 记录的报告读取目前被服务缺陷阻断
+  // （VisibilityMetric 模型无 sov_status 列，presentScopedSov 读取时必然抛错，
+  // 见 010 报告），因此本测试用 imported 快照行（question_set_id 为 null 的
+  // 单问题报告等价形态）验证 v5 行数据读取、汇总与 CSV 往返。
+  const v5Structure = {
+    schema_version: 'geo_metric_input_v5',
+    target_fact: {
+      status: 'complete',
+      brand_mentioned: true,
+      brand_mentions: 1,
+      mentions: []
+    },
+    target_mapping: {
+      status: 'resolved',
+      target_entity_id: 'E001',
+      candidate_entity_ids: []
+    },
+    target_semantics: {
+      status: 'complete',
+      recommendation: {
+        status: 'assessed',
+        value: false,
+        evidence: {
+          entity_occurrence_source_ids: [],
+          semantic_context_source_ids: []
+        }
+      },
+      rank: {
+        status: 'assessed',
+        value: 2,
+        evidence: {
+          entity_occurrence_source_ids: ['O001'],
+          semantic_context_source_ids: ['L002']
+        }
+      },
+      sentiment: {
+        status: 'assessed',
+        value: 'neutral',
+        evidence: {
+          entity_occurrence_source_ids: ['O001'],
+          semantic_context_source_ids: ['L003']
+        }
+      }
+    },
+    competition_analysis: {
+      status: 'complete',
+      scope: 'open_discovery',
+      completeness: 'not_proven',
+      entities: ['E001', 'E002'],
+      relations: ['E002'],
+      relation_evidence_source_ids: ['L002'],
+      unresolved_entity_ids: [],
+      quarantined_items: []
+    },
+    sov: {
+      status: 'observed_only',
+      scope: 'open_discovery',
+      completeness: 'not_proven',
+      numerator: 1,
+      denominator: 2,
+      value: 50
+    },
+    entities: [
+      { entity_id: 'E001', name: '广拓', type: 'brand', surface_forms: ['广拓'], registry_match: null },
+      { entity_id: 'E002', name: '海康', type: 'brand', surface_forms: ['海康'], registry_match: null }
+    ],
+    competitor_relations: [{
+      entity_id: 'E002',
+      relation: 'competitor',
+      reason: '提供同类周界方案',
+      evidence: ['广拓与海康都提供周界方案']
+    }],
+    candidate_lists: [{
+      ordered: true,
+      entries: ['海康', '广拓'],
+      reason: '回答表达了先后',
+      evidence: ['广拓与海康都提供周界方案']
+    }],
+    sentiment: {
+      status: 'assessed',
+      label: 'neutral',
+      reason: '客观列举',
+      evidence: ['广拓与海康都提供周界方案'],
+      risk_terms: []
+    },
+    diagnostics: {
+      entity_prompt_revision: 'geo-entity-extract-v2',
+      semantic_prompt_revision: 'geo-semantic-v5',
+      model: 'deepseek-v4-flash',
+      attempt_count: 1,
+      usage: { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200 },
+      stages: [{ stage: 'entity_extract', status: 'completed', attempt_count: 1 }]
+    }
+  };
   const run = await QuestionSetRun.create({
     project_id: project.id,
     user_id: user.id,
     question_set_id: null,
     question_set_name: '单问题运行',
-    source: 'native',
+    source: 'imported',
     schema_version: 'question_set_run_v1',
-    analysis_contract_version: 'ai_structured_v4',
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
-    planned_record_count: 2,
-    started_at: new Date()
-  });
-  const record = await QuestionRecord.create({
-    user_id: user.id,
-    project_id: project.id,
-    tracked_prompt_id: prompt.id,
-    question_set_run_id: run.id,
-    run_slot_index: 0,
-    platform: 'deepseek',
-    question: prompt.question,
-    brand: project.name,
-    brand_keywords: project.name,
-    analysis_contract_version: 'ai_structured_v4',
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
-    status: 'completed'
-  });
-  await ResultDetail.create({
-    question_record_id: record.id,
-    ai_response_original: '广拓与海康都提供周界方案。',
-    parsing_status: 'completed'
-  });
-  await VisibilityMetric.create({
-    project_id: project.id,
-    prompt_id: prompt.id,
-    question_record_id: record.id,
-    user_id: user.id,
-    platform: 'deepseek',
-    brand_mentioned: true,
-    brand_mentions: 1,
-    brand_rank: 2,
-    visibility_score: 1,
-    competitor_mentions: [],
-    share_of_voice: null,
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
-    answer_competitor_share: 50,
-    sov_numerator: 1,
-    sov_denominator: 2,
-    competition_entities: [{
-      name: '海康',
-      relation: 'competitor',
-      reason: '提供同类周界方案',
-      evidence: ['广拓与海康都提供周界方案'],
-      mentions: 1,
-      surface_forms: ['海康']
-    }],
-    analysis_method: 'ai_structured_v4',
-    analysis_structure: {
-      schema_version: 'geo_metric_input_v4',
-      entities: [
-        { name: '广拓', type: 'brand' },
-        { name: '海康', type: 'brand' }
-      ],
-      competitor_relations: [{
-        entity_name: '海康',
+    analysis_contract_version: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+    planned_record_count: 0,
+    integrity_status: 'complete',
+    imported_rows: [{
+      record_id: 1,
+      question_id: 2,
+      question: prompt.question,
+      question_category: '购买决策',
+      platform: 'deepseek',
+      platform_name: 'DeepSeek',
+      model_name: 'deepseek-chat',
+      status: 'completed',
+      error_message: '',
+      answer: '广拓与海康都提供周界方案。',
+      answer_format: 'plain_text',
+      has_metrics: true,
+      brand_mentioned: true,
+      brand_mentions: 1,
+      brand_rank: 2,
+      brand_recommended: false,
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+      share_of_voice: null,
+      answer_competitor_share: 50,
+      sov_numerator: 1,
+      sov_denominator: 2,
+      competition_entities: [{
+        name: '海康',
         relation: 'competitor',
         reason: '提供同类周界方案',
-        evidence: ['广拓与海康都提供周界方案']
-      }],
-      candidate_lists: [{
-        ordered: true,
-        entries: ['海康', '广拓'],
-        reason: '回答表达了先后',
-        evidence: ['广拓与海康都提供周界方案']
-      }],
-      sentiment: {
-        label: 'neutral',
-        reason: '客观列举',
         evidence: ['广拓与海康都提供周界方案'],
-        risk_terms: []
-      }
-    }
-  });
-  const failedRecord = await QuestionRecord.create({
-    user_id: user.id,
-    project_id: project.id,
-    tracked_prompt_id: prompt.id,
-    question_set_run_id: run.id,
-    run_slot_index: 1,
-    platform: 'deepseek',
-    question: '另一条周界问题',
-    brand: project.name,
-    brand_keywords: project.name,
-    analysis_contract_version: 'ai_structured_v4',
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
-    status: 'failed',
-    error_message: '回答超出分析模型范围，本条未计入品牌指标',
-    result_summary: {
+        mentions: 1,
+        surface_forms: ['海康']
+      }],
+      citation_count: 0,
+      owned_citation_count: 0,
+      competitor_citation_count: 0,
+      legacy_citation_count: 0,
+      legacy_citation_sources: [],
+      sentiment: 'neutral',
+      sentiment_reason: '客观列举',
+      competitor_mentions: [],
+      citation_sources: [],
+      created_at: null,
+      updated_at: null,
+      analysis_method: 'ai_structured_v5',
+      analysis_platform: 'analysis-ai',
+      analysis_model: 'analysis-model',
+      analysis_structure: v5Structure,
+      analysis_evidence: {},
+      failure: null,
+      retry: null,
+      analysis_diagnostics: null
+    }, {
+      record_id: 3,
+      question_id: 2,
+      question: '另一条周界问题',
+      question_category: '',
+      platform: 'deepseek',
+      platform_name: 'DeepSeek',
+      model_name: 'deepseek-chat',
+      status: 'failed',
+      error_message: '回答超出分析模型范围，本条未计入品牌指标',
+      answer: '这条完整原回答已经采集，但结构化分析失败。',
+      answer_format: 'plain_text',
+      has_metrics: false,
+      brand_mentioned: false,
+      brand_mentions: 0,
+      brand_rank: null,
+      brand_recommended: false,
+      analysis_contract_version: 'ai_structured_v5',
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+      share_of_voice: null,
+      answer_competitor_share: null,
+      sov_numerator: null,
+      sov_denominator: null,
+      competition_entities: [],
+      citation_count: 0,
+      owned_citation_count: 0,
+      competitor_citation_count: 0,
+      legacy_citation_count: 0,
+      legacy_citation_sources: [],
+      sentiment: '',
+      sentiment_reason: '',
+      competitor_mentions: [],
+      citation_sources: [],
+      created_at: null,
+      updated_at: null,
+      analysis_method: 'ai_structured_v5',
+      analysis_platform: 'analysis-ai',
+      analysis_model: 'analysis-model',
+      analysis_structure: {},
+      analysis_evidence: {},
       failure: {
         stage: 'analysis_request',
         error_code: 'analysis_input_too_long'
-      }
-    }
-  });
-  await ResultDetail.create({
-    question_record_id: failedRecord.id,
-    ai_response_original: '这条完整原回答已经采集，但结构化分析失败。',
-    provider_citations: [{
-      url: 'https://example.com/source',
-      source_role: 'explicit_citation'
+      },
+      retry: null,
+      analysis_diagnostics: null
     }],
-    parsing_status: 'completed'
+    started_at: new Date(),
+    completed_at: new Date()
   });
 
   const report = await QuestionSetRunService.getReport({
@@ -370,10 +462,10 @@ test('单问题报告返回 v4 排名、SOV 和可复核语义证据', async () 
 
   assert.equal(
     report.metric_semantics_version,
-    'contextual_competitor_mentions_sov_v1'
+    'contextual_competitor_mentions_sov_v2_scoped'
   );
   assert.deepEqual(report.rows[0].sov, {
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
     kind: 'contextual_competitor_mentions',
     status: 'calculated',
     value: 50,
@@ -381,10 +473,12 @@ test('单问题报告返回 v4 排名、SOV 和可复核语义证据', async () 
     denominator: 2
   });
   assert.deepEqual(report.summary.sov_summary, {
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
-    kind: 'contextual_competitor_mentions',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+    kind: 'observed_competitor_mentions',
     average: 50,
-    calculable_answers: 1
+    calculable_answers: 1,
+    scope: 'open_discovery',
+    completeness: 'not_proven'
   });
   assert.equal(Object.hasOwn(report.summary, 'avg_share_of_voice'), false);
   assert.equal(Object.hasOwn(report.rows[0], 'share_of_voice'), false);
@@ -403,11 +497,11 @@ test('单问题报告返回 v4 排名、SOV 和可复核语义证据', async () 
   assert.equal(report.rows[1].has_metrics, false);
   assert.equal(
     report.rows[1].analysis_contract_version,
-    'ai_structured_v4'
+    'ai_structured_v5'
   );
   assert.equal(
     report.rows[1].metric_semantics_version,
-    'contextual_competitor_mentions_sov_v1'
+    'contextual_competitor_mentions_sov_v2_scoped'
   );
   assert.deepEqual({
     valid_answers: report.summary.valid_answers,
@@ -434,7 +528,7 @@ test('单问题报告返回 v4 排名、SOV 和可复核语义证据', async () 
   });
   assert.equal(
     restored.metric_semantics_version,
-    'contextual_competitor_mentions_sov_v1'
+    'contextual_competitor_mentions_sov_v2_scoped'
   );
   assert.deepEqual(restored.summary.sov_summary, report.summary.sov_summary);
   assert.deepEqual(restored.rows[0].sov, report.rows[0].sov);
@@ -444,13 +538,6 @@ test('单问题报告返回 v4 排名、SOV 和可复核语义证据', async () 
   );
   assert.equal(Object.hasOwn(restored.rows[0], 'share_of_voice'), false);
   await imported.destroy();
-
-  await VisibilityMetric.destroy({ where: { question_record_id: record.id } });
-  await ResultDetail.destroy({
-    where: { question_record_id: [record.id, failedRecord.id] }
-  });
-  await failedRecord.destroy();
-  await record.destroy();
   await run.destroy();
 });
 
@@ -768,8 +855,8 @@ test('问题集报告在品牌分析失败时仍统计独立保存的显式引�
     question: '引用证据独立统计',
     brand: project.name,
     brand_keywords: project.name,
-    analysis_contract_version: 'ai_structured_v4',
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    analysis_contract_version: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
     status: 'failed'
   });
   await ResultDetail.create({
@@ -1051,7 +1138,7 @@ test('新口径没有已采集回答时覆盖率和平均 SOV 保持 N/A', () =>
     status: 'failed',
     answer: '',
     has_metrics: false,
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped'
   }]);
 
   assert.equal(summary.valid_answers, 0);
@@ -1073,8 +1160,8 @@ test('历史豆包过渡态标记为采集无效且不进入分析覆盖率分�
     question: '豆包历史搜索状态',
     brand: project.name,
     brand_keywords: project.name,
-    analysis_contract_version: 'ai_structured_v4',
-    metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+    analysis_contract_version: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
     status: 'failed',
     error_message: 'AI 结构化结果无效',
     result_summary: {

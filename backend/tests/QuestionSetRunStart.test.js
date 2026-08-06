@@ -175,10 +175,10 @@ test('atomically persists one launch plan and replays the same idempotency key',
   assert.equal(run.request_fingerprint.length, 64);
   assert.deepEqual(run.planned_platforms, ['doubao']);
   assert.equal(run.skipped_platforms.length, 1);
-  assert.equal(run.analysis_contract_version, 'ai_structured_v4');
+  assert.equal(run.analysis_contract_version, 'ai_structured_v5');
   assert.equal(
     run.metric_semantics_version,
-    'contextual_competitor_mentions_sov_v1'
+    'contextual_competitor_mentions_sov_v2_scoped'
   );
   const report = await QuestionSetRunService.getReport({
     projectId: project.id,
@@ -186,10 +186,10 @@ test('atomically persists one launch plan and replays the same idempotency key',
   });
   assert.deepEqual(report.planned_platforms, ['doubao']);
   assert.deepEqual(report.skipped_platforms, run.skipped_platforms);
-  assert.equal(report.analysis_contract_version, 'ai_structured_v4');
+  assert.equal(report.analysis_contract_version, 'ai_structured_v5');
   assert.equal(
     report.metric_semantics_version,
-    'contextual_competitor_mentions_sov_v1'
+    'contextual_competitor_mentions_sov_v2_scoped'
   );
 
   const records = await QuestionRecord.findAll({
@@ -199,13 +199,13 @@ test('atomically persists one launch plan and replays the same idempotency key',
   assert.deepEqual(records.map((record) => record.run_slot_index), [0, 1]);
   assert.deepEqual(
     records.map((record) => record.analysis_contract_version),
-    ['ai_structured_v4', 'ai_structured_v4']
+    ['ai_structured_v5', 'ai_structured_v5']
   );
   assert.deepEqual(
     records.map((record) => record.metric_semantics_version),
     [
-      'contextual_competitor_mentions_sov_v1',
-      'contextual_competitor_mentions_sov_v1'
+      'contextual_competitor_mentions_sov_v2_scoped',
+      'contextual_competitor_mentions_sov_v2_scoped'
     ]
   );
   const counter = await UsageCounter.findOne({

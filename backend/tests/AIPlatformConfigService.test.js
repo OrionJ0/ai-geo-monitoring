@@ -52,7 +52,7 @@ test('seeds every preset disabled until an administrator enables it', async () =
   assert.equal(rows.every((row) => row.encrypted_api_key === null), true);
   assert.equal(rows.every((row) => row.api_key_last4 === null), true);
   assert.equal(rows.every((row) => row.enabled === false), true);
-  assert.equal(rows.find((row) => row.code === 'deepseek').default_model, 'deepseek-v4-pro');
+  assert.equal(rows.find((row) => row.code === 'deepseek').default_model, 'deepseek-v4-flash');
   const deepseekWeb = rows.find((row) => row.code === 'deepseek-web');
   assert.equal(deepseekWeb.name, 'DeepSeek 网页版');
   assert.equal(deepseekWeb.adapter_type, 'deepseek_web');
@@ -354,7 +354,7 @@ test('does not overwrite administrator-customized Hunyuan connection or request 
   assert.equal(hunyuan.enabled, false);
 });
 
-test('upgrades the retired DeepSeek Flash preset to Pro and keeps unconfigured accounts disabled', async () => {
+test('010 硬切：DeepSeek 分析预设保持 deepseek-v4-flash，不再迁移到 Pro，未配置账户保持禁用', async () => {
   const service = createService();
   await AIPlatformConfig.create({
     code: 'deepseek',
@@ -368,8 +368,9 @@ test('upgrades the retired DeepSeek Flash preset to Pro and keeps unconfigured a
 
   await service.ensurePresets();
   const deepseek = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+  // 010 后 flash 是唯一正式分析模型：预设不迁移、未配置账户保持禁用
   assert.equal(deepseek.enabled, false);
-  assert.equal(deepseek.default_model, 'deepseek-v4-pro');
+  assert.equal(deepseek.default_model, 'deepseek-v4-flash');
 
   await deepseek.update({
     encrypted_api_key: 'already-encrypted',
@@ -380,7 +381,7 @@ test('upgrades the retired DeepSeek Flash preset to Pro and keeps unconfigured a
   await service.ensurePresets();
   await deepseek.reload();
   assert.equal(deepseek.enabled, true);
-  assert.equal(deepseek.default_model, 'deepseek-v4-pro');
+  assert.equal(deepseek.default_model, 'deepseek-v4-flash');
 });
 
 test('stores an encrypted API key and never exposes stored secret fields', async () => {

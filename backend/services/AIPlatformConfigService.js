@@ -84,7 +84,9 @@ const PRESET_PLATFORMS = Object.freeze([
     name: 'DeepSeek',
     adapter_type: 'openai_chat_completions',
     base_url: 'https://api.deepseek.com/v1/chat/completions',
-    default_model: 'deepseek-v4-pro',
+    // 010 硬切（2026-08-06）：分析平台唯一正式模型 deepseek-v4-flash；
+    // v5 分析器 assertFlashPlatform 强制该校验，Pro 不参与分析。
+    default_model: 'deepseek-v4-flash',
     enabled: false,
     builtin: true
   }),
@@ -351,17 +353,8 @@ class AIPlatformConfigService {
           ...this.untestedState()
         });
       }
-      const isLegacyOfficialDeepSeekPreset = preset.code === 'deepseek'
-        && row.name === preset.name
-        && row.adapter_type === preset.adapter_type
-        && row.base_url === preset.base_url
-        && row.default_model === 'deepseek-v4-flash';
-      if (isLegacyOfficialDeepSeekPreset) {
-        await row.update({
-          default_model: preset.default_model,
-          ...this.untestedState()
-        });
-      }
+      // 010 硬切（2026-08-06）：删除 v4 时代"flash 是旧版预设、重置回 Pro"的
+      // 迁移——deepseek-v4-flash 是唯一正式分析模型，无 Pro 参与路径。
       const matchesPresetIdentity = row.name === preset.name
         && row.adapter_type === preset.adapter_type
         && row.base_url === preset.base_url

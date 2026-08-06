@@ -255,10 +255,10 @@ test('scheduled detection records retain their execution ledger id', async () =>
 
     assert.equal(createdPayloads.length, 1);
     assert.equal(createdPayloads[0].scheduled_execution_id, 77);
-    assert.equal(createdPayloads[0].analysis_contract_version, 'ai_structured_v4');
+    assert.equal(createdPayloads[0].analysis_contract_version, 'ai_structured_v5');
     assert.equal(
       createdPayloads[0].metric_semantics_version,
-      'contextual_competitor_mentions_sov_v1'
+      'contextual_competitor_mentions_sov_v2_scoped'
     );
   } finally {
     QuestionRecord.create = originalCreateRecord;

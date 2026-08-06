@@ -140,7 +140,7 @@ test('stores top citation urls in generated report summaries', async () => {
       platform: 'deepseek',
       prompt_id: 7,
       prompt_category: '购买决策',
-      metric_semantics_version: 'contextual_competitor_mentions_sov_v1',
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
       answer_competitor_share: 100,
       sov_numerator: 1,
       sov_denominator: 1,
@@ -207,17 +207,17 @@ test('新版报告快照按当前指标版本查询全部实际历史平台', as
   assert.equal(visibilityQueries.length, 2);
   assert.equal(visibilityQueries[0].where.platform, undefined);
   assert.equal(visibilityQueries[1].where.platform, undefined);
-  assert.equal(visibilityQueries[0].where.metric_semantics_version, 'contextual_competitor_mentions_sov_v1');
-  assert.equal(visibilityQueries[1].where.metric_semantics_version, 'contextual_competitor_mentions_sov_v1');
+  assert.equal(visibilityQueries[0].where.metric_semantics_version, 'contextual_competitor_mentions_sov_v2_scoped');
+  assert.equal(visibilityQueries[1].where.metric_semantics_version, 'contextual_competitor_mentions_sov_v2_scoped');
   assert.equal(recordQueries.length, 1);
   recordQueries.forEach((query) => {
     assert.equal(query.where.platform, undefined);
-    assert.equal(query.where.metric_semantics_version, 'contextual_competitor_mentions_sov_v1');
+    assert.equal(query.where.metric_semantics_version, 'contextual_competitor_mentions_sov_v2_scoped');
   });
 });
 
 test('新版报告一次固化全部平台和单平台视图且使用同一回答级 SOV reducer', async () => {
-  const current = 'contextual_competitor_mentions_sov_v1';
+  const current = 'contextual_competitor_mentions_sov_v2_scoped';
   const metrics = [
     {
       id: 1,

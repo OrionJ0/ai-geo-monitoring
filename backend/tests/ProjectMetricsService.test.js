@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const ProjectMetricsService = require('../services/ProjectMetricsService');
 const CitationMetricSemanticsService = require('../services/CitationMetricSemanticsService');
 
-const CURRENT = 'contextual_competitor_mentions_sov_v1';
+const CURRENT = 'contextual_competitor_mentions_sov_v2_scoped';
 const EXPLICIT_CITATION = {
   analysis_structure: {
     citations: { semantics_version: 'explicit-citation-v2' }
