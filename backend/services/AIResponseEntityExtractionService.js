@@ -261,6 +261,7 @@ class AIResponseEntityExtractionService {
         ? basePrompt
         : buildEntityRepairPrompt(basePrompt, lastError);
       const connection = await this.requestService.queryConfig(platform, prompt, {
+        purpose: 'analysis_entity_extract',
         retryCount: 0,
         requestOptions: effectiveRequestOptions(platform),
         disableWebSearch: true,

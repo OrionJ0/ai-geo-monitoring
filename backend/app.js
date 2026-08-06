@@ -78,6 +78,7 @@ const adminAIPlatformRoutes = require('./routes/adminAIPlatforms');
 const aiPlatformRoutes = require('./routes/aiPlatforms');
 const SchedulerService = require('./services/SchedulerService');
 const ProjectRunService = require('./services/ProjectRunService');
+const AIAnalysisExecutionCoordinator = require('./services/AIAnalysisExecutionCoordinator');
 const WebPlatformRegistry = require('./services/WebPlatformRegistry');
 const { createApplicationShutdown } = require('./services/ApplicationShutdownService');
 const { createSeoAuditJobService } = require('./services/SeoAuditJobService');
@@ -167,6 +168,7 @@ app.get('/api/ready', (req, res) => {
     checks: {
       database,
       scheduler,
+      analysis_execution: AIAnalysisExecutionCoordinator.snapshot(),
       last_error: database.last_error_code || scheduler.last_error_code || null
     },
     timestamp: new Date().toISOString()

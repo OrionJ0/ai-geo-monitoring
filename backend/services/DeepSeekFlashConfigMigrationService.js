@@ -6,6 +6,8 @@ const OFFICIAL_DEEPSEEK_PRESET = Object.freeze({
   source_model: 'deepseek-v4-pro',
   target_model: 'deepseek-v4-flash'
 });
+const ANALYSIS_PLATFORM_SETTING = 'ai_analysis_platform_code';
+const ANALYSIS_MODEL_SETTING = 'ai_analysis_model_name';
 
 class DeepSeekFlashConfigMigrationError extends Error {
   constructor(message, code) {
@@ -78,6 +80,7 @@ function inspectDeepSeekFlashConfigRow(row) {
 class DeepSeekFlashConfigMigrationService {
   constructor(options = {}) {
     this.model = options.model || require('../models').AIPlatformConfig;
+    this.settingModel = options.settingModel || require('../models').Setting;
     this.sequelize = options.sequelize || require('../config/database');
   }
 
@@ -106,22 +109,100 @@ class DeepSeekFlashConfigMigrationService {
     };
   }
 
+  async findAnalysisSettings(transaction = null) {
+    const find = async (key) => {
+      const options = { where: { key } };
+      if (transaction) {
+        options.transaction = transaction;
+        options.lock = transaction.LOCK.UPDATE;
+      }
+      const row = await this.settingModel.findOne(options);
+      if (!row) {
+        fail(
+          `缺少正式分析配置 ${key}，拒绝自动迁移`,
+          'DEEPSEEK_FLASH_ANALYSIS_SETTING_MISSING'
+        );
+      }
+      return row;
+    };
+    return {
+      platform: await find(ANALYSIS_PLATFORM_SETTING),
+      model: await find(ANALYSIS_MODEL_SETTING)
+    };
+  }
+
+  inspectRuntime(row, settings) {
+    const platformState = this.inspect(row).state;
+    const platformCode = String(value(settings.platform, 'value') || '').trim().toLowerCase();
+    if (platformCode !== OFFICIAL_DEEPSEEK_PRESET.code) {
+      fail(
+        '正式分析平台不是 DeepSeek，拒绝自动迁移',
+        'DEEPSEEK_FLASH_ANALYSIS_PLATFORM_MISMATCH'
+      );
+    }
+    const runtimeModel = String(value(settings.model, 'value') || '').trim();
+    if (
+      runtimeModel !== OFFICIAL_DEEPSEEK_PRESET.source_model
+      && runtimeModel !== OFFICIAL_DEEPSEEK_PRESET.target_model
+    ) {
+      fail(
+        '正式分析配置使用未知模型，拒绝自动迁移',
+        'DEEPSEEK_FLASH_ANALYSIS_MODEL_UNSUPPORTED'
+      );
+    }
+    if (!platformState.enabled || !platformState.credential_present) {
+      fail(
+        'DeepSeek 正式配置未启用或缺少凭据，拒绝发布',
+        'DEEPSEEK_FLASH_CONFIG_RUNTIME_UNAVAILABLE'
+      );
+    }
+    const ready = platformState.current_model === OFFICIAL_DEEPSEEK_PRESET.target_model
+      && runtimeModel === OFFICIAL_DEEPSEEK_PRESET.target_model;
+    return {
+      ...platformState,
+      analysis_platform_code: platformCode,
+      analysis_model: runtimeModel,
+      migration_required: !ready,
+      ready
+    };
+  }
+
   async audit(options = {}) {
-    const row = await this.findPreset(options.transaction || null);
-    return this.inspect(row).state;
+    const transaction = options.transaction || null;
+    const row = await this.findPreset(transaction);
+    const settings = await this.findAnalysisSettings(transaction);
+    return this.inspectRuntime(row, settings);
   }
 
   async apply() {
     return this.sequelize.transaction(async (transaction) => {
-      const inspected = this.inspect(await this.findPreset(transaction));
-      if (inspected.state.ready) {
-        return { ...inspected.state, applied: false };
+      const row = await this.findPreset(transaction);
+      const settings = await this.findAnalysisSettings(transaction);
+      const before = this.inspectRuntime(row, settings);
+      if (before.ready) {
+        return { ...before, applied: false };
       }
-      await inspected.row.update(
-        { default_model: OFFICIAL_DEEPSEEK_PRESET.target_model },
-        { transaction, fields: ['default_model'] }
-      );
-      const result = this.inspect(inspected.row).state;
+      if (before.current_model === OFFICIAL_DEEPSEEK_PRESET.source_model) {
+        const patch = {
+          default_model: OFFICIAL_DEEPSEEK_PRESET.target_model,
+          test_status: 'untested',
+          last_tested_at: null,
+          last_test_error_code: null,
+          last_test_message: null,
+          web_search_test_status: 'untested',
+          last_web_search_tested_at: null,
+          last_web_search_test_error_code: null,
+          last_web_search_test_message: null
+        };
+        await row.update(patch, { transaction, fields: Object.keys(patch) });
+      }
+      if (before.analysis_model === OFFICIAL_DEEPSEEK_PRESET.source_model) {
+        await settings.model.update(
+          { value: OFFICIAL_DEEPSEEK_PRESET.target_model },
+          { transaction, fields: ['value'] }
+        );
+      }
+      const result = this.inspectRuntime(row, settings);
       if (!result.ready) {
         fail(
           'DeepSeek Flash 配置迁移后复审未通过',
@@ -135,6 +216,8 @@ class DeepSeekFlashConfigMigrationService {
 
 module.exports = {
   OFFICIAL_DEEPSEEK_PRESET,
+  ANALYSIS_PLATFORM_SETTING,
+  ANALYSIS_MODEL_SETTING,
   DeepSeekFlashConfigMigrationError,
   DeepSeekFlashConfigMigrationService,
   inspectDeepSeekFlashConfigRow

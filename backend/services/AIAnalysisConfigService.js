@@ -51,6 +51,9 @@ class AIAnalysisConfigService {
   }
 
   async getConfiguredModelName(platform) {
+    if (String(platform?.code || '').trim().toLowerCase() === 'deepseek') {
+      return String(platform?.default_model || '').trim();
+    }
     const row = await this.settingModel.findOne({ where: { key: MODEL_SETTING_KEY } });
     return String(row?.value || platform?.default_model || '').trim();
   }
@@ -192,6 +195,15 @@ class AIAnalysisConfigService {
     }
     if (modelName.length > 255) {
       throw new AIAnalysisConfigError('AI 分析模型长度不能超过 255', 'analysis_model_invalid');
+    }
+    if (
+      platformCode === 'deepseek'
+      && modelName !== String(platform.default_model || '').trim()
+    ) {
+      throw new AIAnalysisConfigError(
+        'DeepSeek 正式分析模型固定为平台默认的 Flash 模型',
+        'analysis_model_policy_mismatch'
+      );
     }
     let requestOptions;
     try {

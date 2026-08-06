@@ -13,19 +13,18 @@ const settingsPath = path.resolve(__dirname, '../routes/settings.js');
 test('010 硬切：默认分析 provider 为 v5，分派点只有 v5 分析器（无 v4/Pro fallback）', () => {
   const runSource = fs.readFileSync(runPath, 'utf8');
 
-  assert.match(runSource, /CURRENT_ANALYSIS_PROVIDER = 'v5'/);
   assert.match(runSource, /await AIResponseAnalysisV5Service\.analyze/);
-  assert.doesNotMatch(runSource, /: await AIResponseAnalysisService\.analyze/);
+  assert.doesNotMatch(runSource, /AIResponseAnalysisService|analysisProvider/);
   // 注：裸 fallback 会误匹配合法的 fallbackSnapshot（快照回退）参数名，
   // 这里只检查 v4/Pro 运行时回退与隐藏规则路径。
   assert.doesNotMatch(runSource, /回退到旧|legacy_rules_v1|deepseek-v4-pro/iu);
 });
 
-test('010 硬切：SchedulerService 默认分析 provider 为 v5', () => {
+test('010 硬切：SchedulerService 只有 v5 契约且没有可选 provider 分支', () => {
   const source = fs.readFileSync(schedulerPath, 'utf8');
 
-  assert.match(source, /options\.analysisProvider \|\| 'v5'/);
-  assert.doesNotMatch(source, /\|\| 'v4'/);
+  assert.match(source, /analysis_contract_version:\s*V5_ANALYSIS_CONTRACT/);
+  assert.doesNotMatch(source, /analysisProvider|\|\| 'v4'/);
 });
 
 test('010 硬切：v4 运行时已退役，冻结在历史常量且只供评测对照（非生产引用）', () => {

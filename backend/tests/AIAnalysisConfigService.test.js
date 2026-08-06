@@ -92,6 +92,55 @@ test('falls back to the platform default model for existing analysis settings wi
   assert.equal(result.platform.model_name, 'platform-default-model');
 });
 
+test('DeepSeek runtime uses the official Flash platform model as the single model truth', async () => {
+  const settings = new Map([
+    ['ai_analysis_platform_code', { key: 'ai_analysis_platform_code', value: 'deepseek' }],
+    ['ai_analysis_model_name', { key: 'ai_analysis_model_name', value: 'deepseek-v4-pro' }]
+  ]);
+  const service = new AIAnalysisConfigService({
+    settingModel: { findOne: async ({ where }) => settings.get(where.key) || null },
+    platformConfigService: {
+      getPlatformByCode: async () => ({
+        code: 'deepseek',
+        name: 'DeepSeek',
+        adapter_type: 'openai_chat_completions',
+        default_model: 'deepseek-v4-flash',
+        enabled: true,
+        encrypted_api_key: 'encrypted-only',
+        base_url: 'https://api.deepseek.com/v1/chat/completions'
+      })
+    }
+  });
+
+  const runtime = await service.getAnalysisPlatform();
+  assert.equal(runtime.default_model, 'deepseek-v4-flash');
+});
+
+test('rejects saving a retired DeepSeek Pro model as the analysis override', async () => {
+  const service = new AIAnalysisConfigService({
+    settingModel: {
+      findOne: async () => null,
+      findOrCreate: async () => { throw new Error('settings must not be written'); }
+    },
+    platformConfigService: {
+      getPlatformByCode: async () => ({
+        code: 'deepseek',
+        name: 'DeepSeek',
+        adapter_type: 'openai_chat_completions',
+        default_model: 'deepseek-v4-flash',
+        enabled: true,
+        encrypted_api_key: 'encrypted-only',
+        base_url: 'https://api.deepseek.com/v1/chat/completions'
+      })
+    }
+  });
+
+  await assert.rejects(
+    service.setConfig({ platform_code: 'deepseek', model_name: 'deepseek-v4-pro' }),
+    (error) => error.code === 'analysis_model_policy_mismatch'
+  );
+});
+
 test('rejects a monitoring-only Web platform as the analysis provider', async () => {
   const service = new AIAnalysisConfigService({
     settingModel: {

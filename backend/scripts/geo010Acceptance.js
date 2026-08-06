@@ -1,276 +1,409 @@
 #!/usr/bin/env node
 /**
- * 010 硬切四入口真实验收（2026-08-06 数据所有者授权实施）。
- * 从单问题、问题集、自动监测、analysis-only（检测）四个真实 HTTP 入口
- * 触发真实 deepseek-v4-flash 分析，验证：
- * 1. 新记录全部写入 v5 合同（ai_structured_v5 / geo_metric_input_v5 /
- *    contextual_competitor_mentions_sov_v2_scoped）
- * 2. 实际模型全部为 deepseek-v4-flash
- * 3. v4/Pro 调用数为 0（代码搜索已证明；运行时记录 analysis_method/model 佐证）
- * 4. analysis-only（检测 finalize）不重新采集平台回答
- * 5. 历史 v4 数据仍可正常读取、导出和展示
+ * 010 v5 正式入口验收。
  *
- * 用法：node scripts/geo010Acceptance.js [--port 5999] [--db acceptance.sqlite]
+ * 本脚本只能在正式服务器运行，只访问唯一受支持的 HTTPS 入口。它不会启动
+ * 第二套应用、修改 AI 平台配置、读取/传递 API Key，也不会创建临时数据库。
+ * 登录凭据只从服务器环境读取，验收证据写入 /tmp 且不包含凭据、问题正文或
+ * 上游原始响应。
  */
-const fs = require('fs');
-const path = require('path');
-const { execFile } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const ROOT = path.resolve(__dirname, '..');
-function argValue(flag, fallback) {
-  const index = process.argv.indexOf(flag);
-  return index >= 0 ? process.argv[index + 1] : fallback;
+const BACKEND_ROOT = path.resolve(__dirname, '..');
+require('dotenv').config({ path: path.join(BACKEND_ROOT, '.env'), quiet: true });
+
+const OFFICIAL_BASE = 'https://insight.guangtuo.com/api';
+const V5_CONTRACT = 'ai_structured_v5';
+const V5_METHOD = 'ai_structured_v5';
+const V5_SEMANTICS = 'contextual_competitor_mentions_sov_v2_scoped';
+const FLASH_MODEL = 'deepseek-v4-flash';
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
-const PORT = Number(argValue('--port', 5999));
-const DB_STORAGE = argValue('--db', 'acceptance-010.sqlite');
-const BASE = `http://127.0.0.1:${PORT}/api`;
-const DB_PATH = path.join(ROOT, DB_STORAGE);
 
-function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
-async function api(method, urlPath, body, token) {
-  const response = await fetch(`${BASE}${urlPath}`, {
+function idempotencyKey(label, nonce) {
+  return `geo010-${label}-${nonce}`.slice(0, 120);
+}
+
+function extractRecordId(payload) {
+  const data = payload?.data || payload || {};
+  const candidates = [
+    data.record_id,
+    data.first_record_id,
+    data.record_ids?.[0],
+    data.results?.[0]?.record_id,
+    data.records?.[0]?.record_id,
+    data.records?.[0]?.id,
+    data.run?.records?.[0]?.record_id,
+    data.run?.records?.[0]?.id
+  ];
+  const id = candidates.map(Number).find((value) => Number.isInteger(value) && value > 0);
+  return id || null;
+}
+
+function toEvidence(record) {
+  const row = record?.toJSON ? record.toJSON() : record;
+  const metric = row?.visibilityMetric || row?.visibility_metric || {};
+  return {
+    id: Number(row?.id),
+    status: row?.status || null,
+    execution_mode: row?.execution_mode || null,
+    analysis_contract_version: row?.analysis_contract_version || null,
+    metric_semantics_version: metric?.metric_semantics_version
+      || row?.metric_semantics_version
+      || null,
+    analysis_method: metric?.analysis_method || null,
+    analysis_platform: metric?.analysis_platform || null,
+    analysis_model: metric?.analysis_model || null
+  };
+}
+
+function evaluateEvidence(entries, historyV4Readable) {
+  const requiredNames = [
+    'single_question',
+    'question_set',
+    'automatic_monitoring',
+    'analysis_only'
+  ];
+  const checks = Object.fromEntries(requiredNames.map((name) => {
+    const row = entries?.[name];
+    return [name, Boolean(
+      row
+      && row.status === 'completed'
+      && row.analysis_contract_version === V5_CONTRACT
+      && row.metric_semantics_version === V5_SEMANTICS
+      && row.analysis_method === V5_METHOD
+      && row.analysis_platform === 'deepseek'
+      && row.analysis_model === FLASH_MODEL
+      && (name !== 'analysis_only' || row.execution_mode === 'analysis_only')
+    )];
+  }));
+  return {
+    required_entries: requiredNames,
+    entry_checks: checks,
+    history_v4_readable: historyV4Readable === true,
+    pass: requiredNames.every((name) => checks[name]) && historyV4Readable === true
+  };
+}
+
+async function api(method, urlPath, { body, token, idempotency } = {}) {
+  const response = await fetch(`${OFFICIAL_BASE}${urlPath}`, {
     method,
     headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      Accept: 'application/json',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(idempotency ? { 'Idempotency-Key': idempotency } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });
   const text = await response.text();
-  let data = null;
-  try { data = JSON.parse(text); } catch (_) { data = text; }
-  if (!response.ok && response.status !== 202) {
-    throw new Error(`${method} ${urlPath} -> ${response.status}: ${text.slice(0, 300)}`);
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch (_) {
+    payload = null;
   }
-  return data;
+  if (!response.ok) {
+    const safeCode = String(payload?.data?.error_code || payload?.error?.code || 'http_error').slice(0, 80);
+    throw new Error(`${method} ${urlPath} -> ${response.status} (${safeCode})`);
+  }
+  return payload;
 }
 
-async function waitRecord(pool, recordId, timeoutMs = 120000) {
+async function waitRecord(QuestionRecord, VisibilityMetric, recordId, timeoutMs = 240000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const rows = await pool.query('SELECT id, status, analysis_contract_version, metric_semantics_version, analysis_method, analysis_model, brand_mentioned FROM question_records WHERE id = ?', [recordId]);
-    if (rows[0] && rows[0][0]?.status === 'completed') return rows[0][0];
+    const row = await QuestionRecord.findByPk(recordId, {
+      include: [{ model: VisibilityMetric, as: 'visibilityMetric', required: false }]
+    });
+    if (row?.status === 'completed') return row;
+    if (row?.status === 'failed') throw new Error(`record ${recordId} 执行失败`);
     await sleep(3000);
   }
   throw new Error(`record ${recordId} 未在 ${timeoutMs}ms 内完成`);
 }
 
-async function main() {
-  // --no-spawn：服务器已由外部启动（验收脚本只做 API 流程）
-  const noSpawn = process.argv.includes('--no-spawn');
-  if (!noSpawn) {
-    if (fs.existsSync(DB_PATH)) fs.unlinkSync(DB_PATH);
-    console.log(`[1/8] 启动 app.js（验收 DB: ${DB_STORAGE}, port ${PORT}）`);
-    const child = execFile(process.execPath, ['app.js'], {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        NODE_ENV: 'test',
-        DB_STORAGE,
-        DATABASE_URL: '',
-        HOST: '127.0.0.1',
-        PORT: String(PORT),
-        JWT_SECRET: 'geo010-acceptance-jwt-secret',
-        CONFIG_ENCRYPTION_KEY: '0'.repeat(64),
-        DEFAULT_ADMIN_PASSWORD: 'geo010-acceptance-admin-password'
-      }
-    });
-    let serverOut = '';
-    child.stdout.on('data', (d) => { serverOut += String(d); });
-    child.stderr.on('data', (d) => { serverOut += String(d); });
-    // 等待 /api/ready
-    let ready = false;
-    for (let i = 0; i < 100; i += 1) {
-      try {
-        const response = await fetch(`${BASE}/ready`);
-        if (response.status === 200) { ready = true; break; }
-      } catch (_) { /* 未就绪 */ }
-      await sleep(1000);
-    }
-    if (!ready) throw new Error(`app.js 未就绪。输出:\n${serverOut.slice(-2000)}`);
+async function findDeepSeekRecord(QuestionRecord, VisibilityMetric, ids) {
+  for (const id of ids || []) {
+    const row = await waitRecord(QuestionRecord, VisibilityMetric, id);
+    if (String(row.platform || '').toLowerCase() === 'deepseek') return row;
   }
-
-  try {
-    console.log('[2/8] 管理员登录');
-    const login = await api('POST', '/auth/login', {
-      username: 'admin',
-      password: 'geo010-acceptance-admin-password'
-    });
-    const token = login.data?.token || login.token;
-    if (!token) throw new Error(`登录失败: ${JSON.stringify(login).slice(0, 300)}`);
-
-    console.log('[3/8] 配置 deepseek 分析平台（deepseek-v4-flash）');
-    const apiKey = process.env.DEEPSEEK_API_KEY || '';
-    if (!apiKey) throw new Error('缺少 DEEPSEEK_API_KEY');
-    const platformRows = await api('GET', '/admin/ai-platforms', null, token);
-    let deepseek = (platformRows.data || platformRows || []).find((p) => p.code === 'deepseek');
-    if (!deepseek) {
-      const created = await api('POST', '/admin/ai-platforms', {
-        code: 'deepseek',
-        name: 'DeepSeek',
-        adapter_type: 'openai_chat_completions',
-        base_url: 'https://api.deepseek.com/v1/chat/completions',
-        default_model: 'deepseek-v4-flash',
-        api_key: apiKey,
-        enabled: true
-      }, token);
-      deepseek = created.data;
-    } else {
-      await api('PUT', `/admin/ai-platforms/${deepseek.id}`, {
-        default_model: 'deepseek-v4-flash',
-        api_key: apiKey,
-        enabled: true
-      }, token);
-    }
-    await api('PUT', '/settings/analysis-api', {
-      platform_code: 'deepseek',
-      model_name: 'deepseek-v4-flash'
-    }, token);
-
-    console.log('[4/8] 创建验收项目与问题');
-    const project = await api('POST', '/projects', {
-      name: '硬切验收品牌',
-      aliases: ['硬切验收'],
-      website: 'https://example.com',
-      industry: 'AI 工具',
-      primary_keywords: ['GEO 监测', 'AI 搜索可见度']
-    }, token);
-    const projectId = project.data.id;
-    await api('PUT', `/projects/${projectId}`, {
-      platforms: ['deepseek'],
-      name: '硬切验收品牌',
-      aliases: ['硬切验收'],
-      website: 'https://example.com',
-      industry: 'AI 工具',
-      primary_keywords: ['GEO 监测', 'AI 搜索可见度']
-    }, token);
-    const prompt = await api('POST', `/projects/${projectId}/prompts`, {
-      question: '请介绍适合中小团队的 GEO 监测工具及其主要功能。',
-      platforms: ['deepseek'],
-      tags: ['购买决策'],
-      enabled: true
-    }, token);
-    const promptId = prompt.data.id;
-
-    console.log('[5/8] 入口 1：单问题分析');
-    const singleRun = await api('POST', `/projects/${projectId}/prompts/${promptId}/run`, {}, token);
-    const singleRecordId = singleRun.data?.record_id || singleRun.data?.records?.[0]?.record_id
-      || singleRun.data?.first_record_id;
-    if (!singleRecordId) throw new Error(`单问题 run 未返回 record_id: ${JSON.stringify(singleRun).slice(0, 300)}`);
-    const { sequelize } = require('../models');
-    const single = await waitRecord(sequelize, singleRecordId);
-    console.log('  单问题记录:', JSON.stringify(single));
-
-    console.log('[6/8] 入口 2：问题集运行');
-    const qs = await api('POST', `/projects/${projectId}/question-sets`, {
-      name: '硬切验收问题集',
-      questions: [{ question: '请比较几款 GEO 监测工具的功能差异。', platforms: ['deepseek'], enabled: true }]
-    }, token);
-    const qsRun = await api('POST', `/projects/${projectId}/question-sets/${qs.data.id}/run`, {}, token);
-    const qsRecordId = qsRun.data?.run?.records?.[0]?.id || qsRun.data?.first_record_id
-      || qsRun.data?.records?.[0]?.record_id;
-    if (!qsRecordId) throw new Error(`问题集 run 未返回 record_id: ${JSON.stringify(qsRun).slice(0, 400)}`);
-    const qsRecord = await waitRecord(sequelize, qsRecordId);
-    console.log('  问题集记录:', JSON.stringify(qsRecord));
-
-    console.log('[7/8] 入口 3：自动监测（调度 runNow）+ 入口 4：检测（analysis-only finalize）');
-    // 自动监测：创建调度并立即 run
-    const schedule = await api('POST', '/schedules', {
-      question: '请介绍周界安防电子围栏的主流品牌。',
-      platforms: ['deepseek'],
-      daily_time: '09:00',
-      enabled: true,
-      brand: '硬切验收品牌'
-    }, token);
-    const scheduleId = schedule.data?.id || schedule.data?.schedule?.id;
-    let scheduledRecordId = null;
-    if (scheduleId) {
-      const runNow = await api('POST', `/schedules/${scheduleId}/run`, {}, token);
-      scheduledRecordId = runNow.data?.record_id || runNow.data?.records?.[0]?.id;
-    }
-    let scheduled = null;
-    if (scheduledRecordId) {
-      scheduled = await waitRecord(sequelize, scheduledRecordId);
-      console.log('  自动监测记录:', JSON.stringify(scheduled));
-    } else {
-      console.log('  自动监测：调度已创建（runNow 未返回记录 ID），调度记录合同在 SchedulerService 测试断言');
-    }
-    // 检测入口（搜索 + analysis-only finalize，不重采集）
-    const detection = await api('POST', '/detection/create', {
-      question: '请介绍 AI 搜索可见度监测工具的选择要点。',
-      brand: '硬切验收品牌',
-      brand_keywords: 'GEO 监测',
-      platforms: ['deepseek']
-    }, token);
-    const detectionRecordId = detection.data?.record_id || detection.data?.records?.[0]?.id;
-    let detectionRecord = null;
-    if (detectionRecordId) {
-      detectionRecord = await waitRecord(sequelize, detectionRecordId);
-      console.log('  检测记录:', JSON.stringify(detectionRecord));
-    }
-
-    console.log('[8/8] 验证 v5 合同与历史 v4 可读');
-    const records = [single, qsRecord, scheduled, detectionRecord].filter(Boolean);
-    const evidence = {
-      records: records.map((record) => ({
-        id: record.id,
-        status: record.status,
-        analysis_contract_version: record.analysis_contract_version,
-        metric_semantics_version: record.metric_semantics_version,
-        analysis_method: record.analysis_method,
-        analysis_model: record.analysis_model
-      })),
-      checks: {
-        all_v5_contract: records.every((r) => r.analysis_contract_version === 'ai_structured_v5'),
-        all_v5_semantics: records.every((r) => r.metric_semantics_version === 'contextual_competitor_mentions_sov_v2_scoped'),
-        all_flash: records.every((r) => r.analysis_model === 'deepseek-v4-flash'),
-        all_structured: records.every((r) => r.analysis_method === 'ai_structured_v5')
-      }
-    };
-    // 历史 v4 数据可读：构造 v4 记录 + 报告读取
-    const v4Record = await sequelize.models.QuestionRecord.create({
-      user_id: 1, project_id: projectId, tracked_prompt_id: promptId,
-      platform: 'deepseek', platform_name: 'DeepSeek', model_name: 'deepseek-v4-flash',
-      question: '历史 v4 记录读取验收', brand: '硬切验收品牌', brand_keywords: 'GEO 监测',
-      status: 'completed', analysis_contract_version: 'ai_structured_v4',
-      metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
-    });
-    const v4Metric = await sequelize.models.VisibilityMetric.create({
-      question_record_id: v4Record.id,
-      analysis_method: 'ai_structured_v4',
-      analysis_platform: 'deepseek',
-      analysis_model: 'deepseek-v4-flash',
-      brand_mentioned: true, brand_mentions: 2,
-      answer_competitor_share: 50, sov_numerator: 2, sov_denominator: 4,
-      metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
-    });
-    const QuestionSetRunService = require('../services/QuestionSetRunService');
-    const row = await sequelize.models.QuestionRecord.findByPk(v4Record.id, {
-      include: [{ model: sequelize.models.VisibilityMetric, as: 'visibilityMetric' }]
-    });
-    const normalized = QuestionSetRunService.normalizeNativeRow(row);
-    evidence.history_v4 = {
-      readable: Boolean(normalized?.sov),
-      sov_version: normalized?.sov?.metric_semantics_version,
-      analysis_contract_version: normalized?.analysis_contract_version
-    };
-    evidence.history_v4_readable = evidence.history_v4.readable
-      && evidence.history_v4.sov_version === 'contextual_competitor_mentions_sov_v1'
-      && evidence.history_v4.analysis_contract_version === 'ai_structured_v4';
-    evidence.pass = Object.values(evidence.checks).every(Boolean)
-      && evidence.records.length >= 2
-      && evidence.history_v4_readable;
-    fs.writeFileSync(path.join(ROOT, 'geo010-acceptance-evidence.json'), JSON.stringify(evidence, null, 2));
-    console.log('\n=== 验收证据 ===');
-    console.log(JSON.stringify(evidence, null, 2));
-    if (!evidence.pass) process.exitCode = 1;
-    await sequelize.close();
-  } finally {
-    if (!noSpawn) child.kill('SIGTERM');
-  }
+  throw new Error('入口响应没有产生 DeepSeek 记录');
 }
 
-main().catch(async (error) => {
-  console.error('验收失败:', error.message);
-  process.exitCode = 1;
-});
+async function prepareAnalysisOnlyRetry(models, sourceRecord, project, prompt, userId, nonce) {
+  const {
+    QuestionSetRun,
+    QuestionRecord,
+    ResultDetail
+  } = models;
+  const sourceDetail = await ResultDetail.findOne({ where: { question_record_id: sourceRecord.id } });
+  const responseText = String(sourceDetail?.ai_response_original || '').trim();
+  if (!responseText) throw new Error('无法从已完成入口记录取得 analysis-only 原回答');
+
+  return models.sequelize.transaction(async (transaction) => {
+    const run = await QuestionSetRun.create({
+      project_id: project.id,
+      user_id: userId,
+      question_set_id: null,
+      question_set_name: `010 analysis-only ${nonce}`,
+      source: 'native',
+      planned_record_count: 1,
+      revision: 1,
+      completed_at: new Date()
+    }, { transaction });
+    const failed = await QuestionRecord.create({
+      user_id: userId,
+      project_id: project.id,
+      tracked_prompt_id: prompt.id,
+      question_set_run_id: run.id,
+      run_slot_index: 0,
+      execution_mode: 'full_monitoring',
+      platform: 'deepseek',
+      platform_name: 'DeepSeek',
+      model_name: FLASH_MODEL,
+      question: prompt.question,
+      brand: project.name,
+      brand_keywords: project.name,
+      analysis_contract_version: V5_CONTRACT,
+      metric_semantics_version: V5_SEMANTICS,
+      competitor_snapshot: [],
+      status: 'failed',
+      error_message: '010 controlled analysis retry seed',
+      result_summary: {
+        failure: { stage: 'analysis_validation', error_code: 'acceptance_retry_seed' }
+      }
+    }, { transaction });
+    await ResultDetail.create({
+      question_record_id: failed.id,
+      ai_response_original: responseText,
+      provider_citations: Array.isArray(sourceDetail.provider_citations)
+        ? sourceDetail.provider_citations
+        : [],
+      citation_analysis: sourceDetail.citation_analysis || {},
+      parsing_status: 'completed'
+    }, { transaction });
+    return run;
+  });
+}
+
+async function verifyHistoricalV4(QuestionRecord, token) {
+  const row = await QuestionRecord.findOne({
+    where: { analysis_contract_version: 'ai_structured_v4' },
+    order: [['id', 'DESC']]
+  });
+  if (!row) throw new Error('生产库没有可用于兼容读取验收的历史 v4 记录');
+  const status = await api('GET', `/detection/status/${row.id}`, { token });
+  return Number(status?.data?.record_id) === Number(row.id);
+}
+
+async function main() {
+  if (process.env.NODE_ENV !== 'production') {
+    throw new Error('geo010Acceptance 只允许在 NODE_ENV=production 的正式服务器运行');
+  }
+  const username = String(process.env.GEO010_ACCEPTANCE_USERNAME || 'admin').trim();
+  const password = String(
+    process.env.GEO010_ACCEPTANCE_PASSWORD || process.env.DEFAULT_ADMIN_PASSWORD || ''
+  );
+  if (!username || !password) {
+    throw new Error('缺少服务器侧 GEO010_ACCEPTANCE_PASSWORD/DEFAULT_ADMIN_PASSWORD');
+  }
+
+  const ready = await fetch(`${OFFICIAL_BASE}/ready`);
+  if (ready.status !== 200) throw new Error(`正式入口 /ready 未就绪 (${ready.status})`);
+
+  const login = await api('POST', '/users/login', { body: { username, password } });
+  const token = login?.data?.token || login?.token;
+  const userId = Number(login?.data?.user?.id || login?.user?.id);
+  if (!token || !Number.isInteger(userId)) throw new Error('正式入口登录响应无效');
+
+  const [platformResponse, analysisResponse] = await Promise.all([
+    api('GET', '/admin/ai-platforms', { token }),
+    api('GET', '/settings/analysis-api', { token })
+  ]);
+  const deepseek = (platformResponse?.data || []).find((row) => row.code === 'deepseek');
+  const analysisConfig = analysisResponse?.data || {};
+  if (
+    !deepseek?.builtin
+    || !deepseek?.enabled
+    || !deepseek?.configured
+    || deepseek?.default_model !== FLASH_MODEL
+    || analysisConfig?.platform_code !== 'deepseek'
+    || analysisConfig?.model_name !== FLASH_MODEL
+  ) {
+    throw new Error('正式 DeepSeek/分析配置不满足 builtin + enabled + credential + Flash 门禁');
+  }
+
+  const models = require('../models');
+  const {
+    sequelize,
+    BrandProject,
+    TrackedPrompt,
+    QuestionRecord,
+    QuestionSetRun,
+    ResultDetail,
+    VisibilityMetric
+  } = models;
+  const nonce = `${Date.now()}-${process.pid}`;
+  const projectName = `010-v5-acceptance-${nonce}`;
+  const projectResponse = await api('POST', '/geo-projects', {
+    token,
+    body: {
+      name: projectName,
+      aliases: [],
+      website: `https://acceptance-${nonce}.example.com`,
+      industry: 'GEO 验收',
+      primary_keywords: ['GEO 监测']
+    }
+  });
+  const projectId = Number(projectResponse?.data?.id);
+  const project = await BrandProject.findByPk(projectId);
+  if (!project) throw new Error('验收项目未落库');
+
+  const singlePromptResponse = await api('POST', `/geo-projects/${projectId}/prompts`, {
+    token,
+    body: {
+      question: `010 单问题正式入口验收 ${nonce}：介绍 GEO 监测工具。`,
+      tags: ['010-acceptance'],
+      enabled: true
+    }
+  });
+  const setPromptResponse = await api('POST', `/geo-projects/${projectId}/prompts`, {
+    token,
+    body: {
+      question: `010 问题集正式入口验收 ${nonce}：比较 GEO 监测工具。`,
+      tags: ['010-acceptance'],
+      enabled: true
+    }
+  });
+  const singlePrompt = await TrackedPrompt.findByPk(singlePromptResponse?.data?.id);
+  const setPrompt = await TrackedPrompt.findByPk(setPromptResponse?.data?.id);
+  if (!singlePrompt || !setPrompt) throw new Error('验收问题未落库');
+
+  const singleResponse = await api(
+    'POST',
+    `/geo-projects/${projectId}/prompts/${singlePrompt.id}/run`,
+    {
+      token,
+      idempotency: idempotencyKey('single', nonce),
+      body: { idempotency_key: idempotencyKey('single', nonce) }
+    }
+  );
+  const singleIds = singleResponse?.data?.record_ids || [extractRecordId(singleResponse)].filter(Boolean);
+  const singleRecord = await findDeepSeekRecord(QuestionRecord, VisibilityMetric, singleIds);
+
+  const setResponse = await api('POST', `/geo-projects/${projectId}/question-sets`, {
+    token,
+    body: {
+      name: `010 question set ${nonce}`,
+      question_ids: [setPrompt.id]
+    }
+  });
+  const questionSetId = Number(setResponse?.data?.id);
+  const setRunResponse = await api(
+    'POST',
+    `/geo-projects/${projectId}/question-sets/${questionSetId}/run`,
+    {
+      token,
+      idempotency: idempotencyKey('set', nonce),
+      body: { idempotency_key: idempotencyKey('set', nonce) }
+    }
+  );
+  const setIds = setRunResponse?.data?.record_ids || [extractRecordId(setRunResponse)].filter(Boolean);
+  const setRecord = await findDeepSeekRecord(QuestionRecord, VisibilityMetric, setIds);
+
+  const scheduledAfter = new Date();
+  const scheduleResponse = await api('POST', '/schedules', {
+    token,
+    body: {
+      project_id: projectId,
+      prompt_id: singlePrompt.id,
+      question: singlePrompt.question,
+      platforms: ['deepseek'],
+      daily_time: '09:00',
+      timezone: 'Asia/Shanghai',
+      enabled: true,
+      brand: project.name
+    }
+  });
+  const scheduleId = Number(scheduleResponse?.data?.id);
+  await api('POST', `/schedules/${scheduleId}/run`, { token, body: {} });
+  const scheduledRecord = await QuestionRecord.findOne({
+    where: {
+      project_id: projectId,
+      tracked_prompt_id: singlePrompt.id,
+      platform: 'deepseek',
+      created_at: { [require('sequelize').Op.gte]: scheduledAfter }
+    },
+    include: [{ model: VisibilityMetric, as: 'visibilityMetric', required: false }],
+    order: [['id', 'DESC']]
+  });
+  if (!scheduledRecord || scheduledRecord.status !== 'completed') {
+    throw new Error('自动监测正式入口没有产生已完成 DeepSeek 记录');
+  }
+
+  const retryRun = await prepareAnalysisOnlyRetry(
+    { sequelize, QuestionSetRun, QuestionRecord, ResultDetail },
+    setRecord,
+    project,
+    setPrompt,
+    userId,
+    nonce
+  );
+  const retryResponse = await api(
+    'POST',
+    `/geo-projects/${projectId}/question-set-runs/${retryRun.id}/retry-failed`,
+    {
+      token,
+      idempotency: idempotencyKey('analysis-only', nonce),
+      body: { idempotency_key: idempotencyKey('analysis-only', nonce) }
+    }
+  );
+  if (
+    Number(retryResponse?.data?.analysis_only_count) !== 1
+    || Number(retryResponse?.data?.full_monitoring_count) !== 0
+  ) {
+    throw new Error('analysis-only 正式入口未保持 1/0 重试边界');
+  }
+  const retryRecordId = extractRecordId(retryResponse);
+  const retryRecord = await waitRecord(QuestionRecord, VisibilityMetric, retryRecordId);
+
+  const entries = {
+    single_question: toEvidence(singleRecord),
+    question_set: toEvidence(setRecord),
+    automatic_monitoring: toEvidence(scheduledRecord),
+    analysis_only: toEvidence(retryRecord)
+  };
+  const historyV4Readable = await verifyHistoricalV4(QuestionRecord, token);
+  const evaluation = evaluateEvidence(entries, historyV4Readable);
+  const evidence = {
+    generated_at: new Date().toISOString(),
+    base_url: OFFICIAL_BASE,
+    project_id: projectId,
+    entries,
+    ...evaluation
+  };
+  const revision = String(process.env.APP_REVISION || 'unknown').replace(/[^a-zA-Z0-9._-]/gu, '_');
+  const outputPath = `/tmp/geo010-acceptance-${revision}-${Date.now()}.json`;
+  fs.writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+  console.log(JSON.stringify({ ...evidence, evidence_path: outputPath }, null, 2));
+  await sequelize.close();
+  if (!evaluation.pass) process.exitCode = 1;
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('010 正式入口验收失败:', error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  OFFICIAL_BASE,
+  evaluateEvidence,
+  extractRecordId,
+  toEvidence
+};

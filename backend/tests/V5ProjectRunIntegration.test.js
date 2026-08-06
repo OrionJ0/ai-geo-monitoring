@@ -56,7 +56,7 @@ const SNAPSHOT = [
   { id: 12, name: '海康威视', aliases: ['Hikvision'], website: 'hikvision.com' }
 ];
 
-test('createTargetRecord 默认写 v4 契约且不冻结快照（兼容现役正式路径）', async () => {
+test('createTargetRecord 默认且唯一写 v5 契约', async () => {
   const record = await ProjectRunService.createTargetRecord({
     target: target(),
     runUser: runUser(),
@@ -69,7 +69,7 @@ test('createTargetRecord 默认写 v4 契约且不冻结快照（兼容现役正
   await record.destroy({ force: true });
 });
 
-test('createRunEntries provider=v5：运行内所有记录引用同一契约与快照', async () => {
+test('createRunEntries：运行内所有记录引用同一 v5 契约与快照', async () => {
   const entries = await ProjectRunService.createRunEntries({
     targets: [
       { platform: 'deepseek', prompt: { id: 2, question: '问题一' } },
@@ -78,7 +78,6 @@ test('createRunEntries provider=v5：运行内所有记录引用同一契约与�
     runUser: runUser(),
     projectData: projectData(),
     keywords: ['电子围栏'],
-    analysisProvider: 'v5',
     competitorSnapshot: SNAPSHOT
   });
   assert.equal(entries.length, 2);
@@ -90,13 +89,12 @@ test('createRunEntries provider=v5：运行内所有记录引用同一契约与�
   await QuestionRecord.destroy({ where: { id: entries.map(({ record }) => record.id) }, force: true });
 });
 
-test('createTargetRecord provider=v5 写 v5 契约并冻结竞品快照', async () => {
+test('createTargetRecord 写 v5 契约并冻结竞品快照', async () => {
   const record = await ProjectRunService.createTargetRecord({
     target: target(),
     runUser: runUser(),
     projectData: projectData(),
     keywords: ['电子围栏'],
-    analysisProvider: 'v5',
     competitorSnapshot: SNAPSHOT
   });
   assert.equal(record.analysis_contract_version, V5_ANALYSIS_CONTRACT);
@@ -226,7 +224,7 @@ test('v5 快照迁移服务：模型 sync 后列存在则无需迁移（additive
   assert.equal(audit.migration_required, false);
 });
 
-test('buildVisibilityMetricPayload provider=v5 调用 v5 分析器并传入竞品快照', async () => {
+test('buildVisibilityMetricPayload 调用唯一 v5 分析器并传入竞品快照', async () => {
   let v5Input = null;
   AIResponseAnalysisService.analyze = async () => {
     throw new Error('v5 路径不应调用 v4');
@@ -267,7 +265,6 @@ test('buildVisibilityMetricPayload provider=v5 调用 v5 分析器并传入竞�
     project: projectData(),
     competitors: [],
     prompt: { question: target().prompt.question },
-    analysisProvider: 'v5',
     competitorSnapshot: SNAPSHOT
   });
   assert.ok(v5Input, 'v5 分析器应被调用');

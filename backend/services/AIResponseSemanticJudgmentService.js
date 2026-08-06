@@ -452,6 +452,7 @@ class AIResponseSemanticJudgmentService {
         ? basePrompt
         : buildSemanticRepairPrompt(basePrompt, lastError, { sourceMap, catalog, revision: this.promptRevision });
       const connection = await this.requestService.queryConfig(platform, prompt, {
+        purpose: 'analysis_semantic_judge',
         retryCount: 0,
         requestOptions: effectiveRequestOptions(platform),
         disableWebSearch: true,

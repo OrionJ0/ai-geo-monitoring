@@ -10,7 +10,7 @@ const runtimeSettings = {
   ai_run_concurrency: 2
 };
 
-function createService({ row, post, get, savedResults = [] }) {
+function createService({ row, post, get, savedResults = [], auditLogger = () => {} }) {
   const configService = {
     getPlatformByCode: async () => row,
     getPlatform: async () => row,
@@ -38,9 +38,47 @@ function createService({ row, post, get, savedResults = [] }) {
       let value = 1000;
       return () => (value += 25);
     })(),
-    wait: async () => {}
+    wait: async () => {},
+    auditLogger
   });
 }
+
+test('emits a secret-free model audit for every outbound analysis request', async () => {
+  const audits = [];
+  const row = {
+    id: 4,
+    code: 'deepseek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted-secret-canary',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    auditLogger: (event) => audits.push(event),
+    post: async () => ({
+      data: { choices: [{ message: { content: '{}' } }] },
+      headers: {}
+    })
+  });
+
+  const result = await service.queryConfig(row, 'secret prompt canary', {
+    purpose: 'analysis_entity_extract',
+    retryCount: 0
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(audits, [{
+    event: 'ai_platform_request',
+    platform: 'deepseek',
+    model: 'deepseek-v4-flash',
+    purpose: 'analysis_entity_extract',
+    attempt: 1
+  }]);
+  assert.doesNotMatch(JSON.stringify(audits), /secret prompt|encrypted-secret/u);
+});
 
 test('loads selectable model ids from the provider models endpoint', async () => {
   let request;

@@ -67,7 +67,7 @@ _避免使用_：循环重试登录错误、登录后自动发送、无限等待
 _避免使用_：只显示执行失败、用空报告表示登录错误、隐藏下一次执行时间
 
 **当前 API 预置默认值**：
-全新初始化时，豆包 Web、DeepSeek Web、豆包 API、DeepSeek API、千问 API 和腾讯混元 API 只作为预置写入，启用状态全部为关闭，必须由管理员主动启用；设置页固定按上述 Web 优先顺序展示，自定义平台排在预置之后。已有数据库继续保留管理员保存的启停状态。DeepSeek API 平台 `deepseek` 默认模型为 `deepseek-v4-pro`；正式结构化分析不设置应用层输入或输出 Token 上限，DeepSeek 思考模式默认关闭，管理员修改分析专用请求参数时必须二次确认。千问 `qwen` 使用 Responses 协议并预置强制搜索参数，腾讯混元 `hunyuan` 使用 TokenHub Chat `hy3-preview` 并预置 `web_search_options.enable=true`；这些请求参数不会令停用平台自动启用。只有供应商实际返回 `search_results` 才算联网已验证，账号还必须在 TokenHub“工具管理”具备可用的联网搜索资源。API 平台与同品牌 Web 平台仍是独立样本。
+全新初始化时，豆包 Web、DeepSeek Web、豆包 API、DeepSeek API、千问 API 和腾讯混元 API 只作为预置写入，启用状态全部为关闭，必须由管理员主动启用；设置页固定按上述 Web 优先顺序展示，自定义平台排在预置之后。已有数据库继续保留管理员保存的启停状态与密文凭据。DeepSeek API 平台 `deepseek` 的唯一正式分析模型为 `deepseek-v4-flash`；从旧官方 builtin `deepseek-v4-pro` 升级时必须通过显式发布迁移同时更新平台默认值和 `ai_analysis_model_name`，自定义 URL、未知模型、停用或缺少凭据均 fail-closed。正式结构化分析不设置应用层输入或输出 Token 上限，DeepSeek 思考模式默认关闭，管理员修改分析专用请求参数时必须二次确认。千问 `qwen` 使用 Responses 协议并预置强制搜索参数，腾讯混元 `hunyuan` 使用 TokenHub Chat `hy3-preview` 并预置 `web_search_options.enable=true`；这些请求参数不会令停用平台自动启用。只有供应商实际返回 `search_results` 才算联网已验证，账号还必须在 TokenHub“工具管理”具备可用的联网搜索资源。API 平台与同品牌 Web 平台仍是独立样本。
 _避免使用_：把 DeepSeek API 停用理解为 DeepSeek 网页版停用
 
 **全局启用平台范围**：

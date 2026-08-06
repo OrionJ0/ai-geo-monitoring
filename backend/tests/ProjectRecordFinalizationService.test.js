@@ -137,3 +137,34 @@ test('marks project detection records as failed when visibility metric generatio
   assert.equal(updates[0].error_message, '指标生成失败，请稍后重试');
   assert.equal(result.error.message, '指标生成失败，请稍后重试');
 });
+
+test('forwards the record frozen competitor snapshot instead of live competitor identity', async () => {
+  const frozen = [{ id: 8, name: '冻结竞品', aliases: ['旧别名'], website: null }];
+  let finalized = null;
+  const result = await ProjectRecordFinalizationService.finalize({
+    record: {
+      id: 8,
+      project_id: 9,
+      tracked_prompt_id: 4,
+      competitor_snapshot: frozen
+    },
+    responseText: '冻结竞品出现在回答中。',
+    repositories: {
+      BrandProject: { findByPk: async () => ({ id: 9, name: '目标品牌' }) },
+      BrandCompetitor: {
+        findAll: async () => [{ id: 99, name: '实时新增竞品', aliases: [] }]
+      },
+      TrackedPrompt: { findOne: async () => ({ id: 4, question: '有哪些品牌？' }) }
+    },
+    projectRunService: {
+      failRecord: async () => true,
+      finalizeSuccessfulRecord: async (payload) => {
+        finalized = payload;
+        return { ok: true, status: 'completed' };
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(finalized.competitorSnapshot, frozen);
+});

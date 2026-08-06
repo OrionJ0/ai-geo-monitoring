@@ -69,7 +69,6 @@ test('自动监测 v5 记录冻结竞品快照与 v5 契约', async () => {
     brand: project.name
   };
   const result = await SchedulerService.submitDetectionForSchedule(schedule, {
-    analysisProvider: 'v5',
     aiPlatformService: {
       getPlatformAvailability: async () => [
         { code: 'deepseek', available: true, platform_name: 'DeepSeek', model_name: 'deepseek-v4-flash', config: {} }
@@ -92,29 +91,20 @@ test('自动监测 v5 记录冻结竞品快照与 v5 契约', async () => {
 });
 
 test('010 硬切：租约预算覆盖 v5 两阶段最多 4 次 Flash 调用（默认路径即 v5）', () => {
-  // 010 后默认路径即 v5：不传 analysisProvider 与显式 v5 预算一致
-  const def = ProjectRunService.getRecordExecutionLeaseMs({
+  const lease = ProjectRunService.getRecordExecutionLeaseMs({
     target: {},
     runtimeSettings: {},
     retryMode: 'full_monitoring'
   });
-  const v5 = ProjectRunService.getRecordExecutionLeaseMs({
-    target: {},
-    runtimeSettings: {},
-    retryMode: 'full_monitoring',
-    analysisProvider: 'v5'
-  });
-  assert.equal(def, v5, '默认路径应与 v5 预算一致');
   // 最坏 4 次 × 120 秒 + 60 秒缓冲
-  assert.ok(v5 >= (4 * 120 + 60) * 1000, `v5 预算至少覆盖 4×120s+60s，实际 ${v5}`);
+  assert.ok(lease >= (4 * 120 + 60) * 1000, `v5 预算至少覆盖 4×120s+60s，实际 ${lease}`);
 });
 
 test('analysis-only 的 v5 租约预算不增加监测时间但仍覆盖分析', () => {
   const v5AnalysisOnly = ProjectRunService.getRecordExecutionLeaseMs({
     target: {},
     runtimeSettings: {},
-    retryMode: 'analysis_only',
-    analysisProvider: 'v5'
+    retryMode: 'analysis_only'
   });
   // analysis-only 不采集，仅分析；预算覆盖 4 次分析调用
   assert.ok(v5AnalysisOnly >= (4 * 120 + 60) * 1000);

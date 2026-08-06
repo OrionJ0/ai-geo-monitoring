@@ -102,7 +102,7 @@ async function main() {
   const sqliteIdentity = configureDatabaseTarget(options);
   assertDatabaseTargetUnchanged(sqliteIdentity);
   const sequelize = require('../config/database');
-  const { AIPlatformConfig } = require('../models');
+  const { AIPlatformConfig, Setting } = require('../models');
   const {
     DeepSeekFlashConfigMigrationService
   } = require('../services/DeepSeekFlashConfigMigrationService');
@@ -111,6 +111,7 @@ async function main() {
     assertDatabaseTargetUnchanged(sqliteIdentity);
     const service = new DeepSeekFlashConfigMigrationService({
       model: AIPlatformConfig,
+      settingModel: Setting,
       sequelize
     });
     const result = options.apply

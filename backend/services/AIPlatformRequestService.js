@@ -62,6 +62,11 @@ const PROTECTED_REQUEST_OPTION_KEYS = new Set([
   'max_output_tokens'
 ]);
 
+function normalizeAuditPurpose(value) {
+  const purpose = String(value || '').trim();
+  return /^[a-z0-9_:-]{1,80}$/u.test(purpose) ? purpose : 'unspecified';
+}
+
 function safeRequestOptions(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(
@@ -236,6 +241,9 @@ class AIPlatformRequestService {
     this.urlValidator = options.urlValidator || validatePlatformUrl;
     this.now = options.now || Date.now;
     this.wait = options.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.auditLogger = options.auditLogger || ((event) => {
+      console.info('AI 平台请求审计:', event);
+    });
   }
 
   async queryPlatform(platformCode, question, options = {}) {
@@ -300,6 +308,13 @@ class AIPlatformRequestService {
       const startedAt = this.now();
       try {
         const requestUrl = resolveRequestUrl(config.adapter_type, validation.url);
+        this.auditLogger({
+          event: 'ai_platform_request',
+          platform,
+          model: String(config.default_model || ''),
+          purpose: normalizeAuditPurpose(options.purpose),
+          attempt: attempt + 1
+        });
         const response = await this.httpClient.post(requestUrl, requestBody, requestOptions);
         const text = extractResponseText(config.adapter_type, response?.data);
         if (!text) return this.failure(platform, 'invalid_provider_response');

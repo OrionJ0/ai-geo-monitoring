@@ -114,6 +114,9 @@ async function finalize({
       providerCitations,
       project,
       competitors,
+      competitorSnapshot: Array.isArray(record.competitor_snapshot)
+        ? record.competitor_snapshot
+        : null,
       prompt,
       keywords
     });

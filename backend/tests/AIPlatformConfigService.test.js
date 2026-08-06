@@ -434,6 +434,32 @@ test('startup fails closed on a custom DeepSeek identity without overwriting it'
   assert.equal(deepseek.encrypted_api_key, 'custom-encrypted');
 });
 
+test('startup does not promote a non-builtin custom DeepSeek row before rejecting it', async () => {
+  const service = createService();
+  await AIPlatformConfig.create({
+    code: 'deepseek',
+    name: 'DeepSeek 企业代理',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://proxy.example.invalid/v1',
+    encrypted_api_key: 'custom-encrypted',
+    api_key_last4: '9999',
+    default_model: 'deepseek-v4-flash',
+    request_options: {},
+    enabled: true,
+    builtin: false
+  });
+
+  await assert.rejects(service.ensurePresets(), (error) => {
+    assert.equal(error.code, 'reserved_platform_code_conflict');
+    return true;
+  });
+  const deepseek = await AIPlatformConfig.findOne({ where: { code: 'deepseek' } });
+  assert.equal(deepseek.builtin, false);
+  assert.equal(deepseek.name, 'DeepSeek 企业代理');
+  assert.equal(deepseek.base_url, 'https://proxy.example.invalid/v1');
+  assert.equal(deepseek.encrypted_api_key, 'custom-encrypted');
+});
+
 test('stores an encrypted API key and never exposes stored secret fields', async () => {
   const service = createService();
   await service.ensurePresets();

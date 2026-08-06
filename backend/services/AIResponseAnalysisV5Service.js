@@ -9,6 +9,10 @@ const {
   buildRegistrySnapshot,
   withRegistryMatches
 } = require('./AICompetitorRegistryResolverService');
+const AIAnalysisExecutionCoordinator = require('./AIAnalysisExecutionCoordinator');
+const {
+  AIAnalysisExecutionQueueError
+} = require('./AIAnalysisExecutionCoordinator');
 
 const ANALYSIS_METHOD = 'ai_structured_v5';
 const STRUCTURE_VERSION = 'geo_metric_input_v5';
@@ -575,9 +579,25 @@ class AIResponseAnalysisV5Service {
       || AIResponseEntityExtractionService;
     this.semanticJudgmentService = options.semanticJudgmentService
       || AIResponseSemanticJudgmentService;
+    this.executionCoordinator = options.executionCoordinator
+      || AIAnalysisExecutionCoordinator;
   }
 
-  async analyze({ question, responseText, brand, competitors }) {
+  async analyze(input) {
+    try {
+      return await this.executionCoordinator.run(() => this.analyzeUncoordinated(input));
+    } catch (error) {
+      if (error instanceof AIAnalysisExecutionQueueError) {
+        throw new AIResponseAnalysisV5Error(error.message, error.code, {
+          stage: 'analysis_queue',
+          ...this.executionCoordinator.snapshot()
+        });
+      }
+      throw error;
+    }
+  }
+
+  async analyzeUncoordinated({ question, responseText, brand, competitors }) {
     const normalizedQuestion = String(question || '').trim();
     const answer = String(responseText || '');
     if (!normalizedQuestion || !answer.trim()) {

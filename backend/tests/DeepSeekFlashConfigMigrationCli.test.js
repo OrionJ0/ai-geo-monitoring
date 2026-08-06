@@ -45,6 +45,15 @@ function close(database) {
 async function createDatabase(filename, overrides = {}) {
   const database = openDatabase(filename);
   await run(database, `
+    CREATE TABLE settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key VARCHAR(255) NOT NULL UNIQUE,
+      value TEXT,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL
+    )
+  `);
+  await run(database, `
     CREATE TABLE ai_platform_configs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code VARCHAR(50) NOT NULL UNIQUE,
@@ -105,6 +114,15 @@ async function createDatabase(filename, overrides = {}) {
     '2026-08-05 00:00:00.000 +00:00',
     '2026-08-05 00:00:00.000 +00:00'
   ]);
+  const now = '2026-08-05 00:00:00.000 +00:00';
+  await run(database, `
+    INSERT INTO settings (key, value, created_at, updated_at)
+    VALUES ('ai_analysis_platform_code', ?, ?, ?),
+           ('ai_analysis_model_name', ?, ?, ?)
+  `, [
+    overrides.analysis_platform_code || 'deepseek', now, now,
+    overrides.analysis_model_name || 'deepseek-v4-pro', now, now
+  ]);
   await close(database);
 }
 
@@ -154,6 +172,8 @@ test('CLI migrates only the explicit database and preserves credentials and enab
     target_model: 'deepseek-v4-flash',
     enabled: true,
     credential_present: true,
+    analysis_platform_code: 'deepseek',
+    analysis_model: 'deepseek-v4-flash',
     migration_required: false,
     ready: true,
     applied: true
@@ -171,9 +191,16 @@ test('CLI migrates only the explicit database and preserves credentials and enab
     encrypted_api_key: 'encrypted-cli-key-canary',
     api_key_last4: '5678',
     enabled: 1,
-    test_status: 'success',
-    web_search_test_status: 'inconclusive'
+    test_status: 'untested',
+    web_search_test_status: 'untested'
   });
+  const targetSettingsDb = openDatabase(target);
+  assert.equal(
+    (await get(targetSettingsDb, "SELECT value FROM settings WHERE key = 'ai_analysis_model_name'"))
+      .value,
+    'deepseek-v4-flash'
+  );
+  await close(targetSettingsDb);
 
   const otherDb = openDatabase(other);
   assert.equal(
@@ -189,6 +216,32 @@ test('CLI migrates only the explicit database and preserves credentials and enab
   const second = invoke(['--apply', `--db=${target}`]);
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(second.stdout).applied, false);
+});
+
+test('CLI fails closed for an unknown runtime analysis model without modifying either model', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'deepseek-flash-setting-cli-'));
+  const databasePath = path.join(directory, 'setting.sqlite');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  await createDatabase(databasePath, { analysis_model_name: 'deepseek-v5-unknown' });
+
+  const result = invoke(['--apply', `--db=${databasePath}`]);
+  assert.notEqual(result.status, 0);
+  assert.equal(
+    JSON.parse(result.stderr).error_code,
+    'DEEPSEEK_FLASH_ANALYSIS_MODEL_UNSUPPORTED'
+  );
+  const database = openDatabase(databasePath);
+  assert.equal(
+    (await get(database, "SELECT default_model FROM ai_platform_configs WHERE code = 'deepseek'"))
+      .default_model,
+    'deepseek-v4-pro'
+  );
+  assert.equal(
+    (await get(database, "SELECT value FROM settings WHERE key = 'ai_analysis_model_name'"))
+      .value,
+    'deepseek-v5-unknown'
+  );
+  await close(database);
 });
 
 test('CLI fails closed for a custom URL without modifying the row', async (t) => {

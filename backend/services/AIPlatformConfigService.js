@@ -322,6 +322,13 @@ class AIPlatformConfigService {
           409
         );
       }
+      if (preset.code === 'deepseek' && existing && !existing.builtin) {
+        throw new PlatformConfigError(
+          '保留平台标识 deepseek 已被自定义配置占用',
+          'reserved_platform_code_conflict',
+          409
+        );
+      }
       const [row] = await this.model.findOrCreate({
         where: { code: preset.code },
         defaults: preset

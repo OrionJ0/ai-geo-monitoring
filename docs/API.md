@@ -326,7 +326,7 @@ Authorization: Bearer <token>
   - `PUT /api/settings` 更新设置
   - `GET /api/settings/analysis-api` 获取当前 AI 结构化分析平台与独立模型
   - `GET /api/settings/analysis-api/prompt` 获取正式运行使用的版本化分析提示词模板、期望 JSON 结构、独立调用策略 `request_profile`，以及按当前已保存平台和模型生成的脱敏实际请求预览 `request_parameters`
-  - `PUT /api/settings/analysis-api` 通过 `{ "platform_code": "deepseek", "model_name": "deepseek-v4-pro" }` 分别选择已启用且配置完整的平台和分析模型
+  - `PUT /api/settings/analysis-api` 通过 `{ "platform_code": "deepseek", "model_name": "deepseek-v4-flash" }` 选择已启用且配置完整的正式分析平台；DeepSeek 不接受与平台默认 Flash 模型不同的运行时覆盖
   - `POST /api/settings/analysis-api/test` 提交当前问题、品牌、别名和一段完整原回答，临时返回测试输入、证据结构、程序派生结果和 API 原始输出；测试内容不落库
   - 分析调用固定关闭联网，使用独立的温度、超时和尝试次数，不设置应用层输入或输出 Token 上限；这些值不继承或修改监测平台的同名参数
 - 公开接口（无需认证）：

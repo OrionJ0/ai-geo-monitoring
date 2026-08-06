@@ -19,26 +19,12 @@ const ProjectRecordFinalizationService = require('./ProjectRecordFinalizationSer
 const QuestionSetRunService = require('./QuestionSetRunService');
 const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
 const {
-  CURRENT_ANALYSIS_CONTRACT,
-  CURRENT_METRIC_SEMANTICS,
   V5_ANALYSIS_CONTRACT,
   SCOPED_METRIC_SEMANTICS
 } = require('./GeoMetricSemanticsService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
 const SAFE_PLATFORM_FAILURE_MESSAGE = '监测平台调用失败，请稍后重试';
-
-function isV5Provider(analysisProvider) {
-  return analysisProvider === 'v5';
-}
-
-function scheduleAnalysisContract(analysisProvider) {
-  return isV5Provider(analysisProvider) ? V5_ANALYSIS_CONTRACT : CURRENT_ANALYSIS_CONTRACT;
-}
-
-function scheduleMetricSemantics(analysisProvider) {
-  return isV5Provider(analysisProvider) ? SCOPED_METRIC_SEMANTICS : CURRENT_METRIC_SEMANTICS;
-}
 
 async function frozenCompetitorSnapshot(projectId, transaction = null) {
   const competitors = await BrandCompetitor.findAll({
@@ -181,10 +167,7 @@ async function submitDetectionForSchedule(schedule, options = {}) {
   }
 
   const runtimeSettings = await settingsService.getSettings();
-  const analysisProvider = options.analysisProvider || 'v5';
-  const competitorSnapshot = isV5Provider(analysisProvider)
-    ? await frozenCompetitorSnapshot(schedule.project_id)
-    : null;
+  const competitorSnapshot = await frozenCompetitorSnapshot(schedule.project_id);
 
   // 配额检查：严格按会员控制，每次按平台数量扣减
   try {
@@ -211,8 +194,8 @@ async function submitDetectionForSchedule(schedule, options = {}) {
             question,
             brand: schedule.brand,
             brand_keywords: keywordsArr.join(','),
-            analysis_contract_version: scheduleAnalysisContract(analysisProvider),
-            metric_semantics_version: scheduleMetricSemantics(analysisProvider),
+            analysis_contract_version: V5_ANALYSIS_CONTRACT,
+            metric_semantics_version: SCOPED_METRIC_SEMANTICS,
             competitor_snapshot: competitorSnapshot,
             status: 'failed',
             error_message: errMsg
@@ -253,15 +236,14 @@ async function submitDetectionForSchedule(schedule, options = {}) {
         question,
         brand: schedule.brand,
         brand_keywords: keywordsArr.join(','),
-        analysis_contract_version: scheduleAnalysisContract(analysisProvider),
-        metric_semantics_version: scheduleMetricSemantics(analysisProvider),
+        analysis_contract_version: V5_ANALYSIS_CONTRACT,
+        metric_semantics_version: SCOPED_METRIC_SEMANTICS,
         competitor_snapshot: competitorSnapshot
       });
 
       const leaseMs = ProjectRunService.getRecordExecutionLeaseMs({
         target: { platformConfig: platformStatus.config },
-        runtimeSettings,
-        analysisProvider
+        runtimeSettings
       });
       const lease = await ProjectRunService.claimRecordExecution(rec.id, {
         leaseMs,

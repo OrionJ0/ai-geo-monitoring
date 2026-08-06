@@ -16,9 +16,6 @@ const AIPlatformService = require('./AIPlatformService');
 const WebPlatformRegistry = require('./WebPlatformRegistry');
 const ResultParserService = require('./ResultParserService');
 const VisibilityAnalysisService = require('./VisibilityAnalysisService');
-// 010 硬切（2026-08-06）：v4 运行时已退役，仅保留其错误类用于历史错误消息
-// 映射兼容（评测对照臂可能抛 v4 错误）；分析分派不再引用 v4 服务。
-const { AIResponseAnalysisError } = require('./AIResponseAnalysisService');
 const AIAnalysisConfigService = require('./AIAnalysisConfigService');
 const { AIAnalysisConfigError } = require('./AIAnalysisConfigService');
 const CitationAnalysisService = require('./CitationAnalysisService');
@@ -38,21 +35,6 @@ const AIRuntimeSettingsService = require('./AIRuntimeSettingsService');
 const WebCaptureAnswerQualityService = require('./WebCaptureAnswerQualityService');
 const { ERROR_MESSAGES: AI_PLATFORM_ERROR_MESSAGES } = require('./AIPlatformRequestService');
 const { consumeQuotaDirect } = require('../middleware/quota');
-
-const CURRENT_ANALYSIS_PROVIDER = 'v5';
-const V5_ANALYSIS_PROVIDER = 'v5';
-
-function isV5Provider(analysisProvider) {
-  return analysisProvider === V5_ANALYSIS_PROVIDER;
-}
-
-function resolveAnalysisContract(analysisProvider) {
-  return isV5Provider(analysisProvider) ? V5_ANALYSIS_CONTRACT : CURRENT_ANALYSIS_CONTRACT;
-}
-
-function resolveMetricSemantics(analysisProvider) {
-  return isV5Provider(analysisProvider) ? SCOPED_METRIC_SEMANTICS : CURRENT_METRIC_SEMANTICS;
-}
 
 function normalizeCompetitorSnapshot(competitors, fallbackSnapshot = null) {
   if (Array.isArray(competitors) && competitors.length) {
@@ -142,14 +124,10 @@ function metricFailureMessage(error) {
     analysis_relation_reason_invalid: '竞品判断理由无效，本条未计入品牌指标',
     invalid_analysis_output: 'AI 结构化结果无效，本条未计入品牌指标'
   };
-  // 010 硬切（2026-08-06）：v5 为唯一分析器，错误映射同时识别 v5 错误类；
-  // v4 错误类保留（评测对照臂与历史路径仍可能抛 v4 错误）。
-  if ((error instanceof AIResponseAnalysisError || error instanceof AIResponseAnalysisV5Error)
-    && messages[error.code]) {
+  if (error instanceof AIResponseAnalysisV5Error && messages[error.code]) {
     return messages[error.code];
   }
   if (error instanceof AIAnalysisConfigError
-    || error instanceof AIResponseAnalysisError
     || error instanceof AIResponseAnalysisV5Error) {
     return 'AI 结构化分析失败，本条未计入有效样本';
   }
@@ -159,7 +137,6 @@ function metricFailureMessage(error) {
 function metricFailureDiagnostics(error) {
   if (
     !(error instanceof AIAnalysisConfigError)
-    && !(error instanceof AIResponseAnalysisError)
     && !(error instanceof AIResponseAnalysisV5Error)
   ) {
     return null;
@@ -520,7 +497,6 @@ class ProjectRunService {
     project,
     competitors,
     prompt,
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
     competitorSnapshot = null
   }) {
     const projectData = project.toJSON ? project.toJSON() : project;
@@ -528,13 +504,14 @@ class ProjectRunService {
       ? competitors.map((item) => (item.toJSON ? item.toJSON() : item))
       : [];
     const question = String(prompt?.question || record?.question || '').trim();
+    const frozenSnapshot = resolveFrozenSnapshot(record, competitors, competitorSnapshot);
     // 010 硬切（2026-08-06）：v5 为唯一分析器，不再分派 v4；
     // v5 分阶段分析强制 deepseek-v4-flash（assertFlashPlatform），无 v4/Pro fallback。
     const analysis = await AIResponseAnalysisV5Service.analyze({
       question,
       responseText,
       brand: projectData,
-      competitors: Array.isArray(competitorSnapshot) ? competitorSnapshot : []
+      competitors: frozenSnapshot
     });
     const citationAnalysis = providedCitationAnalysis || this.buildCitationAnalysis({
       responseText,
@@ -732,7 +709,6 @@ class ProjectRunService {
     keywords,
     citationObservationStatus,
     resultSummaryPatch = {},
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
     competitorSnapshot = null
   }) {
     const keywordCounts = countKeywordOccurrences(responseText, keywords, true);
@@ -759,7 +735,6 @@ class ProjectRunService {
         project,
         competitors,
         prompt,
-        analysisProvider,
         competitorSnapshot
       });
       const metric = await this.runInTransaction(async (transaction) => {
@@ -931,7 +906,6 @@ class ProjectRunService {
     runSlotIndex = null,
     executionMode = 'full_monitoring',
     retryBatchId = null,
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
     competitorSnapshot = null,
     transaction = null
   }) {
@@ -951,13 +925,9 @@ class ProjectRunService {
       question: prompt.question,
       brand: projectData.name,
       brand_keywords: keywords.join(','),
-      analysis_contract_version: isV5Provider(analysisProvider)
-        ? V5_ANALYSIS_CONTRACT
-        : CURRENT_ANALYSIS_CONTRACT,
-      metric_semantics_version: isV5Provider(analysisProvider)
-        ? SCOPED_METRIC_SEMANTICS
-        : CURRENT_METRIC_SEMANTICS,
-      competitor_snapshot: isV5Provider(analysisProvider) ? competitorSnapshot : null,
+      analysis_contract_version: V5_ANALYSIS_CONTRACT,
+      metric_semantics_version: SCOPED_METRIC_SEMANTICS,
+      competitor_snapshot: competitorSnapshot,
       status: 'pending'
     }, transaction ? { transaction } : undefined);
   }
@@ -971,7 +941,6 @@ class ProjectRunService {
     questionSetRunId = null,
     transaction = null,
     afterRecordCreated = null,
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
     competitorSnapshot = null
   }) {
     const rows = [];
@@ -984,7 +953,6 @@ class ProjectRunService {
         scheduledExecutionId,
         questionSetRunId,
         runSlotIndex: questionSetRunId ? runSlotIndex : null,
-        analysisProvider,
         competitorSnapshot,
         transaction
       });
@@ -1006,7 +974,7 @@ class ProjectRunService {
     return 2;
   }
 
-  getRecordExecutionLeaseMs({ target = {}, runtimeSettings = {}, retryMode, analysisProvider } = {}) {
+  getRecordExecutionLeaseMs({ target = {}, runtimeSettings = {}, retryMode } = {}) {
     const rawMonitoringTimeoutSeconds = Number(
       target?.platformConfig?.request_timeout_seconds
       || runtimeSettings.ai_default_timeout_seconds
@@ -2351,7 +2319,6 @@ class ProjectRunService {
     keywords,
     runtimeSettings,
     executionToken = null,
-    analysisProvider = CURRENT_ANALYSIS_PROVIDER,
     competitorSnapshot = null
   }) {
     const prompt = target.prompt;
@@ -2367,7 +2334,6 @@ class ProjectRunService {
           runUser,
           projectData,
           keywords,
-          analysisProvider,
           competitorSnapshot: frozenSnapshot
         });
       }
@@ -2545,7 +2511,6 @@ class ProjectRunService {
         prompt,
         keywords,
         resultSummaryPatch,
-        analysisProvider,
         competitorSnapshot: frozenSnapshot
       });
       if (!finalization.ok) {
@@ -2826,9 +2791,6 @@ class ProjectRunService {
 
 module.exports = new ProjectRunService();
 module.exports.ProjectRunService = ProjectRunService;
-module.exports.CURRENT_ANALYSIS_PROVIDER = CURRENT_ANALYSIS_PROVIDER;
-module.exports.V5_ANALYSIS_PROVIDER = V5_ANALYSIS_PROVIDER;
-module.exports.isV5Provider = isV5Provider;
 module.exports.metricFailureDiagnostics = metricFailureDiagnostics;
 module.exports.metricFailureMessage = metricFailureMessage;
 module.exports.normalizeCompetitorSnapshot = normalizeCompetitorSnapshot;

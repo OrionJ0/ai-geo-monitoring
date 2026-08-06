@@ -51,12 +51,41 @@ function buildRow(overrides = {}) {
   };
 }
 
-function buildService(row) {
+function buildSetting(key, settingValue) {
+  const updates = [];
+  return {
+    key,
+    value: settingValue,
+    updates,
+    async update(patch, options = {}) {
+      updates.push({ patch: { ...patch }, options });
+      Object.assign(this, patch);
+      return this;
+    }
+  };
+}
+
+function buildService(row, settingValues = {}) {
   const transactions = [];
+  const settings = {
+    ai_analysis_platform_code: buildSetting(
+      'ai_analysis_platform_code',
+      settingValues.ai_analysis_platform_code ?? 'deepseek'
+    ),
+    ai_analysis_model_name: buildSetting(
+      'ai_analysis_model_name',
+      settingValues.ai_analysis_model_name ?? PRO_MODEL
+    )
+  };
   const model = {
     async findAll(options = {}) {
       assert.deepEqual(options.where, { code: 'deepseek' });
       return row ? [row] : [];
+    }
+  };
+  const settingModel = {
+    async findOne(options = {}) {
+      return settings[options.where?.key] || null;
     }
   };
   const sequelize = {
@@ -67,7 +96,8 @@ function buildService(row) {
     }
   };
   return {
-    service: new DeepSeekFlashConfigMigrationService({ model, sequelize }),
+    service: new DeepSeekFlashConfigMigrationService({ model, settingModel, sequelize }),
+    settings,
     transactions
   };
 }
@@ -78,7 +108,7 @@ test('only upgrades the exact official builtin Pro preset and preserves every ot
   delete before.updates;
   delete before.get;
   delete before.update;
-  const { service, transactions } = buildService(row);
+  const { service, settings, transactions } = buildService(row);
 
   const preflight = await service.audit();
   assert.equal(preflight.migration_required, true);
@@ -92,24 +122,64 @@ test('only upgrades the exact official builtin Pro preset and preserves every ot
   assert.equal(result.current_model, FLASH_MODEL);
   assert.equal(transactions.length, 1);
   assert.equal(row.updates.length, 1);
-  assert.deepEqual(row.updates[0].patch, { default_model: FLASH_MODEL });
+  assert.deepEqual(row.updates[0].patch, {
+    default_model: FLASH_MODEL,
+    test_status: 'untested',
+    last_tested_at: null,
+    last_test_error_code: null,
+    last_test_message: null,
+    web_search_test_status: 'untested',
+    last_web_search_tested_at: null,
+    last_web_search_test_error_code: null,
+    last_web_search_test_message: null
+  });
+  assert.deepEqual(settings.ai_analysis_model_name.updates[0].patch, {
+    value: FLASH_MODEL
+  });
 
   for (const [key, value] of Object.entries(before)) {
-    if (key === 'default_model') continue;
+    if (key === 'default_model' || key.startsWith('test_') || key.startsWith('last_test') || key.startsWith('web_search_test') || key.startsWith('last_web_search')) continue;
     assert.deepEqual(row[key], value, `${key} must be preserved`);
   }
 });
 
 test('an already migrated official Flash preset is an idempotent no-op', async () => {
-  const row = buildRow({ default_model: FLASH_MODEL, enabled: false });
-  const { service } = buildService(row);
+  const row = buildRow({ default_model: FLASH_MODEL });
+  const { service } = buildService(row, { ai_analysis_model_name: FLASH_MODEL });
 
   const result = await service.apply();
   assert.equal(result.ready, true);
   assert.equal(result.applied, false);
   assert.equal(result.current_model, FLASH_MODEL);
-  assert.equal(row.enabled, false);
+  assert.equal(row.enabled, true);
   assert.equal(row.updates.length, 0);
+});
+
+test('fails closed without changing the row when DeepSeek is disabled or has no credential', async () => {
+  for (const overrides of [{ enabled: false }, { encrypted_api_key: null }]) {
+    const row = buildRow(overrides);
+    const { service } = buildService(row);
+    await assert.rejects(service.apply(), (error) => {
+      assert.equal(error.code, 'DEEPSEEK_FLASH_CONFIG_RUNTIME_UNAVAILABLE');
+      return true;
+    });
+    assert.equal(row.updates.length, 0);
+  }
+});
+
+test('fails closed on unknown or missing runtime analysis settings', async () => {
+  for (const [settings, expectedCode] of [
+    [{ ai_analysis_platform_code: 'qwen' }, 'DEEPSEEK_FLASH_ANALYSIS_PLATFORM_MISMATCH'],
+    [{ ai_analysis_model_name: 'deepseek-v5-unknown' }, 'DEEPSEEK_FLASH_ANALYSIS_MODEL_UNSUPPORTED']
+  ]) {
+    const row = buildRow();
+    const built = buildService(row, settings);
+    await assert.rejects(built.service.apply(), (error) => {
+      assert.equal(error.code, expectedCode);
+      return true;
+    });
+    assert.equal(row.updates.length, 0);
+  }
 });
 
 for (const [name, overrides, expectedCode] of [
