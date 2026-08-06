@@ -1,6 +1,6 @@
 # 人工真值复核队列（issue 013 阻塞项）
 
-> 状态：**第三轮返工完成（反例修复 + S53 目标映射真值），等待真实复核人签字**。数据所有者已确认 S03/S21/S46/S50，S53 按三轨拆分裁决；AI 产出的裁决不能写成 `confirmed`、不能代替人工签字，也不能进入 014/015 的 PASS 门禁。
+> 状态：**2026-08-06 数据所有者授权冻结完成**。数据所有者（reviewer=OrionJ0）批准 truth v3 当前裁决内容：`truth.jsonl` 55 条全部 `confirmed`（reviewer=OrionJ0，reviewed_at=2026-08-06T05:09:23Z），truth preflight PASS（0 错误，manifest 哈希一致，S18/S19/S20 dup1 重复簇完整）；排名仅 6 条真值，按非阻塞观察指标处理（NOT_EVALUABLE，不代表能力已认证）。真值冻结已单独提交，015 全量 41×3 获准运行。
 
 ## 结论先行
 

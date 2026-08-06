@@ -68,6 +68,15 @@ blocked_by:
 - `backend/scripts/geoBaselineEvaluate.js`：`addComparison` 对 `label.recommended === null` 跳过 recommended 混淆（unavailable 不得当 false 计 FP/FN）。
 - 测试：新增 17 个构造反例测试（正例/反例/缺失值/诚实降级/防投机/逐次计分方差/混淆矩阵/NOT_EVALUABLE 分子分母样本 ID/grounding span 校验），后端全量 1134/1134 通过。
 
+## 真值冻结（2026-08-06，数据所有者授权）
+
+数据所有者（OrionJ0）批准 truth v3 当前裁决内容，reviewer=OrionJ0，允许完成 confirmed 冻结并运行 41×3；排名因仅 6 条真值作为**非阻塞观察指标**，不代表能力已认证。
+
+- `work/geo-baseline-2026-07-28/truth.jsonl`：55 条全部 `confirmed`（reviewer=OrionJ0，reviewed_at=2026-08-06T05:09:23Z）。
+- truth preflight PASS（0 错误）：`validateTruthEntry` 严格校验、manifest 哈希一致、S18/S19/S20 dup1 重复簇完整。
+- 重复簇处理：41×3 运行排除 S19/S20（dup1 只保留代表 S18，簇权重 1），通过 `--exclude-sample-ids` 运行设施实现。
+- 运行范围：55 条 samples.json（40 主语料 + 15 补充，去重后 53 条）+ C01 challenge（动态加入）= 54 条 × 3 次 × 2 臂（v5-json-rev2 / v4-current）= 324 次真实调用，0 缓存，新输出目录。
+
 ## Blocked by
 
 - [014-targeted-flash-evidence-probe.md](014-targeted-flash-evidence-probe.md)（结构探针已通过 2026-08-06；rev2 最后一轮定向回归仅决定候选冻结为 rev2 或回退基线——不再有 rev3/rev4，不引入多数表决）
