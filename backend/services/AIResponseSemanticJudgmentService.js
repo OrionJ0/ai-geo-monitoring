@@ -7,9 +7,36 @@ const {
 } = require('./AIResponseEntityExtractionService');
 
 const SEMANTIC_PROMPT_REVISION = 'closed_entity_semantics_v4_evidence_roles';
+// 014 第 2 轮 A/B 修订版：仅补三条规则（推荐语义/情绪口径/repair 明确 target_entity_id），
+// 不改变阶段 1、实体结构、竞品表或确定性目标事实。基线 prompt 保持不变。
+const SEMANTIC_PROMPT_REVISION_REV1 = 'closed_entity_semantics_v4_evidence_roles_rev1';
 const SEMANTIC_MAX_ATTEMPTS = 2;
 const VALID_RELATIONS = new Set(['competitor', 'non_competitor']);
 const VALID_SENTIMENTS = new Set(['positive', 'neutral', 'negative']);
+
+/**
+ * 阶段 2 规则行（按 revision 选择；revision 非 'rev1' 时与基线逐字一致）。
+ * rev1 三条规则（2026-08-06 数据所有者裁决，S12 证据）：
+ * 1. 推荐必须有明确选择、推荐、优先或行动语义；对比、列举、"综合性较强"不等于推荐。
+ * 2. 情绪评价回答对目标品牌的描述方式，不看问题是否要求情绪分析。
+ * 3. （repair prompt 内）明确写出 target_entity_id；非空目标不得返回 sentiment=not_applicable。
+ */
+function semanticRules(revision) {
+  const recommendationRules = revision === 'rev1'
+    ? [
+        'recommendations 只记录回答对实体有明确选择、推荐、优先或行动语义的实体；',
+        '仅对比优劣、并列列举或描述"综合性较强/表现较好"不算推荐，不得写入 recommendations。',
+        '正例："建议优先考虑"、"推荐选择"、"首选 X"、"X 更适合本项目"；反例："X 综合性较强，Y 主打性价比"、"两者各有优劣"。'
+      ]
+    : ['recommendations 只记录回答明确建议的实体。'];
+  const sentimentRules = revision === 'rev1'
+    ? [
+        'target_entity_id 为 null 时 sentiment 必须是 not_applicable；目标出现时无论 question 是否询问情绪，',
+        '都必须按回答对目标品牌的描述判断 positive、neutral 或 negative——情绪判断对象是回答对品牌的描述方式，不是问题是否提问。'
+      ]
+    : ['target_entity_id 为 null 时 sentiment 必须是 not_applicable；存在时才判断 positive、neutral 或 negative。'];
+  return { recommendationRules, sentimentRules };
+}
 
 class AISemanticJudgmentError extends Error {
   constructor(message, code = 'analysis_semantic_output_invalid', details = {}) {
@@ -58,7 +85,7 @@ function stringArray(value, field, { allowEmpty = false } = {}) {
   return normalized;
 }
 
-function buildSemanticPrompt({ question, sourceMap, catalog }) {
+function buildSemanticPrompt({ question, sourceMap, catalog, revision = null }) {
   const input = {
     question: String(question || '').trim(),
     target_entity_id: catalog.target_entity_id,
@@ -74,6 +101,7 @@ function buildSemanticPrompt({ question, sourceMap, catalog }) {
       .filter(({ text }) => String(text || '').trim().length > 0)
       .map(({ source_id, text }) => ({ source_id, text }))
   };
+  const rules = semanticRules(revision);
   return [
     '<semantic_input>',
     JSON.stringify(input),
@@ -83,10 +111,10 @@ function buildSemanticPrompt({ question, sourceMap, catalog }) {
     'competitor_relations 尽量覆盖能由原文证明的非目标实体；无法确定关系或证据不足的实体可以不返回，禁止猜测补齐。',
     'competitor_relations 严禁返回 target_entity_id 本身；目标品牌不是它自己的竞品。',
     'candidate_groups 按回答真实类别分组；普通并列、表格行序和正文提及顺序不是排名。',
-    'recommendations 只记录回答明确建议的实体。',
+    ...rules.recommendationRules,
     'semantic_context_source_ids 必须引用真正支持该语义结论的原文片段；它可以与实体出现的片段不同，因为回答常先列举实体、后在其他片段用简称、集合或顺序表达推荐、关系或情绪。',
     '不要只为满足存在性而引用实体列举行；如果某片段确实包含判断词或推荐、分组、比较的语义，才可引用。',
-    'target_entity_id 为 null 时 sentiment 必须是 not_applicable；存在时才判断 positive、neutral 或 negative。',
+    ...rules.sentimentRules,
     '</task>',
     '<output_contract>',
     '只输出一个 JSON 对象，不要输出 Markdown 或解释。',
@@ -96,7 +124,7 @@ function buildSemanticPrompt({ question, sourceMap, catalog }) {
   ].join('\n');
 }
 
-function buildSemanticRepairPrompt(basePrompt, error, { sourceMap, catalog }) {
+function buildSemanticRepairPrompt(basePrompt, error, { sourceMap, catalog, revision = null }) {
   const occurrenceByEntity = new Map((Array.isArray(catalog?.entities) ? catalog.entities : []).map((entity) => [
     entity.entity_id,
     [...new Set((entity.mentions || []).map((mention) => mention.source_id))]
@@ -108,6 +136,9 @@ function buildSemanticRepairPrompt(basePrompt, error, { sourceMap, catalog }) {
   const occurrenceSummary = [...occurrenceByEntity.entries()]
     .map(([entityId, sourceIds]) => `${entityId}: ${sourceIds.join(', ')}`)
     .join('\n');
+  const targetIdLine = revision === 'rev1'
+    ? `target_entity_id=${catalog?.target_entity_id ?? 'null'}（非 null 时必须输出 assessed 情绪，label 为 positive/neutral/negative，不得返回 sentiment=not_applicable）`
+    : null;
   return [
     basePrompt,
     '<validation_feedback>',
@@ -115,6 +146,7 @@ function buildSemanticRepairPrompt(basePrompt, error, { sourceMap, catalog }) {
     `field=${String(error?.details?.field || 'semantic_output')}`,
     `message=${String(error?.message || '语义判断未通过程序校验').slice(0, 300)}`,
     '上一份语义判断未通过程序校验。保持 semantic_input 中的实体目录完全不变，只纠正失败字段后重新输出完整语义 JSON。',
+    ...(targetIdLine ? [targetIdLine] : []),
     '只能引用下面 source map 中存在的 source_id。semantic_context_source_ids 必须引用真正支持该断言结论的原文片段，不要只为满足存在性而引用实体列举行。',
     '<source_map>',
     sourceMapSummary,
@@ -384,10 +416,11 @@ class AIResponseSemanticJudgmentService {
   constructor(options = {}) {
     this.requestService = options.requestService || AIPlatformRequestService;
     this.configService = options.configService || AIAnalysisConfigService;
+    this.promptRevision = options.promptRevision || null;
   }
 
   buildPrompt(input) {
-    return buildSemanticPrompt(input);
+    return buildSemanticPrompt({ ...input, revision: this.promptRevision });
   }
 
   async judge({ question, sourceMap, catalog }) {
@@ -403,12 +436,12 @@ class AIResponseSemanticJudgmentService {
     } catch (error) {
       throw new AISemanticJudgmentError(error.message, error.code, error.details);
     }
-    const basePrompt = buildSemanticPrompt({ question, sourceMap, catalog });
+    const basePrompt = buildSemanticPrompt({ question, sourceMap, catalog, revision: this.promptRevision });
     let lastError = null;
     for (let attempt = 1; attempt <= SEMANTIC_MAX_ATTEMPTS; attempt += 1) {
       const prompt = attempt === 1
         ? basePrompt
-        : buildSemanticRepairPrompt(basePrompt, lastError, { sourceMap, catalog });
+        : buildSemanticRepairPrompt(basePrompt, lastError, { sourceMap, catalog, revision: this.promptRevision });
       const connection = await this.requestService.queryConfig(platform, prompt, {
         retryCount: 0,
         requestOptions: effectiveRequestOptions(platform),
@@ -452,6 +485,7 @@ module.exports = new AIResponseSemanticJudgmentService();
 module.exports.AIResponseSemanticJudgmentService = AIResponseSemanticJudgmentService;
 module.exports.AISemanticJudgmentError = AISemanticJudgmentError;
 module.exports.SEMANTIC_PROMPT_REVISION = SEMANTIC_PROMPT_REVISION;
+module.exports.SEMANTIC_PROMPT_REVISION_REV1 = SEMANTIC_PROMPT_REVISION_REV1;
 module.exports.SEMANTIC_MAX_ATTEMPTS = SEMANTIC_MAX_ATTEMPTS;
 module.exports.parseSemanticOutput = parseSemanticOutput;
 module.exports.buildSemanticPrompt = buildSemanticPrompt;
