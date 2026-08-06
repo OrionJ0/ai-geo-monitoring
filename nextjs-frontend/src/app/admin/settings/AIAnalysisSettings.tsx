@@ -271,11 +271,11 @@ export default function AIAnalysisSettings() {
       <Card
         size="small"
         title={(
-          <Space>
+          <span style={{ display: 'flex', minWidth: 0, flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
             <span>当前两阶段分析提示词</span>
             {promptDefinition?.version ? <Tag>{promptDefinition.version}</Tag> : null}
             {promptDefinition?.prompt_revision ? <Tag>{promptDefinition.prompt_revision}</Tag> : null}
-          </Space>
+          </span>
         )}
         loading={loading && !promptDefinition}
       >

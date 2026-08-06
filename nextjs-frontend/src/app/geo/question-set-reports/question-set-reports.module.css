@@ -18,6 +18,14 @@
   color: #595959;
 }
 
+.reportSheet :global(.ant-typography-secondary) {
+  color: #595959;
+}
+
+.reportSheet :global(.ant-tag-success) {
+  color: #237804 !important;
+}
+
 .resultsHeading {
   display: flex;
   align-items: flex-end;
@@ -413,6 +421,19 @@
 
   .secondaryMetrics {
     grid-template-columns: 1fr;
+  }
+
+  .answerPanel {
+    box-sizing: border-box;
+    width: calc(100vw - 48px);
+    max-width: calc(100vw - 48px);
+    padding-inline: 8px;
+  }
+
+  .competitionEntityRow :global(.ant-typography) {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .historyFilter {

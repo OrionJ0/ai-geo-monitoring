@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -67,6 +67,137 @@ const promptDefinition = {
       expected_output: { judgments: [] }
     }
   ]
+};
+
+const longCompetitorName = '超长竞争实体名称（用于验证窄屏完整换行与事实身份不丢失）';
+const v5Report = {
+  id: 501,
+  project_id: 11,
+  question_set_id: 41,
+  question_set_name: 'v5 结构化分析脱敏验收报告',
+  source: 'native',
+  status: 'completed',
+  control_state: 'terminal',
+  metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+  started_at: '2026-08-06T12:00:00.000Z',
+  completed_at: '2026-08-06T12:01:00.000Z',
+  integrity: { status: 'complete', missing_record_count: 0 },
+  capabilities: {
+    can_pause: false,
+    can_resume: false,
+    can_retry: false
+  },
+  execution_summary: {
+    total: 1,
+    completed: 1,
+    failed: 0,
+    pending: 0,
+    executing: 0,
+    queued: 0,
+    failure_stages: {}
+  },
+  summary: {
+    total: 1,
+    completed: 1,
+    failed: 0,
+    pending: 0,
+    valid_analyses: 1,
+    valid_answers: 1,
+    acquired_answers: 1,
+    invalid_captures: 0,
+    analysis_coverage_rate: 100,
+    brand_mentioned_answers: 1,
+    recommended_answers: 0,
+    ranked_answers: 0,
+    sov_calculable_answers: 0,
+    brand_mention_rate: 100,
+    recommendation_rate: 0,
+    citation_valid_analyses: 1,
+    citation_unverified_analyses: 0,
+    citation_rate: 100,
+    owned_citation_rate: 100,
+    total_citations: 1,
+    total_owned_citations: 1,
+    sov_summary: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+      kind: 'observed_competitor_mentions',
+      scope: 'observed_entities_in_current_answer',
+      completeness: 'observed_only',
+      average: null,
+      calculable_answers: 0
+    }
+  },
+  rows: [{
+    record_id: 9001,
+    question_id: 701,
+    question: '如何选择一套可靠的工业气体安全监测方案？',
+    question_category: '产品选型',
+    platform: 'deepseek',
+    platform_name: 'DeepSeek',
+    model_name: 'deepseek-v4-flash',
+    status: 'completed',
+    execution_state: 'completed',
+    answer: '建议根据现场工况核验传感器、报警控制器和服务能力。[产品资料](https://gato.com.cn/)',
+    answer_format: 'markdown_v1',
+    has_metrics: true,
+    brand_mentioned: true,
+    brand_mentions: 1,
+    brand_recommended: false,
+    analysis_contract_version: 'ai_structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+    analysis_method: 'ai_structured_v5',
+    analysis_platform: 'deepseek',
+    analysis_model: 'deepseek-v4-flash',
+    sov: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+      kind: 'observed_competitor_mentions',
+      status: 'observed_only',
+      scope: 'observed_entities_in_current_answer',
+      completeness: 'observed_only',
+      value: null,
+      numerator: 1,
+      denominator: 0
+    },
+    competition_entities: [{
+      name: longCompetitorName,
+      relation: 'competitor',
+      mentions: 2,
+      reason: '仅根据当前回答中明确出现的实体关系判断，不代表完整市场名单。',
+      evidence: ['回答将该实体与目标品牌放在同一选型语境中。'],
+      surface_forms: ['脱敏竞品']
+    }],
+    analysis_structure: {
+      schema_version: 'ai_structured_v5',
+      target_entity_name: 'GATO',
+      entities: [
+        { name: 'GATO', type: 'brand' },
+        { name: longCompetitorName, type: 'company' }
+      ],
+      candidate_lists: [{
+        ordered: false,
+        entries: ['GATO', longCompetitorName],
+        reason: '回答只是并列举例，没有可靠排名。',
+        evidence: ['可同时核验两类方案。']
+      }],
+      sentiment: {
+        label: 'neutral',
+        reason: '中性选型建议',
+        evidence: ['建议根据现场工况核验。'],
+        risk_terms: []
+      },
+      citations: {
+        count: 1,
+        official_count: 1,
+        official_website_cited: true,
+        sources: [{ url: 'https://gato.com.cn/', domain: 'gato.com.cn', title: '产品资料', owned: true }],
+        semantics_version: 'provider_explicit_v1'
+      }
+    },
+    citation_count: 1,
+    owned_citation_count: 1,
+    citation_evidence_status: 'explicit',
+    sentiment: 'neutral'
+  }]
 };
 
 async function installRoutes(page: Page) {
@@ -138,6 +269,37 @@ async function installRoutes(page: Page) {
   }));
 }
 
+async function installV5ReportRoutes(page: Page) {
+  await page.unroute('**/api/geo-projects/11/question-set-runs*');
+  await page.route('**/api/geo-projects/11/question-set-runs*', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      data: [{ ...v5Report, rows: undefined }],
+      pagination: { page: 1, pageSize: 20, totalItems: 1, totalPages: 1 }
+    })
+  }));
+  await page.route('**/api/geo-projects/11/question-set-runs/501*', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: v5Report })
+  }));
+}
+
+async function expectStableBounds(locator: Locator) {
+  let previous: Awaited<ReturnType<Locator['boundingBox']>> = null;
+  await expect.poll(async () => {
+    const current = await locator.boundingBox();
+    const stable = Boolean(previous && current
+      && Math.abs(previous.x - current.x) < 0.5
+      && Math.abs(previous.y - current.y) < 0.5
+      && Math.abs(previous.width - current.width) < 0.5
+      && Math.abs(previous.height - current.height) < 0.5);
+    previous = current;
+    return stable;
+  }, { intervals: [100, 150, 200, 250] }).toBe(true);
+  return locator.boundingBox();
+}
+
 function seriousViolations(result: Awaited<ReturnType<AxeBuilder['analyze']>>) {
   return result.violations.filter((violation) => (
     ['critical', 'serious'].includes(violation.impact || '')
@@ -162,6 +324,7 @@ test('official DeepSeek dialog is keyboard-contained, selectable, and mobile-saf
 
   const dialog = page.getByRole('dialog', { name: '配置官方 DeepSeek' });
   await expect(dialog).toBeVisible();
+  await expectStableBounds(dialog);
   for (const label of ['平台名称', '唯一标识', '接口类型', 'Base URL', '默认模型']) {
     const field = dialog.getByLabel(label);
     await expect(field).toBeVisible();
@@ -175,7 +338,15 @@ test('official DeepSeek dialog is keyboard-contained, selectable, and mobile-saf
     return input.selectionStart === 0 && input.selectionEnd === input.value.length;
   })).toBe(true);
 
+  const save = dialog.getByRole('button', { name: /保\s*存/u });
+  await save.focus();
   await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => (
+    document.querySelector('[role="dialog"]')?.contains(document.activeElement) === true
+  ))).toBe(true);
+  const close = dialog.locator('.ant-modal-close');
+  await close.focus();
+  await page.keyboard.press('Shift+Tab');
   expect(await page.evaluate(() => (
     document.querySelector('[role="dialog"]')?.contains(document.activeElement) === true
   ))).toBe(true);
@@ -194,13 +365,21 @@ test('official DeepSeek dialog is keyboard-contained, selectable, and mobile-saf
   await edit.focus();
   await page.keyboard.press('Enter');
   await expect(dialog).toBeVisible();
+  const stableMobileBox = await expectStableBounds(dialog);
   expect(await page.evaluate(() => (
     document.documentElement.scrollWidth <= window.innerWidth + 1
   ))).toBe(true);
-  const box = await dialog.boundingBox();
+  expect(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  const footer = dialog.locator('.ant-modal-footer');
+  await footer.scrollIntoViewIfNeeded();
+  await expect(footer.getByRole('button', { name: /取\s*消/u })).toBeVisible();
+  await expect(footer.getByRole('button', { name: /保\s*存/u })).toBeVisible();
+  const box = stableMobileBox;
   expect(box).not.toBeNull();
   expect(box?.x).toBeGreaterThanOrEqual(0);
   expect((box?.x || 0) + (box?.width || 0)).toBeLessThanOrEqual(390);
+  expect(seriousViolations(await new AxeBuilder({ page }).include('[role="dialog"]').analyze()))
+    .toEqual([]);
   await page.screenshot({
     path: path.join(artifactDirectory, 'deepseek-dialog-mobile.png'),
     fullPage: false
@@ -212,6 +391,15 @@ test('two-stage analysis prompts and fallback stay named at narrow zoom width', 
   await page.goto('/admin/settings#ai-analysis');
   await expect(page.getByLabel('阶段 1 提示词')).toBeVisible();
   await expect(page.getByLabel('阶段 2 提示词')).toBeVisible();
+  for (const identity of [promptDefinition.version, promptDefinition.prompt_revision]) {
+    const tag = page.getByText(identity, { exact: true });
+    await expect(tag).toBeVisible();
+    expect(await tag.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    const bounds = await tag.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds?.x).toBeGreaterThanOrEqual(0);
+    expect((bounds?.x || 0) + (bounds?.width || 0)).toBeLessThanOrEqual(320);
+  }
   expect(await page.evaluate(() => (
     document.documentElement.scrollWidth <= window.innerWidth + 1
   ))).toBe(true);
@@ -269,4 +457,44 @@ test('question-set report entry stays usable on desktop, mobile, and narrow zoom
   expect(await page.evaluate(() => (
     document.documentElement.scrollWidth <= window.innerWidth + 1
   ))).toBe(true);
+});
+
+test('v5 scoped report renders observed-only facts and long identities accessibly', async ({ page }) => {
+  await installV5ReportRoutes(page);
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await page.goto('/geo/question-set-reports?run_id=501');
+  await expect(page.getByRole('heading', { name: v5Report.question_set_name })).toBeVisible();
+  await expect(page.getByText('开放发现 SOV（仅基于本次已发现实体）', { exact: false })).toBeVisible();
+  await expect(page.getByText('这份历史报告包含旧规则指标')).toHaveCount(0);
+
+  const expand = page.locator('button.ant-table-row-expand-icon').first();
+  await expect(expand).toBeVisible();
+  await expand.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('AI 结构化 v5', { exact: true })).toBeVisible();
+  const longIdentity = page.getByText(longCompetitorName, { exact: true }).last();
+  await expect(longIdentity).toBeVisible();
+  expect(seriousViolations(await new AxeBuilder({ page }).analyze())).toEqual([]);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => (
+    document.documentElement.scrollWidth <= window.innerWidth + 1
+  ))).toBe(true);
+  const table = page.locator('.ant-table-content').last();
+  expect(await table.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  await longIdentity.evaluate((node) => node.scrollIntoView({ block: 'center', inline: 'center' }));
+  expect(await longIdentity.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  const bounds = await longIdentity.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds?.x).toBeGreaterThanOrEqual(0);
+  expect((bounds?.x || 0) + (bounds?.width || 0)).toBeLessThanOrEqual(320);
+  expect(await page.evaluate(() => (
+    document.documentElement.scrollWidth <= window.innerWidth + 1
+  ))).toBe(true);
+  await page.screenshot({
+    path: path.join(artifactDirectory, 'question-set-report-v5-mobile.png'),
+    fullPage: false
+  });
 });

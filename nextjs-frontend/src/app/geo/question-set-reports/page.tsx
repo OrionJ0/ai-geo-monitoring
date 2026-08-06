@@ -688,7 +688,7 @@ export default function QuestionSetReportsPage() {
     || summary.sov_summary?.kind === 'observed_competitor_mentions';
   const hasLegacyAnalysis = Boolean(report?.rows?.some(
     (row) => row.has_metrics
-      && !['ai_structured_v1', 'ai_structured_v2', 'ai_structured_v3', 'ai_structured_v4'].includes(row.analysis_method || ''),
+      && !['ai_structured_v1', 'ai_structured_v2', 'ai_structured_v3', 'ai_structured_v4', 'ai_structured_v5'].includes(row.analysis_method || ''),
   ));
   const executionSummary: ExecutionSummary = report?.execution_summary || {
     total: summary.total,
@@ -1322,8 +1322,10 @@ export default function QuestionSetReportsPage() {
                           {row.has_metrics ? (
                             <Space wrap size={6}>
                               <Text className={styles.answerLabel}>分析方式</Text>
-                              {row.analysis_method === 'ai_structured_v4'
-                                ? <Tag color="blue">AI 结构化 v4</Tag>
+                              {row.analysis_method === 'ai_structured_v5'
+                                ? <Tag color="blue">AI 结构化 v5</Tag>
+                                : row.analysis_method === 'ai_structured_v4'
+                                  ? <Tag>AI 结构化 v4（历史）</Tag>
                                 : row.analysis_method === 'ai_structured_v3'
                                   ? <Tag>AI 结构化 v3（历史）</Tag>
                                 : row.analysis_method === 'ai_structured_v2'
@@ -1336,7 +1338,7 @@ export default function QuestionSetReportsPage() {
                                   {row.analysis_platform}{row.analysis_model ? ` · ${row.analysis_model}` : ''}
                                 </Text>
                               ) : null}
-                              {row.analysis_method === 'ai_structured_v4' ? (
+                              {['ai_structured_v4', 'ai_structured_v5'].includes(row.analysis_method || '') ? (
                                 <Text type="secondary">
                                   契约 {row.analysis_contract_version || row.analysis_method}
                                 </Text>
