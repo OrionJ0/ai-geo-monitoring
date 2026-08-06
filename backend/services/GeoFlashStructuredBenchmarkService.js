@@ -330,20 +330,23 @@ function relationQualityStats(entries, truthBySample = new Map()) {
     // 同一 span）不误判为关系错误。
     const predictedEntities = extractPredictedEntities(entry.result);
     const truthEntities = Array.isArray(truth.entities) ? truth.entities : [];
-    const predicted = new Set(structure.competitor_relations
-      .map((relation) => {
-        const predictedName = nameById.get(relation.entity_id);
-        if (!predictedName) return null;
-        const predictedEntity = predictedEntities.find((entity) => entity.name === predictedName);
-        const aligned = predictedEntity
-          ? alignedTruthEntities(predictedEntity, truthEntities)
-          : [];
-        const keyName = aligned.length === 1
-          ? String(aligned[0].canonical_name || '').trim()
-          : predictedName;
-        return keyName ? `${keyName}::${relation.relation}` : null;
-      })
-      .filter(Boolean));
+    const predicted = new Set();
+    structure.competitor_relations.forEach((relation) => {
+      const predictedName = nameById.get(relation.entity_id);
+      if (!predictedName) return;
+      const predictedEntity = predictedEntities.find((entity) => entity.name === predictedName);
+      const aligned = predictedEntity
+        ? alignedTruthEntities(predictedEntity, truthEntities)
+        : [];
+      if (aligned.length !== 1) {
+        // 第三轮 P1：预测关系没有可对齐的 span（或无唯一对齐）时不得仅凭名称
+        // 字符串判 TP——关系 correctness 只按 span 对齐后的 truth 实体计，
+        // 不把 canonical name 字符串一致性混入关系 correctness；无对齐依据计 FP。
+        totals.fp += 1;
+        return;
+      }
+      predicted.add(`${String(aligned[0].canonical_name || '').trim()}::${relation.relation}`);
+    });
     const expected = new Set((Array.isArray(truth.relations) ? truth.relations : [])
       .map((relation) => `${String(relation.canonical_name || '').trim()}::${relation.relation}`)
       .filter(Boolean));
@@ -390,6 +393,17 @@ function answerSha256(text) {
  */
 const VALID_ENTITY_TYPES = new Set(['brand', 'company', 'other_organization']);
 const VALID_SENTIMENTS = new Set(['positive', 'neutral', 'negative']);
+// 第三轮：truth 目标映射真值 status 与运行时 target_mapping 合同一致，
+// 另加 conflicting_identity（确定性命中的是身份冲突的其他主体，如 S53 的
+// 深圳市广拓科技有限公司 vs 目标上海广拓/Gato）
+const VALID_TARGET_MAPPING_STATUSES = new Set([
+  'resolved',
+  'not_applicable',
+  'ambiguous',
+  'unavailable',
+  'invalid_input',
+  'conflicting_identity'
+]);
 
 function validateTruthEntry(entry, sampleById = new Map()) {
   const errors = [];
@@ -403,6 +417,16 @@ function validateTruthEntry(entry, sampleById = new Map()) {
   if (entry.review_status === 'confirmed') {
     if (!String(entry.reviewer || '').trim()) errors.push('confirmed 必须记录 reviewer');
     if (!String(entry.reviewed_at || '').trim()) errors.push('confirmed 必须记录 reviewed_at');
+    // 第三轮 P0：confirmed 必须提供全部目标字段，loader 的 Boolean()/Number() 兜底
+    // 不得掩盖字段缺失。recommendation/rank/sentiment 允许 null——目标语义
+    // unavailable 时无推荐/排名/情绪真值（S53 拆分合同），null 是合法语义值；
+    // mentioned/mentions 是确定性 target_fact 核心字段，confirmed 不允许 null。
+    ['mentioned', 'mentions', 'recommendation', 'rank', 'sentiment'].forEach((field) => {
+      if (entry[field] === undefined) errors.push(`confirmed 必须提供目标字段 ${field}`);
+    });
+    ['mentioned', 'mentions'].forEach((field) => {
+      if (entry[field] === null) errors.push(`confirmed 的 ${field} 必须提供非 null 值`);
+    });
   }
   // P0：truth_version 与 dispute 必填（版本化数据集合同）
   if (!/^truth_v\d+/.test(String(entry.truth_version || ''))) {
@@ -439,8 +463,23 @@ function validateTruthEntry(entry, sampleById = new Map()) {
   // 目标未出现时的字段组合约束
   if (entry.mentioned === false) {
     if (Number(entry.mentions) !== 0) errors.push('mentioned=false 时 mentions 必须为 0');
+    if (entry.recommendation !== false) errors.push('mentioned=false 时 recommendation 必须为 false');
     if (entry.rank !== null && entry.rank !== undefined) errors.push('mentioned=false 时 rank 必须为 null');
     if (entry.sentiment !== null && entry.sentiment !== undefined) errors.push('mentioned=false 时 sentiment 必须为 null');
+  }
+  // 第三轮：truth 目标映射真值（可选，争议样本如 S53 必须提供）。
+  // conflicting_identity 表示确定性命中但身份冲突：target_fact 必须 mentioned=true
+  if (entry.target_mapping !== undefined && entry.target_mapping !== null) {
+    if (typeof entry.target_mapping !== 'object' || Array.isArray(entry.target_mapping)) {
+      errors.push('target_mapping 必须是对象');
+    } else {
+      if (!VALID_TARGET_MAPPING_STATUSES.has(entry.target_mapping.status)) {
+        errors.push(`target_mapping.status 无效: ${String(entry.target_mapping.status)}`);
+      }
+      if (entry.target_mapping.status === 'conflicting_identity' && entry.mentioned !== true) {
+        errors.push('target_mapping=conflicting_identity 时 target_fact.mentioned 必须为 true');
+      }
+    }
   }
   const sample = entry.sample_id ? sampleById.get(entry.sample_id) : undefined;
   if (!sample) {
@@ -465,9 +504,12 @@ function validateTruthEntry(entry, sampleById = new Map()) {
       if (!Array.isArray(entity.surface_forms) || !entity.surface_forms.length) {
         errors.push(`${field}.surface_forms 必须非空`);
       }
-      // P1：实体 type enum 校验（模板不得混用 organization 等非合同值）
-      if (entity.type !== undefined && entity.type !== null && String(entity.type || '').trim()
-        && !VALID_ENTITY_TYPES.has(String(entity.type || '').trim())) {
+      // P1：实体 type 必须提供且属于 brand/company/other_organization
+      //（第三轮：type 缺失同样拒绝，不能只校验"存在时的枚举"）
+      const entityType = String(entity.type || '').trim();
+      if (!entityType) {
+        errors.push(`${field}.type 缺失（必须是 brand/company/other_organization）`);
+      } else if (!VALID_ENTITY_TYPES.has(entityType)) {
         errors.push(`${field}.type 必须是 brand/company/other_organization: ${entity.type}`);
       }
       if (!Array.isArray(entity.mentions)) {

@@ -949,7 +949,7 @@ assessed 幸存样本中的推荐 21/21、情绪 21/21 和排名 4/4 不能证�
 
 ## 8. 实现切片
 
-当前进度：对应 issue 001–008 的 U1–U6 已完成；U7/issue 009 门槛失败，U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 与 U10/issue 012 已关闭。U11/issue 013 两轮评测合同返工完成：strict truth schema（truth_version/dispute、目标字段类型/范围/跨字段不变量、entity type enum）已 fail-closed；`relationQualityStats` 按 span 对齐后的 truth entity 计分；`entityQualityStats` span-based；阶段 1 失败降级保留目标事实；编号列表不推导排名；竞品按 occurrence 计数。AI 内容裁决（55 条目标 + 17 条实体/关系修正）已应用为 pending_review 并通过严格校验。唯一剩余阻塞是数据所有者确认签字（见 AI-TRUTH-ADJUDICATION.md、TRUTH-REVIEW-QUEUE.md）。U12/issue 014–015 必须等待数据所有者确认、真实复核人签字和 truth preflight 全部通过。
+当前进度：对应 issue 001–008 的 U1–U6 已完成；U7/issue 009 门槛失败，U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 与 U10/issue 012 已关闭。U11/issue 013 三轮评测合同返工完成：strict truth schema（truth_version/dispute、目标字段类型/范围/跨字段不变量、entity type enum、confirmed 目标字段完整性、`mentioned=false → recommendation=false`、实体 type 必填）已 fail-closed；`relationQualityStats` 按 span 对齐后的 truth entity 计分（无对齐关系不判 TP）；`entityQualityStats` span-based；阶段 1 失败降级保留目标事实；编号列表不推导排名；排序表达须直接修饰目标（“首选海康威视，广拓备选”不推导 rank）；竞品按 occurrence 计数。AI 内容裁决（55 条目标 + 17 条实体/关系修正）已应用为 pending_review 并通过严格校验；S53 按数据所有者裁决拆三轨（target_fact=true/1、target_mapping=conflicting_identity、target_semantics=unavailable），truth 新增 target_mapping 真值字段。剩余阻塞是真实复核人签字（见 AI-TRUTH-ADJUDICATION.md、TRUTH-REVIEW-QUEUE.md）。U12/issue 014–015 必须等待数据所有者确认、真实复核人签字和 truth preflight 全部通过。
 
 ### U1. 冻结真实语料与评测合同
 

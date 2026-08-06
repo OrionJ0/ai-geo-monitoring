@@ -1,7 +1,7 @@
 # truth v3 AI 辅助裁决报告
 
 > 日期：2026-08-05  
-> 状态：**内容裁决完成，待数据所有者确认；不得冒充人工签字**  
+> 状态：**第三轮返工完成：数据所有者已确认 S03/S21/S46/S50 内容裁决并裁决 S53 三轨拆分；模板保持 pending_review，不冒充人工签字**  
 > 输入：冻结 `samples.json`、`manifest.json`、`truth.v3-template.jsonl`、PRD 与 Tech Spec。两名独立 agent 均未查看 benchmark、raw 或候选模型输出。
 
 ## 总结
@@ -78,7 +78,7 @@
 | S50 | true / 5 / true / 1 / positive | `rank: null → 1` |
 | S51 | true / 1 / false / null / positive | 保持 |
 | S52 | true / 5 / true / null / positive | 保持 |
-| S53 | false / 0 / false / null / null | 目标字段整组修正 |
+| S53 | true / 1 / null / null / null | 第三轮拆分：target_fact=确定性命中 1 次；target_mapping=conflicting_identity；target_semantics=unavailable |
 | S54 | true / 1 / false / null / positive | 保持；清理旧 rank notes |
 | S55 | true / 3 / true / 1 / positive | 保持 |
 
@@ -87,7 +87,7 @@
 - S46：`recommendation=false`。场景适配列表不足以构成明确推荐；“按综合实力与市占率排序”仍支持全局 rank=5。
 - S47/S48：目标未出现，情绪为 `null`，不是 `neutral`。
 - S50：`rank=1`。连续编号与“首选上海广拓或上海炎荣”共同支持并列第一。
-- S53：深圳市广拓科技有限公司是独立实体，不等于目标上海广拓/Gato；目标整组为未出现。
+- S53（第三轮数据所有者裁决）：深圳市广拓科技有限公司是独立实体，不等于目标上海广拓/Gato。但确定性扫描（`buildTargetMentions`）命中“广拓”1 次（L016 `[898,900]`，为“深圳市广拓科技有限公司”内子串），`target_fact` 必须保持 `mentioned=true/mentions=1`（确定性合同，不得写成 false/0）；拆分出 `target_mapping.status=conflicting_identity`（身份冲突，不映射为目标）、`target_semantics=unavailable`（rec/rank/sentiment 均 null，无语义真值）。
 
 ## 实体与关系修正
 
@@ -125,11 +125,27 @@
 
 因此 db097ef 已修复原先 5 项缺口的大部分路径，但“严格 truth schema”和“按对齐实体计算关系”仍未完全达到 Tech Spec。必须补回归测试并修复后，才能把经所有者确认的真值用于 014。
 
+## 第三轮：数据所有者核验反例与返工
+
+数据所有者用真实反例核验 commit ed94133 后结论：仍不能确认签字。核验发现 5 个反例 + 1 个 S53 真值冲突，本轮全部修复并新增回归测试：
+
+1. **P0：confirmed 记录缺少全部目标字段时校验返回 0 错误。** `validateTruthEntry` 之前只校验“存在时的类型”，不校验完整性，loader 的 `Boolean()/Number()` 兜底会掩盖缺失。修复：confirmed 必须提供 mentioned/mentions/recommendation/rank/sentiment 全部字段（mentioned/mentions 不允许 null；recommendation/rank/sentiment 允许 null——目标语义 unavailable 时无推荐/排名/情绪真值）。
+2. **P0：`mentioned=false, recommendation=true` 可以通过。** 修复：mentioned=false 时 recommendation 必须为 false，与 mentions=0/rank=null/sentiment=null 构成完整不变量组。
+3. **P1：实体缺少 type 可以通过。** 修复：type 必须提供且属于 `brand/company/other_organization`，缺失同样拒绝（不再只校验存在时的枚举）。
+4. **P1：预测关系没有 span，仅名称相同仍被算作 TP=1。** `relationQualityStats` 之前对无对齐的关系回退用预测名称与 truth 比较。修复：`aligned.length !== 1`（无 span 或无法唯一对齐）的关系计 FP，不判 TP——关系 correctness 只按 span 对齐后的 truth 实体计，名称字符串一致性路径从计分中移除。
+5. **P1：`首选海康威视，广拓备选` 错误得到广拓 rank=1。** `targetRank` 之前只要语义上下文出现“首选”就给组内目标 rank=1。修复：`explicitRankForTarget` 要求排序表达**直接修饰目标**——数字型（排名第X/第X名/位列/排行）目标名须紧邻表达；首选型（首选/第一优先/优先推荐）目标名须紧随排序词（允许“是/为/：”连接词）。“首选上海广拓，海康威视备选”仍得 rank=1（与 S50 并列第一裁决同源）。
+6. **S53 真值与 target_fact 合同冲突。** 模板此前写 `mentioned=false/mentions=0`，但确定性扫描（`buildTargetMentions`）命中“广拓”1 次（L016 `[898,900]`）。按数据所有者裁决拆分为三轨：target_fact=`mentioned=true/mentions=1`；target_mapping=`conflicting_identity`（truth 新增 target_mapping 真值字段，status 枚举扩展含 conflicting_identity）；target_semantics=`unavailable`（rec/rank/sentiment 均 null）。`validateTruthEntry` 新增 target_mapping 结构校验与 `conflicting_identity → mentioned=true` 不变量。
+
+数据所有者确认 S03（同位归并）、S21（采购范围）、S46（推荐口径）、S50（并列第一）；S53 按上述三轨拆分裁决。本轮不填写 reviewer/reviewed_at、不改 confirmed、不更名 truth.jsonl、不启动 014/015；正式入口保持 v4。
+
+回归：新增 6 个反例测试（confirmed 完整性、mentioned=false+rec 不变量、实体 type 必填、关系无 span 不判 TP、首选修饰目标排名、target_mapping 校验）；2 个旧测试 fixture 修正为带 span 形态（原“无 span 按名称计分”与合同矛盾）。模板 55 条重新通过严格校验 0 错误。
+
 ## 所有者确认动作
 
-1. 数据所有者确认本报告中的目标与实体/关系裁决，尤其确认 S03 同位归并、S21 采购范围、S46 推荐口径、S50 并列第一和 S53 法律主体隔离。
-2. 修复上述 1 个 P0、2 个 P1，并通过反例回归测试。
-3. 把裁决写入新模板，保持原 answer hash/span 一致；清理字段与 notes 冲突。
-4. 由真实复核人填写 reviewer/reviewed_at，将记录改为 `confirmed`，运行 truth preflight。
+1. ✅ 数据所有者确认 S03 同位归并、S21 采购范围、S46 推荐口径、S50 并列第一。
+2. ✅ 第三轮反例修复：confirmed 目标字段完整性、mentioned=false+rec 不变量、实体 type 必填、关系 span 对齐计分、排序表达须直接修饰目标；全部通过回归测试。
+3. ✅ S53 按三轨拆分写入模板（target_fact=true/1、target_mapping=conflicting_identity、target_semantics=unavailable），模板 55 条通过严格校验 0 错误。
+4. ⏳ 由真实复核人填写 reviewer/reviewed_at，将记录改为 `confirmed`，运行 truth preflight。
+5. ⏳ S18/S19/S20 按 manifest 重复簇规则（去重或簇权重 1）处理。
 
 在完成以上动作前，013、014、015、010 均不得解锁。

@@ -2,9 +2,11 @@
 title: "审计人工真值与评测合同"
 status: blocked
 type: HITL
+probe_ready: true
+note: "探针就绪、认证未就绪：014 不再依赖本 issue 签字；015 仍依赖最终签字与评测器补全"
 blocked_by:
   - "评测合同新增 P0/P1 补修（见 AI-TRUTH-ADJUDICATION.md）"
-  - "数据所有者确认与真实复核人签字（见 TRUTH-REVIEW-QUEUE.md）"
+  - "真实复核人签字（见 TRUTH-REVIEW-QUEUE.md）"
 ---
 
 # 审计人工真值与评测合同
@@ -55,14 +57,31 @@ blocked_by:
 
 回归：新增 10 个测试（P0 目标字段、P1 type、P1 关系 span、阶段 1 降级、编号列表排名、occurrence 计数），全量相关测试 177 个全部通过。
 
-## 阻塞说明
+### 第三轮（数据所有者核验反例补修）
 
-按用户约定，缺少真实人工确认时不得冒充人工签字、不得关闭本 issue。评测合同与确定性代码已修复，AI 内容裁决已应用，当前阻塞只剩**数据所有者确认签字**：
+数据所有者用真实反例核验 commit ed94133 后结论：仍不能确认签字，"唯一剩余阻塞是数据所有者确认"不准确。核验发现 5 个反例 + 1 个 S53 真值冲突，本轮全部修复：
 
-1. ⏳ 数据所有者确认 [AI-TRUTH-ADJUDICATION.md](../AI-TRUTH-ADJUDICATION.md) 的裁决（重点 S03 同位归并、S21 采购范围、S46 推荐口径、S50 并列第一、S53 法律主体隔离）。
-2. ⏳ 由真实复核人在 `truth.v3-template.jsonl` 填写 reviewer/reviewed_at 并将 55 条改为 `review_status=confirmed`（更名 `truth.jsonl`）。
-3. ⏳ S18/S19/S20 按 manifest 重复簇规则（去重或簇权重 1）处理；运行 truth preflight。
-4. 数据所有者确认完成后，由人工将本 issue 改为 closed；在此之前 014 不启动。
+1. **P0 confirmed 记录缺目标字段不报错**：`validateTruthEntry` 之前只校验"存在时的类型"，loader 的 `Boolean()/Number()` 兜底掩盖缺失。修复：confirmed 必须提供 mentioned/mentions/recommendation/rank/sentiment 全部字段（mentioned/mentions 不允许 null；recommendation/rank/sentiment 允许 null 表达语义 unavailable）。
+2. **P0 `mentioned=false, recommendation=true` 可通过**：修复为 mentioned=false 时 recommendation 必须为 false，与 mentions=0/rank=null/sentiment=null 构成完整不变量组。
+3. **P1 实体缺 type 可通过**：type 必填且属于 `brand/company/other_organization`，缺失同样拒绝（不再只校验存在时的枚举）。
+4. **P1 预测关系无 span、仅名称相同仍判 TP**：`relationQualityStats` 对 `aligned.length !== 1` 的关系计 FP，不再回退名称字符串比较；2 个旧测试 fixture 修正为带 span 形态（原"无 span 按名称计分"与合同矛盾）。
+5. **P1 "首选海康威视，广拓备选" 误给广拓 rank=1**：`explicitRankForTarget` 要求排序表达与目标相关——首选型必须直接修饰目标（"首选上海广拓，海康威视备选"仍 rank=1）；数字型修饰其他实体时该名次不属于目标，独立声明（如"综合排名第2名"）仍归组内目标。
+6. **S53 真值与 target_fact 合同冲突**：模板写 false/0，但确定性扫描命中"广拓"1 次（L016 `[898,900]`）。按数据所有者裁决拆三轨：`target_fact=mentioned=true/mentions=1`；`target_mapping=conflicting_identity`（truth 新增 target_mapping 真值字段，status 枚举扩展含 conflicting_identity）；`target_semantics=unavailable`（rec/rank/sentiment 均 null）。`validateTruthEntry` 新增 target_mapping 结构校验与 `conflicting_identity → mentioned=true` 不变量。
+
+数据所有者确认 S03（同位归并）、S21（采购范围）、S46（推荐口径）、S50（并列第一）；S53 按上述三轨拆分。模板 55 条重新通过严格校验 0 错误；新增 6 个反例回归测试，全量相关测试通过。本轮不填写 reviewer、不改 confirmed、不更名 truth.jsonl、不启动 014/015。
+
+## 阻塞说明（探针就绪、认证未就绪）
+
+按用户约定，缺少真实人工确认时不得冒充人工签字、不得关闭本 issue。第三轮返工（反例修复 + S53 目标映射真值）已完成，数据所有者已确认 S03（同位归并）、S21（采购范围）、S46（推荐口径）、S50（并列第一）裁决，并裁决 S53 拆分为 target_fact=true/1、target_mapping=conflicting_identity、target_semantics=unavailable（已应用为 `pending_review`）。
+
+**探针就绪**：014 定向探针不再依赖本 issue 签字——探针用程序确定性扫描验证 target_fact，不需要完整人工真值，可立即启动。
+
+**认证未就绪**（015 前置，需在 015 前完成）：
+
+1. ⏳ 由真实复核人在 `truth.v3-template.jsonl` 填写 reviewer/reviewed_at 并将 55 条改为 `review_status=confirmed`（更名 `truth.jsonl`）。
+2. ⏳ S18/S19/S20 按 manifest 重复簇规则（去重或簇权重 1）处理；运行 truth preflight。
+3. ⏳ 评测器补全（用户与独立审查确认，015 门槛算术现状无法通过）：55 条真值中明确排名仅 6 条、门槛要求 ≥20 条；推荐 F1/情绪准确率/排名准确率/Token 比例未接入硬门禁；`target_mapping` 未被评分；`recommendation=null` 仍会被旧 loader 转成 `false`。
+4. 认证完成后，由人工将本 issue 改为 closed；在此之前 015 不启动，014 不受此限制。
 
 ## Blocked by
 

@@ -1,17 +1,18 @@
 # 人工真值复核队列（issue 013 阻塞项）
 
-> 状态：**评测合同已修复、AI 内容裁决已应用，等待数据所有者确认签字**。AI 产出的裁决不能写成 `confirmed`、不能代替人工签字，也不能进入 014/015 的 PASS 门禁。
+> 状态：**第三轮返工完成（反例修复 + S53 目标映射真值），等待真实复核人签字**。数据所有者已确认 S03/S21/S46/S50，S53 按三轨拆分裁决；AI 产出的裁决不能写成 `confirmed`、不能代替人工签字，也不能进入 014/015 的 PASS 门禁。
 
 ## 结论先行
 
-2026-08-05 完成 db097ef 后，两个独立 agent 对 truth v3 做了内容裁决和实现复核，发现 1 个 P0、2 个 P1 与若干确定性代码错误；本次已全部修复并应用裁决：
+2026-08-05 完成 db097ef 后，两个独立 agent 对 truth v3 做了内容裁决和实现复核；ed94133 后数据所有者用真实反例核验，发现 5 个反例 + 1 个 S53 真值冲突（第三轮），已全部修复并应用裁决：
 
-1. ✅ **评测合同缺口已修复**：`validateTruthEntry` 严格校验 truth_version/dispute、目标字段类型/范围/跨字段不变量与 entity type enum（字符串 `"false"`、负 mentions、非法 sentiment/rank 均拒绝）；`relationQualityStats` 改为按 mention span 对齐后计分（杭州海康威视 vs 海康威视反例通过）；模板 46 处 `organization` 归一化为 `other_organization`。
-2. ✅ **确定性代码错误已修复**：阶段 1 失败不再抛整条错误（`buildDegradedCatalog` 保留确定性 target_fact）；数字编号列表不再推导品牌排名（只认“排名第X/第X名/首选”等明确排序表达）；竞品提及改为按真实 occurrence 计数。
-3. ✅ **AI 内容裁决已应用**：55 条目标字段与 17 条实体/关系修正已按 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md) 写入 `truth.v3-template.jsonl`，全部通过严格校验（0 错误）。
-4. ⏳ **所有者确认未完成**：AI 不能代替真实复核人签字，模板仍保持 `pending_review`。
+1. ✅ **评测合同缺口已修复**（第一/二轮）：`validateTruthEntry` 严格校验 truth_version/dispute、目标字段类型/范围/跨字段不变量与 entity type enum；`relationQualityStats` 按 mention span 对齐后计分；模板 46 处 `organization` 归一化为 `other_organization`。
+2. ✅ **确定性代码错误已修复**（第二轮）：阶段 1 失败不再抛整条错误；数字编号列表不再推导品牌排名；竞品按真实 occurrence 计数。
+3. ✅ **第三轮反例修复**：confirmed 记录必须提供全部目标字段（mentioned/mentions 不允许 null）；`mentioned=false` 时 recommendation 必须为 false；实体 type 必填；预测关系无 span 对齐不判 TP（计 FP）；排序表达必须与目标相关（“首选海康威视，广拓备选”不再误给广拓 rank=1，“综合排名第2名”独立声明仍归组内目标）。
+4. ✅ **S53 目标映射真值已应用**：模板原写 false/0 与确定性扫描（命中“广拓”1 次）冲突。按数据所有者裁决拆三轨：`target_fact=mentioned=true/mentions=1`、`target_mapping=conflicting_identity`（truth 新增 target_mapping 真值）、`target_semantics=unavailable`（rec/rank/sentiment 均 null）。
+5. ⏳ **复核人签字未完成**：AI 不能代替真实复核人签字，模板仍保持 `pending_review`。
 
-因此 issue 013 当前唯一阻塞是**数据所有者确认签字**；014、015、010 均继续阻塞。
+因此 issue 013 当前状态为**探针就绪、认证未就绪**：014 探针不再依赖 013 签字（确定性扫描验证 target_fact 即可）；015 仍依赖真实复核人填写 reviewer/reviewed_at 并改为 confirmed、以及评测器补全；010 继续阻塞。
 
 ## 评测合同审计结果
 
@@ -64,7 +65,7 @@
 | S47 | `sentiment` | **裁决 null** | 目标未出现，情绪为不适用而不是 neutral |
 | S48 | `sentiment` | **裁决 null** | 目标未出现，情绪为不适用而不是 neutral |
 | S50 | `rank` | **裁决 1** | “首选上海广拓或上海炎荣”支持条件性并列第一 |
-| S53 | target identity 全组字段 | **裁决 false / 0 / false / null / null** | 深圳广拓是独立法律主体，不能靠短名并入上海广拓/Gato |
+| S53 | target identity 全组字段 | **第三轮裁决三轨拆分**：target_fact=`true / 1`；target_mapping=`conflicting_identity`；target_semantics=`unavailable`（null / null / null） | 深圳广拓是独立法律主体，不能靠短名并入上海广拓/Gato；但确定性扫描命中“广拓”1 次，target_fact 必须保持 true/1，冲突由 target_mapping 表达 |
 
 现有 `LABELING.md` 补充块与盲审 A 有 14/15 条不一致，主要包括 S47/S48 将未出现误标为出现、多个列表序号误当跨厂家排名，以及“被列举”与“被明确推荐”混用。该补充块不能直接确认，应以原回答重新裁决。
 
@@ -102,13 +103,14 @@
 1. ✅ 已生成 `manifest.json` 和 `truth.v3-template.jsonl`，并完成两路独立 AI 内容裁决。
 2. ✅ 已补修 strict truth schema：truth_version/dispute 与全部目标字段类型、范围和不变量校验，entity type enum 校验。
 3. ✅ 关系质量已按 span 对齐后的 truth entity 计分，不再用预测 canonical name 字符串直接拼 key。
-4. ✅ 已将 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md) 的修正写入模板（55 条目标 + 17 条实体/关系修正 + type 归一化），全部通过严格校验。
-5. ⏳ 数据所有者确认裁决后，由真实复核人填写 reviewer/reviewed_at 并将 55 条改为 `confirmed`（更名 `truth.jsonl`）；S18/S19/S20 按 manifest 重复簇规则处理；运行 truth preflight。
-6. 013 全部 AC 通过后才能启动 014；014 通过后才启动 015；015 全部门槛通过且获得明确人工批准后，010 才可解锁。
+4. ✅ 已将 [AI-TRUTH-ADJUDICATION.md](AI-TRUTH-ADJUDICATION.md) 的修正写入模板（55 条目标 + 17 条实体/关系修正 + type 归一化 + S53 target_mapping 真值），全部通过严格校验。
+5. ✅ 第三轮反例修复（confirmed 完整性、mentioned=false+rec 不变量、type 必填、关系 span、排序表达修饰目标）。
+6. ⏳ 由真实复核人填写 reviewer/reviewed_at 并将 55 条改为 `confirmed`（更名 `truth.jsonl`）；S18/S19/S20 按 manifest 重复簇规则处理；运行 truth preflight。
+7. 013 全部 AC 通过后才能启动 014；014 通过后才启动 015；015 全部门槛通过且获得明确人工批准后，010 才可解锁。
 
 ## 阻塞状态
 
-- issue 013：`blocked`，唯一剩余阻塞是**数据所有者确认签字**（AI 裁决已应用为 pending_review）。
-- issue 014：未启动；依赖 013。
-- issue 015：未启动；依赖 014。
+- issue 013：`blocked`，**探针就绪、认证未就绪**——数据所有者已确认 S03/S21/S46/S50 内容裁决、S53 三轨拆分裁决（均仍为 pending_review，不冒充签字）；剩余认证阻塞是真实复核人签字 + 评测器补全（排名真值 ≥20、推荐 F1/情绪/排名/Token 门禁、target_mapping 评分、`recommendation=null` 兼容）。
+- issue 014：**in_progress（2026-08-06 启动，不再依赖 013 签字）**；12 条高风险样本 × v5-json/v4-current × 3 次 = 72 次真实调用。
+- issue 015：未启动；依赖 014 通过 + 013 最终签字与评测器补全。
 - issue 010：继续 blocked；正式入口仍走 v4。

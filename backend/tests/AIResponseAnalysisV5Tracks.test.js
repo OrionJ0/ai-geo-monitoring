@@ -517,3 +517,56 @@ test('matched 与 unmatched 的已证明竞品按相同规则进入 scoped SOV �
   assert.equal(result.sov_status, 'observed_only');
   assert.equal(result.analysis_structure.sov.status, 'observed_only');
 });
+
+test('第三轮反例 P1："首选"只给被直接修饰的目标 rank=1，"备选"不得推导排名', () => {
+  const { calculate } = require('../services/AIResponseAnalysisV5Service');
+  // 反例："首选"修饰海康威视，目标广拓只是备选 -> 不得 rank=1
+  const answer = '首选海康威视，广拓备选。';
+  const sourceMap = createSourceMap(answer);
+  const catalog = buildEntityCatalog({
+    answer,
+    sourceMap,
+    extractedMentions: [
+      { source_id: 'L001', surface_form: '海康威视', canonical_name: '海康威视', entity_type: 'brand' },
+      { source_id: 'L001', surface_form: '广拓', canonical_name: '广拓', entity_type: 'company' }
+    ],
+    targetBrand: { name: '广拓', aliases: ['上海广拓'] }
+  });
+  const semantic = {
+    competitor_relations: [
+      { entity_id: 'E001', relation: 'competitor', reason: '同类', evidence_source_ids: ['L001'] }
+    ],
+    // 自然语句而非有序列表："首选"出现在语义上下文但修饰的是其他品牌
+    candidate_groups: [{ ordered: false, entries: ['E001', 'E002'], reason: '候选', evidence_source_ids: ['L001'] }],
+    recommendations: [],
+    sentiment: { status: 'assessed', label: 'neutral', reason: '中性', evidence_source_ids: ['L001'], risk_terms: [] }
+  };
+  const result = calculate({ sourceMap, catalog, semantic, diagnostics: [] });
+  assert.equal(result.brand_rank, null, '备选不得推导出 rank=1');
+  assert.equal(result.analysis_structure.target_semantics.rank.status, 'assessed');
+  assert.equal(result.analysis_structure.target_semantics.rank.value, null);
+
+  // 正例："首选"直接修饰目标 -> rank=1（与 S50 并列第一裁决同源）
+  const answer2 = '首选上海广拓，海康威视备选。';
+  const sourceMap2 = createSourceMap(answer2);
+  const catalog2 = buildEntityCatalog({
+    answer: answer2,
+    sourceMap: sourceMap2,
+    extractedMentions: [
+      { source_id: 'L001', surface_form: '上海广拓', canonical_name: '上海广拓', entity_type: 'company' },
+      { source_id: 'L001', surface_form: '海康威视', canonical_name: '海康威视', entity_type: 'brand' }
+    ],
+    targetBrand: { name: '广拓', aliases: ['上海广拓'] }
+  });
+  const semantic2 = {
+    competitor_relations: [
+      { entity_id: 'E002', relation: 'competitor', reason: '同类', evidence_source_ids: ['L001'] }
+    ],
+    candidate_groups: [{ ordered: false, entries: ['E001', 'E002'], reason: '候选', evidence_source_ids: ['L001'] }],
+    recommendations: [],
+    sentiment: { status: 'assessed', label: 'neutral', reason: '中性', evidence_source_ids: ['L001'], risk_terms: [] }
+  };
+  const result2 = calculate({ sourceMap: sourceMap2, catalog: catalog2, semantic: semantic2, diagnostics: [] });
+  assert.equal(result2.brand_rank, 1, '被"首选"直接修饰的目标应 rank=1');
+  assert.equal(result2.analysis_structure.target_semantics.rank.value, 1);
+});

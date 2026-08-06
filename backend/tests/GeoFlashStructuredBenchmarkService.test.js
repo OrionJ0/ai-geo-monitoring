@@ -165,6 +165,9 @@ function v3Truth(overrides = {}) {
       { canonical_name: '海康威视', relation: 'competitor', evidence_source_ids: ['L001'] },
       { canonical_name: '大华股份', relation: 'competitor', evidence_source_ids: ['L001'] }
     ],
+    // confirmed 必须提供全部目标字段（第三轮 P0 完整性合同）
+    mentioned: true,
+    mentions: 2,
     recommendation: true,
     rank: 1,
     sentiment: 'positive',
@@ -269,6 +272,12 @@ test('relationQualityStats 计算预测关系对真值关系的真实 TP/FP/FN',
       { entity_id: 'E002', name: '大华股份' },
       { entity_id: 'E003', name: '宇视科技' }
     ],
+    // 预测侧必须带可对齐的 mention span，关系才参与 TP 比较
+    mentions: [
+      { entity_id: 'E001', start: 5, end: 9, surface_form: '海康威视' },
+      { entity_id: 'E002', start: 10, end: 14, surface_form: '大华股份' },
+      { entity_id: 'E003', start: 15, end: 19, surface_form: '宇视科技' }
+    ],
     competitor_relations: [
       { entity_id: 'E001', relation: 'competitor' },
       { entity_id: 'E002', relation: 'competitor' },
@@ -284,9 +293,9 @@ test('relationQualityStats 计算预测关系对真值关系的真实 TP/FP/FN',
   }];
   const truthBySample = new Map([['S01', v3Truth({
     entities: [
-      { canonical_name: '海康威视', surface_forms: ['海康威视'], type: 'brand', mentions: [] },
-      { canonical_name: '大华股份', surface_forms: ['大华股份'], type: 'brand', mentions: [] },
-      { canonical_name: '宇视科技', surface_forms: ['宇视科技'], type: 'brand', mentions: [] }
+      { canonical_name: '海康威视', surface_forms: ['海康威视'], type: 'brand', mentions: [spanMention(5, 9, '海康威视')] },
+      { canonical_name: '大华股份', surface_forms: ['大华股份'], type: 'brand', mentions: [spanMention(10, 14, '大华股份')] },
+      { canonical_name: '宇视科技', surface_forms: ['宇视科技'], type: 'brand', mentions: [spanMention(15, 19, '宇视科技')] }
     ],
     relations: [
       { canonical_name: '海康威视', relation: 'competitor' },
@@ -306,6 +315,7 @@ test('relationQualityStats 计算预测关系对真值关系的真实 TP/FP/FN',
 test('relationQualityStats 关系全错时 precision 为 0，不因覆盖数达标而 PASS', () => {
   const structure = {
     entities: [{ entity_id: 'E001', name: '海康威视' }],
+    mentions: [{ entity_id: 'E001', start: 5, end: 9, surface_form: '海康威视' }],
     competitor_relations: [{ entity_id: 'E001', relation: 'non_competitor' }]
   };
   const entries = [{
@@ -315,7 +325,7 @@ test('relationQualityStats 关系全错时 precision 为 0，不因覆盖数达�
     result: { analysis_structure: structure }
   }];
   const truthBySample = new Map([['S01', v3Truth({
-    entities: [{ canonical_name: '海康威视', surface_forms: ['海康威视'], type: 'brand', mentions: [] }],
+    entities: [{ canonical_name: '海康威视', surface_forms: ['海康威视'], type: 'brand', mentions: [spanMention(5, 9, '海康威视')] }],
     relations: [{ canonical_name: '海康威视', relation: 'competitor' }]
   })]]);
   const stats = relationQualityStats(entries, truthBySample);
@@ -480,4 +490,123 @@ test('semanticTruthCoverage 报告推荐/排名/情绪/关系的已复核实例�
   assert.equal(coverage.relations.count, 20);
   assert.equal(coverage.recommendation.pass, true);
   assert.equal(coverage.rank.pass, false);
+});
+
+// ---- 第三轮反例回归（数据所有者核验真实反例后补修）----
+
+test('第三轮反例 P0：confirmed 缺少目标字段时校验必须报错（不得 0 错误）', () => {
+  const sampleById = new Map([
+    ['S01', { response_text: '海康威视、大华股份。' }]
+  ]);
+  const hash = require('node:crypto').createHash('sha256').update('海康威视、大华股份。').digest('hex');
+  const base = v3Truth({ answer_sha256: hash });
+  // 反例：删除全部目标字段，confirmed 记录此前返回 0 错误
+  const stripped = { ...base };
+  ['mentioned', 'mentions', 'recommendation', 'rank', 'sentiment'].forEach((field) => {
+    delete stripped[field];
+  });
+  const errors = validateTruthEntry(stripped, sampleById);
+  ['mentioned', 'mentions', 'recommendation', 'rank', 'sentiment'].forEach((field) => {
+    assert.ok(errors.some((error) => error.includes(field)), `缺 ${field} 必须报错: ${errors.join('; ')}`);
+  });
+  // 只缺一个字段也必须报错
+  const missingMentions = { ...base };
+  delete missingMentions.mentions;
+  assert.ok(validateTruthEntry(missingMentions, sampleById).some((error) => /mentions/.test(error)));
+  // 完整目标字段的 confirmed 记录仍然通过
+  assert.deepEqual(validateTruthEntry(base, sampleById), []);
+});
+
+test('第三轮反例 P0：mentioned=false 时 recommendation=true 必须拒绝', () => {
+  const sampleById = new Map([
+    ['S01', { response_text: '海康威视、大华股份。' }]
+  ]);
+  const hash = require('node:crypto').createHash('sha256').update('海康威视、大华股份。').digest('hex');
+  const base = v3Truth({ answer_sha256: hash });
+  const contradiction = {
+    ...base,
+    mentioned: false,
+    mentions: 0,
+    recommendation: true,
+    rank: null,
+    sentiment: null
+  };
+  assert.ok(validateTruthEntry(contradiction, sampleById).some((error) => /recommendation/.test(error)));
+  // mentioned=false 且 recommendation=false 的组合合法
+  const consistent = { ...contradiction, recommendation: false };
+  assert.deepEqual(validateTruthEntry(consistent, sampleById), []);
+});
+
+test('第三轮反例 P1：实体缺少 type 必须拒绝（不能只校验存在时的枚举）', () => {
+  const sampleById = new Map([
+    ['S01', { response_text: '海康威视、大华股份。' }]
+  ]);
+  const hash = require('node:crypto').createHash('sha256').update('海康威视、大华股份。').digest('hex');
+  const base = v3Truth({ answer_sha256: hash });
+  const noType = {
+    ...base,
+    entities: base.entities.map((entity) => {
+      const { type: _removed, ...rest } = entity;
+      return rest;
+    })
+  };
+  assert.ok(validateTruthEntry(noType, sampleById).some((error) => /type/.test(error)));
+});
+
+test('第三轮反例 P1：预测关系没有可对齐 span 时，仅名称相同不得判 TP', () => {
+  // 反例：预测实体完全没有 mention span（只输出实体名与关系），truth 有同名实体
+  const structure = {
+    entities: [{ entity_id: 'E001', name: '海康威视' }],
+    // 没有 mentions 数组：预测关系无 span 可对齐
+    competitor_relations: [{ entity_id: 'E001', relation: 'competitor' }]
+  };
+  const entries = [{
+    sample_id: 'S01',
+    repeat: 1,
+    ok: true,
+    result: { analysis_structure: structure }
+  }];
+  const truthBySample = new Map([['S01', v3Truth({
+    entities: [{ canonical_name: '海康威视', surface_forms: ['海康威视'], type: 'brand', mentions: [spanMention(0, 4, '海康威视')] }],
+    relations: [{ canonical_name: '海康威视', relation: 'competitor' }]
+  })]]);
+  const stats = relationQualityStats(entries, truthBySample);
+  assert.equal(stats.status, 'EVALUATED');
+  assert.equal(stats.tp, 0, '无 span 对齐的关系不得判 TP');
+  assert.equal(stats.fp, 1, '无对齐依据的预测关系计 FP');
+  assert.equal(stats.fn, 1, '真值关系未被证实');
+  assert.equal(stats.precision, 0);
+});
+
+test('第三轮：truth target_mapping 真值结构校验与 conflicting_identity 不变量', () => {
+  const sampleById = new Map([
+    ['S01', { response_text: '海康威视、大华股份。' }]
+  ]);
+  const hash = require('node:crypto').createHash('sha256').update('海康威视、大华股份。').digest('hex');
+  const base = v3Truth({ answer_sha256: hash });
+  // S53 形态合法：mentioned=true/mentions=1 + conflicting_identity，语义字段 null 表示 unavailable
+  const conflict = {
+    ...base,
+    mentioned: true,
+    mentions: 1,
+    recommendation: null,
+    rank: null,
+    sentiment: null,
+    target_mapping: { status: 'conflicting_identity', target_mapped: false }
+  };
+  assert.deepEqual(validateTruthEntry(conflict, sampleById), []);
+  // 非法 status 拒绝
+  const badStatus = { ...conflict, target_mapping: { status: 'same_company' } };
+  assert.ok(validateTruthEntry(badStatus, sampleById).some((error) => /target_mapping/.test(error)));
+  // conflicting_identity 与 mentioned=false 冲突拒绝
+  const contradiction = {
+    ...conflict,
+    mentioned: false,
+    mentions: 0,
+    recommendation: false,
+    target_mapping: { status: 'conflicting_identity' }
+  };
+  assert.ok(validateTruthEntry(contradiction, sampleById).some((error) => /target_mapping/.test(error)));
+  // 不带 target_mapping 的记录仍然合法（可选字段）
+  assert.deepEqual(validateTruthEntry(base, sampleById), []);
 });

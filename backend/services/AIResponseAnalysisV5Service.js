@@ -108,18 +108,66 @@ function isGroundedTargetRecommendation(recommendation, targetEntity) {
 // 只有"排名第X / 第X名 / 首选 / 优先推荐"等明确排序表达才产生排名。
 const EXPLICIT_RANK_RE = /(?:排名第?\s*(\d+)|第\s*(\d+)\s*名|位列第?\s*(\d+)|排行第?\s*(\d+)|首选|第一优先|优先推荐)/u;
 
-function targetRank({ sourceMap, targetEntity, semantic, targetEntityId }) {
+function targetRank({ sourceMap, targetEntity, semantic, targetEntityId, entities = [] }) {
   const sourceById = new Map(sourceMap.segments.map((segment) => [segment.source_id, segment.text]));
+  const targetSurfaces = [targetEntity?.name, ...(Array.isArray(targetEntity?.surface_forms) ? targetEntity.surface_forms : [])]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  const otherSurfaces = (Array.isArray(entities) ? entities : [])
+    .filter((entity) => entity?.entity_id !== targetEntityId)
+    .flatMap((entity) => [entity?.name, ...(Array.isArray(entity?.surface_forms) ? entity.surface_forms : [])])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
   for (const group of semantic.candidate_groups) {
     if (!group.entries.includes(targetEntityId) || group.entries.length < 2) continue;
-    const explicitMatch = semanticContextOf(group)
-      .map((sourceId) => sourceById.get(sourceId) || '')
-      .map((text) => text.match(EXPLICIT_RANK_RE))
-      .find((match) => match !== null);
-    if (explicitMatch) {
-      return Number(explicitMatch[1] || explicitMatch[2] || explicitMatch[3] || explicitMatch[4]) || 1;
-    }
+    const contextTexts = semanticContextOf(group)
+      .map((sourceId) => sourceById.get(sourceId) || '');
+    const explicitRank = explicitRankForTarget(contextTexts, targetSurfaces, otherSurfaces);
+    if (explicitRank !== null) return explicitRank;
     if (group.ordered) return group.entries.indexOf(targetEntityId) + 1;
+  }
+  return null;
+}
+
+// 第三轮 P1：排序表达必须与目标相关，才能把目标赋为该排名。
+// "首选海康威视，广拓备选"这类"排序词修饰的是其他品牌"的文本，不得让目标
+// 拿到 rank=1——此前只要语义上下文出现"首选"就给组内目标 rank=1。
+// - 首选型（首选/第一优先/优先推荐，无数字）：目标名必须紧邻排序词
+//   （前或后，允许"是/为/："等连接词），否则该排序与目标无关
+// - 数字型（排名第X/第X名/位列/排行）：排序表达直接修饰目标 -> 返回该名次；
+//   修饰的是其他实体 -> 该名次不属于目标；无修饰对象（独立声明如
+//   "综合排名第2名"）-> 组内目标获得该名次
+function explicitRankForTarget(contextTexts, targetSurfaces, otherSurfaces) {
+  if (!targetSurfaces.length) return null;
+  for (const text of contextTexts) {
+    let offset = 0;
+    while (offset < text.length) {
+      const match = EXPLICIT_RANK_RE.exec(text.slice(offset));
+      if (!match) break;
+      const matchStart = offset + match.index;
+      const matchEnd = matchStart + match[0].length;
+      // 数字型匹配才有捕获组；首选型（首选/第一优先/优先推荐）digits 为空，
+      // 必须保持 null——Number(undefined) 是 NaN，会误入数字分支返回 NaN
+      const digits = match[1] || match[2] || match[3] || match[4];
+      const rankNumber = digits ? Number(digits) : null;
+      const before = text.slice(Math.max(0, matchStart - 12), matchStart);
+      const after = text.slice(matchEnd, Math.min(text.length, matchEnd + 12));
+      const leadingConnector = /^(?:的|是|为|：|:)*/u.exec(after)[0];
+      const trailingConnector = /(?:的|是|为|：|:)*$/u.exec(before)[0];
+      const targetAfter = after.slice(leadingConnector.length);
+      const targetBefore = before.slice(0, before.length - trailingConnector.length);
+      const mentionsTarget = targetSurfaces.some((surface) => (
+        targetAfter.startsWith(surface) || targetBefore.endsWith(surface)
+      ));
+      if (mentionsTarget) return rankNumber || 1;
+      if (rankNumber !== null) {
+        const mentionsOther = (otherSurfaces || []).some((surface) => (
+          targetAfter.startsWith(surface) || targetBefore.endsWith(surface)
+        ));
+        if (!mentionsOther) return rankNumber;
+      }
+      offset = matchEnd;
+    }
   }
   return null;
 }
@@ -182,7 +230,8 @@ function calculate({
     sourceMap,
     targetEntity,
     semantic,
-    targetEntityId: catalog.target_entity_id
+    targetEntityId: catalog.target_entity_id,
+    entities: catalog.entities
   });
   const targetRecommendation = semantic.recommendations.find(
     (recommendation) => recommendation.entity_id === catalog.target_entity_id
