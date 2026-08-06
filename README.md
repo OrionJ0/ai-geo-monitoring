@@ -87,7 +87,7 @@ flowchart LR
 - 用户登录、权限、会员等级与额度管理
 - 管理后台：用户、任务、会员、系统配置与运行记录管理
 - 本地 SQLite 自动初始化，生产环境支持外部 Postgres 数据库
-- 百度营销真实数据试点：显式迁移、OAuth/Token、搜索账户绑定、最近 30 个上海完整日的计划/单元/关键词/搜索词原子快照、双读一致性校验、精确值看板和刷新生命周期已部署并完成正式入口验收；严格层级只到关键词，搜索词不伪造关键词 ID。`PILOT_DATA_READY` 使用百度营销 dev2 OAuth Token，百度统计另用“数据 API”Token，两套凭据分别加密保存且不得混用
+- 百度营销真实数据试点：显式迁移、统一 OAuth、搜索账户绑定、最近 30 个上海完整日的计划/单元/关键词/搜索词原子快照、双读一致性校验、精确值看板和刷新生命周期已部署并完成正式入口验收；严格层级只到关键词，搜索词不伪造关键词 ID。搜索推广和百度统计共用同一连接的版本化 Access Context，只保存一套加密 Access/Refresh Token；非秘密统计用户名与两个产品的能力状态独立保存和校验，不存在第二枚统计 Token 或双 Token fallback
 - 官网表单咨询代码已部署但生产未启用：独立 `websiteFormConsultations` 模块分页读取官网联系人列表，并由同一批记录生成区间汇总 `/api/website-data/projects/:projectId/form-consultations` 和最多 31 日逐日接口 `/api/website-data/projects/:projectId/form-consultation-days`。公开统计只返回全部表单记录的九键数量，不返回联系人明细、原始 URL、官网流量或 53KF 数据
 - 官网原始咨询代码已部署但生产未启用：独立 `consultationRecords` 模块只读调用官网联系人列表和按需详情接口，通过 `/api/consultations/projects/:projectId/records` 输出严格、服务端脱敏的浏览合同；九键版本依据原始 `referrer`、UTM 和百度点击标识归因，并在审计详情中保留原始来路 URL。生产仍需注入专用只读项目与账号凭据。该链路不读取 53KF，也不把联系入口点击、自动问候或窗口打开计为咨询
 
