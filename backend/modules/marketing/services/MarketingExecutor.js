@@ -60,11 +60,15 @@ class MarketingExecutor {
     if (!this.accepting) {
       const error = new Error('营销执行器未接收新运行');
       error.code = 'MARKETING_EXECUTOR_NOT_ACCEPTING';
+      error.status = 503;
+      error.retryAfterSeconds = 2;
       throw error;
     }
     if (this.queue.length >= this.queueLimit) {
       const error = new Error('营销刷新队列已满');
       error.code = 'MARKETING_EXECUTOR_QUEUE_FULL';
+      error.status = 503;
+      error.retryAfterSeconds = 2;
       throw error;
     }
     let resolveJob;

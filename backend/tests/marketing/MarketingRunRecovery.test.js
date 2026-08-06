@@ -74,6 +74,15 @@ test('executor shutdown interrupts queued runs that were not yet drained', async
 
   await executor.stop();
 
+  assert.throws(
+    () => executor.enqueue(run.runId),
+    {
+      code: 'MARKETING_EXECUTOR_NOT_ACCEPTING',
+      status: 503,
+      retryAfterSeconds: 2
+    }
+  );
+
   const terminal = await refresh.getRun(11, run.runId);
   assert.equal(terminal.status, 'INTERRUPTED');
   assert.equal(terminal.failure.code, 'APPLICATION_SHUTDOWN');

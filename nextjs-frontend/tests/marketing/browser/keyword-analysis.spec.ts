@@ -616,19 +616,26 @@ test('keyword table pins one root revision and sends paging, query, and sort to 
   expect(previousTo - previousFrom).toBe(currentTo - currentFrom);
 
   const summaryBeforePaging = await keywordMetric(page, '展现').textContent();
+  const requestsBeforePaging = keywordRequests.length;
   await page.getByRole('listitem', { name: '2' }).click();
-  await expect.poll(() => keywordRequests.some((request) => (
-    request.searchParams.get('page') === '2'
-    && request.searchParams.get('pageSize') === '10'
-  ))).toBe(true);
+  await expect.poll(() => keywordRequests.length).toBe(requestsBeforePaging + 1);
+  expect(keywordRequests.at(-1)!.searchParams.get('page')).toBe('2');
+  expect(keywordRequests.at(-1)!.searchParams.get('pageSize')).toBe('10');
+  expect(keywordRequests.filter((request) => (
+    request.searchParams.get('from') === previousRequest.searchParams.get('from')
+    && request.searchParams.get('to') === previousRequest.searchParams.get('to')
+  ))).toHaveLength(1);
   expect(await keywordMetric(page, '展现').textContent()).toBe(summaryBeforePaging);
   await page.locator('.ant-pagination-options-size-changer').click();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  await expect.poll(() => keywordRequests.some((request) => (
-    request.searchParams.get('page') === '1'
-    && request.searchParams.get('pageSize') === '20'
-  ))).toBe(true);
+  await expect.poll(() => keywordRequests.length).toBe(requestsBeforePaging + 2);
+  expect(keywordRequests.at(-1)!.searchParams.get('page')).toBe('1');
+  expect(keywordRequests.at(-1)!.searchParams.get('pageSize')).toBe('20');
+  expect(keywordRequests.filter((request) => (
+    request.searchParams.get('from') === previousRequest.searchParams.get('from')
+    && request.searchParams.get('to') === previousRequest.searchParams.get('to')
+  ))).toHaveLength(1);
   expect(await keywordMetric(page, '展现').textContent()).toBe(summaryBeforePaging);
 
   await page.getByLabel('搜索投放关键词').fill('周界报警系统');
@@ -668,6 +675,156 @@ test('keyword table pins one root revision and sends paging, query, and sort to 
   expect(dashboardRequests).toBe(3);
   expect(new Set(keywordRequests.map((request) => request.searchParams.get('revision'))))
     .toEqual(new Set(['keyword-analysis-fixture-revision']));
+});
+
+test('keyword pagination keeps data, keyboard focus, and a retryable error during remote loading', async ({ page }) => {
+  let releaseSecondPage: (() => void) | undefined;
+  const secondPageGate = new Promise<void>((resolve) => {
+    releaseSecondPage = resolve;
+  });
+  let releasePageThreeRetry: (() => void) | undefined;
+  const pageThreeRetryGate = new Promise<void>((resolve) => {
+    releasePageThreeRetry = resolve;
+  });
+  let pageThreeAttempts = 0;
+  await page.unroute('**/api/marketing/projects/11/keywords**');
+  await page.route('**/api/marketing/projects/11/keywords**', async (route) => {
+    const request = new URL(route.request().url());
+    const requestedPage = request.searchParams.get('page');
+    const requestedPageSize = request.searchParams.get('pageSize');
+    if (requestedPage === '2' && requestedPageSize === '10') {
+      await secondPageGate;
+    }
+    if (requestedPage === '3' && requestedPageSize === '10') {
+      pageThreeAttempts += 1;
+      if (pageThreeAttempts === 1) {
+        return route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'MARKETING_RESOURCE_UNAVAILABLE',
+              message: '关键词第 3 页暂时不可用'
+            }
+          })
+        });
+      }
+      await pageThreeRetryGate;
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(keywordResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  const table = page.getByRole('table', { name: '全部关键词明细表' });
+  await expect(table).toBeVisible();
+  const pageTwo = page.locator('.ant-pagination-item-2');
+  await pageTwo.focus();
+  await page.keyboard.press('Enter');
+
+  await expect(page.getByRole('status'))
+    .toContainText('正在加载关键词第 2 页');
+  await expect(table).toBeVisible();
+  await expect(table).toHaveAttribute('aria-busy', 'true');
+  await expect(pageTwo).toBeFocused();
+
+  releaseSecondPage?.();
+  await expect(table).toHaveAttribute('aria-busy', 'false');
+  await expect(pageTwo).toHaveAttribute('aria-current', 'page');
+  await expect(pageTwo).toBeFocused();
+  await expect(page.getByRole('status'))
+    .toContainText('关键词第 2 页加载完成，显示 10 条');
+  const secondPageFirstRow = await table.locator('tbody tr').first().textContent();
+
+  const pageThree = page.locator('.ant-pagination-item-3');
+  await pageThree.focus();
+  await page.keyboard.press('Enter');
+  const retryableError = page.getByRole('alert').filter({
+    hasText: '关键词第 3 页暂时不可用'
+  });
+  await expect(retryableError).toBeVisible();
+  await expect(retryableError.getByRole('button', { name: /重\s*试/u })).toBeVisible();
+  await expect(table.locator('tbody tr').first()).toHaveText(secondPageFirstRow || '');
+  await expect(pageTwo).toHaveAttribute('aria-current', 'page');
+  await expect(pageThree).toBeFocused();
+
+  const retryButton = retryableError.getByRole('button', { name: /重\s*试/u });
+  await retryButton.focus();
+  await page.keyboard.press('Enter');
+  await expect(retryButton).toBeFocused();
+  await expect(retryButton).toHaveAttribute('aria-disabled', 'true');
+  await expect(retryableError).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('正在加载关键词第 3 页');
+
+  releasePageThreeRetry?.();
+  await expect(pageThree).toHaveAttribute('aria-current', 'page');
+  await expect(pageThree).toBeFocused();
+  await expect(page.getByRole('status'))
+    .toContainText('关键词第 3 页加载完成，显示 10 条');
+  await expect(retryableError).toHaveCount(0);
+});
+
+test('keyword current facts render before a slow previous-period comparison', async ({ page }) => {
+  let releasePrevious: (() => void) | undefined;
+  const previousGate = new Promise<void>((resolve) => {
+    releasePrevious = resolve;
+  });
+  let previousStarted = false;
+  await page.unroute('**/api/marketing/projects/11/keywords**');
+  await page.route('**/api/marketing/projects/11/keywords**', async (route) => {
+    const request = new URL(route.request().url());
+    if ((request.searchParams.get('to') || '') < '2026-07-28') {
+      previousStarted = true;
+      await previousGate;
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(keywordResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  await expect.poll(() => previousStarted).toBe(true);
+  await expect(page.getByRole('table', { name: '全部关键词明细表' }))
+    .toContainText('电子围栏厂家');
+  await expect(page.getByRole('status'))
+    .toContainText('正在加载上一周期关键词比较');
+
+  releasePrevious?.();
+  await expect(keywordMetric(page, '广告关键词数'))
+    .toContainText(/本期\s*302\s*上期\s*302/u);
+});
+
+test('keyword server search waits for stable input and sends only one comparison pair', async ({ page }) => {
+  const resourceRequests: URL[] = [];
+  await page.unroute('**/api/marketing/projects/11/keywords**');
+  await page.route('**/api/marketing/projects/11/keywords**', (route) => {
+    const request = new URL(route.request().url());
+    if (request.searchParams.has('query')) resourceRequests.push(request);
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(keywordResourceFixture(route.request().url()))
+    });
+  });
+
+  await page.goto('/geo/keyword-analysis');
+  const pageTwo = page.locator('.ant-pagination-item-2');
+  await pageTwo.click();
+  await expect(pageTwo).toHaveAttribute('aria-current', 'page');
+  resourceRequests.length = 0;
+  const search = page.getByLabel('搜索投放关键词');
+  await search.pressSequentially('周界报警系统', { delay: 50 });
+  await expect(page.getByRole('table', { name: '全部关键词明细表' }))
+    .toContainText('周界报警系统');
+  await expect.poll(() => resourceRequests.length).toBe(2);
+  expect(new Set(resourceRequests.map((request) => request.searchParams.get('query'))))
+    .toEqual(new Set(['周界报警系统']));
+  expect(resourceRequests.map((request) => request.searchParams.get('page')))
+    .toEqual(['1', '1']);
+  expect(new Set(resourceRequests.map((request) => request.searchParams.get('pageSize'))))
+    .toEqual(new Set(['10', '1']));
 });
 
 test('keyword comparison keeps factual zero distinct from unavailable data', async ({ page }) => {
@@ -765,32 +922,59 @@ test('keyword comparison preserves retryable previous failure instead of calling
 });
 
 test('keyword comparison discards a late request generation after the date changes', async ({ page }) => {
-  let releaseFirstGeneration: (() => void) | undefined;
-  const firstGenerationGate = new Promise<void>((resolve) => {
-    releaseFirstGeneration = resolve;
+  let releaseFirstPrevious: (() => void) | undefined;
+  const firstPreviousGate = new Promise<void>((resolve) => {
+    releaseFirstPrevious = resolve;
   });
-  let keywordRequestCount = 0;
+  let releaseSecondCurrent: (() => void) | undefined;
+  const secondCurrentGate = new Promise<void>((resolve) => {
+    releaseSecondCurrent = resolve;
+  });
+  let currentRequests = 0;
+  let previousRequests = 0;
+  let firstPreviousUrl = '';
+  let firstPreviousAborted = false;
+  page.on('requestfailed', (request) => {
+    if (request.url() === firstPreviousUrl) firstPreviousAborted = true;
+  });
   await page.unroute('**/api/marketing/projects/11/keywords**');
   await page.route('**/api/marketing/projects/11/keywords**', async (route) => {
-    keywordRequestCount += 1;
-    const requestNumber = keywordRequestCount;
-    const body = keywordResourceFixture(route.request().url());
-    body.summary.impressions = requestNumber <= 2 ? '700' : '1400';
-    if (requestNumber <= 2) await firstGenerationGate;
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(body)
-    });
+    const requestUrl = route.request().url();
+    const request = new URL(requestUrl);
+    const isPrevious = (request.searchParams.get('to') || '') < '2026-07-28';
+    const body = keywordResourceFixture(requestUrl);
+    if (isPrevious) {
+      previousRequests += 1;
+      if (previousRequests === 1) {
+        firstPreviousUrl = requestUrl;
+        await firstPreviousGate;
+      }
+    } else {
+      currentRequests += 1;
+      body.summary.impressions = currentRequests === 1 ? '700' : '1400';
+      if (currentRequests === 2) await secondCurrentGate;
+    }
+    try {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(body)
+      });
+    } catch {
+      // The superseded first previous-period request is expected to be aborted.
+    }
   });
 
   await page.goto('/geo/keyword-analysis');
-  await expect.poll(() => keywordRequestCount).toBe(2);
+  await expect.poll(() => previousRequests).toBe(1);
   await page.locator('.ant-picker').first().click();
   await page.getByText('最近 14 天', { exact: true }).last().click();
-  await expect.poll(() => keywordRequestCount).toBe(4);
+  await expect.poll(() => currentRequests).toBe(2);
+  await expect.poll(() => firstPreviousAborted).toBe(true);
+  releaseSecondCurrent?.();
+  await expect.poll(() => previousRequests).toBe(2);
   await expect(keywordMetric(page, '展现')).toContainText(/本期\s*1,400/u);
 
-  releaseFirstGeneration?.();
+  releaseFirstPrevious?.();
   await expect(keywordMetric(page, '展现')).toContainText(/本期\s*1,400/u);
   await expect(keywordMetric(page, '展现')).not.toContainText(/本期\s*700/u);
 });
@@ -1296,7 +1480,13 @@ test('stale snapshot warns and preserves keyword data with retry', async ({ page
 test('stale snapshot clamps a crossed-day default to the last completed coverage', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-05T04:00:00.000Z'));
   await page.unroute('**/api/marketing/projects/11/dashboard**');
+  await page.unroute('**/api/marketing/projects/11/keywords**');
   const requestedRanges: Array<string | null> = [];
+  let previousRequests = 0;
+  let releasePrevious: (() => void) | undefined;
+  const previousGate = new Promise<void>((resolve) => {
+    releasePrevious = resolve;
+  });
   await page.route('**/api/marketing/projects/11/dashboard**', (route) => {
     const url = new URL(route.request().url());
     const from = url.searchParams.get('from');
@@ -1321,10 +1511,34 @@ test('stale snapshot clamps a crossed-day default to the last completed coverage
       body: JSON.stringify(response)
     });
   });
+  await page.route('**/api/marketing/projects/11/keywords**', async (route) => {
+    const request = new URL(route.request().url());
+    if ((request.searchParams.get('to') || '') < '2026-07-28') {
+      previousRequests += 1;
+      await previousGate;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(keywordResourceFixture(route.request().url()))
+    });
+  });
 
   await page.goto('/geo/keyword-analysis');
 
   await expect(keywordMetric(page, '广告关键词数')).toContainText('302');
+  await expect.poll(() => previousRequests).toBe(1);
+  const pageTwo = page.locator('.ant-pagination-item-2');
+  await pageTwo.click();
+  await expect(pageTwo).toHaveAttribute('aria-current', 'page');
+  await expect.poll(() => previousRequests).toBe(1);
+  await expect(page.getByRole('status'))
+    .toContainText('正在加载上一周期关键词比较');
+  await expect(page.getByRole('alert').filter({
+    hasText: '上一周期关键词比较读取失败'
+  })).toHaveCount(0);
+  releasePrevious?.();
+  await expect(keywordMetric(page, '广告关键词数'))
+    .toContainText(/本期\s*302\s*上期\s*302/u);
   await expect(page.getByText('日期筛选超出当前快照覆盖范围')).toHaveCount(0);
   await expect.poll(() => requestedRanges).toEqual([
     '2026-07-29:2026-08-04',

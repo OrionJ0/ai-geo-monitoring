@@ -15,6 +15,9 @@ const {
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
+const {
+  assertMarketingOpenApiResponse
+} = require('./helpers/assertMarketingOpenApiResponse');
 
 // 等待最新刷新运行达到终态（SUCCEEDED/FAILED/INTERRUPTED）且释放 active_project_key 槽，
 // 再给一拍让内存态（失败冷却）落定。后台刷新的 commit 与本次等待可能并发，
@@ -229,6 +232,12 @@ test('dashboard refreshes advertising only when requested and reuses it for ten 
   assert.equal(staleRead.revision, first.revision, '过期时先返回旧快照，不阻塞读取');
   assert.equal(staleRead.states.snapshotFreshnessState, 'STALE');
   assert.ok(staleRead.activeRun?.runId, '后台刷新运行应暴露给前端轮询');
+  assert.deepEqual(Object.keys(staleRead.activeRun).sort(), ['runId', 'status']);
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 200,
+    payload: staleRead
+  });
 
   await waitForRefreshSettled(database.sequelize, 11);
   const refreshed = await service.read({ projectId: 11 });

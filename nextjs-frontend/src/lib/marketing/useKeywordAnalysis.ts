@@ -25,6 +25,7 @@ import {
   createKeywordPreviousSummaryCache,
   keywordPreviousSummaryKey
 } from '@/lib/marketing/keywordPreviousSummaryCache';
+import { clampMarketingDateRange } from '@/components/marketing/MarketingFiltersContext';
 import { readMarketingDashboard } from './readMarketingDashboard';
 
 export type KeywordFixtureState = 'ready' | 'loading' | 'empty' | 'error';
@@ -60,6 +61,7 @@ type UseKeywordAnalysisOptions = {
 type UseKeywordAnalysisState = {
   data: KeywordAnalysisModel | null;
   loading: boolean;
+  previousLoading: boolean;
   error: string;
   warning: string;
   fixtureEnabled: boolean;
@@ -97,6 +99,7 @@ export default function useKeywordAnalysis({
 }: UseKeywordAnalysisOptions): UseKeywordAnalysisState {
   const [data, setData] = useState<KeywordAnalysisModel | null>(null);
   const [loading, setLoading] = useState(true);
+  const [previousLoading, setPreviousLoading] = useState(false);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
   const requestSequence = useRef(0);
@@ -108,18 +111,72 @@ export default function useKeywordAnalysis({
   const [previousSummaryCache] = useState(
     () => createKeywordPreviousSummaryCache<KeywordPreviousResourceResult>()
   );
+  const dataRef = useRef<KeywordAnalysisModel | null>(null);
+  const successfulResourceScope = useRef('');
+  const currentRequestController = useRef<AbortController | null>(null);
+  const activePreviousRequest = useRef<{
+    key: string;
+    controller: AbortController;
+  } | null>(null);
 
   const load = useCallback(async (refreshRoot = false) => {
     const requestId = ++requestSequence.current;
+    currentRequestController.current?.abort();
+    const requestController = new AbortController();
+    currentRequestController.current = requestController;
+    let resourceScope = '';
+    const cachedDashboard = dashboardCache.current?.result.data;
+    const cachedCoverage = cachedDashboard?.coverage;
+    const cachedRevision = cachedDashboard?.revision;
+    const cachedRange = cachedCoverage
+      ? dateRange
+        ? clampMarketingDateRange(dateRange, cachedCoverage)
+        : [
+            cachedDashboard.filter?.from || cachedCoverage.from,
+            cachedDashboard.filter?.to || cachedCoverage.to
+          ] as [string, string]
+      : null;
+    const predictedPreviousKey = cachedRevision && cachedRange
+      ? (() => {
+          const period = buildAdPeriod(cachedRange[0], cachedRange[1]);
+          return keywordPreviousSummaryKey({
+            projectId,
+            revision: cachedRevision,
+            previousFrom: period.previousFrom,
+            previousTo: period.previousTo,
+            query: resourceQuery.query || undefined,
+            campaignId: resourceQuery.campaignId,
+            adGroupId: resourceQuery.adGroupId
+          });
+        })()
+      : null;
+    if (
+      activePreviousRequest.current
+      && (
+        refreshRoot
+        || (
+          predictedPreviousKey
+          && activePreviousRequest.current.key !== predictedPreviousKey
+        )
+      )
+    ) {
+      previousSummaryCache.clear();
+      activePreviousRequest.current.controller.abort();
+      activePreviousRequest.current = null;
+    }
     if (!fixtureEnabled && (!enabled || !projectId)) {
+      dataRef.current = null;
+      successfulResourceScope.current = '';
       setData(null);
       setError('');
       setWarning('');
       setLoading(false);
+      setPreviousLoading(false);
       return;
     }
-    setError('');
+    if (!refreshRoot) setError('');
     setWarning('');
+    setPreviousLoading(false);
     if (fixtureEnabled && fixtureState === 'loading') {
       setData(null);
       setLoading(true);
@@ -185,6 +242,17 @@ export default function useKeywordAnalysis({
         }
         onDateRangeAdjusted?.(response.effectiveDateRange);
       }
+      resourceScope = JSON.stringify([
+        projectId,
+        revision,
+        from,
+        to,
+        resourceQuery.query,
+        resourceQuery.campaignId || '',
+        resourceQuery.adGroupId || '',
+        resourceQuery.sortBy,
+        resourceQuery.sortOrder
+      ]);
       setWarning(marketingSnapshotWarning(response.data));
       const endpoint = `/api/marketing/projects/${encodeURIComponent(projectId)}/keywords`;
       const period = buildAdPeriod(from, to);
@@ -201,6 +269,47 @@ export default function useKeywordAnalysis({
         campaignId: resourceQuery.campaignId,
         adGroupId: resourceQuery.adGroupId
       };
+      const currentPromise = axios.get<MarketingKeywordResourceResponse>(
+        endpoint,
+        {
+          params: {
+            ...sharedParams,
+            from,
+            to,
+            page: resourceQuery.page,
+            pageSize: resourceQuery.pageSize
+          },
+          signal: requestController.signal,
+          timeout: 10_000
+        }
+      );
+      const currentResult = await currentPromise;
+      if (requestId !== requestSequence.current) return;
+      assertMarketingKeywordResourceResponse(
+        currentResult.data,
+        projectId,
+        revision,
+        { from, to },
+        coverage,
+        expectedBusinessFilter
+      );
+      const pendingPrevious: KeywordPreviousResourceResult = {
+        state: 'PENDING',
+        resource: null,
+        reason: '上一周期关键词比较正在加载。'
+      };
+      const currentData = adaptMarketingKeywordResource(
+        currentResult.data,
+        response.data,
+        pendingPrevious,
+        projectName
+      );
+      dataRef.current = currentData;
+      successfulResourceScope.current = resourceScope;
+      setError('');
+      setData(currentData);
+      setLoading(false);
+      setPreviousLoading(true);
       const previousKey = keywordPreviousSummaryKey({
         projectId,
         revision,
@@ -208,9 +317,25 @@ export default function useKeywordAnalysis({
         previousTo: period.previousTo,
         ...expectedBusinessFilter
       });
+      if (
+        activePreviousRequest.current
+        && (
+          refreshRoot
+          || activePreviousRequest.current.key !== previousKey
+        )
+      ) {
+        previousSummaryCache.clear();
+        activePreviousRequest.current.controller.abort();
+        activePreviousRequest.current = null;
+      }
       const previousPromise = previousSummaryCache.read(
         previousKey,
         async () => {
+          const previousController = new AbortController();
+          activePreviousRequest.current = {
+            key: previousKey,
+            controller: previousController
+          };
           try {
             const previousResponse = await axios.get<MarketingKeywordResourceResponse>(
               endpoint,
@@ -222,6 +347,7 @@ export default function useKeywordAnalysis({
                   page: 1,
                   pageSize: 1
                 },
+                signal: previousController.signal,
                 timeout: 10_000
               }
             );
@@ -247,58 +373,57 @@ export default function useKeywordAnalysis({
               };
             }
           } catch (previousError) {
+            if (axios.isCancel(previousError)) throw previousError;
             return classifyKeywordPreviousError(previousError);
+          } finally {
+            if (activePreviousRequest.current?.controller === previousController) {
+              activePreviousRequest.current = null;
+            }
           }
         },
         refreshRoot
       );
-      const [currentResult, previousResult] = await Promise.allSettled([
-        axios.get<MarketingKeywordResourceResponse>(endpoint, {
-          params: {
-            ...sharedParams,
-            from,
-            to,
-            page: resourceQuery.page,
-            pageSize: resourceQuery.pageSize
-          },
-          timeout: 10_000
-        }),
-        previousPromise
-      ]);
-      if (requestId !== requestSequence.current) return;
-      if (currentResult.status === 'rejected') throw currentResult.reason;
-      assertMarketingKeywordResourceResponse(
-        currentResult.value.data,
-        projectId,
-        revision,
-        { from, to },
-        coverage,
-        expectedBusinessFilter
-      );
       let previous: KeywordPreviousResourceResult;
-      if (previousResult.status === 'rejected') {
-        previous = classifyKeywordPreviousError(previousResult.reason);
-      } else {
-        previous = previousResult.value;
+      try {
+        previous = await previousPromise;
+      } catch (previousError) {
+        previous = classifyKeywordPreviousError(previousError);
       }
-      setData(adaptMarketingKeywordResource(
-        currentResult.value.data,
+      if (requestId !== requestSequence.current) return;
+      const nextData = adaptMarketingKeywordResource(
+        currentResult.data,
         response.data,
         previous,
         projectName
-      ));
+      );
+      dataRef.current = nextData;
+      successfulResourceScope.current = resourceScope;
+      setData(nextData);
     } catch (requestError: unknown) {
       if (requestId !== requestSequence.current) return;
       const message = readErrorMessage(requestError);
-      setData(null);
-      setWarning('');
+      const preserveCurrentPage = Boolean(resourceScope)
+        && Boolean(dataRef.current)
+        && successfulResourceScope.current === resourceScope;
+      if (!preserveCurrentPage) {
+        dataRef.current = null;
+        successfulResourceScope.current = '';
+        setData(null);
+        setWarning('');
+      }
       setError(
         typeof message === 'string'
           ? message
           : '关键词数据读取失败，请稍后重试。'
       );
     } finally {
-      if (requestId === requestSequence.current) setLoading(false);
+      if (requestId === requestSequence.current) {
+        if (currentRequestController.current === requestController) {
+          currentRequestController.current = null;
+        }
+        setLoading(false);
+        setPreviousLoading(false);
+      }
     }
   }, [
     dateRange,
@@ -329,9 +454,16 @@ export default function useKeywordAnalysis({
     void load();
   }, [dateRange, load]);
 
+  useEffect(() => () => {
+    requestSequence.current += 1;
+    currentRequestController.current?.abort();
+    activePreviousRequest.current?.controller.abort();
+  }, []);
+
   return {
     data,
     loading,
+    previousLoading,
     error,
     warning,
     fixtureEnabled,

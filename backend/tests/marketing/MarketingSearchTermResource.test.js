@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 
 const express = require('express');
@@ -309,6 +310,115 @@ test('search-term resource distinguishes revision and coverage errors', async (t
       campaignId: 'x'.repeat(513)
     }),
     { code: 'MARKETING_AD_RESOURCE_QUERY_INVALID', status: 400 }
+  );
+});
+
+test('SQLite search-term ratio sorting enforces its 2k identity and 5k fact budgets', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-terms-ratio-budgets-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  await seedRun(database.sequelize, {
+    id: 'ratio-budget-revision',
+    sequence: 1,
+    rows: []
+  });
+  await database.sequelize.query(
+    `WITH RECURSIVE identities(x) AS (
+       SELECT 1 UNION ALL SELECT x + 1 FROM identities WHERE x < 2000
+     )
+     INSERT INTO baidu_search_term_daily_metrics (
+       id, project_id, binding_id, refresh_run_id, metric_date,
+       external_account_id, campaign_id, campaign_name,
+       ad_group_id, ad_group_name, impressions_text, clicks_text,
+       cost_amount_scaled_text, keyword_name, search_term,
+       search_term_key, query_status, match_type, created_at
+     )
+     SELECT
+       'term-identity-budget-' || x, 11, 'binding-1', 'ratio-budget-revision',
+       '2026-07-03', 'account-1', 'campaign-1', '计划一', 'group-1', '单元一',
+       CAST((x % 997) + 1 AS TEXT), CAST((x % 97) + 1 AS TEXT),
+       CAST(9007199254740000 + x AS TEXT), '规模关键词', '实体边界 ' || x,
+       'term-identity-budget-' || x, 'NOT_ADDED', 'PHRASE', CURRENT_TIMESTAMP
+     FROM identities`
+  );
+  await database.sequelize.query(
+    `WITH RECURSIVE identities(x) AS (
+       SELECT 1 UNION ALL SELECT x + 1 FROM identities WHERE x < 1000
+     ), days(day) AS (
+       SELECT 0 UNION ALL SELECT day + 1 FROM days WHERE day < 4
+     )
+     INSERT INTO baidu_search_term_daily_metrics (
+       id, project_id, binding_id, refresh_run_id, metric_date,
+       external_account_id, campaign_id, campaign_name,
+       ad_group_id, ad_group_name, impressions_text, clicks_text,
+       cost_amount_scaled_text, keyword_name, search_term,
+       search_term_key, query_status, match_type, created_at
+     )
+     SELECT
+       'term-fact-budget-' || x || '-' || day,
+       11, 'binding-1', 'ratio-budget-revision', date('2026-07-01', '+' || day || ' day'),
+       'account-1', 'campaign-1', '计划一', 'group-1', '单元一',
+       '10', '2', '7', '规模关键词', '事实边界 ' || x,
+       'term-fact-budget-' || x, 'NOT_ADDED', 'PHRASE', CURRENT_TIMESTAMP
+     FROM identities CROSS JOIN days`
+  );
+  const service = createService(database.sequelize);
+
+  for (const [query, totalItems] of [
+    ['实体边界', 2000],
+    ['事实边界', 1000]
+  ]) {
+    const readBoundary = () => service.readSearchTerms({
+      projectId: '11',
+      revision: 'ratio-budget-revision',
+      from: '2026-07-01',
+      to: '2026-07-05',
+      query,
+      pageSize: '50',
+      sortBy: 'averageCpc',
+      sortOrder: 'descend'
+    });
+    assert.equal((await readBoundary()).pagination.totalItems, totalItems);
+    const durations = [];
+    for (let sample = 0; sample < 3; sample += 1) {
+      const startedAt = performance.now();
+      const result = await readBoundary();
+      durations.push(performance.now() - startedAt);
+      assert.equal(result.pagination.totalItems, totalItems);
+    }
+    durations.sort((left, right) => left - right);
+    const p95Ms = durations[Math.ceil(durations.length * 0.95) - 1];
+    assert.ok(
+      p95Ms < 750,
+      `${query} search-term boundary sort P95 took ${p95Ms}ms`
+    );
+  }
+
+  await database.sequelize.query(
+    `INSERT INTO baidu_search_term_daily_metrics (
+      id, project_id, binding_id, refresh_run_id, metric_date,
+      external_account_id, campaign_id, campaign_name,
+      ad_group_id, ad_group_name, impressions_text, clicks_text,
+      cost_amount_scaled_text, keyword_name, search_term,
+      search_term_key, query_status, match_type, created_at
+    ) VALUES (
+      'term-fact-budget-overflow', 11, 'binding-1', 'ratio-budget-revision',
+      '2026-07-06', 'account-1', 'campaign-1', '计划一', 'group-1', '单元一',
+      '1', '1', '1', '规模关键词', '事实边界 1',
+      'term-fact-budget-1', 'NOT_ADDED', 'PHRASE', CURRENT_TIMESTAMP
+    )`
+  );
+  await assert.rejects(
+    service.readSearchTerms({
+      projectId: '11',
+      revision: 'ratio-budget-revision',
+      from: '2026-07-01',
+      to: '2026-07-06',
+      query: '事实边界',
+      sortBy: 'averageCpc',
+      sortOrder: 'descend'
+    }),
+    { code: 'MARKETING_AD_RESOURCE_SORT_SCOPE_TOO_LARGE', status: 422 }
   );
 });
 

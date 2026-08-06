@@ -120,6 +120,47 @@ test('dashboard returns one revision and exact aggregates without provider calls
     assert.match(reads[0], /GROUP BY/u);
     assert.doesNotMatch(reads[0], /SELECT \*/u);
   }
+  await dashboardService.read({
+    projectId: 11,
+    from: '2026-07-28',
+    to: '2026-07-29'
+  });
+  for (const table of [
+    'baidu_ad_group_daily_metrics',
+    'baidu_keyword_daily_metrics',
+    'baidu_search_term_daily_metrics'
+  ]) {
+    assert.equal(
+      dashboardQueries.filter((sql) => sql.includes(table)).length,
+      1,
+      `${table} immutable hierarchy count should be reused for the same revision and range`
+    );
+  }
+
+  const concurrentService = new MarketingDashboardService({
+    sequelize: database.sequelize,
+    clock: () => Date.parse('2026-07-30T04:05:00.000Z')
+  });
+  dashboardQueries.length = 0;
+  await Promise.all(Array.from({ length: 5 }, () => concurrentService.read({
+    projectId: 11,
+    from: '2026-07-28',
+    to: '2026-07-29'
+  })));
+  for (const table of [
+    'baidu_campaign_daily_metrics',
+    'baidu_ad_group_daily_metrics',
+    'baidu_keyword_daily_metrics',
+    'baidu_search_term_daily_metrics'
+  ]) {
+    assert.equal(
+      dashboardQueries.filter((sql) => (
+        sql.includes(table) && /SELECT COUNT\(\*\) AS total/u.test(sql)
+      )).length,
+      1,
+      `${table} concurrent cold reads should share one hierarchy count query`
+    );
+  }
 });
 
 test('dashboard rejects filters outside the saved coverage', async (t) => {

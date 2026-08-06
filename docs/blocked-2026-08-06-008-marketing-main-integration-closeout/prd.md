@@ -1,6 +1,6 @@
 ---
 title: "营销工作线主分支集成与治理收尾"
-status: active
+status: blocked
 owner: Codex
 depends_on:
   - "../closed-2026-08-05-003-baidu-unified-oauth-api-architecture/prd.md"
@@ -60,12 +60,14 @@ depends_on:
 - [x] 四个接口的真实服务响应和代表性错误响应通过同一 OpenAPI schema 校验；
 - [x] 关键词页码或 page size 变化只重新请求本期列表，不重复读取相同上期汇总；
 - [x] 客户端不再维护 manifest 已声明的第二份报告 URL；
-- [ ] P0/P1/P2 对抗审查问题清零；
-- [ ] 后端、营销、前端、部署测试，lint、TypeScript、生产构建和真实 Chrome 通过；
+- [x] 本轮营销 diff 的 P0/P1/P2 对抗审查问题清零；
+- [x] 后端、营销、前端、部署测试，lint、TypeScript、生产构建和真实 Chrome 通过；
 - [ ] 本地 `main == origin/main == server HEAD == public revision`，服务器工作区干净且迁移 audit 通过。
 
 ## Handoff
 
-- 当前状态：Issue 001–004 已关闭，Issue 005 实施中；
-- 正式生产仍运行既有营销 revision；本目录的新收尾修复尚未发布；
-- 下一步：重新核对 main/生产隔离，完成全量回归、对抗审查、正式发布与真值对齐。
+- 当前状态：Issue 001–004 已关闭；Issue 005 的本地实现、回归和对抗审查已完成，正式发布门禁阻塞；
+- 本轮营销 diff 的代码、现实证据、最小变更、API、安全、数据库、架构、性能和无障碍审查均无 P0/P1/P2；
+- 正式生产仍运行既有营销 revision `2c6a36e`，本目录的新收尾修复尚未发布；
+- 外部阻塞来自并行 0805-002：候选运行模型会读取 `question_records.competitor_snapshot`，但正式部署入口尚未应用并审计 `migrateV5SnapshotFields.js`。在 0805-002 独立完成旧生产 schema → 新迁移、`missing_columns=[]`、scheduler 启动、`/ready=200` 和默认 v4 冒烟前，不得发布本营销候选；
+- 阻塞解除后：重新吸收最新 `main`，重跑全量回归和 Bundle 门禁，执行正式发布，再快进并推送 `main`，使本地、远端、服务器和公开 revision 完全一致。

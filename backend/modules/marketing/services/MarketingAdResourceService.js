@@ -32,6 +32,14 @@ function queryError(message = '搜索词资源查询参数无效') {
   );
 }
 
+function sortScopeTooLarge(message) {
+  return new MarketingRefreshError(
+    message,
+    MARKETING_AD_READ_CONTRACT.errors.sortScopeTooLarge,
+    422
+  );
+}
+
 function positiveInteger(value, fallback, maximum = null) {
   if (value === undefined) return fallback;
   if (typeof value !== 'string' || !/^[1-9]\d*$/u.test(value)) {
@@ -356,120 +364,141 @@ function stableKeywordOrder(options, dialect) {
   return `CASE WHEN ${denominator} = '0' THEN 1 ELSE 0 END ASC, ${ratio} ${direction}, ${KEYWORD_COLUMNS.join(' ASC, ')} ASC`;
 }
 
-function sqliteExactRatioRankSql(aggregateSql, numerator, denominator) {
-  return `WITH RECURSIVE
-  aggregated_rows AS (${aggregateSql}),
-  operands AS (
-    SELECT
-      left_row.group_index AS left_index,
-      right_row.group_index AS right_index,
-      'left' AS side,
-      left_row.${numerator} AS left_value,
-      right_row.${denominator} AS right_value
-    FROM aggregated_rows left_row CROSS JOIN aggregated_rows right_row
-    WHERE left_row.${denominator} != '0' AND right_row.${denominator} != '0'
-    UNION ALL
-    SELECT
-      left_row.group_index,
-      right_row.group_index,
-      'right',
-      right_row.${numerator},
-      left_row.${denominator}
-    FROM aggregated_rows left_row CROSS JOIN aggregated_rows right_row
-    WHERE left_row.${denominator} != '0' AND right_row.${denominator} != '0'
-  ),
-  left_digits(left_index, right_index, side, position, digit) AS (
-    SELECT left_index, right_index, side, 0,
-      CAST(substr(left_value, -1, 1) AS INTEGER)
-    FROM operands
-    UNION ALL
-    SELECT digits.left_index, digits.right_index, digits.side,
-      digits.position + 1,
-      CAST(substr(operands.left_value, -digits.position - 2, 1) AS INTEGER)
-    FROM left_digits digits
-    JOIN operands USING (left_index, right_index, side)
-    WHERE digits.position + 1 < length(operands.left_value)
-  ),
-  right_digits(left_index, right_index, side, position, digit) AS (
-    SELECT left_index, right_index, side, 0,
-      CAST(substr(right_value, -1, 1) AS INTEGER)
-    FROM operands
-    UNION ALL
-    SELECT digits.left_index, digits.right_index, digits.side,
-      digits.position + 1,
-      CAST(substr(operands.right_value, -digits.position - 2, 1) AS INTEGER)
-    FROM right_digits digits
-    JOIN operands USING (left_index, right_index, side)
-    WHERE digits.position + 1 < length(operands.right_value)
-  ),
-  raw_digit_sums AS (
-    SELECT
-      left_digits.left_index,
-      left_digits.right_index,
-      left_digits.side,
-      left_digits.position + right_digits.position AS position,
-      SUM(left_digits.digit * right_digits.digit) AS digit_sum
-    FROM left_digits
-    JOIN right_digits USING (left_index, right_index, side)
-    GROUP BY
-      left_digits.left_index,
-      left_digits.right_index,
-      left_digits.side,
-      left_digits.position + right_digits.position
-  ),
-  product_digits(
-    left_index, right_index, side, position, max_position, carry, value
-  ) AS (
-    SELECT
-      left_index, right_index, side, 0,
-      MAX(position) OVER (PARTITION BY left_index, right_index, side),
-      CAST(digit_sum / 10 AS INTEGER),
-      CAST(digit_sum % 10 AS TEXT)
-    FROM raw_digit_sums
-    WHERE position = 0
-    UNION ALL
-    SELECT
-      sums.left_index, sums.right_index, sums.side, sums.position,
-      digits.max_position,
-      CAST((sums.digit_sum + digits.carry) / 10 AS INTEGER),
-      CAST((sums.digit_sum + digits.carry) % 10 AS TEXT) || digits.value
-    FROM product_digits digits
-    JOIN raw_digit_sums sums
-      ON sums.left_index = digits.left_index
-      AND sums.right_index = digits.right_index
-      AND sums.side = digits.side
-      AND sums.position = digits.position + 1
-  ),
-  products AS (
-    SELECT
-      left_index, right_index, side,
-      COALESCE(NULLIF(ltrim(
-        CASE WHEN carry = 0 THEN value ELSE CAST(carry AS TEXT) || value END,
-        '0'
-      ), ''), '0') AS value
-    FROM product_digits WHERE position = max_position
-  ),
-  comparisons AS (
-    SELECT
-      left_index, right_index,
-      MAX(CASE WHEN side = 'left' THEN value END) AS left_product,
-      MAX(CASE WHEN side = 'right' THEN value END) AS right_product
-    FROM products GROUP BY left_index, right_index
-  ),
-  ratio_ranks AS (
-    SELECT left_index,
-      SUM(CASE
-        WHEN length(left_product) > length(right_product) THEN 1
-        WHEN length(left_product) = length(right_product)
-          AND left_product > right_product THEN 1
-        ELSE 0
-      END) AS exact_ratio_rank
-    FROM comparisons GROUP BY left_index
-  )
-  SELECT aggregated_rows.*,
-    COALESCE(ratio_ranks.exact_ratio_rank, 0) AS exact_ratio_rank
-  FROM aggregated_rows
-  LEFT JOIN ratio_ranks ON ratio_ranks.left_index = aggregated_rows.group_index`;
+function compareIdentity(left, right, columns) {
+  for (const column of columns) {
+    if (left[column] < right[column]) return -1;
+    if (left[column] > right[column]) return 1;
+  }
+  return 0;
+}
+
+function compareExactRatio(left, right, numerator, denominator, options, columns) {
+  const leftZero = left[denominator] === '0';
+  const rightZero = right[denominator] === '0';
+  if (leftZero !== rightZero) return leftZero ? 1 : -1;
+  if (!leftZero) {
+    const leftProduct = BigInt(left[numerator]) * BigInt(right[denominator]);
+    const rightProduct = BigInt(right[numerator]) * BigInt(left[denominator]);
+    if (leftProduct !== rightProduct) {
+      const comparison = leftProduct < rightProduct ? -1 : 1;
+      return options.sortOrder === 'ascend' ? comparison : -comparison;
+    }
+  }
+  return compareIdentity(left, right, columns);
+}
+
+function aggregateExactFacts(rows, identityColumns, textColumns) {
+  const aggregated = new Map();
+  const summary = {
+    impressions: '0',
+    clicks: '0',
+    costAmountScaled: '0'
+  };
+  for (const row of rows) {
+    const key = identityColumns.map((column) => row[column]).join('\u0000');
+    if (!aggregated.has(key)) {
+      aggregated.set(key, {
+        ...Object.fromEntries(identityColumns.map((column) => [column, row[column]])),
+        ...Object.fromEntries(textColumns.map((column) => [column, row[column]])),
+        impressions: '0',
+        clicks: '0',
+        cost_amount_scaled: '0'
+      });
+    }
+    const item = aggregated.get(key);
+    for (const column of textColumns) {
+      if (row[column] < item[column]) item[column] = row[column];
+    }
+    item.impressions = addDecimalText(item.impressions, row.impressions_text);
+    item.clicks = addDecimalText(item.clicks, row.clicks_text);
+    item.cost_amount_scaled = addDecimalText(
+      item.cost_amount_scaled,
+      row.cost_amount_scaled_text
+    );
+    summary.impressions = addDecimalText(summary.impressions, row.impressions_text);
+    summary.clicks = addDecimalText(summary.clicks, row.clicks_text);
+    summary.costAmountScaled = addDecimalText(
+      summary.costAmountScaled,
+      row.cost_amount_scaled_text
+    );
+  }
+  return { items: [...aggregated.values()], summary };
+}
+
+function exactFactColumns(identityColumns, textColumns) {
+  return [...new Set([
+    ...identityColumns,
+    ...textColumns,
+    'impressions_text',
+    'clicks_text',
+    'cost_amount_scaled_text'
+  ])].join(', ');
+}
+
+function postgresExactSummarySql(table, where) {
+  return `SELECT
+    COALESCE(SUM(impressions_text::numeric), 0)::text AS impressions,
+    COALESCE(SUM(clicks_text::numeric), 0)::text AS clicks,
+    COALESCE(SUM(cost_amount_scaled_text::numeric), 0)::text AS cost_amount_scaled
+  FROM ${table} WHERE ${where}`;
+}
+
+async function sqliteExactSummary({
+  sequelize,
+  table,
+  where,
+  replacements,
+  transaction
+}) {
+  const metrics = [
+    ['impressions', 'impressions_text'],
+    ['clicks', 'clicks_text'],
+    ['cost_amount_scaled', 'cost_amount_scaled_text']
+  ];
+  const lengthRows = await sequelize.query(
+    `SELECT COUNT(*) AS total_facts,
+       MAX(length(impressions_text)) AS impressions_length,
+       MAX(length(clicks_text)) AS clicks_length,
+       MAX(length(cost_amount_scaled_text)) AS cost_amount_scaled_length
+     FROM ${table} WHERE ${where}`,
+    { replacements, type: QueryTypes.SELECT, transaction }
+  );
+  const lengths = lengthRows[0] || {};
+  if (Number(lengths.total_facts || 0) === 0) return exactSummary(null);
+  const limbDigits = 6;
+  const expressions = [];
+  for (const [metric, column] of metrics) {
+    const limbCount = Math.ceil(Number(lengths[`${metric}_length`] || 0) / limbDigits);
+    for (let limb = 0; limb < limbCount; limb += 1) {
+      expressions.push(
+        `COALESCE(SUM(CAST(substr(${column}, -${(limb + 1) * limbDigits}, ${limbDigits}) AS INTEGER)), 0) AS ${metric}_${limb}`
+      );
+    }
+  }
+  const rows = await sequelize.query(
+    `SELECT ${expressions.join(', ')} FROM ${table} WHERE ${where}`,
+    { replacements, type: QueryTypes.SELECT, transaction }
+  );
+  const limbs = rows[0] || {};
+  const summary = {};
+  for (const [metric] of metrics) {
+    const limbCount = Math.ceil(Number(lengths[`${metric}_length`] || 0) / limbDigits);
+    let total = 0n;
+    for (let limb = 0; limb < limbCount; limb += 1) {
+      total += BigInt(String(limbs[`${metric}_${limb}`] || 0))
+        * (10n ** BigInt(limb * limbDigits));
+    }
+    summary[metric] = total.toString();
+  }
+  return exactSummary(summary);
+}
+
+function exactSummary(row) {
+  return {
+    impressions: String(row?.impressions || '0'),
+    clicks: String(row?.clicks || '0'),
+    costAmountScaled: String(row?.cost_amount_scaled || '0')
+  };
 }
 
 function postgresAggregateSql(where) {
@@ -808,49 +837,112 @@ class MarketingAdResourceService {
       const ratioDenominator = options.sortBy === 'ctr'
         ? 'impressions'
         : 'clicks';
-      const orderedSql = dialect === 'sqlite'
-        && ['ctr', 'averageCpc'].includes(options.sortBy)
-        ? sqliteExactRatioRankSql(
-            aggregateSql,
-            ratioNumerator,
-            ratioDenominator
-          )
-        : aggregateSql;
+      const sqliteRatioSort = dialect === 'sqlite'
+        && ['ctr', 'averageCpc'].includes(options.sortBy);
       const replacements = {
         ...where.replacements,
         limit: options.pageSize,
         offset: (options.page - 1) * options.pageSize
       };
-      const items = await this.sequelize.query(
-        `SELECT * FROM (${orderedSql}) aggregated_keywords
-         ORDER BY ${stableKeywordOrder(options, dialect)}
-         LIMIT :limit OFFSET :offset`,
-        { replacements, type: QueryTypes.SELECT, transaction }
-      );
-      const countRows = await this.sequelize.query(
-        `SELECT COUNT(*) AS total
-         FROM (
-           SELECT 1
-           FROM baidu_keyword_daily_metrics
-           WHERE ${where.sql}
-           GROUP BY ${KEYWORD_COLUMNS.join(', ')}
-         ) grouped_keywords`,
-        {
-          replacements: where.replacements,
-          type: QueryTypes.SELECT,
-          transaction
+      let items;
+      let totalItems;
+      let exactRatioSummary = null;
+      if (sqliteRatioSort) {
+        const countRows = await this.sequelize.query(
+          `SELECT COUNT(*) AS total, COALESCE(SUM(fact_count), 0) AS total_facts
+           FROM (
+             SELECT COUNT(*) AS fact_count
+             FROM baidu_keyword_daily_metrics
+             WHERE ${where.sql}
+             GROUP BY ${KEYWORD_COLUMNS.join(', ')}
+           ) grouped_keywords`,
+          {
+            replacements: where.replacements,
+            type: QueryTypes.SELECT,
+            transaction
+          }
+        );
+        totalItems = Number(countRows[0]?.total || 0);
+        const totalFacts = Number(countRows[0]?.total_facts || 0);
+        if (
+          totalItems
+          > MARKETING_AD_READ_CONTRACT.pagination.maximumExactRatioSortItems
+          || totalFacts
+          > MARKETING_AD_READ_CONTRACT.pagination.maximumExactRatioSortFacts
+        ) {
+          throw sortScopeTooLarge('精确比率排序范围过大，请缩小关键词筛选范围');
         }
-      );
-      const summaryRows = await this.sequelize.query(
-        `SELECT impressions_text, clicks_text, cost_amount_scaled_text
-         FROM baidu_keyword_daily_metrics
-         WHERE ${where.sql}`,
-        {
-          replacements: where.replacements,
-          type: QueryTypes.SELECT,
-          transaction
-        }
-      );
+        const boundedFacts = await this.sequelize.query(
+          `SELECT ${exactFactColumns(
+            KEYWORD_COLUMNS,
+            ['campaign_name', 'ad_group_name', 'keyword_name', 'targeting_type']
+          )}
+           FROM baidu_keyword_daily_metrics WHERE ${where.sql}`,
+          {
+            replacements: where.replacements,
+            type: QueryTypes.SELECT,
+            transaction
+          }
+        );
+        const exactAggregation = aggregateExactFacts(
+          boundedFacts,
+          KEYWORD_COLUMNS,
+          ['campaign_name', 'ad_group_name', 'keyword_name', 'targeting_type']
+        );
+        exactAggregation.items.sort((left, right) => compareExactRatio(
+          left,
+          right,
+          ratioNumerator,
+          ratioDenominator,
+          options,
+          KEYWORD_COLUMNS
+        ));
+        items = exactAggregation.items.slice(
+          replacements.offset,
+          replacements.offset + options.pageSize
+        );
+        exactRatioSummary = exactAggregation.summary;
+      } else {
+        items = await this.sequelize.query(
+          `SELECT * FROM (${aggregateSql}) aggregated_keywords
+           ORDER BY ${stableKeywordOrder(options, dialect)}
+           LIMIT :limit OFFSET :offset`,
+          { replacements, type: QueryTypes.SELECT, transaction }
+        );
+        const countRows = await this.sequelize.query(
+          `SELECT COUNT(*) AS total
+           FROM (
+             SELECT 1
+             FROM baidu_keyword_daily_metrics
+             WHERE ${where.sql}
+             GROUP BY ${KEYWORD_COLUMNS.join(', ')}
+           ) grouped_keywords`,
+          {
+            replacements: where.replacements,
+            type: QueryTypes.SELECT,
+            transaction
+          }
+        );
+        totalItems = Number(countRows[0]?.total || 0);
+      }
+      const summary = exactRatioSummary
+        ? exactRatioSummary
+        : dialect === 'postgres'
+        ? exactSummary((await this.sequelize.query(
+            postgresExactSummarySql('baidu_keyword_daily_metrics', where.sql),
+            {
+              replacements: where.replacements,
+              type: QueryTypes.SELECT,
+              transaction
+            }
+          ))[0])
+        : await sqliteExactSummary({
+            sequelize: this.sequelize,
+            table: 'baidu_keyword_daily_metrics',
+            where: where.sql,
+            replacements: where.replacements,
+            transaction
+          });
       const itemKeys = new Set(items.map((item) => KEYWORD_COLUMNS
         .map((column) => item[column])
         .join('\u0000')));
@@ -894,7 +986,6 @@ class MarketingAdResourceService {
           row.cost_amount_scaled_text
         );
       }
-      const totalItems = Number(countRows[0]?.total || 0);
       return {
         schemaVersion: MARKETING_AD_READ_CONTRACT.resources.keywords.schemaVersion,
         projectId: String(input.projectId),
@@ -907,7 +998,7 @@ class MarketingAdResourceService {
           costScale: Number(selected.run.cost_scale)
         },
         filter: keywordResponseFilter(options, selected),
-        summary: exactSumRows(summaryRows),
+        summary,
         items: items.map((item) => {
           const key = KEYWORD_COLUMNS.map((column) => item[column]).join('\u0000');
           return {
@@ -959,49 +1050,126 @@ class MarketingAdResourceService {
       const ratioDenominator = options.sortBy === 'ctr'
         ? 'impressions'
         : 'clicks';
-      const orderedSql = dialect === 'sqlite'
-        && ['ctr', 'averageCpc'].includes(options.sortBy)
-        ? sqliteExactRatioRankSql(
-            aggregateSql,
-            ratioNumerator,
-            ratioDenominator
-          )
-        : aggregateSql;
+      const sqliteRatioSort = dialect === 'sqlite'
+        && ['ctr', 'averageCpc'].includes(options.sortBy);
       const replacements = {
         ...where.replacements,
         limit: options.pageSize,
         offset: (options.page - 1) * options.pageSize
       };
-      const items = await this.sequelize.query(
-        `SELECT * FROM (${orderedSql}) aggregated_terms
-         ORDER BY ${stableOrder(options, dialect)}
-         LIMIT :limit OFFSET :offset`,
-        { replacements, type: QueryTypes.SELECT, transaction }
-      );
-      const countRows = await this.sequelize.query(
-        `SELECT COUNT(*) AS total
-         FROM (
-           SELECT 1
-           FROM baidu_search_term_daily_metrics
-           WHERE ${where.sql}
-           GROUP BY ${SEARCH_TERM_COLUMNS.join(', ')}
-         ) grouped_terms`,
-        {
-          replacements: where.replacements,
-          type: QueryTypes.SELECT,
-          transaction
+      let items;
+      let totalItems;
+      let exactRatioSummary = null;
+      if (sqliteRatioSort) {
+        const countRows = await this.sequelize.query(
+          `SELECT COUNT(*) AS total, COALESCE(SUM(fact_count), 0) AS total_facts
+           FROM (
+             SELECT COUNT(*) AS fact_count
+             FROM baidu_search_term_daily_metrics
+             WHERE ${where.sql}
+             GROUP BY ${SEARCH_TERM_COLUMNS.join(', ')}
+           ) grouped_terms`,
+          {
+            replacements: where.replacements,
+            type: QueryTypes.SELECT,
+            transaction
+          }
+        );
+        totalItems = Number(countRows[0]?.total || 0);
+        const totalFacts = Number(countRows[0]?.total_facts || 0);
+        if (
+          totalItems
+          > MARKETING_AD_READ_CONTRACT.pagination.maximumExactRatioSortItems
+          || totalFacts
+          > MARKETING_AD_READ_CONTRACT.pagination.maximumExactRatioSortFacts
+        ) {
+          throw sortScopeTooLarge('精确比率排序范围过大，请缩小搜索词筛选范围');
         }
-      );
-      const summaryRows = await this.sequelize.query(
-        `SELECT impressions_text, clicks_text, cost_amount_scaled_text
-         FROM baidu_search_term_daily_metrics
-         WHERE ${where.sql}`,
-        {
-          replacements: where.replacements,
-          type: QueryTypes.SELECT,
-          transaction
-        }
-      );
+        const boundedFacts = await this.sequelize.query(
+          `SELECT ${exactFactColumns(
+            SEARCH_TERM_COLUMNS,
+            [
+              'campaign_name',
+              'ad_group_name',
+              'keyword_name',
+              'search_term',
+              'query_status',
+              'match_type'
+            ]
+          )}
+           FROM baidu_search_term_daily_metrics WHERE ${where.sql}`,
+          {
+            replacements: where.replacements,
+            type: QueryTypes.SELECT,
+            transaction
+          }
+        );
+        const exactAggregation = aggregateExactFacts(
+          boundedFacts,
+          SEARCH_TERM_COLUMNS,
+          [
+            'campaign_name',
+            'ad_group_name',
+            'keyword_name',
+            'search_term',
+            'query_status',
+            'match_type'
+          ]
+        );
+        exactAggregation.items.sort((left, right) => compareExactRatio(
+          left,
+          right,
+          ratioNumerator,
+          ratioDenominator,
+          options,
+          SEARCH_TERM_COLUMNS
+        ));
+        items = exactAggregation.items.slice(
+          replacements.offset,
+          replacements.offset + options.pageSize
+        );
+        exactRatioSummary = exactAggregation.summary;
+      } else {
+        items = await this.sequelize.query(
+          `SELECT * FROM (${aggregateSql}) aggregated_terms
+           ORDER BY ${stableOrder(options, dialect)}
+           LIMIT :limit OFFSET :offset`,
+          { replacements, type: QueryTypes.SELECT, transaction }
+        );
+        const countRows = await this.sequelize.query(
+          `SELECT COUNT(*) AS total
+           FROM (
+             SELECT 1
+             FROM baidu_search_term_daily_metrics
+             WHERE ${where.sql}
+             GROUP BY ${SEARCH_TERM_COLUMNS.join(', ')}
+           ) grouped_terms`,
+          {
+            replacements: where.replacements,
+            type: QueryTypes.SELECT,
+            transaction
+          }
+        );
+        totalItems = Number(countRows[0]?.total || 0);
+      }
+      const summary = exactRatioSummary
+        ? exactRatioSummary
+        : dialect === 'postgres'
+        ? exactSummary((await this.sequelize.query(
+            postgresExactSummarySql('baidu_search_term_daily_metrics', where.sql),
+            {
+              replacements: where.replacements,
+              type: QueryTypes.SELECT,
+              transaction
+            }
+          ))[0])
+        : await sqliteExactSummary({
+            sequelize: this.sequelize,
+            table: 'baidu_search_term_daily_metrics',
+            where: where.sql,
+            replacements: where.replacements,
+            transaction
+          });
       const itemKeys = new Set(items.map((item) => [
         item.external_account_id,
         item.campaign_id,
@@ -1051,7 +1219,6 @@ class MarketingAdResourceService {
           row.cost_amount_scaled_text
         );
       }
-      const totalItems = Number(countRows[0]?.total || 0);
       return {
         schemaVersion: MARKETING_AD_READ_CONTRACT.resources.searchTerms.schemaVersion,
         projectId: String(input.projectId),
@@ -1064,7 +1231,7 @@ class MarketingAdResourceService {
           costScale: Number(selected.run.cost_scale)
         },
         filter: selected.filter,
-        summary: exactSumRows(summaryRows),
+        summary,
         items: items.map((item) => {
           const key = SEARCH_TERM_COLUMNS.map((column) => item[column]).join('\u0000');
           return {

@@ -56,6 +56,16 @@ class MarketingDashboardService {
     this.clock = clock;
     this.projectAllowlist = parseProjectAllowlist(allowedProjectIds);
     this.moduleState = moduleState;
+    this.hierarchyCountCache = new Map();
+  }
+
+  rememberHierarchyCounts(key, countsPromise) {
+    this.hierarchyCountCache.delete(key);
+    this.hierarchyCountCache.set(key, countsPromise);
+    while (this.hierarchyCountCache.size > 128) {
+      this.hierarchyCountCache.delete(this.hierarchyCountCache.keys().next().value);
+    }
+    return countsPromise;
   }
 
   async getProject(projectId, transaction) {
@@ -230,38 +240,57 @@ class MarketingDashboardService {
             );
             return Number(rows[0]?.total || 0);
           };
-          const [
-            campaignFacts,
-            campaigns,
-            adGroups,
-            keywords,
-            searchTerms
-          ] = await Promise.all([
+          const hierarchyCountKey = [
+            projectId,
+            snapshotRun.id,
+            requestedFrom,
+            requestedTo
+          ].join('\u0000');
+          let countPromise = this.hierarchyCountCache.get(hierarchyCountKey);
+          if (countPromise) {
+            this.rememberHierarchyCounts(hierarchyCountKey, countPromise);
+          } else {
+            countPromise = Promise.all([
+                countFacts('baidu_campaign_daily_metrics', [
+                  'external_account_id',
+                  'campaign_id'
+                ]),
+                countFacts('baidu_ad_group_daily_metrics', [
+                  'external_account_id',
+                  'campaign_id',
+                  'ad_group_id'
+                ]),
+                countFacts('baidu_keyword_daily_metrics', [
+                  'external_account_id',
+                  'campaign_id',
+                  'ad_group_id',
+                  'keyword_id'
+                ]),
+                countFacts('baidu_search_term_daily_metrics', [
+                  'external_account_id',
+                  'campaign_id',
+                  'ad_group_id',
+                  'search_term_key'
+                ])
+              ]).then(([campaigns, adGroups, keywords, searchTerms]) => ({
+                  campaigns,
+                  adGroups,
+                  keywords,
+                  searchTerms
+                }));
+            this.rememberHierarchyCounts(hierarchyCountKey, countPromise);
+            countPromise.catch(() => {
+              if (this.hierarchyCountCache.get(hierarchyCountKey) === countPromise) {
+                this.hierarchyCountCache.delete(hierarchyCountKey);
+              }
+            });
+          }
+          const [campaignFacts, resolvedCounts] = await Promise.all([
             readCampaignFacts(),
-            countFacts('baidu_campaign_daily_metrics', [
-              'external_account_id',
-              'campaign_id'
-            ]),
-            countFacts('baidu_ad_group_daily_metrics', [
-              'external_account_id',
-              'campaign_id',
-              'ad_group_id'
-            ]),
-            countFacts('baidu_keyword_daily_metrics', [
-              'external_account_id',
-              'campaign_id',
-              'ad_group_id',
-              'keyword_id'
-            ]),
-            countFacts('baidu_search_term_daily_metrics', [
-              'external_account_id',
-              'campaign_id',
-              'ad_group_id',
-              'search_term_key'
-            ])
+            countPromise
           ]);
           metrics = campaignFacts;
-          hierarchyCounts = { campaigns, adGroups, keywords, searchTerms };
+          hierarchyCounts = resolvedCounts;
         }
 
         const activeRuns = await this.sequelize.query(

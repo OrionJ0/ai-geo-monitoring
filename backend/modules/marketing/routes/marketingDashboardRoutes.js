@@ -1,14 +1,32 @@
 const express = require('express');
+const {
+  PUBLIC_MARKETING_SERVER_CODES
+} = require('../contracts/MarketingPublicErrorContract');
 
-function sendError(res, error) {
+function sendError(res, error, operation = 'dashboard') {
   res.set('Cache-Control', 'private, no-store');
   if (Number.isSafeInteger(error?.retryAfterSeconds)) {
     res.set('Retry-After', String(error.retryAfterSeconds));
   }
-  return res.status(error?.status || 500).json({
+  const status = error?.status || 500;
+  const detailInternalFailure = [
+    'ad-hierarchy',
+    'keywords',
+    'search-terms'
+  ].includes(operation) && status >= 500;
+  const publicServerCode = PUBLIC_MARKETING_SERVER_CODES[operation]?.includes(error?.code)
+    ? error.code
+    : 'MARKETING_DASHBOARD_FAILED';
+  return res.status(status).json({
     error: {
-      code: error?.code || 'MARKETING_DASHBOARD_FAILED',
-      message: error?.status && error.status < 500
+      code: detailInternalFailure
+        ? 'MARKETING_AD_RESOURCE_FAILED'
+        : status >= 500
+          ? publicServerCode
+          : error?.code || 'MARKETING_DASHBOARD_FAILED',
+      message: detailInternalFailure
+        ? '营销广告资源暂时不可用'
+        : error?.status && error.status < 500
         ? error.message
         : '营销看板暂时不可用'
     }
@@ -75,7 +93,7 @@ function createMarketingDashboardRouter({
         error,
         startedAt
       }));
-      return sendError(res, error);
+      return sendError(res, error, 'dashboard');
     }
   });
 
@@ -122,7 +140,7 @@ function createMarketingDashboardRouter({
           error,
           startedAt
         }));
-        return sendError(res, error);
+        return sendError(res, error, 'search-terms');
       }
     }
   );
@@ -166,7 +184,7 @@ function createMarketingDashboardRouter({
           error,
           startedAt
         }));
-        return sendError(res, error);
+        return sendError(res, error, 'keywords');
       }
     }
   );
@@ -203,7 +221,7 @@ function createMarketingDashboardRouter({
           error,
           startedAt
         }));
-        return sendError(res, error);
+        return sendError(res, error, 'ad-hierarchy');
       }
     }
   );
@@ -230,7 +248,7 @@ function createMarketingDashboardRouter({
         res.set('Cache-Control', 'private, max-age=60');
         return res.json(result);
       } catch (error) {
-        return sendError(res, error);
+        return sendError(res, error, 'tongji');
       }
     }
   );
@@ -260,7 +278,7 @@ function createMarketingDashboardRouter({
         res.set('Cache-Control', 'private, max-age=60');
         return res.json(result);
       } catch (error) {
-        return sendError(res, error);
+        return sendError(res, error, 'tongji');
       }
     }
   );
@@ -308,7 +326,7 @@ function createMarketingDashboardRouter({
       }
       return res.status(202).json(run);
     } catch (error) {
-      return sendError(res, error);
+      return sendError(res, error, 'refresh');
     }
   });
 
@@ -326,7 +344,7 @@ function createMarketingDashboardRouter({
           req.params.runId
         ));
       } catch (error) {
-        return sendError(res, error);
+        return sendError(res, error, 'refresh');
       }
     }
   );

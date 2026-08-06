@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 
 const express = require('express');
@@ -221,6 +222,212 @@ test('keyword resource keeps exact full-filter summary across stable pages', asy
   assert.deepEqual(
     exactRatioOrder.items.map((item) => item.keywordId),
     ['ratio-b', 'ratio-a']
+  );
+});
+
+test('SQLite exact CPC sorting stays bounded for one thousand keyword identities', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-keywords-scale-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  await seedKeywordRevision(database.sequelize);
+  await database.sequelize.query(
+    `WITH RECURSIVE seq(x) AS (
+       SELECT 1 UNION ALL SELECT x + 1 FROM seq WHERE x < 1000
+     )
+     INSERT INTO baidu_keyword_daily_metrics (
+       id, project_id, binding_id, refresh_run_id, metric_date,
+       external_account_id, campaign_id, campaign_name,
+       ad_group_id, ad_group_name, impressions_text, clicks_text,
+       cost_amount_scaled_text, keyword_id, keyword_name,
+       targeting_type, created_at
+     )
+     SELECT
+       'scale-fact-' || x, 11, 'binding-1', 'keyword-revision', '2026-07-03',
+       'account-1', 'campaign-1', '计划一', 'group-1', '单元一',
+       CAST((x % 997) + 1 AS TEXT), CAST((x % 97) + 1 AS TEXT),
+       '900719925474099' || printf('%04d', x),
+       'scale-keyword-' || printf('%04d', x), '规模关键词 ' || x,
+       'KEYWORD', CURRENT_TIMESTAMP
+     FROM seq`
+  );
+  const service = new MarketingAdResourceService({
+    sequelize: database.sequelize,
+    snapshotSelector: new MarketingSnapshotSelector({
+      sequelize: database.sequelize
+    })
+  });
+  const startedAt = performance.now();
+  const result = await service.readKeywords({
+    projectId: '11',
+    revision: 'keyword-revision',
+    from: '2026-07-02',
+    to: '2026-07-03',
+    page: '1',
+    pageSize: '50',
+    sortBy: 'averageCpc',
+    sortOrder: 'descend'
+  });
+  const durationMs = performance.now() - startedAt;
+  assert.equal(result.pagination.totalItems, 1003);
+  assert.equal(result.items.length, 50);
+  assert.ok(durationMs < 5_000, `1000-keyword exact sort took ${durationMs}ms`);
+});
+
+test('SQLite exact ratio sorting rejects an unbounded keyword identity set', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-keywords-ratio-limit-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  await seedKeywordRevision(database.sequelize);
+  await database.sequelize.query(
+    `WITH RECURSIVE seq(x) AS (
+       SELECT 1 UNION ALL SELECT x + 1 FROM seq WHERE x <= 100
+     )
+     INSERT INTO baidu_keyword_daily_metrics (
+       id, project_id, binding_id, refresh_run_id, metric_date,
+       external_account_id, campaign_id, campaign_name,
+       ad_group_id, ad_group_name, impressions_text, clicks_text,
+       cost_amount_scaled_text, keyword_id, keyword_name,
+       targeting_type, created_at
+     )
+     SELECT
+       'limit-fact-' || left_seq.x || '-' || right_seq.x,
+       11, 'binding-1', 'keyword-revision', '2026-07-03',
+       'account-1', 'campaign-1', '计划一', 'group-1', '单元一',
+       '1', '1', '1',
+       'limit-keyword-' || left_seq.x || '-' || right_seq.x,
+       '规模关键词 ' || left_seq.x || '-' || right_seq.x,
+       'KEYWORD', CURRENT_TIMESTAMP
+     FROM seq left_seq CROSS JOIN seq right_seq`
+  );
+  const service = new MarketingAdResourceService({
+    sequelize: database.sequelize,
+    snapshotSelector: new MarketingSnapshotSelector({
+      sequelize: database.sequelize
+    })
+  });
+
+  await assert.rejects(
+    service.readKeywords({
+      projectId: '11',
+      revision: 'keyword-revision',
+      from: '2026-07-02',
+      to: '2026-07-03',
+      sortBy: 'averageCpc',
+      sortOrder: 'descend'
+    }),
+    {
+      code: 'MARKETING_AD_RESOURCE_SORT_SCOPE_TOO_LARGE',
+      status: 422,
+      message: '精确比率排序范围过大，请缩小关键词筛选范围'
+    }
+  );
+});
+
+test('SQLite exact ratio sorting enforces its 2k identity and 5k fact budgets', async (t) => {
+  const database = await createMarketingTestDatabase('marketing-keywords-ratio-budgets-');
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize);
+  await seedKeywordRevision(database.sequelize);
+  await database.sequelize.query(
+    `WITH RECURSIVE identities(x) AS (
+       SELECT 1 UNION ALL SELECT x + 1 FROM identities WHERE x < 2000
+     )
+     INSERT INTO baidu_keyword_daily_metrics (
+       id, project_id, binding_id, refresh_run_id, metric_date,
+       external_account_id, campaign_id, campaign_name,
+       ad_group_id, ad_group_name, impressions_text, clicks_text,
+       cost_amount_scaled_text, keyword_id, keyword_name,
+       targeting_type, created_at
+     )
+     SELECT
+       'identity-budget-' || x, 11, 'binding-1', 'keyword-revision', '2026-07-03',
+       'account-1', 'campaign-1', '计划一', 'group-1', '单元一',
+       CAST((x % 997) + 1 AS TEXT), CAST((x % 97) + 1 AS TEXT),
+       CAST(9007199254740000 + x AS TEXT),
+       'identity-budget-' || x, '实体边界 ' || x,
+       'KEYWORD', CURRENT_TIMESTAMP
+     FROM identities`
+  );
+  await database.sequelize.query(
+    `WITH RECURSIVE identities(x) AS (
+       SELECT 1 UNION ALL SELECT x + 1 FROM identities WHERE x < 1000
+     ), days(day) AS (
+       SELECT 0 UNION ALL SELECT day + 1 FROM days WHERE day < 4
+     )
+     INSERT INTO baidu_keyword_daily_metrics (
+       id, project_id, binding_id, refresh_run_id, metric_date,
+       external_account_id, campaign_id, campaign_name,
+       ad_group_id, ad_group_name, impressions_text, clicks_text,
+       cost_amount_scaled_text, keyword_id, keyword_name,
+       targeting_type, created_at
+     )
+     SELECT
+       'fact-budget-' || x || '-' || day,
+       11, 'binding-1', 'keyword-revision', date('2026-07-01', '+' || day || ' day'),
+       'account-1', 'campaign-1', '计划一', 'group-1', '单元一',
+       '10', '2', '7', 'fact-budget-' || x, '事实边界 ' || x,
+       'KEYWORD', CURRENT_TIMESTAMP
+     FROM identities CROSS JOIN days`
+  );
+  const service = new MarketingAdResourceService({
+    sequelize: database.sequelize,
+    snapshotSelector: new MarketingSnapshotSelector({
+      sequelize: database.sequelize
+    })
+  });
+
+  for (const [query, totalItems] of [
+    ['实体边界', 2000],
+    ['事实边界', 1000]
+  ]) {
+    const readBoundary = () => service.readKeywords({
+      projectId: '11',
+      revision: 'keyword-revision',
+      from: '2026-07-01',
+      to: '2026-07-05',
+      query,
+      pageSize: '50',
+      sortBy: 'averageCpc',
+      sortOrder: 'descend'
+    });
+    assert.equal((await readBoundary()).pagination.totalItems, totalItems);
+    const durations = [];
+    for (let sample = 0; sample < 3; sample += 1) {
+      const startedAt = performance.now();
+      const result = await readBoundary();
+      durations.push(performance.now() - startedAt);
+      assert.equal(result.pagination.totalItems, totalItems);
+    }
+    durations.sort((left, right) => left - right);
+    const p95Ms = durations[Math.ceil(durations.length * 0.95) - 1];
+    assert.ok(p95Ms < 750, `${query} boundary sort P95 took ${p95Ms}ms`);
+  }
+
+  await database.sequelize.query(
+    `INSERT INTO baidu_keyword_daily_metrics (
+      id, project_id, binding_id, refresh_run_id, metric_date,
+      external_account_id, campaign_id, campaign_name,
+      ad_group_id, ad_group_name, impressions_text, clicks_text,
+      cost_amount_scaled_text, keyword_id, keyword_name,
+      targeting_type, created_at
+    ) VALUES (
+      'fact-budget-overflow', 11, 'binding-1', 'keyword-revision', '2026-07-06',
+      'account-1', 'campaign-1', '计划一', 'group-1', '单元一',
+      '1', '1', '1', 'fact-budget-1', '事实边界 1',
+      'KEYWORD', CURRENT_TIMESTAMP
+    )`
+  );
+  await assert.rejects(
+    service.readKeywords({
+      projectId: '11',
+      revision: 'keyword-revision',
+      from: '2026-07-01',
+      to: '2026-07-06',
+      query: '事实边界',
+      sortBy: 'averageCpc',
+      sortOrder: 'descend'
+    }),
+    { code: 'MARKETING_AD_RESOURCE_SORT_SCOPE_TOO_LARGE', status: 422 }
   );
 });
 

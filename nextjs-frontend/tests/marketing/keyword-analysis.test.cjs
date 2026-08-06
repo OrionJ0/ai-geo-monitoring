@@ -271,7 +271,9 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(hookSource, /assertMarketingDashboardRootResponse\(response\.data, projectId\)/);
   assert.match(hookSource, /\/keywords/);
   assert.match(hookSource, /const revision = response\.data\.revision/);
-  assert.match(hookSource, /Promise\.allSettled/);
+  assert.match(hookSource, /const currentResult = await currentPromise/);
+  assert.match(hookSource, /state: 'PENDING'/);
+  assert.match(hookSource, /previous = await previousPromise/);
   assert.match(hookSource, /from:\s*period\.previousFrom/);
   assert.match(hookSource, /to:\s*period\.previousTo/);
   assert.match(hookSource, /page:\s*resourceQuery\.page/);
@@ -280,13 +282,22 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(hookSource, /pageSize:\s*1/);
   assert.match(hookSource, /previousSummaryCache\.read/);
   assert.match(hookSource, /keywordPreviousSummaryKey/);
+  assert.match(hookSource, /activePreviousRequest\.current\?\.controller\.abort\(\)/);
+  assert.match(hookSource, /activePreviousRequest\.current\.key !== previousKey/);
+  assert.match(hookSource, /activePreviousRequest\.current\.key !== predictedPreviousKey/);
+  assert.match(hookSource, /clampMarketingDateRange\(dateRange, cachedCoverage\)/);
+  assert.doesNotMatch(hookSource, /requestedPreviousScope|effectivePreviousScope|scope: effectivePreviousScope/);
+  assert.match(hookSource, /previousSummaryCache\.clear\(\)/);
+  assert.match(hookSource, /signal:\s*previousController\.signal/);
   assert.doesNotMatch(previousSummaryCacheSource, /pageSize|sortBy|sortOrder/);
   assert.match(hookSource, /requestId !== requestSequence\.current/);
+  assert.match(hookSource, /currentRequestController\.current\?\.abort\(\)/);
   assert.match(hookSource, /assertMarketingKeywordResourceResponse/);
   assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);
   assert.match(pageSource, /analysis\.warning/);
-  assert.match(pageSource, /!pageError && analysis\.warning/);
-  assert.match(pageSource, /shellLoading \|\| analysis\.loading \|\| !model/);
+  assert.match(pageSource, /!blockingPageError && analysis\.warning/);
+  assert.match(pageSource, /shellLoading \|\| !model/);
+  assert.match(pageSource, /setResourceSearchValue\(searchValue\);\s*setPage\(1\);/);
 
   assert.match(hookSource, /NEXT_PUBLIC_KEYWORD_ANALYSIS_FIXTURE/);
   assert.match(hookSource, /process\.env\.NODE_ENV !== 'production'/);

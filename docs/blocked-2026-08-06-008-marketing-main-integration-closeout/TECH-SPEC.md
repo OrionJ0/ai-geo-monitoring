@@ -33,16 +33,33 @@ OpenAPI 3.1/JSON Schema 2020-12 校验。优先复用现有依赖；如现有栈
 `page/pageSize` 和排序。hook 在身份未变化时复用进行中或已完成请求；项目、revision、
 日期或业务筛选变化时失效。失败结果只保留到同一身份的显式刷新，显式刷新会强制
 重试；请求 generation 仍是唯一页面状态写入门禁，迟到响应不得覆盖新状态。
+进行中的上期请求只保留 `previousKey` 与 `AbortController`，不存在第二套 scope 真值；
+已有 Dashboard coverage 只用于提前计算同一个 `previousKey`，最终响应仍负责权威校验。
 
-## 4. 百度报告端点唯一真值
+## 4. 公开错误与 SQLite 精确排序边界
+
+四个读取入口和刷新入口只允许公开版本化错误合同中的状态码、固定文案和必要的
+`Retry-After`；未知 SQL、驱动或上游错误统一脱敏。OpenAPI 的成功与典型错误示例
+必须来自同一公开错误合同。
+
+SQLite 的 CTR/CPC 精确排序固定为最多 2,000 个事实身份、5,000 行日事实，超出返回
+`MARKETING_AD_RESOURCE_SORT_SCOPE_TOO_LARGE`。有界路径只查询 identity、展示字段和三个
+精确指标字段，在一次 Node `Map`/`BigInt` 遍历中同时生成排序项与完整筛选范围 summary。
+边界性能测试排除造数，预热后分别采样三次并以 750ms P95 阻止秒级回归。
+
+## 5. 百度报告端点唯一真值
 
 `backend/modules/marketing/contracts/baidu/` manifest 继续声明允许的报告端点。
 `BaiduSearchAdsClient` 只引用 manifest/安全内核暴露的端点标识，不再写第二个 URL
 字面量。共享 HTTP 内核仍负责最终 allowlist 校验，客户端不得获得放宽安全策略的入口。
 
-## 5. 发布与 main 对齐
+## 6. 发布与 main 对齐
 
 发布前重新获取并比较本地 `main`、`origin/main`、服务器 `HEAD`、公开 revision
 和 0805-002 状态。若 `main` 前进，先把候选重放到新 `main` 并重跑受影响验证。
 正式发布使用 Git Bundle、systemd 和项目部署入口。生产通过后将本地 `main` 与
 `origin/main` 快进到同一已发布提交；禁止强推、非快进回退和服务器源码直改。
+
+当前发布被 0805-002 的 `competitor_snapshot` 正式迁移门禁阻塞。本需求不得跨范围修改
+该迁移；只能在 0805-002 独立证明旧生产 schema 可升级、audit 无缺列、scheduler 与
+`/ready` 正常且默认 v4 冒烟通过后重新桥接并发布。

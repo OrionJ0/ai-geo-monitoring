@@ -246,6 +246,8 @@ function buildDensityRows(points: KeywordScatterPoint[], xMax: number, yMax: num
 
 export default function KeywordAnalysisPage() {
   const pageRef = useRef<HTMLElement>(null);
+  const retainedErrorRetryButton = useRef<HTMLButtonElement>(null);
+  const restoreFocusAfterRetry = useRef(false);
   const fixtureEnabled = KEYWORD_ANALYSIS_FIXTURE_ENABLED;
   const defaultContext = useDefaultProjectContext();
   const marketing = useMarketingCapabilities(!fixtureEnabled);
@@ -257,6 +259,7 @@ export default function KeywordAnalysisPage() {
   const [costRange, setCostRange] = useState<KeywordCostRange>('all');
   const [anomalyFilter, setAnomalyFilter] = useState<KeywordAnomaly>('all');
   const [searchValue, setSearchValue] = useState('');
+  const [resourceSearchValue, setResourceSearchValue] = useState('');
   const [benchmarkMode, setBenchmarkMode] = useState<BenchmarkMode>('median');
   const [chartMode, setChartMode] = useState<ChartMode>('scatter');
   const [selectedKeywordKey, setSelectedKeywordKey] = useState<string | null>(null);
@@ -266,6 +269,15 @@ export default function KeywordAnalysisPage() {
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('descend');
 
   useEffect(() => setFixtureState(fixtureStateFromLocation()), []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (resourceSearchValue === searchValue) return;
+      setResourceSearchValue(searchValue);
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [resourceSearchValue, searchValue]);
 
   const projectId = fixtureEnabled
     ? 'fixture-market-workspace'
@@ -278,9 +290,9 @@ export default function KeywordAnalysisPage() {
     pageSize,
     sortBy,
     sortOrder,
-    query: searchValue,
+    query: resourceSearchValue,
     adGroupId: unitFilter === 'all' ? undefined : unitFilter
-  }), [page, pageSize, searchValue, sortBy, sortOrder, unitFilter]);
+  }), [page, pageSize, resourceSearchValue, sortBy, sortOrder, unitFilter]);
   const analysis = useKeywordAnalysis({
     projectId,
     projectName: defaultContext.project?.name,
@@ -367,7 +379,7 @@ export default function KeywordAnalysisPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [anomalyFilter, costRange, dateRange, searchValue, stageFilter, tagFilter, unitFilter]);
+  }, [anomalyFilter, costRange, dateRange, stageFilter, tagFilter, unitFilter]);
 
   useEffect(() => {
     if (!scatterPoints.length) {
@@ -392,6 +404,8 @@ export default function KeywordAnalysisPage() {
       tableBody.tabIndex = 0;
       tableBody.setAttribute('aria-label', '关键词明细，可横向和纵向滚动');
     }
+    const activePage = pageElement.querySelector<HTMLElement>('.ant-pagination-item-active');
+    activePage?.setAttribute('aria-current', 'page');
   }, [analysis.loading, filteredRows.length, pageSize]);
 
   const clearFilters = () => {
@@ -616,6 +630,20 @@ export default function KeywordAnalysisPage() {
         ? '广告关键词数据尚未开放。'
         : analysis.error)
     : analysis.error;
+  const blockingPageError = pageError && !model ? pageError : '';
+  const retainedPageError = pageError && model ? pageError : '';
+
+  useEffect(() => {
+    if (!restoreFocusAfterRetry.current || analysis.loading) return;
+    restoreFocusAfterRetry.current = false;
+    if (retainedPageError) {
+      retainedErrorRetryButton.current?.focus();
+      return;
+    }
+    pageRef.current
+      ?.querySelector<HTMLElement>('.ant-pagination-item-active')
+      ?.focus();
+  }, [analysis.loading, model?.pagination.page, retainedPageError]);
 
   return (
     <section ref={pageRef} className={styles.page} aria-label="广告关键词">
@@ -642,7 +670,7 @@ export default function KeywordAnalysisPage() {
         />
       </div>
 
-      {!pageError && analysis.warning ? (
+      {!blockingPageError && analysis.warning ? (
         <Alert
           type="warning"
           showIcon
@@ -651,7 +679,7 @@ export default function KeywordAnalysisPage() {
         />
       ) : null}
 
-      {!pageError && model?.previousState === 'ERROR' ? (
+      {!blockingPageError && model?.previousState === 'ERROR' ? (
         <Alert
           type="warning"
           showIcon
@@ -660,24 +688,60 @@ export default function KeywordAnalysisPage() {
         />
       ) : null}
 
-      {pageError ? (
+      {blockingPageError ? (
         <div className={styles.moduleStack}>
           <Alert
             type="error"
             showIcon
-            title={pageError}
+            title={blockingPageError}
             action={<Button size="small" onClick={() => void analysis.reload()}>重试</Button>}
           />
           <MarketingMetricPlaceholderGrid
             items={KEYWORD_SUMMARY_PLACEHOLDERS}
             ariaLabel="关键词覆盖摘要"
-            missingReason={pageError}
+            missingReason={blockingPageError}
           />
         </div>
-      ) : shellLoading || analysis.loading || !model ? (
+      ) : shellLoading || !model ? (
         <LoadingPage />
       ) : (
         <div className={styles.moduleStack}>
+          <span
+            className={sharedStyles.visuallyHidden}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {analysis.loading
+              ? `正在加载关键词第 ${page} 页`
+              : analysis.previousLoading
+                ? '正在加载上一周期关键词比较'
+              : retainedPageError
+                ? ''
+                : `关键词第 ${model.pagination.page} 页加载完成，显示 ${filteredRows.length} 条`}
+          </span>
+          {retainedPageError ? (
+            <Alert
+              type="error"
+              showIcon
+              title={retainedPageError}
+              action={(
+                <Button
+                  ref={retainedErrorRetryButton}
+                  size="small"
+                  loading={analysis.loading}
+                  aria-disabled={analysis.loading}
+                  onClick={() => {
+                    if (analysis.loading) return;
+                    restoreFocusAfterRetry.current = true;
+                    void analysis.reload();
+                  }}
+                >
+                  重试
+                </Button>
+              )}
+            />
+          ) : null}
           <MarketingMetricGrid ariaLabel="关键词覆盖摘要">
             <MarketingMetricCard
               title="广告关键词数"
@@ -1117,12 +1181,14 @@ export default function KeywordAnalysisPage() {
             </div>
             <Table<KeywordAnalysisRow>
               aria-label="全部关键词明细表"
+              aria-busy={analysis.loading}
               className={styles.keywordTable}
               rowKey="key"
               columns={columns}
               dataSource={filteredRows}
               tableLayout="fixed"
               size="middle"
+              loading={analysis.loading}
               scroll={{ x: 1186, y: 312 }}
               rowClassName={(record) => record.key === selectedKeywordKey ? styles.selectedRow : ''}
               onRow={(record) => ({
@@ -1147,7 +1213,7 @@ export default function KeywordAnalysisPage() {
                 )
               }}
               pagination={{
-                current: page,
+                current: model.pagination.page,
                 pageSize,
                 total: model.pagination.totalItems,
                 showSizeChanger: true,

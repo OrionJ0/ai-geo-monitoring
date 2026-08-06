@@ -19,7 +19,9 @@
       "defaultPage": 1,
       "defaultPageSize": 50,
       "maximumPageSize": 200,
-      "maximumQueryLength": 200
+      "maximumQueryLength": 200,
+      "maximumExactRatioSortItems": 2000,
+      "maximumExactRatioSortFacts": 5000
     },
     "filterMaximumLengths": {
       "accountId": 512,
@@ -68,6 +70,7 @@
       "snapshotUnavailable": "MARKETING_SNAPSHOT_UNAVAILABLE",
       "dateOutOfRange": "DASHBOARD_DATE_OUT_OF_RANGE",
       "filterWithoutSnapshot": "DASHBOARD_FILTER_WITHOUT_SNAPSHOT",
+      "sortScopeTooLarge": "MARKETING_AD_RESOURCE_SORT_SCOPE_TOO_LARGE",
       "internalFailure": "MARKETING_AD_RESOURCE_FAILED"
     }
   },
@@ -102,7 +105,8 @@
           "422": { "$ref": "#/components/responses/ErrorResponse" },
           "500": { "$ref": "#/components/responses/ServerErrorResponse" },
           "502": { "$ref": "#/components/responses/ErrorResponse" },
-          "503": { "$ref": "#/components/responses/UnavailableResponse" }
+          "503": { "$ref": "#/components/responses/UnavailableResponse" },
+          "504": { "$ref": "#/components/responses/UnavailableResponse" }
         }
       }
     },
@@ -577,7 +581,7 @@
         "additionalProperties": false,
         "required": ["code", "message"],
         "properties": {
-          "code": { "type": "string", "description": "稳定机器错误码；可能包含刷新协调和百度上游错误码。", "examples": ["MARKETING_REVISION_REQUIRED", "MARKETING_AD_RESOURCE_QUERY_INVALID", "DASHBOARD_FILTER_WITHOUT_SNAPSHOT", "BAIDU_REPORT_API_FAILED"] },
+          "code": { "type": "string", "description": "稳定机器错误码；可能包含刷新协调和百度上游错误码。", "examples": ["MARKETING_REVISION_REQUIRED", "MARKETING_AD_RESOURCE_QUERY_INVALID", "DASHBOARD_FILTER_WITHOUT_SNAPSHOT", "BAIDU_REPORT_FAILED"] },
           "message": { "type": "string" }
         }
       },

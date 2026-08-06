@@ -129,8 +129,7 @@ class MarketingOnDemandDashboardService {
           ...current,
           activeRun: {
             runId: run.runId,
-            status: run.status,
-            coverage: run.coverage
+            status: run.status
           }
         };
       } catch (error) {

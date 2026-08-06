@@ -47,7 +47,7 @@ export type KeywordAnalysisModel = Omit<
     clicks: string;
     costAmountScaled: string;
   };
-  previousState: 'READY' | 'UNAVAILABLE' | 'ERROR';
+  previousState: 'READY' | 'PENDING' | 'UNAVAILABLE' | 'ERROR';
   previousSummary: {
     impressions: string;
     clicks: string;
@@ -72,7 +72,7 @@ export type KeywordPreviousResourceResult =
       reason: '';
     }
   | {
-      state: 'UNAVAILABLE' | 'ERROR';
+      state: 'PENDING' | 'UNAVAILABLE' | 'ERROR';
       resource: null;
       reason: string;
     };
