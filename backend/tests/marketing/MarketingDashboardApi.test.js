@@ -15,6 +15,9 @@ const {
 const openApi = require(
   '../../modules/marketing/contracts/goodieai-marketing-ad-read.openapi.json'
 );
+const {
+  assertMarketingOpenApiResponse
+} = require('./helpers/assertMarketingOpenApiResponse');
 
 test('dashboard returns one revision and exact aggregates without provider calls', async (t) => {
   const database = await createMarketingTestDatabase();
@@ -75,6 +78,11 @@ test('dashboard returns one revision and exact aggregates without provider calls
     projectId: 11,
     from: '2026-07-28',
     to: '2026-07-29'
+  });
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 200,
+    payload: dashboard
   });
   assert.equal(providerCalls, 1, 'dashboard GET must not call the provider');
   assert.equal(dashboard.schemaVersion, 'marketing_dashboard_v2');

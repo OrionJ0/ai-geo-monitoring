@@ -11,6 +11,22 @@ function strictDate(value) {
     && parsed.toISOString().slice(0, 10) === value;
 }
 
+function isoDateTime(value) {
+  const candidate = typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/u.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+  const parsed = candidate instanceof Date ? candidate : new Date(candidate);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new MarketingRefreshError(
+      '指定的营销快照完成时间无效',
+      'MARKETING_SNAPSHOT_UNAVAILABLE',
+      409
+    );
+  }
+  return parsed.toISOString();
+}
+
 class MarketingSnapshotSelector {
   constructor({ sequelize }) {
     this.sequelize = sequelize;
@@ -59,6 +75,7 @@ class MarketingSnapshotSelector {
         409
       );
     }
+    run.finished_at = isoDateTime(run.finished_at);
     const requestedFrom = from ?? run.coverage_start;
     const requestedTo = to ?? run.coverage_end;
     if (
@@ -83,5 +100,6 @@ class MarketingSnapshotSelector {
 
 module.exports = {
   MarketingSnapshotSelector,
+  isoDateTime,
   strictDate
 };

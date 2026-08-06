@@ -18,6 +18,9 @@ const {
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
+const {
+  assertMarketingOpenApiResponse
+} = require('./helpers/assertMarketingOpenApiResponse');
 
 async function seedHierarchy(sequelize) {
   await sequelize.query(
@@ -105,6 +108,11 @@ test('ad hierarchy returns one exact strict tree without reading search terms', 
     revision: 'hierarchy-revision',
     from: '2026-07-02',
     to: '2026-07-03'
+  });
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/ad-hierarchy',
+    status: 200,
+    payload: result
   });
 
   assert.equal(result.schemaVersion, 'marketing_ad_hierarchy_v1');

@@ -17,6 +17,9 @@ const {
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
+const {
+  assertMarketingOpenApiResponse
+} = require('./helpers/assertMarketingOpenApiResponse');
 
 async function seedKeywordRevision(sequelize) {
   await sequelize.query(
@@ -90,6 +93,11 @@ test('keyword resource keeps exact full-filter summary across stable pages', asy
     pageSize: '2',
     sortBy: 'impressions',
     sortOrder: 'descend'
+  });
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/keywords',
+    status: 200,
+    payload: firstPage
   });
   assert.equal(firstPage.schemaVersion, 'marketing_keywords_v1');
   assert.equal(firstPage.revision, 'keyword-revision');

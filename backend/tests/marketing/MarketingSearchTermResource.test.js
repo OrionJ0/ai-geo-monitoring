@@ -17,6 +17,9 @@ const {
   createMarketingTestDatabase,
   seedConnectionAndBinding
 } = require('./helpers/createMarketingTestDatabase');
+const {
+  assertMarketingOpenApiResponse
+} = require('./helpers/assertMarketingOpenApiResponse');
 
 async function seedRun(sequelize, {
   id,
@@ -169,6 +172,11 @@ test('search-term resource pins an old revision and keeps exact database paginat
     pageSize: '2',
     sortBy: 'impressions',
     sortOrder: 'descend'
+  });
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/search-terms',
+    status: 200,
+    payload: result
   });
 
   assert.equal(result.schemaVersion, 'marketing_search_terms_v1');

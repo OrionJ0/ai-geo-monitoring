@@ -48,6 +48,8 @@
     "ws": "^8.21.1"
   },
   "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "nodemon": "^3.1.14"
   },
   "overrides": {

@@ -14,6 +14,9 @@ const {
 const {
   MARKETING_AD_READ_CONTRACT
 } = require('../../modules/marketing/contracts/MarketingAdReadContract');
+const {
+  assertMarketingOpenApiResponse
+} = require('./helpers/assertMarketingOpenApiResponse');
 
 const openApiPath = path.resolve(
   __dirname,
@@ -216,6 +219,11 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
     success: false,
     message: '未授权：缺少令牌'
   });
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 401,
+    payload: authResponse.payload
+  });
 
   const logs = [];
   const secretCanary = 'route-secret-canary';
@@ -227,11 +235,27 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
   app.use('/api/marketing', createMarketingDashboardRouter({
     dashboardService: {
       async assertAccess() {},
-      async read() { return { schemaVersion: 'marketing_dashboard_v2' }; }
+      async read(input) {
+        if (String(input.projectId) === '503') {
+          throw Object.assign(new Error('营销模块不可用'), {
+            code: 'MARKETING_MODULE_UNAVAILABLE',
+            status: 503
+          });
+        }
+        return { schemaVersion: 'marketing_dashboard_v2' };
+      }
     },
     adResourceService: {
       async readAdHierarchy() { return { campaigns: [] }; },
-      async readKeywords() { return { items: [] }; },
+      async readKeywords(input) {
+        if (input.revision === 'out-of-range') {
+          throw Object.assign(new Error('所选范围超出快照覆盖'), {
+            code: 'DASHBOARD_DATE_OUT_OF_RANGE',
+            status: 422
+          });
+        }
+        return { items: [] };
+      },
       async readSearchTerms(input) {
         if (input.revision === 'fail') {
           throw Object.assign(new Error(secretCanary), {
@@ -271,6 +295,32 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
     `${baseUrl}/api/marketing/projects/11/search-terms?revision=fail`
   );
   assert.equal(failed.status, 409);
+  const failedPayload = await failed.json();
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/search-terms',
+    status: 409,
+    payload: failedPayload
+  });
+
+  const outOfRange = await fetch(
+    `${baseUrl}/api/marketing/projects/11/keywords?revision=out-of-range`
+  );
+  assert.equal(outOfRange.status, 422);
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/keywords',
+    status: 422,
+    payload: await outOfRange.json()
+  });
+
+  const unavailable = await fetch(
+    `${baseUrl}/api/marketing/projects/503/dashboard`
+  );
+  assert.equal(unavailable.status, 503);
+  assertMarketingOpenApiResponse({
+    path: '/api/marketing/projects/{projectId}/dashboard',
+    status: 503,
+    payload: await unavailable.json()
+  });
   assert.deepEqual(logs.map(({ event, operation, status, errorCode }) => ({
     event,
     operation,
@@ -281,7 +331,9 @@ test('鉴权缺失响应与四个广告读取入口的安全结构化日志符�
     { event: 'marketing_ad_read_completed', operation: 'ad-hierarchy', status: 200, errorCode: null },
     { event: 'marketing_ad_read_completed', operation: 'keywords', status: 200, errorCode: null },
     { event: 'marketing_ad_read_completed', operation: 'search-terms', status: 200, errorCode: null },
-    { event: 'marketing_ad_read_failed', operation: 'search-terms', status: 409, errorCode: 'MARKETING_SNAPSHOT_UNAVAILABLE' }
+    { event: 'marketing_ad_read_failed', operation: 'search-terms', status: 409, errorCode: 'MARKETING_SNAPSHOT_UNAVAILABLE' },
+    { event: 'marketing_ad_read_failed', operation: 'keywords', status: 422, errorCode: 'DASHBOARD_DATE_OUT_OF_RANGE' },
+    { event: 'marketing_ad_read_failed', operation: 'dashboard', status: 503, errorCode: 'MARKETING_MODULE_UNAVAILABLE' }
   ]);
   assert.equal(logs.every((entry) => Number.isSafeInteger(entry.durationMs)), true);
   assert.doesNotMatch(JSON.stringify(logs), new RegExp(secretCanary));
