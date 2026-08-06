@@ -183,9 +183,12 @@ function recommendationQualityStats(entries, truthBySample = new Map()) {
       if (!entry?.ok || !entry.result) return;
       const truth = truthFor(truthBySample, entry.sample_id);
       if (!truth || typeof truth.recommendation !== 'boolean') return;
+      const pred = semanticFieldOf(entry.result, 'recommendation');
+      // 目标未出现（truth.mentioned=false）时预测 not_applicable 是合同正常状态，
+      // 不是降级：不进 coverage 分母、不计错误、不计降级。
+      if (pred?.status === 'not_applicable' && truth.mentioned === false) return;
       group.evaluable += 1;
       uniqueEvaluable.add(entry.sample_id);
-      const pred = semanticFieldOf(entry.result, 'recommendation');
       if (!pred || pred.status !== 'assessed' || typeof pred.value !== 'boolean') {
         group.degraded += 1;
         degraded += 1;
@@ -323,13 +326,14 @@ function rankQualityStats(entries, truthBySample = new Map()) {
       group.evaluated += 1;
       totalEvaluated.evaluated += 1;
       const pred = semanticFieldOf(entry.result, 'rank');
-      if (!pred || pred.status !== 'assessed' || pred.value === null) {
+      if (!pred || pred.status !== 'assessed') {
         group.degraded += 1;
         degraded += 1;
         degradedDetails.push(`${entry.sample_id} r${entry.repeat}: ${pred ? pred.status : 'no_structure'}`);
         return;
       }
-      if (Number(pred.value) === Number(truth.rank)) {
+      // assessed value=null 是合法判断（明确无排名）：与真值比较计错判，不计降级
+      if (pred.value !== null && Number(pred.value) === Number(truth.rank)) {
         exact += 1;
         group.exact += 1;
       }

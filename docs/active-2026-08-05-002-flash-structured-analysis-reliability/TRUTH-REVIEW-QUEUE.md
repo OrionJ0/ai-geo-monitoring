@@ -110,7 +110,7 @@
 
 ## 阻塞状态
 
-- issue 013：`blocked`，**探针就绪、认证未就绪**——数据所有者已确认 S03/S21/S46/S50 内容裁决、S53 三轨拆分裁决（均仍为 pending_review，不冒充签字）；剩余认证阻塞是真实复核人签字 + 评测器补全（排名真值 ≥20、推荐 F1/情绪/排名/Token 门禁、target_mapping 评分、`recommendation=null` 兼容）。
-- issue 014：**in_progress（2026-08-06 启动，不再依赖 013 签字）**；12 条高风险样本 × v5-json/v4-current × 3 次 = 72 次真实调用。
-- issue 015：未启动；依赖 014 通过 + 013 最终签字与评测器补全。
-- issue 010：继续 blocked；正式入口仍走 v4。
+- issue 013：`completed`——2026-08-06 数据所有者授权冻结（reviewer=OrionJ0，55 条 confirmed，preflight PASS），评测合同与评测器补全完成。
+- issue 014：`completed`——结构探针通过 + rev2 最后一轮提示词回归通过，冻结 v5-json-rev2。
+- issue 015：`completed`（门禁执行）——324 次真实调用全量结果：**不批准硬切**。硬门槛关系 precision 92.39% < 95% FAIL；语义门槛推荐 F1 83.69% < 95% FAIL；情绪 accuracy 100% PASS；排名 NOT EVALUABLE（6 条真值，证据不足，非阻塞观察指标）；target_mapping 0/3 报告。结构轨道全绿（完成率 100%、target_fact 100%、evidence/grounding 0、Token PASS）。真实缺口：推荐口径过宽（FP 集中 S46/S29/S54/S16/S27/S49）+ 竞品关系判定。
+- issue 010：继续 blocked——全量门禁未通过，正式入口仍走 v4，v5 未默认，旧实现未退役。

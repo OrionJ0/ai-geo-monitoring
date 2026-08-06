@@ -919,3 +919,32 @@ test('015 semanticFieldOf：v5 合同字段状态与值提取；无结构返回 
   assert.equal(semanticFieldOf(result, 'sentiment'), null);
   assert.equal(semanticFieldOf({}, 'recommendation'), null);
 });
+
+test('015 推荐指标：目标未出现（mentioned=false）预测 not_applicable 是合同正常状态，不计降级、不进 coverage 分母', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', recommendation: false, mentioned: false },
+    { sample_id: 'S02', recommendation: true, mentioned: true }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rec: { status: 'not_applicable', value: null } }),
+    v5Entry({ sampleId: 'S02', rec: { status: 'assessed', value: true } })
+  ];
+  const stats = recommendationQualityStats(entries, truths);
+  assert.equal(stats.degraded_count, 0);
+  assert.equal(stats.coverage, 1);
+  assert.equal(stats.evaluated_samples, 1);
+  assert.equal(stats.tp, 1);
+  assert.equal(stats.f1, 1);
+});
+
+test('015 排名指标：assessed value=null（明确无排名）计错判而非降级', () => {
+  const truths = makeTruths([{ sample_id: 'S01', rank: 1 }]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rank: { status: 'assessed', value: null } })
+  ];
+  const stats = rankQualityStats(entries, truths);
+  assert.equal(stats.degraded_count, 0);
+  assert.equal(stats.coverage, 1);
+  assert.equal(stats.exact_accuracy, 0);
+  assert.equal(stats.exact_matches, 0);
+});

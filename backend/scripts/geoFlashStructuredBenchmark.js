@@ -101,6 +101,12 @@ function parseArgs(argv = process.argv.slice(2)) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+  // 重复簇去重运行设施（issue 015 冻结执行）：按 manifest duplicate_group 规则，
+  // 同一回答只保留代表样本（如 S18/S19/S20 dup1 → 排除 S19/S20），簇权重 1。
+  const excludeSampleIds = String(value('--exclude-sample-ids') || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 10) {
     throw new Error('--repeats 必须是 1 至 10 的整数');
   }
@@ -116,6 +122,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     concurrency,
     limit,
     sampleIds: [...new Set(sampleIds)],
+    excludeSampleIds: [...new Set(excludeSampleIds)],
     refresh: argv.includes('--refresh'),
     recalculateCached: argv.includes('--recalculate-cached'),
     baselineDir: path.resolve(value('--dir') || DEFAULT_BASELINE_DIR),
@@ -595,7 +602,13 @@ async function main() {
     const missing = options.sampleIds.filter((sampleId) => !found.has(sampleId));
     throw new Error(`--sample-ids 包含未知样本：${missing.join(',')}`);
   }
-  const samples = options.limit ? selectedSamples.slice(0, options.limit) : selectedSamples;
+  // 重复簇去重：排除非代表样本（S18/S19/S20 dup1 只保留 S18），簇权重 1
+  const excluded = new Set(options.excludeSampleIds);
+  const dedupedSamples = selectedSamples.filter((sample) => !excluded.has(sample.sample_id));
+  if (dedupedSamples.length !== selectedSamples.length - excluded.size) {
+    throw new Error(`--exclude-sample-ids 包含未知样本：${[...excluded].filter((id) => !selectedSamples.some((sample) => sample.sample_id === id)).join(',')}`);
+  }
+  const samples = options.limit ? dedupedSamples.slice(0, options.limit) : dedupedSamples;
   fs.mkdirSync(options.outputDir, { recursive: true });
   fs.writeFileSync(path.join(options.outputDir, 'manifest.json'), JSON.stringify({
     generated_at: new Date().toISOString(),
