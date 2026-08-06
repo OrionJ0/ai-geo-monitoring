@@ -912,6 +912,16 @@ D 先执行小型能力探针。若官方接口拒绝 schema、工具选择与�
 - 同一样本/重复的 A 与 C 结果用配对差值报告，不把不同样本平均值直接比较。
 - 报告总体结果及各分层结果；小样本分层明确样本数，不作过度推断。
 
+### 7.5.1 issue 015 语义门禁执行合同（2026-08-06 数据所有者裁决）
+
+评测器按四组门禁执行，全部指标按**单次预测**计分（每次运行是一条预测）；重复运行只报告逐次分数与方差，**禁止多数投票改写单次预测**。
+
+- **硬门槛**（结构正确性）：整条完成率；`target_fact` 可用率与 presence/count 准确率 100%、目标假阳性 0；mention grounding（span 与原文逐字校验）与证据引用错误（`analysis_evidence_reference_invalid`）为 0；已输出竞品关系 precision≥0.95；Token 中位≤基线×1.5、P95≤基线×2。
+- **语义门槛**（仅 EVALUATED 判定）：推荐 precision/recall/F1 + assessed coverage；情绪逐次预测准确率 + 3×3 混淆矩阵；明确排名 exact-match（**仅评估真值 rank 非空的样本**，不人为扩充/伪造排名样本）；`target_mapping` 状态判断准确率与成功映射准确率分别统计。每项指标始终报告分子、分母与样本 ID。
+- **诚实降级**：预测侧非 assessed（unresolved/unavailable）单独计数（degraded），**不算错误预测、不得伪装成 assessed**；降级只降低 assessed coverage。`recommendation=null`（语义 unavailable）必须保留 null，禁止转成 false，不进入推荐混淆。
+- **NOT_EVALUABLE**：唯一已复核真值样本数 < 20 时（排名当前仅 6 条、target_mapping 仅 1 条），该指标输出 NOT_EVALUABLE——不判 PASS、不阻塞其他指标运行，仍报告可计算的准确率、分母与样本 ID。真值可后续补充真实回答，但不得为了凑数改变冻结答案或把编号列表当排名。
+- **重复运行**：三次重复逐次计分并报告 repeat_variance（min/max/mean/stddev），只用于测量方差，不通过多数投票合并为单次预测。
+
 ### 7.6 预注册上线门槛
 
 门槛直接沿用 PRD AC-009 至 AC-028，关键硬门槛为：
@@ -949,7 +959,7 @@ assessed 幸存样本中的推荐 21/21、情绪 21/21 和排名 4/4 不能证�
 
 ## 8. 实现切片
 
-当前进度：对应 issue 001–008 的 U1–U6 已完成；U7/issue 009 门槛失败，U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 与 U10/issue 012 已关闭。U11/issue 013 三轮评测合同返工完成：strict truth schema（truth_version/dispute、目标字段类型/范围/跨字段不变量、entity type enum、confirmed 目标字段完整性、`mentioned=false → recommendation=false`、实体 type 必填）已 fail-closed；`relationQualityStats` 按 span 对齐后的 truth entity 计分（无对齐关系不判 TP）；`entityQualityStats` span-based；阶段 1 失败降级保留目标事实；编号列表不推导排名；排序表达须直接修饰目标（“首选海康威视，广拓备选”不推导 rank）；竞品按 occurrence 计数。AI 内容裁决（55 条目标 + 17 条实体/关系修正）已应用为 pending_review 并通过严格校验；S53 按数据所有者裁决拆三轨（target_fact=true/1、target_mapping=conflicting_identity、target_semantics=unavailable），truth 新增 target_mapping 真值字段。剩余阻塞是真实复核人签字（见 AI-TRUTH-ADJUDICATION.md、TRUTH-REVIEW-QUEUE.md）。U12/issue 014–015 必须等待数据所有者确认、真实复核人签字和 truth preflight 全部通过。
+当前进度：对应 issue 001–008 的 U1–U6 已完成；U7/issue 009 门槛失败，U8/issue 010 未开始，正式生产仍走 v4。U9/issue 011 与 U10/issue 012 已关闭。U11/issue 013 三轮评测合同返工完成：strict truth schema（truth_version/dispute、目标字段类型/范围/跨字段不变量、entity type enum、confirmed 目标字段完整性、`mentioned=false → recommendation=false`、实体 type 必填）已 fail-closed；`relationQualityStats` 按 span 对齐后的 truth entity 计分（无对齐关系不判 TP）；`entityQualityStats` span-based；阶段 1 失败降级保留目标事实；编号列表不推导排名；排序表达须直接修饰目标（“首选海康威视，广拓备选”不推导 rank）；竞品按 occurrence 计数。AI 内容裁决（55 条目标 + 17 条实体/关系修正）已应用为 pending_review 并通过严格校验；S53 按数据所有者裁决拆三轨（target_fact=true/1、target_mapping=conflicting_identity、target_semantics=unavailable），truth 新增 target_mapping 真值字段。U12/issue 014 已关闭：结构探针通过（确定性轨道全绿）+ rev2 最后一轮提示词回归全过（S12 false+positive 3/3），冻结 `v5-json-rev2` 作为 015 语义提示词版本；不再有 rev3/rev4、不引入多数表决。U12/issue 015 评测器补全已完成（代码，见 7.5.1 四组门禁合同）：推荐 PRF+coverage、情绪准确率+混淆矩阵、排名 exact accuracy（NOT_EVALUABLE 合同，不伪造排名样本）、target_mapping 状态/映射准确率、grounding/evidence 校验、诚实降级单独计数、三次重复逐次计分与方差、Token 门禁、`recommendation=null` 保留 unavailable（labels 合并与 `addComparison` 均不再转 false）。剩余人工前置条件：真实复核人签字（reviewer/reviewed_at + confirmed + 更名 truth.jsonl + truth preflight，见 AI-TRUTH-ADJUDICATION.md、TRUTH-REVIEW-QUEUE.md）→ 冻结评测器 commit → 独立运行 41×3 全量门禁 → 按门禁决定是否解锁 010。正式入口仍 v4。
 
 ### U1. 冻结真实语料与评测合同
 

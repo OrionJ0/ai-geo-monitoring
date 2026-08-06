@@ -464,8 +464,12 @@ function addComparison(stats, label, actual) {
   if (actualMentions === label.mentions) stats.mentions.exact += 1;
   if (Math.abs(actualMentions - label.mentions) <= 1) stats.mentions.within1 += 1;
 
-  addConfusion(stats.recommended, actualRecommended, label.recommended);
-  if (actualRecommended !== label.recommended) disagreements.push('recommended');
+  // issue 015：recommendation=null（语义 unavailable，如 S53）保留 unavailable，
+  // 不进入 recommended 混淆（禁止当 false 计 FP/FN）——unavailable 与明确不推荐不同。
+  if (label.recommended !== null) {
+    addConfusion(stats.recommended, actualRecommended, label.recommended);
+    if (actualRecommended !== label.recommended) disagreements.push('recommended');
+  }
 
   if (label.rank !== null || actualRank !== null) {
     stats.rank.evaluated += 1;

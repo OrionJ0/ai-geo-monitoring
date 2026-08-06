@@ -610,3 +610,312 @@ test('第三轮：truth target_mapping 真值结构校验与 conflicting_identit
   // 不带 target_mapping 的记录仍然合法（可选字段）
   assert.deepEqual(validateTruthEntry(base, sampleById), []);
 });
+
+// ---- issue 015 语义门禁指标（四组合同）：推荐/情绪/排名/target_mapping/grounding ----
+
+const {
+  groundingEvidenceStats,
+  rankQualityStats,
+  recommendationQualityStats,
+  semanticFieldOf,
+  sentimentQualityStats,
+  spread,
+  targetMappingQualityStats
+} = require('../services/GeoFlashStructuredBenchmarkService');
+
+function confirmedTruth(overrides = {}) {
+  return {
+    review_status: 'confirmed',
+    reviewer: 'tester',
+    reviewed_at: '2026-08-06T00:00:00Z',
+    recommendation: true,
+    rank: 1,
+    sentiment: 'positive',
+    ...overrides
+  };
+}
+
+function v5Entry({ sampleId = 'S01', repeat = 1, rec = { status: 'assessed', value: true }, rank = { status: 'assessed', value: 1 }, sent = { status: 'assessed', value: 'positive' }, mapping = { status: 'resolved', target_entity_id: 'E001' }, codes = [], mentions = [], ok = true } = {}) {
+  return {
+    sample_id: sampleId,
+    repeat,
+    ok,
+    total_tokens: 1000,
+    result: {
+      brand_mentioned: true,
+      analysis_structure: {
+        target_semantics: { recommendation: rec, rank, sentiment: sent },
+        target_mapping: mapping,
+        diagnostics: { error_codes: codes.map((code) => ({ code })) },
+        target_mentions: mentions,
+        mentions: []
+      }
+    }
+  };
+}
+
+function makeTruths(specs) {
+  return new Map(specs.map((spec) => [spec.sample_id, confirmedTruth(spec)]));
+}
+
+test('015 推荐指标：正例 TP/TN 计分与 F1=1', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', recommendation: true },
+    { sample_id: 'S02', recommendation: false }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rec: { status: 'assessed', value: true } }),
+    v5Entry({ sampleId: 'S02', rec: { status: 'assessed', value: false } })
+  ];
+  const stats = recommendationQualityStats(entries, truths);
+  assert.equal(stats.tp, 1);
+  assert.equal(stats.fp, 0);
+  assert.equal(stats.fn, 0);
+  assert.equal(stats.precision, 1);
+  assert.equal(stats.recall, 1);
+  assert.equal(stats.f1, 1);
+  assert.equal(stats.coverage, 1);
+});
+
+test('015 推荐指标：反例检出 FN 与 FP', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', recommendation: true },
+    { sample_id: 'S02', recommendation: false }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rec: { status: 'assessed', value: false } }),
+    v5Entry({ sampleId: 'S02', rec: { status: 'assessed', value: true } })
+  ];
+  const stats = recommendationQualityStats(entries, truths);
+  assert.equal(stats.tp, 0);
+  assert.equal(stats.fp, 1);
+  assert.equal(stats.fn, 1);
+  assert.equal(stats.precision, 0);
+  assert.equal(stats.recall, 0);
+  assert.equal(stats.f1, 0);
+});
+
+test('015 推荐指标：truth recommendation=null（unavailable）不进入评估分母', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', recommendation: null },
+    { sample_id: 'S02', recommendation: true }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rec: { status: 'assessed', value: false } }),
+    v5Entry({ sampleId: 'S02', rec: { status: 'assessed', value: true } })
+  ];
+  const stats = recommendationQualityStats(entries, truths);
+  // S01 的 assessed=false 预测不得因 truth=null 而计 FN——null 是 unavailable 不是 false
+  assert.equal(stats.tp, 1);
+  assert.equal(stats.fn, 0);
+  assert.equal(stats.evaluated_samples, 1);
+  assert.deepEqual(stats.sample_ids, ['S02']);
+});
+
+test('015 推荐指标：诚实降级（unresolved）降低 coverage、不计错误', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', recommendation: true },
+    { sample_id: 'S02', recommendation: false }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rec: { status: 'assessed', value: true } }),
+    v5Entry({ sampleId: 'S02', rec: { status: 'unresolved', value: null } })
+  ];
+  const stats = recommendationQualityStats(entries, truths);
+  assert.equal(stats.tp, 1);
+  assert.equal(stats.fp, 0);
+  assert.equal(stats.fn, 0);
+  assert.equal(stats.degraded_count, 1);
+  assert.equal(stats.coverage, 0.5);
+  assert.equal(stats.f1, 1);
+});
+
+test('015 推荐指标：防投机——全部 unresolved 时 precision/recall/F1 为 null 且 coverage=0', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', recommendation: true },
+    { sample_id: 'S02', recommendation: false }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rec: { status: 'unresolved', value: null } }),
+    v5Entry({ sampleId: 'S02', rec: { status: 'unresolved', value: null } })
+  ];
+  const stats = recommendationQualityStats(entries, truths);
+  assert.equal(stats.tp, 0);
+  assert.equal(stats.degraded_count, 2);
+  assert.equal(stats.coverage, 0);
+  assert.equal(stats.precision, null);
+  assert.equal(stats.recall, null);
+  assert.equal(stats.f1, null);
+});
+
+test('015 推荐指标：逐次计分并报告方差，不合并重复、不投票', () => {
+  const truths = makeTruths([{ sample_id: 'S01', recommendation: true }]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', repeat: 1, rec: { status: 'assessed', value: true } }),
+    v5Entry({ sampleId: 'S01', repeat: 2, rec: { status: 'assessed', value: false } }),
+    v5Entry({ sampleId: 'S01', repeat: 3, rec: { status: 'assessed', value: true } })
+  ];
+  const stats = recommendationQualityStats(entries, truths);
+  assert.equal(stats.tp, 2);
+  assert.equal(stats.fn, 1);
+  assert.equal(stats.per_repeat[1].f1, 1);
+  assert.equal(stats.per_repeat[2].f1, 0);
+  assert.equal(stats.per_repeat[3].f1, 1);
+  assert.equal(stats.repeat_variance.f1.min, 0);
+  assert.equal(stats.repeat_variance.f1.max, 1);
+  assert.equal(stats.repeat_variance.f1.stddev, 0.5773502691896258);
+});
+
+test('015 推荐指标：可评估样本不足时 NOT_EVALUABLE 且不阻塞（状态判定基于唯一真值样本）', () => {
+  const truths = makeTruths([{ sample_id: 'S01', recommendation: true }]);
+  const stats = recommendationQualityStats([v5Entry({ sampleId: 'S01' })], truths);
+  assert.equal(stats.status, 'NOT_EVALUABLE');
+  assert.ok(/< 20/.test(stats.status_reason));
+  assert.equal(stats.evaluated_samples, 1);
+  assert.equal(stats.f1, 1);
+});
+
+test('015 情绪指标：准确率与 3×3 混淆矩阵', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', sentiment: 'positive' },
+    { sample_id: 'S02', sentiment: 'neutral' },
+    { sample_id: 'S03', sentiment: 'negative' },
+    { sample_id: 'S04', sentiment: 'positive' }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', sent: { status: 'assessed', value: 'positive' } }),
+    v5Entry({ sampleId: 'S02', sent: { status: 'assessed', value: 'neutral' } }),
+    v5Entry({ sampleId: 'S03', sent: { status: 'assessed', value: 'negative' } }),
+    v5Entry({ sampleId: 'S04', sent: { status: 'assessed', value: 'neutral' } })
+  ];
+  const stats = sentimentQualityStats(entries, truths);
+  assert.equal(stats.accuracy, 0.75);
+  assert.equal(stats.correct, 3);
+  assert.equal(stats.confusion_matrix.positive.positive, 1);
+  assert.equal(stats.confusion_matrix.positive.neutral, 1);
+  assert.equal(stats.confusion_matrix.neutral.neutral, 1);
+  assert.equal(stats.confusion_matrix.negative.negative, 1);
+});
+
+test('015 情绪指标：truth sentiment=null 不评估；预测降级计诚实降级不计错误', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', sentiment: null },
+    { sample_id: 'S02', sentiment: 'positive' }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', sent: { status: 'assessed', value: 'positive' } }),
+    v5Entry({ sampleId: 'S02', sent: { status: 'unresolved', value: null } })
+  ];
+  const stats = sentimentQualityStats(entries, truths);
+  assert.equal(stats.evaluated_samples, 1);
+  assert.equal(stats.predictions, 1);
+  assert.equal(stats.degraded_count, 1);
+  assert.equal(stats.accuracy, null);
+  assert.equal(stats.coverage, 0);
+});
+
+test('015 排名指标：exact accuracy 只对 rank 非空真值计分', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', rank: 1 },
+    { sample_id: 'S02', rank: 5 },
+    { sample_id: 'S03', rank: null },
+    { sample_id: 'S04', rank: 2 }
+  ]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rank: { status: 'assessed', value: 1 } }),
+    v5Entry({ sampleId: 'S02', rank: { status: 'assessed', value: 3 } }),
+    v5Entry({ sampleId: 'S03', rank: { status: 'assessed', value: 1 } }),
+    v5Entry({ sampleId: 'S04', rank: { status: 'assessed', value: 2 } })
+  ];
+  const stats = rankQualityStats(entries, truths);
+  assert.equal(stats.denominator_samples, 3);
+  assert.deepEqual(stats.sample_ids, ['S01', 'S02', 'S04']);
+  assert.equal(stats.exact_accuracy, 2 / 3);
+  assert.equal(stats.exact_matches, 2);
+});
+
+test('015 排名指标：真值不足（<20）NOT_EVALUABLE，仍报告分母与样本 ID，不伪造', () => {
+  const truths = makeTruths([{ sample_id: 'S01', rank: 1 }]);
+  const stats = rankQualityStats([v5Entry({ sampleId: 'S01' })], truths);
+  assert.equal(stats.status, 'NOT_EVALUABLE');
+  assert.ok(/不伪造/.test(stats.status_reason));
+  assert.equal(stats.denominator_samples, 1);
+  assert.deepEqual(stats.sample_ids, ['S01']);
+  assert.equal(stats.exact_accuracy, 1);
+});
+
+test('015 排名指标：预测 unresolved 计降级并降低 coverage', () => {
+  const truths = makeTruths([{ sample_id: 'S01', rank: 1 }]);
+  const entries = [
+    v5Entry({ sampleId: 'S01', rank: { status: 'assessed', value: 1 } }),
+    v5Entry({ sampleId: 'S01', repeat: 2, rank: { status: 'unresolved', value: null } })
+  ];
+  const stats = rankQualityStats(entries, truths);
+  assert.equal(stats.exact_matches, 1);
+  assert.equal(stats.degraded_count, 1);
+  assert.equal(stats.coverage, 0.5);
+});
+
+test('015 target_mapping：状态判断与成功映射分别计分', () => {
+  const truths = makeTruths([
+    { sample_id: 'S01', target_mapping: { status: 'conflicting_identity', target_mapped: false } }
+  ]);
+  const wrongStatus = v5Entry({ sampleId: 'S01', mapping: { status: 'resolved', target_entity_id: 'E003' } });
+  const rightStatus = v5Entry({ sampleId: 'S01', repeat: 2, mapping: { status: 'conflicting_identity', target_entity_id: null } });
+  const stats = targetMappingQualityStats([wrongStatus, rightStatus], truths);
+  // 状态判断：1/2 正确
+  assert.equal(stats.status_accuracy, 0.5);
+  assert.equal(stats.status_evaluated_samples, 2);
+  // 成功映射：resolved+非空 id 被 truth.target_mapped=false 判错；非 resolved 判对
+  assert.equal(stats.mapped_accuracy, 0.5);
+  assert.equal(stats.mapped_evaluated_samples, 2);
+});
+
+test('015 target_mapping：无真值样本不评估；预测缺结构计诚实降级', () => {
+  const truths = makeTruths([{ sample_id: 'S01' }]);
+  const entry = { sample_id: 'S01', repeat: 1, ok: true, result: { brand_mentioned: true, analysis_structure: {} } };
+  const stats = targetMappingQualityStats([entry], truths);
+  assert.equal(stats.status_evaluated_samples, 0);
+  assert.equal(stats.degraded_count, 0);
+});
+
+test('015 groundingEvidenceStats：evidence 错误码计数与 mention span 原文校验', () => {
+  const text = '你好广拓。';
+  const samplesById = new Map([['S01', { response_text: text }]]);
+  const good = v5Entry({
+    sampleId: 'S01',
+    mentions: [{ source_id: 'L001', start: 2, end: 4, surface_form: '广拓' }]
+  });
+  const bad = v5Entry({
+    sampleId: 'S01',
+    repeat: 2,
+    codes: ['analysis_evidence_reference_invalid'],
+    mentions: [{ source_id: 'L001', start: 0, end: 99, surface_form: '不存在' }]
+  });
+  const stats = groundingEvidenceStats([good, bad], samplesById);
+  assert.equal(stats.evidence_invalid_count, 1);
+  assert.equal(stats.grounding_error_count, 1);
+  assert.equal(stats.evaluated, 2);
+});
+
+test('015 spread：逐次分数方差（样本方差 n-1）', () => {
+  const result = spread([1, 1, 1]);
+  assert.equal(result.mean, 1);
+  assert.equal(result.stddev, 0);
+  const varied = spread([0, 1]);
+  assert.equal(varied.min, 0);
+  assert.equal(varied.max, 1);
+  assert.equal(varied.mean, 0.5);
+  assert.equal(varied.stddev, 0.7071067811865476);
+});
+
+test('015 semanticFieldOf：v5 合同字段状态与值提取；无结构返回 null', () => {
+  const result = {
+    analysis_structure: {
+      target_semantics: { recommendation: { status: 'assessed', value: true } }
+    }
+  };
+  assert.deepEqual(semanticFieldOf(result, 'recommendation'), { status: 'assessed', value: true });
+  assert.equal(semanticFieldOf(result, 'sentiment'), null);
+  assert.equal(semanticFieldOf({}, 'recommendation'), null);
+});

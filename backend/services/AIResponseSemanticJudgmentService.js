@@ -7,32 +7,41 @@ const {
 } = require('./AIResponseEntityExtractionService');
 
 const SEMANTIC_PROMPT_REVISION = 'closed_entity_semantics_v4_evidence_roles';
-// 014 第 2 轮 A/B 修订版：仅补三条规则（推荐语义/情绪口径/repair 明确 target_entity_id），
+// 014 最后一轮 A/B 修订版 rev2（2026-08-06 数据所有者裁决，最后一轮、严格限界）：
+// 只改情绪规则 + 双字段组合示例；删除 rev1 推荐规则里孤立的"综合性较强"表述
+// （rev1 的推荐示例被模型串线到情绪判级，把"不推荐"误解为"情绪中性"）。
 // 不改变阶段 1、实体结构、竞品表或确定性目标事实。基线 prompt 保持不变。
-const SEMANTIC_PROMPT_REVISION_REV1 = 'closed_entity_semantics_v4_evidence_roles_rev1';
+const SEMANTIC_PROMPT_REVISION_REV2 = 'closed_entity_semantics_v4_evidence_roles_rev2';
 const SEMANTIC_MAX_ATTEMPTS = 2;
 const VALID_RELATIONS = new Set(['competitor', 'non_competitor']);
 const VALID_SENTIMENTS = new Set(['positive', 'neutral', 'negative']);
 
 /**
- * 阶段 2 规则行（按 revision 选择；revision 非 'rev1' 时与基线逐字一致）。
- * rev1 三条规则（2026-08-06 数据所有者裁决，S12 证据）：
- * 1. 推荐必须有明确选择、推荐、优先或行动语义；对比、列举、"综合性较强"不等于推荐。
- * 2. 情绪评价回答对目标品牌的描述方式，不看问题是否要求情绪分析。
+ * 阶段 2 规则行（按 revision 选择；revision 非 'rev2' 时与基线逐字一致）。
+ * rev2 规则（S12 证据）：
+ * 1. 推荐必须有明确选择、推荐、优先或行动语义；对比、列举不算推荐（不点名"综合性较强"，避免串线）。
+ * 2. 情绪判断对象是回答对品牌的描述方式，不看问题是否询问情绪；
+ *    推荐与情绪是两个独立判断维度：未推荐、未表达购买偏好，不等于中性评价；
+ *    "综合性较强""能力突出""覆盖完整""稳定成熟"等肯定能力或优势的描述应判为 positive，
+ *    即使 recommendation=false；只有纯粹陈述存在、功能、规格或名单且没有价值判断时才判 neutral。
  * 3. （repair prompt 内）明确写出 target_entity_id；非空目标不得返回 sentiment=not_applicable。
  */
 function semanticRules(revision) {
-  const recommendationRules = revision === 'rev1'
+  const recommendationRules = revision === 'rev2'
     ? [
         'recommendations 只记录回答对实体有明确选择、推荐、优先或行动语义的实体；',
-        '仅对比优劣、并列列举或描述"综合性较强/表现较好"不算推荐，不得写入 recommendations。',
-        '正例："建议优先考虑"、"推荐选择"、"首选 X"、"X 更适合本项目"；反例："X 综合性较强，Y 主打性价比"、"两者各有优劣"。'
+        '仅对比优劣、并列列举不算推荐，不得写入 recommendations。',
+        '正例："建议优先考虑"、"推荐选择"、"首选 X"、"X 更适合本项目"；反例："两者各有优劣"、"你的选择应取决于具体需求"。'
       ]
     : ['recommendations 只记录回答明确建议的实体。'];
-  const sentimentRules = revision === 'rev1'
+  const sentimentRules = revision === 'rev2'
     ? [
         'target_entity_id 为 null 时 sentiment 必须是 not_applicable；目标出现时无论 question 是否询问情绪，',
-        '都必须按回答对目标品牌的描述判断 positive、neutral 或 negative——情绪判断对象是回答对品牌的描述方式，不是问题是否提问。'
+        '都必须按回答对目标品牌的描述判断 positive、neutral 或 negative。',
+        '推荐与情绪是两个相互独立的判断维度：未推荐、未表达购买偏好，不等于中性评价。',
+        '"综合性较强"、"能力突出"、"覆盖完整"、"稳定成熟"等肯定能力或优势的描述，应判为 positive，即使 recommendation=false。',
+        '只有纯粹陈述存在、功能、规格或名单，且没有价值判断时，才判为 neutral。',
+        '组合示例：{"text": "Goodie AI 综合性较强，但应根据具体需求选择", "recommendation": false, "sentiment": "positive"}'
       ]
     : ['target_entity_id 为 null 时 sentiment 必须是 not_applicable；存在时才判断 positive、neutral 或 negative。'];
   return { recommendationRules, sentimentRules };
@@ -136,7 +145,7 @@ function buildSemanticRepairPrompt(basePrompt, error, { sourceMap, catalog, revi
   const occurrenceSummary = [...occurrenceByEntity.entries()]
     .map(([entityId, sourceIds]) => `${entityId}: ${sourceIds.join(', ')}`)
     .join('\n');
-  const targetIdLine = revision === 'rev1'
+  const targetIdLine = revision === 'rev2'
     ? `target_entity_id=${catalog?.target_entity_id ?? 'null'}（非 null 时必须输出 assessed 情绪，label 为 positive/neutral/negative，不得返回 sentiment=not_applicable）`
     : null;
   return [
@@ -485,7 +494,7 @@ module.exports = new AIResponseSemanticJudgmentService();
 module.exports.AIResponseSemanticJudgmentService = AIResponseSemanticJudgmentService;
 module.exports.AISemanticJudgmentError = AISemanticJudgmentError;
 module.exports.SEMANTIC_PROMPT_REVISION = SEMANTIC_PROMPT_REVISION;
-module.exports.SEMANTIC_PROMPT_REVISION_REV1 = SEMANTIC_PROMPT_REVISION_REV1;
+module.exports.SEMANTIC_PROMPT_REVISION_REV2 = SEMANTIC_PROMPT_REVISION_REV2;
 module.exports.SEMANTIC_MAX_ATTEMPTS = SEMANTIC_MAX_ATTEMPTS;
 module.exports.parseSemanticOutput = parseSemanticOutput;
 module.exports.buildSemanticPrompt = buildSemanticPrompt;
