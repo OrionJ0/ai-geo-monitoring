@@ -83,6 +83,10 @@ test('runtime contains one transport and allowlist implementation', () => {
     'utf8'
   );
   assert.doesNotMatch(searchSource, /BaiduTongjiClient/u);
+  assert.doesNotMatch(
+    searchSource,
+    /https:\/\/api\.baidu\.com\/json\/sms\/service\/OpenApiReportService\/getReportData/u
+  );
   assert.doesNotMatch(tongjiSource, /BaiduSearchAdsClient|BaiduOAuthClient/u);
 });
 

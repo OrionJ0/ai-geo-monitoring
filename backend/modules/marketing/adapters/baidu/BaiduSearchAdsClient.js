@@ -536,8 +536,8 @@ class BaiduSearchAdsClient {
     const costScale = this.manifest.money?.costScale;
     if (
       report?.method !== 'POST'
-      || report?.url
-        !== 'https://api.baidu.com/json/sms/service/OpenApiReportService/getReportData'
+      || typeof report?.url !== 'string'
+      || !report.url
       || !Number.isSafeInteger(report?.reportType)
       || report?.timeUnit !== 'DAY'
       || !Number.isSafeInteger(report?.qps)

@@ -59,13 +59,13 @@ depends_on:
 - [x] 003、006、007、005 的聚焦集成测试分别通过；
 - [x] 四个接口的真实服务响应和代表性错误响应通过同一 OpenAPI schema 校验；
 - [x] 关键词页码或 page size 变化只重新请求本期列表，不重复读取相同上期汇总；
-- [ ] 客户端不再维护 manifest 已声明的第二份报告 URL；
+- [x] 客户端不再维护 manifest 已声明的第二份报告 URL；
 - [ ] P0/P1/P2 对抗审查问题清零；
 - [ ] 后端、营销、前端、部署测试，lint、TypeScript、生产构建和真实 Chrome 通过；
 - [ ] 本地 `main == origin/main == server HEAD == public revision`，服务器工作区干净且迁移 audit 通过。
 
 ## Handoff
 
-- 当前状态：Issue 001–003 已关闭，Issue 004 实施中；
+- 当前状态：Issue 001–004 已关闭，Issue 005 实施中；
 - 正式生产仍运行既有营销 revision；本目录的新收尾修复尚未发布；
-- 下一步：消除百度报告 URL 双重机器真值，不提前实施 Issue 005。
+- 下一步：重新核对 main/生产隔离，完成全量回归、对抗审查、正式发布与真值对齐。

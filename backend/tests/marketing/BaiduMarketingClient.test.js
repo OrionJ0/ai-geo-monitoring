@@ -1109,6 +1109,37 @@ test('client rejects endpoints outside the versioned outbound allowlist', async 
   }
 });
 
+test('search report endpoint comes from the manifest and remains kernel-allowlisted', async () => {
+  const client = new BaiduMarketingClient({
+    manifest: {
+      ...manifest,
+      searchPlanReport: {
+        ...manifest.searchPlanReport,
+        url: 'https://outside.example.test/read'
+      }
+    },
+    ...config,
+    transport: async () => {
+      assert.fail('out-of-allowlist report endpoint must not reach transport');
+    }
+  });
+
+  await assert.rejects(
+    client.fetchSearchReport({
+      binding: {
+        accountId: '1234',
+        accountName: '脱敏搜索账户'
+      },
+      accessToken: 'access-token-fixture',
+      coverage: {
+        from: '2026-07-01',
+        to: '2026-07-30'
+      }
+    }),
+    { code: 'BAIDU_OUTBOUND_NOT_ALLOWED', status: 500 }
+  );
+});
+
 test('HTTP kernel security policy cannot be relaxed by callers', async () => {
   const calls = [];
   const kernel = new BaiduHttpKernel({
