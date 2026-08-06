@@ -469,7 +469,6 @@ export default function GeoReportsPage() {
   return (
     <div className="geo-report-page" style={{ padding: 24 }}>
       <style>{`
-        html, body { max-width: 100%; overflow-x: clip; }
         .geo-report-page { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; overflow-x: hidden; contain: paint; }
         .geo-report-page .ant-space-item,
         .geo-report-page .ant-card-body,

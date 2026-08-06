@@ -189,6 +189,7 @@ test('exports competitor visibility score for alert review', () => {
 test('新版项目报告导出版本化回答级 SOV、样本数和实际竞品提及', () => {
   const current = 'contextual_competitor_mentions_sov_v2_scoped';
   const csv = buildReportCsv({
+    reportMetricSemanticsVersion: current,
     summary: {
       metric_semantics_version: current,
       valid_answers: 3,
@@ -246,6 +247,14 @@ test('新版项目报告导出版本化回答级 SOV、样本数和实际竞品�
   assert.match(csv, /DeepSeek,3,100%（2 \/ 2）,50%（有效回答 2）/);
   assert.match(csv, /海康,9,1/);
   assert.doesNotMatch(csv, /平均声量占比|可见度得分|综合得分/);
+});
+
+test('新版 summary 缺少同版本外层报告时拒绝导出', () => {
+  assert.throws(() => buildReportCsv({
+    summary: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped'
+    }
+  }), /项目报告与 summary 的指标语义版本不一致/);
 });
 
 test('项目报告外层与 summary 指标版本不一致时拒绝导出', () => {

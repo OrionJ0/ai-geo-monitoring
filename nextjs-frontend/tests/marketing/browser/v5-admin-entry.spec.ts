@@ -676,12 +676,10 @@ test('v2 scoped project report stays on the current metric view and switches pla
       return {
         rootClientWidth: root.clientWidth,
         rootScrollWidth: root.scrollWidth,
-        bodyOverflowX: getComputedStyle(document.body).overflowX,
-        htmlOverflowX: getComputedStyle(document.documentElement).overflowX
+        rootOverflowX: getComputedStyle(root).overflowX
       };
     });
-    expect(pageOverflow.bodyOverflowX).toBe('clip');
-    expect(pageOverflow.htmlOverflowX).toBe('clip');
+    expect(pageOverflow.rootOverflowX).toBe('hidden');
     expect(pageOverflow.rootScrollWidth - pageOverflow.rootClientWidth).toBeLessThanOrEqual(8);
     await expect.poll(async () => page.locator('.ant-table-content').evaluateAll((nodes) => (
       nodes.some((node) => node.scrollWidth > node.clientWidth)
