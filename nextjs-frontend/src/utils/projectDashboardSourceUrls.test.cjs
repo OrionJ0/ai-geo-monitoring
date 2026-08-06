@@ -44,15 +44,14 @@ test('project dashboard exposes url-level source change counts', () => {
   assert.match(source, /value=\{retainedSourceUrls\.length\}/);
 });
 
-test('project dashboard exposes domain-level source change details', () => {
+test('project dashboard exposes domain-level source change counts and links to full details', () => {
   assert.match(source, /const retainedSourceDomains = useMemo/);
   assert.match(source, /Array\.isArray\(sourceChanges\.retained_domains\) \? sourceChanges\.retained_domains : \[\]/);
-  assert.match(source, /const sourceChangeColumns = \[/);
   assert.match(source, /title="新增引用域名"/);
-  assert.match(source, /dataSource=\{newSourceDomains\}/);
+  assert.match(source, /value=\{newSourceDomains\.length\}/);
   assert.match(source, /title="流失引用域名"/);
-  assert.match(source, /dataSource=\{droppedSourceDomains\}/);
+  assert.match(source, /value=\{droppedSourceDomains\.length\}/);
   assert.match(source, /title="保留引用域名"/);
   assert.match(source, /value=\{retainedSourceDomains\.length\}/);
-  assert.match(source, /dataSource=\{retainedSourceDomains\}/);
+  assert.match(source, /href="\/geo\/sources"/);
 });

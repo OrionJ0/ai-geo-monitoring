@@ -9,7 +9,7 @@ import { Column, Line } from '@ant-design/plots';
 import { shouldRenderMetricChart } from '@/utils/dashboardChartState.cjs';
 import { getBrandSentimentDisplay } from '@/utils/historyAnalysisDisplay.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
-import { getSovPresentationTitle } from '@/utils/metricSemantics.cjs';
+import { formatAnswerLevelSov, getSovPresentationTitle } from '@/utils/metricSemantics.cjs';
 import { useAIPlatformCatalog } from '@/lib/useAIPlatformCatalog';
 import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import WorkspacePageHeader from '@/components/WorkspacePageHeader';
@@ -92,8 +92,14 @@ function metricTitle(label, explanation) {
   return (
     <Space size={6}>
       <span>{label}</span>
-      <Tooltip title={explanation} trigger={['hover']}>
-        <InfoCircleOutlined aria-label={`${label}计算口径`} style={{ color: '#7b8ba5' }} />
+      <Tooltip title={explanation} trigger={['hover', 'focus', 'click']}>
+        <button
+          type="button"
+          aria-label={`${label}计算口径：${explanation}`}
+          style={{ border: 0, padding: 0, background: 'transparent', color: '#5d6f89', cursor: 'help', lineHeight: 1 }}
+        >
+          <InfoCircleOutlined aria-hidden="true" />
+        </button>
       </Tooltip>
     </Space>
   );
@@ -280,9 +286,7 @@ export default function GeoProjectDashboardPage() {
       title: sovMetricTitle,
       dataIndex: 'sov',
       width: 180,
-      render: (value) => value?.status === 'calculated'
-        ? `${nullablePercent(value.value)}%（${value.numerator} / ${value.denominator}）`
-        : '—',
+      render: formatAnswerLevelSov,
     },
     {
       title: '排名/推荐',

@@ -333,7 +333,7 @@ export default function WebsiteTrafficPage() {
     return <Skeleton active paragraph={{ rows: 12 }} />;
   }
   if (defaultContext.errorMessage) {
-    return <Alert type="error" showIcon message={defaultContext.errorMessage} />;
+    return <Alert type="error" showIcon title={defaultContext.errorMessage} />;
   }
 
   return (
@@ -367,7 +367,7 @@ export default function WebsiteTrafficPage() {
           className={styles.pageAlert}
           type="info"
           showIcon
-          message="网站流量尚未开放"
+          title="网站流量尚未开放"
           description="页面结构与筛选器保持可用；当前数据源未开放，因此指标显示为缺失状态。"
         />
       ) : null}
@@ -377,7 +377,7 @@ export default function WebsiteTrafficPage() {
           className={styles.pageAlert}
           type="error"
           showIcon
-          message={overview.error}
+          title={overview.error}
           action={<Button onClick={overview.reload} icon={<ReloadOutlined />}>重试</Button>}
         />
       ) : null}
@@ -386,7 +386,7 @@ export default function WebsiteTrafficPage() {
           className={styles.pageAlert}
           type="warning"
           showIcon
-          message="上游暂时不可用，当前展示最后一份同口径缓存。"
+          title="上游暂时不可用，当前展示最后一份同口径缓存。"
         />
       ) : null}
 
@@ -671,13 +671,13 @@ export default function WebsiteTrafficPage() {
                 allowClear
               />
             </div>
-            {pages.error ? <Alert className={styles.inlineAlert} type="error" showIcon message={pages.error} /> : null}
+            {pages.error ? <Alert className={styles.inlineAlert} type="error" showIcon title={pages.error} /> : null}
             {pages.data?.dataState === 'UNAVAILABLE' ? (
               <Alert
                 className={styles.inlineAlert}
                 type="info"
                 showIcon
-                message="页面报告暂未接入"
+                title="页面报告暂未接入"
                 description={pages.data.capabilities.unavailableReason}
               />
             ) : null}

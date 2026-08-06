@@ -15,6 +15,7 @@ import { normalizeHistoryCitationSources } from '@/utils/historyCitationSources.
 import { formatHistoryErrorMessage, formatHistoryParsingErrorMessage } from '@/utils/historyErrorDisplay.cjs';
 import { getRunResultNotice } from '@/utils/runResultMessage.cjs';
 import { getApiErrorMessage } from '@/utils/apiErrorMessage.cjs';
+import { getSovPresentationTitle } from '@/utils/metricSemantics.cjs';
 import { getApiRunResultData } from '@/utils/apiRunResult.cjs';
 import { createIdempotencyKey } from '@/utils/idempotencyKey.cjs';
 import { formatOptionalDateTimeShort } from '@/utils/dateTimeDisplay.cjs';
@@ -900,11 +901,16 @@ export default function GeoPromptsPage() {
       sorter: (a, b) => Number(a.performance?.brand_mention_rate || 0) - Number(b.performance?.brand_mention_rate || 0),
     },
     {
-      title: '回答内竞品提及占比（SOV）',
+      title: 'SOV',
       dataIndex: ['performance', 'sov_summary'],
       key: 'sov_summary',
       width: 190,
-      render: formatSovSummary,
+      render: (value) => (
+        <Space orientation="vertical" size={0}>
+          <Text>{formatSovSummary(value)}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{getSovPresentationTitle(value)}</Text>
+        </Space>
+      ),
       sorter: (a, b) => Number(a.performance?.sov_summary?.average ?? -1)
         - Number(b.performance?.sov_summary?.average ?? -1),
     },
@@ -1398,13 +1404,14 @@ export default function GeoPromptsPage() {
               }
             },
             {
-              title: '回答内竞品提及占比（SOV）',
+              title: 'SOV',
               width: 220,
               render: (_, row) => {
                 const display = getHistoryAnalysisDisplay(row);
                 return (
                   <Space orientation="vertical" size={0}>
                     <Text>{display.sov}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{display.sovLabel}</Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>{display.metricSemanticsLabel}</Text>
                   </Space>
                 );

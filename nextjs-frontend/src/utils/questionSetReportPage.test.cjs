@@ -67,8 +67,7 @@ test('问题集报告分级展示指标并给出简短的悬停口径说明', ()
   assert.match(source, /trigger=\{\['hover'\]\}/);
   assert.doesNotMatch(source, /trigger=\{\['hover', 'focus'\]\}/);
   assert.match(source, /提及目标品牌的有效分析数 ÷ 有效分析数/);
-  assert.match(source, /推荐语义已评估回答数/);
-  assert.match(source, /未解决或不可用不进入分母/);
+  assert.match(source, /明确推荐数 ÷ 推荐语义已评估数；未评估不入分母/);
   assert.match(source, /目标品牌提及数 ÷ 品牌与竞品提及总数.*按回答取平均/);
   assert.match(source, /明确给出顺序或名次的多品牌榜单/);
   assert.match(source, /AI 结构化/);

@@ -5,7 +5,8 @@ const defaultPlatformLabel = {
 /* eslint-disable @typescript-eslint/no-require-imports */
 const {
   getSovPresentationTitle,
-  isAnswerLevelSovSemantics
+  isAnswerLevelSovSemantics,
+  isCurrentReportSnapshot
 } = require('./metricSemantics.cjs');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -240,8 +241,14 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
 function buildReportCsvRows({
   summary = {},
   platformLabel = defaultPlatformLabel,
-  websiteConfigured
+  websiteConfigured,
+  reportMetricSemanticsVersion
 } = {}) {
+  if (reportMetricSemanticsVersion !== undefined
+    && reportMetricSemanticsVersion !== summary.metric_semantics_version
+    && !isCurrentReportSnapshot(reportMetricSemanticsVersion, summary.metric_semantics_version)) {
+    throw new Error('项目报告与 summary 的指标语义版本不一致');
+  }
   if (isAnswerLevelSovSemantics(summary.metric_semantics_version)) {
     return buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured });
   }

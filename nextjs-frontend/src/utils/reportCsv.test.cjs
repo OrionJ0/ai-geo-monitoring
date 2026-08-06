@@ -247,3 +247,12 @@ test('新版项目报告导出版本化回答级 SOV、样本数和实际竞品�
   assert.match(csv, /海康,9,1/);
   assert.doesNotMatch(csv, /平均声量占比|可见度得分|综合得分/);
 });
+
+test('项目报告外层与 summary 指标版本不一致时拒绝导出', () => {
+  assert.throws(() => buildReportCsv({
+    reportMetricSemanticsVersion: 'contextual_competitor_mentions_sov_v1',
+    summary: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped'
+    }
+  }), /指标语义版本不一致/);
+});

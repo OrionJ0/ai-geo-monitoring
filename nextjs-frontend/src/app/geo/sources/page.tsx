@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tabs, Tag, Tooltip, message } from 'antd';
+import { Alert, Card, Col, Empty, Row, Select, Space, Statistic, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import axios from '@/lib/axiosConfig';
 import { Column } from '@ant-design/plots';
@@ -13,6 +13,7 @@ import useDefaultProjectContext from '@/lib/useDefaultProjectContext';
 import WorkspacePageHeader from '@/components/WorkspacePageHeader';
 import styles from './sources.module.css';
 
+const { Text } = Typography;
 
 const typeColor = {
   自有来源: 'green',
@@ -305,9 +306,12 @@ export default function GeoSourcesPage() {
 
       <Row gutter={[12, 12]} className={styles.equalCardRow}>
         <Col xs={24} lg={8}>
-          <Card size="small" title="来源类型分布" loading={sourceLoading}>
-            {sourceTypeChartData.length ? <Column {...sourceTypeConfig} /> : <Empty description="暂无引用来源" />}
-          </Card>
+              <Card size="small" title="来源类型分布" loading={sourceLoading}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                  <Text type="secondary">媒体内容按维护的媒体域名规则分类；其他第三方来源指未命中明确类别的外部来源。第三方来源总数包含媒体及其他外部来源。</Text>
+                  {sourceTypeChartData.length ? <Column {...sourceTypeConfig} /> : <Empty description="暂无引用来源" />}
+                </Space>
+              </Card>
         </Col>
         <Col xs={24} lg={16}>
           <Card size="small" title={`Top 来源域名${selectedProject?.name ? `：${selectedProject.name}` : ''}`} loading={sourceLoading}>

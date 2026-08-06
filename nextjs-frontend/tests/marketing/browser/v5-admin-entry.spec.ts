@@ -277,6 +277,38 @@ const scopedProjectReport = {
   }
 };
 
+const scopedProjectDashboard = {
+  selected_platform: 'all',
+  available_platforms: ['deepseek'],
+  summary: {
+    ...scopedProjectReport.summary.metric_views.all.summary,
+    platforms: [{
+      platform: 'deepseek',
+      valid_answers: 1,
+      brand_mentioned_answers: 1,
+      brand_mention_assessed_answers: 1,
+      brand_mention_rate: 100,
+      sov_summary: scopedProjectReport.summary.metric_views.platforms[0].summary.sov_summary
+    }],
+    categories: [{
+      category: '产品选型',
+      valid_answers: 1,
+      brand_mentioned_answers: 1,
+      brand_mention_assessed_answers: 1,
+      brand_mention_rate: 100,
+      sov_summary: scopedProjectReport.summary.metric_views.all.summary.sov_summary
+    }],
+    competitors: [],
+    source_types: [],
+    source_domains: [],
+    source_urls: [],
+    source_summary: {}
+  },
+  trend: [],
+  recent_metrics: [],
+  opportunities: []
+};
+
 async function installRoutes(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('agd_token', 'playwright.v5-admin.signature');
@@ -373,6 +405,13 @@ async function installScopedProjectReportRoutes(page: Page) {
   await page.route('**/api/geo-projects/11/reports/latest*', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ success: true, data: scopedProjectReport })
+  }));
+}
+
+async function installScopedProjectDashboardRoutes(page: Page) {
+  await page.route('**/api/geo-projects/11/dashboard*', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: scopedProjectDashboard })
   }));
 }
 
@@ -621,5 +660,75 @@ test('v2 scoped project report stays on the current metric view and switches pla
   await platformScope.press('ArrowDown');
   await platformScope.press('ArrowDown');
   await platformScope.press('Enter');
+  await expect(platformScope).toBeFocused();
   await expect(page.getByText('50%（有效回答 1）', { exact: true })).toBeVisible();
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 800 }]) {
+    await page.setViewportSize(viewport);
+    const title = page.getByText('开放发现 SOV（仅基于本次已发现实体，不代表完整市场）', { exact: true }).first();
+    await expect(title).toBeVisible();
+    const bounds = await title.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds?.x).toBeGreaterThanOrEqual(0);
+    expect((bounds?.x || 0) + (bounds?.width || 0)).toBeLessThanOrEqual(viewport.width);
+    const pageOverflow = await page.evaluate(() => {
+      const root = document.querySelector('.geo-report-page') as HTMLElement;
+      return {
+        rootClientWidth: root.clientWidth,
+        rootScrollWidth: root.scrollWidth,
+        bodyOverflowX: getComputedStyle(document.body).overflowX,
+        htmlOverflowX: getComputedStyle(document.documentElement).overflowX
+      };
+    });
+    expect(pageOverflow.bodyOverflowX).toBe('clip');
+    expect(pageOverflow.htmlOverflowX).toBe('clip');
+    expect(pageOverflow.rootScrollWidth - pageOverflow.rootClientWidth).toBeLessThanOrEqual(8);
+    await expect.poll(async () => page.locator('.ant-table-content').evaluateAll((nodes) => (
+      nodes.some((node) => node.scrollWidth > node.clientWidth)
+    ))).toBe(true);
+    const reportAxe = await new AxeBuilder({ page })
+      .include('.geo-report-actions')
+      .include('#geo-report-core-metrics')
+      .analyze();
+    expect(seriousViolations(reportAxe)).toEqual([]);
+  }
+});
+
+test('scoped project dashboard keeps its long title and calculation help accessible at narrow widths', async ({ page }) => {
+  await installScopedProjectDashboardRoutes(page);
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await page.goto('/geo/project-dashboard');
+
+  const titleText = '开放发现 SOV（仅基于本次已发现实体，不代表完整市场）';
+  const title = page.getByText(titleText, { exact: true }).first();
+  await expect(title).toBeVisible();
+  const helpButton = page.getByRole('button', { name: /开放发现 SOV.*未证明竞品集合完整/u });
+  await helpButton.focus();
+  await expect(helpButton).toBeFocused();
+  await expect(page.getByRole('tooltip')).toContainText('未证明竞品集合完整');
+  expect(seriousViolations(await new AxeBuilder({ page })
+    .include('section[aria-labelledby="core-metrics-title"]')
+    .analyze())).toEqual([]);
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 800 }]) {
+    await page.setViewportSize(viewport);
+    await expect(title).toBeVisible();
+    const bounds = await title.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds?.x).toBeGreaterThanOrEqual(0);
+    expect((bounds?.x || 0) + (bounds?.width || 0)).toBeLessThanOrEqual(viewport.width);
+    const dashboardOverflow = await page.evaluate(() => {
+      const root = document.querySelector('[class*="project-dashboard_page__"]') as HTMLElement;
+      return {
+        overflowX: getComputedStyle(root).overflowX,
+        clientWidth: root.clientWidth,
+        scrollWidth: root.scrollWidth
+      };
+    });
+    expect(dashboardOverflow.overflowX).toBe('clip');
+    expect(dashboardOverflow.scrollWidth).toBeGreaterThanOrEqual(dashboardOverflow.clientWidth);
+    expect(seriousViolations(await new AxeBuilder({ page })
+      .include('section[aria-labelledby="core-metrics-title"]')
+      .analyze())).toEqual([]);
+  }
 });

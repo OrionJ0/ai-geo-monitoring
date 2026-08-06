@@ -241,11 +241,18 @@ export default function GeoReportsPage() {
 
   const exportCsv = () => {
     if (!report) return;
-    const csv = buildReportCsv({
-      summary,
-      platformLabel,
-      websiteConfigured: Boolean(selectedProject?.website || report?.project?.website)
-    });
+    let csv;
+    try {
+      csv = buildReportCsv({
+        summary,
+        reportMetricSemanticsVersion: report.metric_semantics_version,
+        platformLabel,
+        websiteConfigured: Boolean(selectedProject?.website || report?.project?.website)
+      });
+    } catch {
+      message.error('报告指标版本不一致，无法导出 CSV');
+      return;
+    }
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -460,8 +467,14 @@ export default function GeoReportsPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
+    <div className="geo-report-page" style={{ padding: 24 }}>
       <style>{`
+        html, body { max-width: 100%; overflow-x: clip; }
+        .geo-report-page { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; overflow-x: hidden; contain: paint; }
+        .geo-report-page .ant-space-item,
+        .geo-report-page .ant-card-body,
+        .geo-report-page .ant-col { min-width: 0; }
+        .geo-report-page .ant-statistic-title { color: #42526e !important; }
         @media print {
           body * { visibility: hidden; }
           #geo-report-print, #geo-report-print * { visibility: visible; }
@@ -473,11 +486,12 @@ export default function GeoReportsPage() {
         <Row align="middle" justify="space-between" gutter={[16, 12]} className="geo-report-actions">
           <Col>
             <Title level={3} style={{ margin: 0 }}>项目报告</Title>
-            <Text type="secondary">生成并查看指定周期的 GEO 可见度报告快照</Text>
+            <Text style={{ color: '#42526e' }}>生成并查看指定周期的 GEO 可见度报告快照</Text>
           </Col>
           <Col>
             <Space wrap>
               <Select
+                aria-label="品牌项目"
                 loading={projectLoading}
                 placeholder="选择品牌项目"
                 style={{ width: 280 }}
@@ -486,6 +500,7 @@ export default function GeoReportsPage() {
                 options={projects.map((item) => ({ label: item.name, value: item.id }))}
               />
               <Select
+                aria-label="报告周期"
                 style={{ width: 120 }}
                 value={days}
                 options={periodOptions}
@@ -506,7 +521,7 @@ export default function GeoReportsPage() {
                   ]}
                 />
               ) : null}
-              <Button type="primary" loading={reportLoading} disabled={!projectId} onClick={generateReport}>生成 {days} 天报告</Button>
+              <Button type="primary" style={{ background: '#0b63ce', borderColor: '#0b63ce' }} loading={reportLoading} disabled={!projectId} onClick={generateReport}>生成 {days} 天报告</Button>
               <Button disabled={!report} onClick={() => window.print()}>打印</Button>
               <Button disabled={!report} onClick={exportCsv}>导出 CSV</Button>
             </Space>
@@ -545,7 +560,7 @@ export default function GeoReportsPage() {
                 </Row>
               </Card>
 
-              <Row gutter={[12, 12]}>
+              <Row id="geo-report-core-metrics" gutter={[12, 12]}>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="总运行数" value={metricSummary.total_runs ?? metricSummary.total_checks ?? 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '有效回答' : '有效分析数'} value={metricSummary.valid_answers ?? metricSummary.total_checks ?? 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="品牌提及率" value={isCurrentReport ? formatRate(metricSummary.brand_mention_rate, metricSummary.brand_mentioned_answers, metricSummary.brand_mention_assessed_answers ?? metricSummary.valid_answers) : `${percent(metricSummary.brand_mention_rate)}%`} /></Card></Col>

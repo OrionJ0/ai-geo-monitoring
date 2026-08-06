@@ -1257,7 +1257,7 @@ export default function QuestionSetReportsPage() {
                           summary.recommendation_assessed_answers ?? summary.valid_answers,
                         )
                         : `${percent(summary.recommendation_rate)}%`}
-                      help="明确推荐目标品牌的回答数 ÷ 推荐语义已评估回答数；未解决或不可用不进入分母，仅列举不算推荐。"
+                      help="明确推荐数 ÷ 推荐语义已评估数；未评估不入分母。"
                     />
                   </div>
 

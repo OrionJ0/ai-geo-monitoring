@@ -20,11 +20,24 @@ function getSovPresentationTitle(summary = {}) {
     : '回答内竞品提及占比（SOV）';
 }
 
+function formatAnswerLevelSov(sov = {}) {
+  const denominator = Number(sov.denominator || 0);
+  const numerator = Number(sov.numerator || 0);
+  const value = sov.value;
+  const supportedStatus = sov.status === 'calculated' || sov.status === 'observed_only';
+  if (supportedStatus && denominator > 0 && numerator >= 0
+    && value !== null && value !== undefined && Number.isFinite(Number(value))) {
+    return `${Number(Number(value).toFixed(2))}%（${numerator} / ${denominator}）`;
+  }
+  return `—（不可计算：${numerator} / ${denominator}）`;
+}
+
 module.exports = {
   ANSWER_LEVEL_SOV_V1,
   SCOPED_SOV_V2,
   OPEN_DISCOVERY_SOV_TITLE,
   isAnswerLevelSovSemantics,
   isCurrentReportSnapshot,
-  getSovPresentationTitle
+  getSovPresentationTitle,
+  formatAnswerLevelSov
 };

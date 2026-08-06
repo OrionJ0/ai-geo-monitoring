@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const {
   isAnswerLevelSovSemantics,
   isCurrentReportSnapshot,
-  getSovPresentationTitle
+  getSovPresentationTitle,
+  formatAnswerLevelSov
 } = require('./metricSemantics.cjs');
 
 const V1 = 'contextual_competitor_mentions_sov_v1';
@@ -14,6 +15,21 @@ test('v1 与 v2 scoped 都属于回答级 SOV，但旧配置口径不属于', ()
   assert.equal(isAnswerLevelSovSemantics(V1), true);
   assert.equal(isAnswerLevelSovSemantics(V2), true);
   assert.equal(isAnswerLevelSovSemantics('configured_competitor_sov_v1'), false);
+});
+
+test('v2 observed_only 按有效分母显示，0/0 保持不可计算', () => {
+  assert.equal(formatAnswerLevelSov({
+    status: 'observed_only',
+    value: 40,
+    numerator: 2,
+    denominator: 5
+  }), '40%（2 / 5）');
+  assert.equal(formatAnswerLevelSov({
+    status: 'observed_only',
+    value: null,
+    numerator: 0,
+    denominator: 0
+  }), '—（不可计算：0 / 0）');
 });
 
 test('报告与 summary 必须使用同一回答级版本才进入当前报告分支', () => {
