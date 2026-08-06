@@ -16,6 +16,7 @@ const {
   acceptanceRequiredTimeoutMs,
   acceptanceAvailableTimeoutMs,
   assertAcceptanceBudget,
+  reassertAcceptanceBudget,
   recordBatchWaitTimeoutMs,
   requiredAnalysisQueueTimeoutMs,
   toEvidence,
@@ -199,6 +200,19 @@ test('preflight budget reserves an hour for install, tests, build and migrations
     AI_GEO_DEPLOYMENT_DEADLINE_EPOCH_MS: String(deadline),
     AI_GEO_ACCEPTANCE_STAGE: 'runtime'
   }), 300 * 60 * 1000);
+  const initial = assertAcceptanceBudget({
+    platformCount: 1,
+    concurrency: 1,
+    recordLeaseMs: 60_000,
+    availableMs: 30 * 60 * 1000
+  });
+  assert.throws(
+    () => reassertAcceptanceBudget(initial, deadline - 70 * 60 * 1000, {
+      AI_GEO_DEPLOYMENT_DEADLINE_EPOCH_MS: String(deadline),
+      AI_GEO_ACCEPTANCE_STAGE: 'preflight'
+    }),
+    /停服前门禁/u
+  );
 });
 
 function validEntry(overrides = {}) {

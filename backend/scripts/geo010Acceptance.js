@@ -319,6 +319,18 @@ function assertAcceptanceBudget({
   };
 }
 
+function reassertAcceptanceBudget(budget, now = Date.now(), environment = process.env) {
+  return {
+    ...budget,
+    ...assertAcceptanceBudget({
+      platformCount: budget.platform_count,
+      concurrency: budget.concurrency,
+      recordLeaseMs: budget.record_lease_ms,
+      availableMs: acceptanceAvailableTimeoutMs(now, environment)
+    })
+  };
+}
+
 function runnablePlatformCount(platformRows) {
   const count = (Array.isArray(platformRows) ? platformRows : []).filter((row) => (
     row?.enabled === true && row?.configured === true
@@ -831,7 +843,7 @@ async function runPreflight() {
     const acceptanceCleanup = await cleanupAcceptanceProjects(models, {
       acceptanceUserId: userId
     });
-    const acceptanceBudget = process.env.AI_GEO_REQUIRE_FULL_ACCEPTANCE === 'true'
+    let acceptanceBudget = process.env.AI_GEO_REQUIRE_FULL_ACCEPTANCE === 'true'
       ? await buildAcceptanceBudget(platformResponse?.data)
       : { required: false };
     const deepSeekFlash = await verifyDeepSeekFlashCredential(models);
@@ -843,6 +855,11 @@ async function runPreflight() {
       userId
     );
     if (!historyV4.readable) throw new Error('历史 v4 报告或 CSV 不可读取');
+    if (process.env.AI_GEO_REQUIRE_FULL_ACCEPTANCE === 'true') {
+      // 现役 bridge 会在本脚本成功后立即停服；全部只读检查结束后必须按
+      // 当前时间复核预算，不能复用预检开头的时间余量。
+      acceptanceBudget = reassertAcceptanceBudget(acceptanceBudget);
+    }
     console.log(JSON.stringify({
       preflight: 'ready',
       public_revision: backendRevision,
@@ -1319,6 +1336,7 @@ module.exports = {
   acceptanceAvailableTimeoutMs,
   acceptanceRequiredTimeoutMs,
   assertAcceptanceBudget,
+  reassertAcceptanceBudget,
   readPublicReadiness,
   readPublicRevisionValue,
   recordBatchWaitTimeoutMs,
