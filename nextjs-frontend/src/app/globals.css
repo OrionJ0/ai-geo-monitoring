@@ -171,6 +171,27 @@ h1 {
   color: #0958d9 !important;
 }
 
+@media (max-width: 640px) {
+  .v5-admin-settings-tabs > .ant-tabs-nav .ant-tabs-nav-wrap {
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .v5-admin-settings-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+    flex-wrap: wrap;
+    transform: none !important;
+  }
+
+  .v5-admin-settings-tabs > .ant-tabs-nav .ant-tabs-nav-more {
+    display: none !important;
+  }
+
+  .v5-admin-settings-tabs > .ant-tabs-nav .ant-tabs-tab {
+    margin: 0 12px 0 0 !important;
+    padding-block: 8px;
+  }
+}
+
 .v5-platform-modal .ant-form-item-extra {
   color: #595959;
 }

@@ -422,12 +422,13 @@ test('two-stage analysis prompts and fallback stay named at narrow zoom width', 
   await expect(analysisTab).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(analysisTab).toHaveAttribute('aria-selected', 'true');
-  // Ant Design renders its labelled overflow button inside the tablist at this
-  // width. Keep the whole navigation in scope and waive only that library
-  // structure rule; keyboard state and every other serious rule remain tested.
-  expect(seriousViolations(await new AxeBuilder({ page })
-    .disableRules(['aria-required-children'])
-    .analyze())).toEqual([]);
+  const tabs = page.getByRole('tab');
+  await expect(tabs).toHaveCount(7);
+  for (let index = 0; index < 7; index += 1) {
+    await expect(tabs.nth(index)).toBeVisible();
+  }
+  await expect(page.locator('.v5-admin-settings-tabs .ant-tabs-nav-more')).toBeHidden();
+  expect(seriousViolations(await new AxeBuilder({ page }).analyze())).toEqual([]);
   await page.screenshot({
     path: path.join(artifactDirectory, 'analysis-prompts-400-percent.png'),
     fullPage: false
