@@ -286,6 +286,21 @@ test('activation refuses to stop production without the 70 minute reserve', asyn
   assert.equal(assertActivationBudget(4_200_000, 0), 4_200_000);
 });
 
+test('activation keeps production running when dynamic acceptance budget was consumed', async () => {
+  let stopped = false;
+  await assert.rejects(
+    activatePreparedRelease({
+      projectRoot: process.cwd(),
+      prepared: { previousRevision: 'a'.repeat(40), revision: 'b'.repeat(40) },
+      preflight: async () => ({ requiredAcceptanceMs: 20 * 60 * 1000 }),
+      stopProduction: async () => { stopped = true; },
+      deadline: Date.now() + 80 * 60 * 1000
+    }),
+    /四入口验收预算/u
+  );
+  assert.equal(stopped, false);
+});
+
 test('activation reports both the release failure and cleanup stop failure', async () => {
   let stopCalls = 0;
   await assert.rejects(

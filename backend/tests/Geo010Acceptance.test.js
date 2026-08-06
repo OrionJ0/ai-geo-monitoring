@@ -26,6 +26,7 @@ const {
   acceptanceProjectMarker,
   acceptanceProjectWebsite,
   isMarkedAcceptanceProject,
+  writePreflightBudgetResult,
   writeSecureEvidence
 } = require('../scripts/geo010Acceptance');
 const projectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
@@ -430,5 +431,28 @@ test('writes production evidence into a private directory without overwriting', 
   } finally {
     fs.unlinkSync(filename);
     fs.rmdirSync(directory);
+  }
+});
+
+test('writes a one-time machine-readable preflight budget without secrets', () => {
+  const directory = fs.mkdtempSync('/tmp/geo010-budget-test-');
+  const filename = path.join(directory, 'budget.json');
+  try {
+    writePreflightBudgetResult({
+      required_ms: 1234,
+      platform_count: 2,
+      concurrency: 1,
+      record_lease_ms: 5678,
+      secret: 'must-not-leak'
+    }, filename);
+    assert.deepEqual(JSON.parse(fs.readFileSync(filename, 'utf8')), {
+      required_ms: 1234,
+      platform_count: 2,
+      concurrency: 1,
+      record_lease_ms: 5678
+    });
+    assert.throws(() => writePreflightBudgetResult({ required_ms: 1 }, filename), /EEXIST/u);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });

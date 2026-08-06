@@ -813,6 +813,26 @@ function writeSecureEvidence(evidence, revision) {
   return filename;
 }
 
+function writePreflightBudgetResult(budget, filename = process.env.AI_GEO_PREFLIGHT_RESULT_PATH) {
+  const target = String(filename || '').trim();
+  if (!target) throw new Error('缺少候选预检预算结果路径');
+  const flags = fs.constants.O_WRONLY
+    | fs.constants.O_CREAT
+    | fs.constants.O_EXCL
+    | (fs.constants.O_NOFOLLOW || 0);
+  const fd = fs.openSync(target, flags, 0o600);
+  try {
+    fs.writeFileSync(fd, `${JSON.stringify({
+      required_ms: budget.required_ms,
+      platform_count: budget.platform_count,
+      concurrency: budget.concurrency,
+      record_lease_ms: budget.record_lease_ms
+    })}\n`);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 async function runPreflight() {
   if (process.env.NODE_ENV !== 'production') {
     throw new Error('geo010Acceptance 只允许在 NODE_ENV=production 的正式服务器运行');
@@ -859,6 +879,7 @@ async function runPreflight() {
       // 现役 bridge 会在本脚本成功后立即停服；全部只读检查结束后必须按
       // 当前时间复核预算，不能复用预检开头的时间余量。
       acceptanceBudget = reassertAcceptanceBudget(acceptanceBudget);
+      writePreflightBudgetResult(acceptanceBudget);
     }
     console.log(JSON.stringify({
       preflight: 'ready',
@@ -887,7 +908,7 @@ async function runRecoveryPreflight() {
     });
     const enabledPlatformCount = platformRows.filter((row) => row.enabled === true).length;
     if (enabledPlatformCount < 1) throw new Error('没有已启用的正式监测平台');
-    const acceptanceBudget = await buildAcceptanceBudget(
+    let acceptanceBudget = await buildAcceptanceBudget(
       Array.from({ length: enabledPlatformCount }, () => ({ enabled: true, configured: true }))
     );
     const deepSeekFlash = await verifyDeepSeekFlashCredential(models);
@@ -896,6 +917,8 @@ async function runRecoveryPreflight() {
       historicalV4Query(models.QuestionSetRun, undefined)
     );
     if (!historicalV4) throw new Error('生产库没有历史 v4 问题集记录');
+    acceptanceBudget = reassertAcceptanceBudget(acceptanceBudget);
+    writePreflightBudgetResult(acceptanceBudget);
     console.log(JSON.stringify({
       recovery_preflight: 'ready',
       acceptance_budget: acceptanceBudget,
@@ -1347,6 +1370,7 @@ module.exports = {
   acceptanceProjectMarker,
   acceptanceProjectWebsite,
   isMarkedAcceptanceProject,
+  writePreflightBudgetResult,
   runPreflight,
   runRecoveryPreflight,
   toEvidence,

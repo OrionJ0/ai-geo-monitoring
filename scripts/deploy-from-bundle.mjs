@@ -22,12 +22,26 @@ function remainingTimeout(deadline) {
   return remaining;
 }
 
-export function assertActivationBudget(deadline, now = Date.now()) {
+export function assertActivationBudget(deadline, now = Date.now(), requiredAcceptanceMs = 0) {
   const remaining = deadline - now;
-  if (remaining < ACTIVATION_RESERVE_MS) {
-    throw new Error('Bundle 停服门禁失败：必须保留至少 70 分钟部署与清理预算');
+  const required = Math.max(0, Number(requiredAcceptanceMs) || 0);
+  if (remaining < ACTIVATION_RESERVE_MS + required) {
+    throw new Error(
+      `Bundle 停服门禁失败：必须保留至少 70 分钟部署与清理预算及 ${
+        Math.ceil(required / 60_000)
+      } 分钟四入口验收预算`
+    );
   }
   return remaining;
+}
+
+function readAcceptanceBudgetResult(filename) {
+  const result = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  const requiredAcceptanceMs = Number(result?.required_ms);
+  if (!Number.isFinite(requiredAcceptanceMs) || requiredAcceptanceMs <= 0) {
+    throw new Error('候选预检没有返回有效的四入口验收预算');
+  }
+  return requiredAcceptanceMs;
 }
 
 export function runManagedCommand(command, args, {
@@ -289,6 +303,7 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
     path.join(os.tmpdir(), 'ai-geo-preflight-')
   );
   const checkout = path.join(checkoutParent, 'candidate');
+  const acceptanceBudgetResultPath = path.join(checkoutParent, 'acceptance-budget.json');
   let worktreeAdded = false;
   try {
     await git(projectRoot, ['worktree', 'add', '--detach', checkout, prepared.revision], {
@@ -327,7 +342,8 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
       NODE_ENV: 'production',
       AI_GEO_DEPLOYMENT_DEADLINE_EPOCH_MS: String(deadline),
       AI_GEO_ACCEPTANCE_STAGE: 'preflight',
-      AI_GEO_REQUIRE_FULL_ACCEPTANCE: String(contractChanged || releaseState.recovery)
+      AI_GEO_REQUIRE_FULL_ACCEPTANCE: String(contractChanged || releaseState.recovery),
+      AI_GEO_PREFLIGHT_RESULT_PATH: acceptanceBudgetResultPath
     };
     delete environment.DB_STORAGE;
     delete environment.DATABASE_URL;
@@ -351,9 +367,11 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
       deadline,
       terminationGraceMs: 90_000
     });
+    const requiredAcceptanceMs = readAcceptanceBudgetResult(acceptanceBudgetResultPath);
     return {
       requireGeo010Acceptance: true,
-      dependenciesPreflighted: true
+      dependenciesPreflighted: true,
+      requiredAcceptanceMs
     };
   } finally {
     if (worktreeAdded) {
@@ -384,7 +402,11 @@ export async function activatePreparedRelease({
   try {
     // 先在现役服务运行期间完成候选只读门禁和依赖缓存，再停服；停服后才
     // 快进 live worktree，杜绝旧进程延迟 require 候选文件形成混合版本。
-    assertActivationBudget(deadline);
+    assertActivationBudget(
+      deadline,
+      Date.now(),
+      preflightResult?.requiredAcceptanceMs
+    );
     stopAttempted = true;
     await stopProduction({ projectRoot, signal, deadline });
     await fastForward({ projectRoot, ...prepared, signal, deadline });
