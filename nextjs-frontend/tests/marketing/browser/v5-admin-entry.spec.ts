@@ -107,12 +107,13 @@ const v5Report = {
     invalid_captures: 0,
     analysis_coverage_rate: 100,
     brand_mentioned_answers: 1,
+    recommendation_assessed_answers: 0,
     recommended_answers: 0,
     ranked_answers: 0,
     sov_calculable_answers: 1,
     avg_answer_competitor_share: 33.33,
     brand_mention_rate: 100,
-    recommendation_rate: 0,
+    recommendation_rate: null,
     citation_valid_analyses: 1,
     citation_unverified_analyses: 0,
     citation_rate: 100,
@@ -174,6 +175,17 @@ const v5Report = {
         target_entity_id: 'E001',
         candidate_entity_ids: []
       },
+      target_fact: {
+        status: 'complete',
+        brand_mentioned: true,
+        brand_mentions: 1
+      },
+      target_semantics: {
+        status: 'unavailable',
+        recommendation: { status: 'unavailable', value: null },
+        rank: { status: 'unavailable', value: null },
+        sentiment: { status: 'unavailable', value: null }
+      },
       target_entity_id: 'E001',
       entities: [
         { entity_id: 'E001', name: 'GATO', type: 'brand' },
@@ -185,13 +197,7 @@ const v5Report = {
         reason: '回答只是并列举例，没有可靠排名。',
         evidence: ['可同时核验两类方案。']
       }],
-      sentiment: {
-        status: 'assessed',
-        label: 'neutral',
-        reason: '中性选型建议',
-        evidence: ['建议根据现场工况核验。'],
-        risk_terms: []
-      },
+      claims: { status: 'not_collected', items: [] },
       citations: {
         count: 1,
         official_count: 1,
@@ -475,6 +481,9 @@ test('v5 scoped report renders observed-only facts and long identities accessibl
   await expect(page.getByRole('heading', { name: v5Report.question_set_name })).toBeVisible();
   await expect(page.getByText('开放发现 SOV（仅基于本次已发现实体）', { exact: false })).toBeVisible();
   await expect(page.getByText('33.33%（1/3）', { exact: false })).toBeVisible();
+  await expect(page.getByText('—（0 / 0）', { exact: true })).toBeVisible();
+  await expect(page.getByText('推荐未评估', { exact: true })).toBeVisible();
+  await expect(page.getByText('未评估', { exact: true })).toHaveCount(2);
   await expect(page.getByText('这份历史报告包含旧规则指标')).toHaveCount(0);
 
   const expand = page.locator('button.ant-table-row-expand-icon').first();
@@ -482,6 +491,7 @@ test('v5 scoped report renders observed-only facts and long identities accessibl
   await expand.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByText('AI 结构化 v5', { exact: true })).toBeVisible();
+  await expect(page.getByText('本版本未采集品牌主张', { exact: true })).toBeVisible();
   await expect(page.getByText('目标品牌映射：GATO', { exact: true })).toBeVisible();
   await expect(page.getByText(`普通列表：GATO → ${longCompetitorName}`, { exact: false })).toBeVisible();
   const entityTag = page.locator('.ant-tag').filter({ hasText: `${longCompetitorName} · 公司` }).last();

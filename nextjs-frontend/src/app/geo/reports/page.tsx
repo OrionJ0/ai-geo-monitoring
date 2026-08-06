@@ -260,7 +260,7 @@ export default function GeoReportsPage() {
       dataIndex: 'brand_mention_rate',
       width: 160,
       render: (value, row) => isCurrentReport
-        ? formatRate(value, row.brand_mentioned_answers, row.valid_answers)
+        ? formatRate(value, row.brand_mentioned_answers, row.brand_mention_assessed_answers ?? row.valid_answers)
         : `${percent(value)}%`
     },
     {
@@ -275,7 +275,7 @@ export default function GeoReportsPage() {
       dataIndex: 'recommendation_rate',
       width: 150,
       render: (value, row) => isCurrentReport
-        ? formatRate(value, row.recommended_answers, row.valid_answers)
+        ? formatRate(value, row.recommended_answers, row.recommendation_assessed_answers ?? row.valid_answers)
         : `${percent(value)}%`
     },
     {
@@ -305,7 +305,7 @@ export default function GeoReportsPage() {
       dataIndex: 'brand_mention_rate',
       width: 160,
       render: (value, row) => isCurrentReport
-        ? formatRate(value, row.brand_mentioned_answers, row.valid_answers)
+        ? formatRate(value, row.brand_mentioned_answers, row.brand_mention_assessed_answers ?? row.valid_answers)
         : `${percent(value)}%`
     },
     {
@@ -320,7 +320,7 @@ export default function GeoReportsPage() {
       dataIndex: 'recommendation_rate',
       width: 150,
       render: (value, row) => isCurrentReport
-        ? formatRate(value, row.recommended_answers, row.valid_answers)
+        ? formatRate(value, row.recommended_answers, row.recommendation_assessed_answers ?? row.valid_answers)
         : `${percent(value)}%`
     },
   ];
@@ -338,7 +338,7 @@ export default function GeoReportsPage() {
       dataIndex: 'brand_mention_rate',
       width: 160,
       render: (value, row) => isCurrentReport
-        ? formatRate(value, row.brand_mentioned_answers, row.valid_answers)
+        ? formatRate(value, row.brand_mentioned_answers, row.brand_mention_assessed_answers ?? row.valid_answers)
         : `${percent(value)}%`
     },
     {
@@ -353,7 +353,7 @@ export default function GeoReportsPage() {
       dataIndex: 'recommendation_rate',
       width: 150,
       render: (value, row) => isCurrentReport
-        ? formatRate(value, row.recommended_answers, row.valid_answers)
+        ? formatRate(value, row.recommended_answers, row.recommendation_assessed_answers ?? row.valid_answers)
         : `${percent(value)}%`
     },
   ];
@@ -545,14 +545,14 @@ export default function GeoReportsPage() {
               <Row gutter={[12, 12]}>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="总运行数" value={metricSummary.total_runs ?? metricSummary.total_checks ?? 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '有效回答' : '有效分析数'} value={metricSummary.valid_answers ?? metricSummary.total_checks ?? 0} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="品牌提及率" value={isCurrentReport ? formatRate(metricSummary.brand_mention_rate, metricSummary.brand_mentioned_answers, metricSummary.valid_answers) : `${percent(metricSummary.brand_mention_rate)}%`} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="品牌提及率" value={isCurrentReport ? formatRate(metricSummary.brand_mention_rate, metricSummary.brand_mentioned_answers, metricSummary.brand_mention_assessed_answers ?? metricSummary.valid_answers) : `${percent(metricSummary.brand_mention_rate)}%`} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '回答内竞品提及占比（SOV）' : '平均声量占比（SOV）'} value={isCurrentReport ? formatSov(metricSummary.sov_summary) : `${percent(metricSummary.avg_share_of_voice)}%`} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="分析覆盖率" value={isCurrentReport ? formatRate(metricSummary.analysis_coverage_rate, metricSummary.valid_answers, metricSummary.acquired_answers) : '历史报告未记录'} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="失败数" value={metricSummary.failed_runs || 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="竞品提及次数" value={(isCurrentReport ? metricSummary.competitors || [] : competitors).reduce((sum, item) => sum + Number(item.mentions || 0), 0)} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用率" value={Number(metricSummary.citation_eligible_checks || 0) > 0 ? percent(metricSummary.citation_rate) : '暂无可验证样本'} suffix={Number(metricSummary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '官网引用率' : '自有来源覆盖率'} value={isCurrentReport && !(selectedProject?.website || report?.project?.website) ? '未配置官网' : (Number(metricSummary.citation_eligible_checks || 0) > 0 ? percent(metricSummary.owned_citation_rate) : '暂无可验证样本')} suffix={(!isCurrentReport || Boolean(selectedProject?.website || report?.project?.website)) && Number(metricSummary.citation_eligible_checks || 0) > 0 ? '%' : undefined} /></Card></Col>
-                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '推荐率（AI 语义分析）' : '推荐率'} value={isCurrentReport ? formatRate(metricSummary.recommendation_rate, metricSummary.recommended_answers, metricSummary.valid_answers) : `${percent(metricSummary.recommendation_rate)}%`} /></Card></Col>
+                <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '推荐率（AI 语义分析）' : '推荐率'} value={isCurrentReport ? formatRate(metricSummary.recommendation_rate, metricSummary.recommended_answers, metricSummary.recommendation_assessed_answers ?? metricSummary.valid_answers) : `${percent(metricSummary.recommendation_rate)}%`} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title={isCurrentReport ? '明确有序榜单平均排名' : '平均品牌排名'} value={isCurrentReport ? (metricSummary.avg_brand_rank === null || metricSummary.avg_brand_rank === undefined ? `—（有效回答 ${Number(metricSummary.ranked_answers || 0)}）` : `${formatRank(metricSummary.avg_brand_rank)}（有效回答 ${Number(metricSummary.ranked_answers || 0)}）`) : formatRank(metricSummary.avg_brand_rank)} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="引用源总数" value={sourceSummary.total_citations || 0} /></Card></Col>
                 <Col xs={24} sm={12} lg={6}><Card size="small"><Statistic title="来源域名数" value={sourceSummary.source_domain_count || 0} /></Card></Col>

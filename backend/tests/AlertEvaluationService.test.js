@@ -129,6 +129,18 @@ test('does not trigger negative sentiment alerts before enough brand-mentioned s
   assert.deepEqual(decisions, []);
 });
 
+test('does not trigger negative sentiment alerts before enough assessed sentiment samples exist', () => {
+  const decisions = AlertEvaluationService.evaluateRules([
+    { id: 1, type: 'negative_sentiment', threshold: 10, enabled: true }
+  ], {
+    valid_answers: 3,
+    brand_mentioned_answers: 3,
+    sentiment_assessed_answers: 1,
+    negative_sentiment_rate: 100
+  });
+  assert.deepEqual(decisions, []);
+});
+
 test('triggers negative sentiment alerts after enough brand-mentioned samples exist', () => {
   const decisions = AlertEvaluationService.evaluateRules([
     { id: 1, type: 'negative_sentiment', threshold: 50, enabled: true }

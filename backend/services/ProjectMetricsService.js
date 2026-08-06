@@ -63,6 +63,28 @@ class ProjectMetricsService {
     return String(this.plain(row).metric_semantics_version || '').trim() === CURRENT_METRIC_SEMANTICS;
   }
 
+  analysisStructure(row) {
+    const structure = this.plain(row).analysis_structure;
+    return structure && typeof structure === 'object' && !Array.isArray(structure)
+      ? structure
+      : {};
+  }
+
+  targetSemantic(row, field) {
+    const semantic = this.analysisStructure(row)?.target_semantics?.[field];
+    return semantic && typeof semantic === 'object' && !Array.isArray(semantic)
+      ? semantic
+      : {};
+  }
+
+  presentCurrentSov(row) {
+    const structure = this.analysisStructure(row);
+    return GeoMetricSemanticsService.presentScopedSov({
+      ...row,
+      sov_status: structure?.sov?.status
+    });
+  }
+
   hasAcquiredAnswer(record) {
     const row = this.plain(record);
     const resultDetail = this.plain(row.resultDetail || row.result_detail);
@@ -228,14 +250,27 @@ class ProjectMetricsService {
     ));
     const sovValues = metricRows
       .map((row) => {
-        const sov = GeoMetricSemanticsService.presentSov(row);
-        return sov.status === 'calculated' ? sov.value : null;
+        const sov = this.presentCurrentSov(row);
+        return sov.status === 'observed_only' && sov.denominator > 0 ? sov.value : null;
       })
       .filter((value) => value !== null);
-    const mentioned = metricRows.filter((row) => Boolean(row.brand_mentioned)).length;
-    const recommended = metricRows.filter((row) => Boolean(row.brand_recommended)).length;
-    const rankValues = metricRows
-      .map((row) => Number(row.brand_rank))
+    const mentionScope = metricRows.filter(
+      (row) => this.analysisStructure(row)?.target_fact?.status === 'complete'
+    );
+    const mentioned = mentionScope.filter(
+      (row) => Boolean(this.analysisStructure(row)?.target_fact?.brand_mentioned)
+    ).length;
+    const recommendationScope = metricRows.filter(
+      (row) => this.targetSemantic(row, 'recommendation').status === 'assessed'
+    );
+    const recommended = recommendationScope.filter(
+      (row) => this.targetSemantic(row, 'recommendation').value === true
+    ).length;
+    const rankScope = metricRows.filter(
+      (row) => this.targetSemantic(row, 'rank').status === 'assessed'
+    );
+    const rankValues = rankScope
+      .map((row) => Number(this.targetSemantic(row, 'rank').value))
       .filter((rank) => Number.isFinite(rank) && rank > 0);
     const citationRows = this.buildCurrentCitationEvidenceRows({
       metrics: metricRows,
@@ -245,8 +280,12 @@ class ProjectMetricsService {
     const ownedCited = citationRows.filter(
       (row) => this.citationCount(row, 'owned_citation_count') > 0
     ).length;
-    const sentimentRows = metricRows.filter((row) => Boolean(row.brand_mentioned));
-    const negative = sentimentRows.filter((row) => row.sentiment === 'negative').length;
+    const sentimentRows = metricRows.filter(
+      (row) => this.targetSemantic(row, 'sentiment').status === 'assessed'
+    );
+    const negative = sentimentRows.filter(
+      (row) => this.targetSemantic(row, 'sentiment').value === 'negative'
+    ).length;
     const competitorMap = new Map();
 
     for (const row of metricRows) {
@@ -275,15 +314,20 @@ class ProjectMetricsService {
       analysis_coverage_rate: this.nullablePct(total, acquiredRows.length),
       total_checks: total,
       checks: total,
+      brand_mention_assessed_answers: mentionScope.length,
       brand_mentioned_answers: mentioned,
-      brand_mention_rate: this.nullablePct(mentioned, total),
+      brand_mention_rate: this.nullablePct(mentioned, mentionScope.length),
+      recommendation_assessed_answers: recommendationScope.length,
       recommended_answers: recommended,
-      recommendation_rate: this.nullablePct(recommended, total),
+      recommendation_rate: this.nullablePct(recommended, recommendationScope.length),
+      rank_assessed_answers: rankScope.length,
       ranked_answers: rankValues.length,
       avg_brand_rank: this.nullableAvg(rankValues),
       sov_summary: {
         metric_semantics_version: CURRENT_METRIC_SEMANTICS,
-        kind: 'contextual_competitor_mentions',
+        kind: 'observed_competitor_mentions',
+        scope: 'open_discovery',
+        completeness: 'not_proven',
         average: this.nullableAvg(sovValues),
         calculable_answers: sovValues.length
       },
@@ -291,6 +335,7 @@ class ProjectMetricsService {
       citation_unverified_checks: acquiredRows.length - citationRows.length,
       citation_rate: this.nullablePct(cited, citationRows.length),
       owned_citation_rate: this.nullablePct(ownedCited, citationRows.length),
+      sentiment_assessed_answers: sentimentRows.length,
       negative_sentiment_answers: negative,
       negative_sentiment_rate: this.nullablePct(negative, sentimentRows.length),
       competitors: Array.from(competitorMap.values())
@@ -450,15 +495,16 @@ class ProjectMetricsService {
         }),
         ...this.summarizeRuns(promptRecords),
         positive_sentiment_count: promptMetrics.filter(
-          (row) => row.brand_mentioned && row.sentiment === 'positive'
+          (row) => this.targetSemantic(row, 'sentiment').status === 'assessed'
+            && this.targetSemantic(row, 'sentiment').value === 'positive'
         ).length,
         neutral_sentiment_count: promptMetrics.filter(
-          (row) => row.brand_mentioned
-            && row.sentiment !== 'positive'
-            && row.sentiment !== 'negative'
+          (row) => this.targetSemantic(row, 'sentiment').status === 'assessed'
+            && this.targetSemantic(row, 'sentiment').value === 'neutral'
         ).length,
         negative_sentiment_count: promptMetrics.filter(
-          (row) => row.brand_mentioned && row.sentiment === 'negative'
+          (row) => this.targetSemantic(row, 'sentiment').status === 'assessed'
+            && this.targetSemantic(row, 'sentiment').value === 'negative'
         ).length,
         last_run_at: latest([...promptMetrics, ...promptRecords])
       };
@@ -500,7 +546,7 @@ class ProjectMetricsService {
 
   presentCurrentMetric(metric) {
     const row = this.plain(metric);
-    const sov = GeoMetricSemanticsService.presentSov(row);
+    const sov = this.presentCurrentSov(row);
     const normalized = CitationMetricSemanticsService.normalizeForRead(row);
     const {
       share_of_voice: ignoredHistoricalSov,

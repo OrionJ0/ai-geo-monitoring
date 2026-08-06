@@ -75,6 +75,7 @@ type ReportSummary = {
   invalid_captures?: number | null;
   analysis_coverage_rate?: number | null;
   brand_mentioned_answers?: number | null;
+  recommendation_assessed_answers?: number | null;
   recommended_answers?: number | null;
   ranked_answers?: number | null;
   sov_calculable_answers?: number | null;
@@ -242,6 +243,26 @@ type ReportRow = {
       target_entity_id?: string | null;
       candidate_entity_ids?: string[];
     };
+    target_fact?: {
+      status?: string;
+      brand_mentioned?: boolean;
+      brand_mentions?: number;
+    };
+    target_semantics?: {
+      status?: string;
+      recommendation?: {
+        status?: 'assessed' | 'unresolved' | 'unavailable' | 'not_applicable' | string;
+        value?: boolean | null;
+      };
+      rank?: {
+        status?: 'assessed' | 'unresolved' | 'unavailable' | 'not_applicable' | string;
+        value?: number | null;
+      };
+      sentiment?: {
+        status?: 'assessed' | 'unresolved' | 'unavailable' | 'not_applicable' | string;
+        value?: 'positive' | 'neutral' | 'negative' | null;
+      };
+    };
     entities?: Array<{
       entity_id?: string;
       name?: string;
@@ -275,11 +296,19 @@ type ReportRow = {
       risk_terms?: string[];
     };
     claims?: Array<{
-      subject_name?: string;
-      predicate?: string;
-      value?: string;
-      qualifier?: string;
-    }>;
+        subject_name?: string;
+        predicate?: string;
+        value?: string;
+        qualifier?: string;
+      }> | {
+        status?: 'not_collected' | 'collected' | string;
+        items?: Array<{
+          subject_name?: string;
+          predicate?: string;
+          value?: string;
+          qualifier?: string;
+        }>;
+      };
     citations?: {
       count?: number;
       official_count?: number;
@@ -375,6 +404,26 @@ function percent(value?: number | null) {
 function formatRank(value?: number | null) {
   const number = Number(value || 0);
   return Number.isFinite(number) && number > 0 ? Number(number.toFixed(2)) : '—';
+}
+
+function semanticStatusLabel(status?: string) {
+  if (status === 'unresolved') return '未解决';
+  if (status === 'not_applicable') return '不适用';
+  return '未评估';
+}
+
+function v5Semantic(row: ReportRow, field: 'recommendation' | 'rank' | 'sentiment') {
+  if (row.analysis_method !== 'ai_structured_v5') return null;
+  return row.analysis_structure?.target_semantics?.[field] || { status: 'unavailable' };
+}
+
+function claimsPresentation(row: ReportRow) {
+  const claims = row.analysis_structure?.claims;
+  if (Array.isArray(claims)) return { status: 'collected', items: claims };
+  return {
+    status: claims?.status || null,
+    items: Array.isArray(claims?.items) ? claims.items : []
+  };
 }
 
 function formatAnswerSov(row: ReportRow) {
@@ -945,7 +994,15 @@ export default function QuestionSetReportsPage() {
         <Space orientation="vertical" size={2}>
           <Space wrap size={[4, 4]}>
             <Tag color={row.brand_mentioned ? 'blue' : 'default'}>{row.brand_mentioned ? '已提及' : '未提及'}</Tag>
-            {row.brand_recommended ? <Tag color="green">明确推荐</Tag> : null}
+            {v5Semantic(row, 'recommendation')?.status === 'assessed'
+              ? v5Semantic(row, 'recommendation')?.value === true
+                ? <Tag color="green">明确推荐</Tag>
+                : <Tag>未明确推荐</Tag>
+              : v5Semantic(row, 'recommendation')
+                ? <Tag className={styles.semanticUnavailableTag}>推荐{semanticStatusLabel(v5Semantic(row, 'recommendation')?.status)}</Tag>
+                : row.brand_recommended
+                  ? <Tag color="green">明确推荐</Tag>
+                  : null}
           </Space>
           {row.sov?.kind === 'contextual_competitor_mentions' || row.sov?.kind === 'observed_competitor_mentions' ? (
             <Text type="secondary">
@@ -961,9 +1018,14 @@ export default function QuestionSetReportsPage() {
     },
     {
       title: '排名',
-      dataIndex: 'brand_rank',
+      key: 'brand_rank',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.rank : 80,
-      render: formatRank,
+      render: (_: unknown, row: ReportRow) => {
+        const rank = v5Semantic(row, 'rank');
+        return rank
+          ? rank.status === 'assessed' ? formatRank(rank.value as number | null) : semanticStatusLabel(rank.status)
+          : formatRank(row.brand_rank);
+      },
     },
     {
       title: '引用',
@@ -973,9 +1035,16 @@ export default function QuestionSetReportsPage() {
     },
     {
       title: '情绪（AI 语义分析）',
-      dataIndex: 'sentiment',
+      key: 'sentiment',
       width: pdfLayout ? PDF_COLUMN_WIDTHS.sentiment : 80,
-      render: (value: string) => sentimentLabel[value] || '—',
+      render: (_: unknown, row: ReportRow) => {
+        const sentiment = v5Semantic(row, 'sentiment');
+        return sentiment
+          ? sentiment.status === 'assessed'
+            ? sentimentLabel[String(sentiment.value)] || '—'
+            : semanticStatusLabel(sentiment.status)
+          : sentimentLabel[row.sentiment || ''] || '—';
+      },
     },
   ];
 
@@ -1185,10 +1254,10 @@ export default function QuestionSetReportsPage() {
                         ? formatCurrentRate(
                           summary.recommendation_rate,
                           summary.recommended_answers,
-                          summary.valid_answers,
+                          summary.recommendation_assessed_answers ?? summary.valid_answers,
                         )
                         : `${percent(summary.recommendation_rate)}%`}
-                      help="明确推荐目标品牌的有效分析数 ÷ 有效分析数；仅列举不算推荐。"
+                      help="明确推荐目标品牌的回答数 ÷ 推荐语义已评估回答数；未解决或不可用不进入分母，仅列举不算推荐。"
                     />
                   </div>
 
@@ -1477,12 +1546,11 @@ export default function QuestionSetReportsPage() {
                               </Space>
                             </div>
                           ) : null}
-                          {Array.isArray(row.analysis_structure?.claims)
-                            && row.analysis_structure.claims.length ? (
+                          {claimsPresentation(row).items.length ? (
                             <div>
                               <Text className={styles.answerLabel}>待核验事实声明</Text>
                               <Space orientation="vertical" size={4}>
-                                {row.analysis_structure.claims.map((claim, index) => (
+                                {claimsPresentation(row).items.map((claim, index) => (
                                   <Text key={`claim-${index}`}>
                                     {claim.subject_name || '—'} · {claim.predicate || '—'}：
                                     {claim.value || '—'}
@@ -1490,6 +1558,11 @@ export default function QuestionSetReportsPage() {
                                   </Text>
                                 ))}
                               </Space>
+                            </div>
+                          ) : claimsPresentation(row).status === 'not_collected' ? (
+                            <div>
+                              <Text className={styles.answerLabel}>品牌主张</Text>
+                              <Text type="secondary">本版本未采集品牌主张</Text>
                             </div>
                           ) : null}
                           {row.analysis_method === 'ai_structured_v1' && brandEvidence(row).length ? (

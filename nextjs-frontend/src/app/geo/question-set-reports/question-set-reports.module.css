@@ -416,6 +416,12 @@
   padding: 20px;
 }
 
+.semanticUnavailableTag {
+  color: #7c2d12;
+  background: #fff7ed;
+  border-color: #c2410c;
+}
+
 @media (max-width: 1200px) {
   .reportSheet {
     min-height: auto;

@@ -368,7 +368,7 @@ export default function GeoProjectDashboardPage() {
       title: '提及率',
       dataIndex: 'brand_mention_rate',
       width: 150,
-      render: (value, row) => formatRate(value, row.brand_mentioned_answers, row.valid_answers)
+      render: (value, row) => formatRate(value, row.brand_mentioned_answers, row.brand_mention_assessed_answers ?? row.valid_answers)
     },
     {
       title: '回答内竞品提及占比（SOV）',
@@ -386,7 +386,7 @@ export default function GeoProjectDashboardPage() {
       title: '推荐率（AI 语义分析）',
       dataIndex: 'recommendation_rate',
       width: 150,
-      render: (value, row) => formatRate(value, row.recommended_answers, row.valid_answers)
+      render: (value, row) => formatRate(value, row.recommended_answers, row.recommendation_assessed_answers ?? row.valid_answers)
     },
   ];
 
@@ -511,13 +511,13 @@ export default function GeoProjectDashboardPage() {
           </div>
           <Row gutter={[12, 12]}>
             <Col xs={24} sm={12} lg={8}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('品牌提及率', '提及目标品牌的有效回答数 ÷ 有效回答数')} value={formatRate(summary.brand_mention_rate, summary.brand_mentioned_answers, summary.valid_answers)} loading={dashboardLoading} /></Card>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('品牌提及率', '目标事实已完成的回答中，提及目标品牌的回答数 ÷ 目标事实已完成回答数。')} value={formatRate(summary.brand_mention_rate, summary.brand_mentioned_answers, summary.brand_mention_assessed_answers ?? summary.valid_answers)} loading={dashboardLoading} /></Card>
             </Col>
             <Col xs={24} sm={12} lg={8}>
               <Card className={styles.coreMetricCard}><Statistic title={metricTitle('回答内竞品提及占比（SOV）', '目标品牌提及数 ÷ 品牌与竞品提及总数，再按回答取平均。')} value={formatSov(summary.sov_summary)} loading={dashboardLoading} /></Card>
             </Col>
             <Col xs={24} sm={12} lg={8}>
-              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('推荐率（AI 语义分析）', '明确推荐目标品牌的有效回答数 ÷ 有效回答数。')} value={formatRate(summary.recommendation_rate, summary.recommended_answers, summary.valid_answers)} loading={dashboardLoading} /></Card>
+              <Card className={styles.coreMetricCard}><Statistic title={metricTitle('推荐率（AI 语义分析）', '明确推荐目标品牌的回答数 ÷ 推荐语义已评估回答数；未解决或不可用不进入分母。')} value={formatRate(summary.recommendation_rate, summary.recommended_answers, summary.recommendation_assessed_answers ?? summary.valid_answers)} loading={dashboardLoading} /></Card>
             </Col>
           </Row>
         </section>

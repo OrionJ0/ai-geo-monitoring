@@ -31,6 +31,7 @@ test('问题集 v5 统计只把 recommendation/rank 的 assessed 记录纳入对
     v5Row({ recStatus: 'unresolved', rankStatus: 'unresolved' })
   ];
   const summary = summarize(rows);
+  assert.equal(summary.recommendation_assessed_answers, 2);
   assert.equal(summary.recommended_answers, 1);
   assert.equal(summary.ranked_answers, 1);
   assert.equal(summary.brand_mentioned_answers, 3);

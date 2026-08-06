@@ -82,18 +82,18 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
     ['品牌提及率', formatCurrentRate(
       summary.brand_mention_rate,
       summary.brand_mentioned_answers,
-      summary.valid_answers
+      summary.brand_mention_assessed_answers ?? summary.valid_answers
     )],
     ['回答内竞品提及占比（SOV）', formatCurrentSov(summary.sov_summary)],
     ['推荐率（AI 语义分析）', formatCurrentRate(
       summary.recommendation_rate,
       summary.recommended_answers,
-      summary.valid_answers
+      summary.recommendation_assessed_answers ?? summary.valid_answers
     )],
     ['负向情绪率（AI 语义分析）', formatCurrentRate(
       summary.negative_sentiment_rate,
       summary.negative_sentiment_answers,
-      summary.brand_mentioned_answers
+      summary.sentiment_assessed_answers ?? summary.brand_mentioned_answers
     )],
     ['明确有序榜单平均排名', summary.avg_brand_rank == null
       ? `N/A（有效回答 ${Number(summary.ranked_answers || 0)}）`
@@ -110,10 +110,10 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
     ...platforms.map((item) => [
       platformLabel[item.platform] || item.platform || '未知',
       item.valid_answers || 0,
-      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.valid_answers),
+      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.brand_mention_assessed_answers ?? item.valid_answers),
       formatCurrentSov(item.sov_summary),
       formatCitationRate(item.citation_rate, item),
-      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.valid_answers),
+      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.recommendation_assessed_answers ?? item.valid_answers),
       item.avg_brand_rank == null
         ? `N/A（有效回答 ${Number(item.ranked_answers || 0)}）`
         : `${formatRank(item.avg_brand_rank)}（有效回答 ${Number(item.ranked_answers || 0)}）`
@@ -128,10 +128,10 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
       item.total_runs || 0,
       item.failed_runs || 0,
       item.valid_answers || 0,
-      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.valid_answers),
+      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.brand_mention_assessed_answers ?? item.valid_answers),
       formatCurrentSov(item.sov_summary),
       formatCitationRate(item.citation_rate, item),
-      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.valid_answers)
+      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.recommendation_assessed_answers ?? item.valid_answers)
     ]),
     [],
     ['竞品提及'],
@@ -147,10 +147,10 @@ function buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured }
     ...trend.map((item) => [
       item.date,
       item.valid_answers || 0,
-      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.valid_answers),
+      formatCurrentRate(item.brand_mention_rate, item.brand_mentioned_answers, item.brand_mention_assessed_answers ?? item.valid_answers),
       formatCurrentSov(item.sov_summary),
       formatCitationRate(item.citation_rate, item),
-      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.valid_answers)
+      formatCurrentRate(item.recommendation_rate, item.recommended_answers, item.recommendation_assessed_answers ?? item.valid_answers)
     ]),
     [],
     ['来源类型'],
@@ -235,7 +235,10 @@ function buildReportCsvRows({
   platformLabel = defaultPlatformLabel,
   websiteConfigured
 } = {}) {
-  if (summary.metric_semantics_version === 'contextual_competitor_mentions_sov_v1') {
+  if (
+    summary.metric_semantics_version === 'contextual_competitor_mentions_sov_v1'
+    || summary.metric_semantics_version === 'contextual_competitor_mentions_sov_v2_scoped'
+  ) {
     return buildCurrentReportCsvRows({ summary, platformLabel, websiteConfigured });
   }
   const platforms = Array.isArray(summary.platforms) ? summary.platforms : [];

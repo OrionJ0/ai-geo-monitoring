@@ -126,7 +126,10 @@ class AlertEvaluationService {
 
       if (rule.type === 'negative_sentiment' && hasEffectiveMetrics) {
         const sentimentChecks = Number(
-          summary?.brand_mentioned_answers ?? summary?.brand_mentioned_checks ?? 0
+          summary?.sentiment_assessed_answers
+          ?? summary?.brand_mentioned_answers
+          ?? summary?.brand_mentioned_checks
+          ?? 0
         );
         if (sentimentChecks < MIN_EFFECTIVE_METRIC_ALERT_CHECKS) continue;
         const value = Number(summary?.negative_sentiment_rate || 0);

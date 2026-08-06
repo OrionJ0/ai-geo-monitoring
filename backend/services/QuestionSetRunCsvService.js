@@ -116,6 +116,12 @@ function csvEscape(value) {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+function v5SemanticCell(row, field, fallback) {
+  if (String(row?.analysis_method || '') !== 'ai_structured_v5') return fallback;
+  const semantic = row?.analysis_structure?.target_semantics?.[field];
+  return semantic?.status === 'assessed' ? semantic.value : '';
+}
+
 function buildCsv(report) {
   const rows = (Array.isArray(report?.rows) ? report.rows : []).map((row) => [
     SCHEMA_VERSION,
@@ -136,11 +142,11 @@ function buildCsv(report) {
     Boolean(row.has_metrics),
     Boolean(row.brand_mentioned),
     Number(row.brand_mentions || 0),
-    row.brand_rank ?? '',
-    Boolean(row.brand_recommended),
+    v5SemanticCell(row, 'rank', row.brand_rank ?? '') ?? '',
+    v5SemanticCell(row, 'recommendation', Boolean(row.brand_recommended)),
     row.share_of_voice == null ? '' : Number(row.share_of_voice),
     Number(row.citation_count || 0),
-    row.sentiment,
+    v5SemanticCell(row, 'sentiment', row.sentiment),
     row.sentiment_reason,
     JSON.stringify(Array.isArray(row.competitor_mentions) ? row.competitor_mentions : []),
     JSON.stringify(Array.isArray(row.citation_sources) ? row.citation_sources : []),

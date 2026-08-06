@@ -2,6 +2,22 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const ReportSnapshotService = require('../services/ReportSnapshotService');
 
+function v5Structure({ mentioned = false, recommended = false, rank = null, sentiment = 'neutral' } = {}) {
+  return {
+    target_fact: {
+      status: 'complete',
+      brand_mentioned: mentioned,
+      brand_mentions: mentioned ? 1 : 0
+    },
+    target_semantics: {
+      recommendation: { status: 'assessed', value: recommended },
+      rank: { status: 'assessed', value: rank },
+      sentiment: { status: 'assessed', value: sentiment }
+    },
+    sov: { status: 'observed_only', scope: 'open_discovery', completeness: 'not_proven' }
+  };
+}
+
 test('finds the latest report snapshot without creating a new one', async () => {
   const repository = {
     createCalls: 0,
@@ -147,6 +163,7 @@ test('stores top citation urls in generated report summaries', async () => {
       competition_entities: [],
       citation_sources: [{ url: 'https://example.com/guide?utm_source=ai' }],
       analysis_structure: {
+        ...v5Structure(),
         citations: { semantics_version: 'explicit-citation-v2' }
       },
       created_at: '2026-05-14T00:00:00.000Z'
@@ -230,6 +247,7 @@ test('新版报告一次固化全部平台和单平台视图且使用同一回�
       sov_denominator: 1,
       brand_mentioned: true,
       brand_recommended: true,
+      analysis_structure: v5Structure({ mentioned: true, recommended: true, rank: 1, sentiment: 'positive' }),
       competition_entities: [],
       created_at: '2026-05-14T00:00:00.000Z'
     },
@@ -244,6 +262,7 @@ test('新版报告一次固化全部平台和单平台视图且使用同一回�
       sov_denominator: 9,
       brand_mentioned: false,
       brand_recommended: false,
+      analysis_structure: v5Structure(),
       competition_entities: [{
         name: '海康',
         relation: 'competitor',

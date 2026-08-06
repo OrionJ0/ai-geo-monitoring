@@ -340,6 +340,7 @@ function summarize(rows) {
       ? nullablePercent(metricRows.length, acquiredRows.length)
       : null,
     brand_mentioned_answers: usesCurrentSemantics ? brandMentionedAnswers : null,
+    recommendation_assessed_answers: usesCurrentSemantics ? recommendationScope.length : null,
     recommended_answers: usesCurrentSemantics ? recommendedAnswers : null,
     ranked_answers: usesCurrentSemantics ? rankedRows.length : null,
     sov_calculable_answers: usesCurrentSemantics ? sovCalculableRows.length : null,

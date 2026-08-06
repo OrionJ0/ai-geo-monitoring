@@ -27,6 +27,11 @@ const SIX_QUESTIONS = [
   '大工业园区用什么安防设备比较好？'
 ];
 
+const CORPUS_HASH_MANIFEST = path.resolve(
+  __dirname,
+  'fixtures/geo-flash-structured-corpus-manifest.json'
+);
+
 function sampleFixture() {
   return [
     {
@@ -213,8 +218,52 @@ test('冻结语料加载后输出与语料清单可追溯（sample_id、question
   assert.equal(corpus.samples[0].answer_sha256, answerSha256(samples[0].response_text));
 });
 
-test('真实冻结语料（40+ 条 + 挑战样本）满足六类问题覆盖与分层要求', { skip: !fs.existsSync(path.resolve(__dirname, '../../work/geo-baseline-2026-07-28/samples.json')) }, () => {
+test('脱敏冻结语料哈希清单在干净仓库强制满足 40+ 唯一回答、六类问题与分层门槛', () => {
+  const manifest = JSON.parse(fs.readFileSync(CORPUS_HASH_MANIFEST, 'utf8'));
+  assert.equal(manifest.schema_version, 'geo_flash_corpus_hash_manifest_v1');
+  assert.equal(manifest.privacy, 'raw_text_omitted');
+  assert.doesNotMatch(JSON.stringify(manifest), /response_text|answer_text|question_text/u);
+
+  const hashes = Object.values(manifest.answer_sha256_by_sample_id || {});
+  const sampleIds = new Set(Object.keys(manifest.answer_sha256_by_sample_id || {}));
+  assert.ok(hashes.length >= 40, `清单至少 40 条，实际 ${hashes.length}`);
+  assert.ok(hashes.every((hash) => /^[0-9a-f]{64}$/u.test(hash)), '答案哈希必须是 SHA-256');
+  assert.ok(new Set(hashes).size >= 40, `去重后至少 40 条，实际 ${new Set(hashes).size}`);
+
+  const expectedQuestionClasses = [
+    'tension_fence',
+    'pulse_fence',
+    'laser_beam',
+    'electromagnetic_cable',
+    'vibration_fiber',
+    'industrial_park'
+  ];
+  assert.deepEqual(
+    Object.keys(manifest.question_class_sample_ids || {}).sort(),
+    expectedQuestionClasses.sort()
+  );
+  Object.values(manifest.question_class_sample_ids).forEach((ids) => {
+    assert.ok(ids.length > 0, '六类问题每类至少有一条冻结样本');
+    assert.ok(ids.every((id) => sampleIds.has(id)), '问题分层不得引用未知样本');
+  });
+
+  const platformGroups = Object.values(manifest.platform_sample_ids || {});
+  assert.ok(platformGroups.length >= 3, '至少 3 个平台');
+  const platformIds = platformGroups.flat();
+  assert.equal(platformIds.length, sampleIds.size, '每条样本必须且只能归属一个平台');
+  assert.equal(new Set(platformIds).size, sampleIds.size, '平台分层不得重复或遗漏样本');
+  assert.ok(platformIds.every((id) => sampleIds.has(id)), '平台分层不得引用未知样本');
+
+  const manifestStrata = manifest.strata_sample_ids || {};
+  assert.ok(manifestStrata.long_answer?.length >= 10, `长回答至少 10 条，实际 ${manifestStrata.long_answer?.length || 0}`);
+  assert.ok(manifestStrata.multi_entity?.length >= 10, `多实体至少 10 条，实际 ${manifestStrata.multi_entity?.length || 0}`);
+  assert.ok(manifestStrata.challenge?.length >= 1, '至少保留一条挑战样本');
+  Object.values(manifestStrata).forEach((ids) => {
+    assert.ok(ids.every((id) => sampleIds.has(id)), '语料分层不得引用未知样本');
+  });
+
   const realDir = path.resolve(__dirname, '../../work/geo-baseline-2026-07-28');
+  if (!fs.existsSync(path.join(realDir, 'samples.json'))) return;
   const samples = JSON.parse(fs.readFileSync(path.join(realDir, 'samples.json'), 'utf8'));
   const challengeArtifact = path.resolve(__dirname, '../../work/diagnostics/real-ai-structure-2026-08-05T01-54-10-701Z.json');
   const all = [...samples];
@@ -235,12 +284,16 @@ test('真实冻结语料（40+ 条 + 挑战样本）满足六类问题覆盖与�
   assert.ok(strata.long_answer >= 10, `长回答至少 10 条，实际 ${strata.long_answer}`);
   assert.ok(strata.multi_entity >= 10, `多实体至少 10 条，实际 ${strata.multi_entity}`);
   assert.ok(strata.by_platform && Object.keys(strata.by_platform).length >= 3, '至少 3 个平台');
-  // 去重合同：原始样本至少 40 条；按 answer_sha256 去重后的唯一回答
-  // 必须在 009 真实对比前达到 40 条。当前 samples.json 内 S18/S19/S20
-  // 三条答案完全相同，去重后为 38 条 + 挑战样本 C01 = 39 条。
   const deduped = loadFrozenCorpus({ samples: all }).samples;
   assert.ok(samples.length >= 40, `原始语料至少 40 条，实际 ${samples.length}`);
-  assert.ok(deduped.length >= 38, `去重后至少 38 条（合同要求 40，009 前补充），实际 ${deduped.length}`);
+  assert.ok(deduped.length >= 40, `去重后至少 40 条，实际 ${deduped.length}`);
+  all.forEach((sample) => {
+    assert.equal(
+      manifest.answer_sha256_by_sample_id[sample.sample_id],
+      answerSha256(sample.response_text),
+      `${sample.sample_id} 的本地原文与提交哈希清单不一致`
+    );
+  });
 });
 
 test('评测把失败计入完成率分母，输出缺失不当作成功', () => {

@@ -12,7 +12,7 @@ const EXPLICIT_CITATION = {
 };
 
 function currentMetric(overrides = {}) {
-  return {
+  const row = {
     metric_semantics_version: CURRENT,
     answer_competitor_share: null,
     sov_numerator: 0,
@@ -22,6 +22,26 @@ function currentMetric(overrides = {}) {
     competition_entities: [],
     ...overrides
   };
+  const providedStructure = row.analysis_structure || {};
+  row.analysis_structure = {
+      target_fact: providedStructure.target_fact || {
+        status: 'complete',
+        brand_mentioned: Boolean(row.brand_mentioned),
+        brand_mentions: row.brand_mentioned ? 1 : 0
+      },
+      target_semantics: providedStructure.target_semantics || {
+        recommendation: { status: 'assessed', value: Boolean(row.brand_recommended) },
+        rank: { status: 'assessed', value: row.brand_rank ?? null },
+        sentiment: { status: 'assessed', value: row.sentiment || 'neutral' }
+      },
+      sov: providedStructure.sov || {
+        status: 'observed_only',
+        scope: 'open_discovery',
+        completeness: 'not_proven'
+      },
+      ...providedStructure
+    };
+  return row;
 }
 
 function currentRecord(overrides = {}) {
@@ -116,11 +136,15 @@ test('新版项目聚合按回答等权平均并只让分析失败降低覆盖�
   assert.equal(view.analysis_coverage_rate, 75);
   assert.equal(view.brand_mention_rate, 33.33);
   assert.equal(view.recommendation_rate, 33.33);
+  assert.equal(view.recommendation_assessed_answers, 3);
+  assert.equal(view.sentiment_assessed_answers, 3);
   assert.equal(view.ranked_answers, 1);
   assert.equal(view.avg_brand_rank, 1);
   assert.deepEqual(view.sov_summary, {
     metric_semantics_version: CURRENT,
-    kind: 'contextual_competitor_mentions',
+    kind: 'observed_competitor_mentions',
+    scope: 'open_discovery',
+    completeness: 'not_proven',
     average: 50,
     calculable_answers: 2
   });
@@ -129,6 +153,52 @@ test('新版项目聚合按回答等权平均并只让分析失败降低覆盖�
     mentions: 9,
     appeared_answers: 1
   }]);
+});
+
+test('v5 项目聚合只把 assessed 语义纳入各自分母且不读取兼容占位', () => {
+  const metrics = [
+    currentMetric({
+      brand_mentioned: true,
+      brand_recommended: true,
+      brand_rank: 1,
+      sentiment: 'positive'
+    }),
+    currentMetric({
+      brand_mentioned: true,
+      brand_recommended: false,
+      brand_rank: null,
+      sentiment: 'negative'
+    }),
+    currentMetric({
+      brand_mentioned: true,
+      brand_recommended: true,
+      brand_rank: 1,
+      sentiment: 'neutral',
+      analysis_structure: {
+        target_fact: { status: 'unavailable', brand_mentioned: true },
+        target_semantics: {
+          recommendation: { status: 'unavailable', value: null },
+          rank: { status: 'unresolved', value: null },
+          sentiment: { status: 'unavailable', value: null }
+        },
+        sov: { status: 'observed_only', scope: 'open_discovery', completeness: 'not_proven' }
+      }
+    })
+  ];
+
+  const view = ProjectMetricsService.buildCurrentMetricView({ metrics, records: [] });
+  assert.equal(view.valid_answers, 3);
+  assert.equal(view.brand_mention_assessed_answers, 2);
+  assert.equal(view.brand_mention_rate, 100);
+  assert.equal(view.recommendation_assessed_answers, 2);
+  assert.equal(view.recommended_answers, 1);
+  assert.equal(view.recommendation_rate, 50);
+  assert.equal(view.rank_assessed_answers, 2);
+  assert.equal(view.ranked_answers, 1);
+  assert.equal(view.avg_brand_rank, 1);
+  assert.equal(view.sentiment_assessed_answers, 2);
+  assert.equal(view.negative_sentiment_answers, 1);
+  assert.equal(view.negative_sentiment_rate, 50);
 });
 
 test('问题集重试只统计当前槽位记录，不让已被替代的失败尝试污染覆盖率', () => {
