@@ -16,6 +16,7 @@ node_modules/
 *.db
 database.sqlite
 backend/backups/
+backend/releases/
 
 # build outputs
 .next/

@@ -160,6 +160,54 @@ test('release manifest binds the complete backup to source identity and revision
   );
 });
 
+test('strict manifest verification tolerates metadata churn on an empty WAL', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-empty-wal-manifest-'));
+  const sourcePath = path.join(directory, 'database.sqlite');
+  const backupPath = path.join(directory, 'database.pre-release.sqlite');
+  const manifestPath = `${backupPath}.manifest.json`;
+  const revision = 'f'.repeat(40);
+  const source = openDatabase(sourcePath);
+
+  t.after(async () => {
+    await close(source);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  await run(source, 'PRAGMA journal_mode=WAL');
+  await run(source, 'CREATE TABLE question_records (id INTEGER PRIMARY KEY)');
+  await run(source, 'PRAGMA wal_checkpoint(TRUNCATE)');
+  await backupDatabase({
+    sourcePath,
+    backupPath,
+    ifAbsent: true,
+    manifestPath,
+    revision
+  });
+
+  const walPath = `${sourcePath}-wal`;
+  assert.equal(fs.statSync(walPath).size, 0);
+  const changed = new Date(Date.now() + 1000);
+  fs.utimesSync(walPath, changed, changed);
+
+  await verifyBackupManifest({
+    sourcePath,
+    backupPath,
+    manifestPath,
+    revision
+  });
+
+  await run(source, 'INSERT INTO question_records DEFAULT VALUES');
+  await assert.rejects(
+    verifyBackupManifest({
+      sourcePath,
+      backupPath,
+      manifestPath,
+      revision
+    }),
+    /manifest 与源库、备份或 revision 不匹配/u
+  );
+});
+
 test('manifest mode never overwrites an existing backup or accepts non-exclusive creation', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-manifest-exclusive-'));
   const sourcePath = path.join(directory, 'database.sqlite');

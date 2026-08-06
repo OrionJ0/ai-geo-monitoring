@@ -104,6 +104,18 @@ async function databaseFileIdentity(sourcePath) {
   return identity;
 }
 
+function sourceStateMatches(manifestIdentity, currentIdentity) {
+  if (JSON.stringify(manifestIdentity?.main) !== JSON.stringify(currentIdentity?.main)) {
+    return false;
+  }
+  const manifestWal = manifestIdentity?.['-wal'];
+  const currentWal = currentIdentity?.['-wal'];
+  const manifestWalIsEmpty = !manifestWal || manifestWal.size === 0;
+  const currentWalIsEmpty = !currentWal || currentWal.size === 0;
+  if (manifestWalIsEmpty && currentWalIsEmpty) return true;
+  return JSON.stringify(manifestWal) === JSON.stringify(currentWal);
+}
+
 async function writeBackupManifest({
   sourcePath,
   backupPath,
@@ -171,9 +183,7 @@ async function verifyBackupManifest({
     || !sameSourceFile
     || (
       requireCurrentSourceState
-      && JSON.stringify(manifest.source_identity) !== JSON.stringify(
-        currentSourceIdentity
-      )
+      && !sourceStateMatches(manifest.source_identity, currentSourceIdentity)
     )
   ) {
     throw new Error('SQLite 备份 manifest 与源库、备份或 revision 不匹配');
