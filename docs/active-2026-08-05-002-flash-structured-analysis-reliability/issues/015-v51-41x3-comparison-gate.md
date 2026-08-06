@@ -36,7 +36,7 @@ blocked_by:
 
 ### 语义门槛（assessed 字段准确率）
 
-- [ ] 推荐 F1≥0.95、情绪准确率≥0.90、明确排名 exact-match≥0.95，每项至少 20 个已复核可评估实例；排名真值不足时（当前 55 条中仅 6 条）先扩充已复核真值或按合同修订门槛，不得用不足样本宣称通过。
+- [ ] 推荐 F1≥0.95、情绪准确率≥0.90、明确排名 exact-match≥0.95，每项至少 20 个已复核可评估实例；排名真值仅 6 条，按 NOT_EVALUABLE 合同处理——**发布口径：最终报告必须写明"排名能力证据不足"，不得描述为排名门禁通过**；由 010 决策它是非阻塞观察项还是暂不对外承诺（见 TECH-SPEC 7.5.1 发布口径）。
 - [ ] `target_mapping` 接入评分与门禁（truth v3 已有 S53 conflicting_identity 真值），预测映射状态准确率报告。
 - [ ] 整体 assessed/unresolved/unavailable/not_applicable 字段分布单独报告，assessed 覆盖率作为语义可用性证据而非硬性门槛。
 

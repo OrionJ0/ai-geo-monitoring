@@ -920,6 +920,7 @@ D 先执行小型能力探针。若官方接口拒绝 schema、工具选择与�
 - **语义门槛**（仅 EVALUATED 判定）：推荐 precision/recall/F1 + assessed coverage；情绪逐次预测准确率 + 3×3 混淆矩阵；明确排名 exact-match（**仅评估真值 rank 非空的样本**，不人为扩充/伪造排名样本）；`target_mapping` 状态判断准确率与成功映射准确率分别统计。每项指标始终报告分子、分母与样本 ID。
 - **诚实降级**：预测侧非 assessed（unresolved/unavailable）单独计数（degraded），**不算错误预测、不得伪装成 assessed**；降级只降低 assessed coverage。`recommendation=null`（语义 unavailable）必须保留 null，禁止转成 false，不进入推荐混淆。
 - **NOT_EVALUABLE**：唯一已复核真值样本数 < 20 时（排名当前仅 6 条、target_mapping 仅 1 条），该指标输出 NOT_EVALUABLE——不判 PASS、不阻塞其他指标运行，仍报告可计算的准确率、分母与样本 ID。真值可后续补充真实回答，但不得为了凑数改变冻结答案或把编号列表当排名。
+- **发布口径（2026-08-06 数据所有者裁决）**：排名仅 6 条真值，`NOT_EVALUABLE` **不得被描述为排名门禁通过**。015 全量运行后，最终报告必须写明"排名能力证据不足"，由 010 决策时区分：作为**非阻塞观察项**（不阻碍其他硬/语义门槛判定）还是**暂不对外承诺**（进入生产承诺范围前必须补足真值并重新评估）。
 - **重复运行**：三次重复逐次计分并报告 repeat_variance（min/max/mean/stddev），只用于测量方差，不通过多数投票合并为单次预测。
 
 ### 7.6 预注册上线门槛
