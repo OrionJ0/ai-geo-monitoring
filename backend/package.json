@@ -22,6 +22,8 @@
     "migrate:run-ownership": "node scripts/migrateQuestionSetRunOwnership.js --apply",
     "audit:geo-metric-semantics": "node scripts/migrateGeoMetricSemantics.js",
     "migrate:geo-metric-semantics": "node scripts/migrateGeoMetricSemantics.js --apply",
+    "audit:v5-snapshot": "node scripts/migrateV5SnapshotFields.js --require-ready",
+    "migrate:v5-snapshot": "node scripts/migrateV5SnapshotFields.js --apply",
     "setup:local-key": "node scripts/setupLocalEncryptionKey.js",
     "web:login": "node scripts/webLogin.js"
   },
