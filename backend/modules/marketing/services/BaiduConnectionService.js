@@ -39,15 +39,30 @@ class BaiduConnectionService {
     encryptionKey,
     clock = () => Date.now(),
     wait = () => new Promise((resolve) => setTimeout(resolve, 25)),
-    claimTtlMs = 30_000,
+    providerTimeoutMs = 60_000,
+    claimLeaseMs = providerTimeoutMs + 15_000,
+    refreshCooldownMs = 30_000,
     maxClaimWaits = 100
   }) {
+    if (
+      !Number.isSafeInteger(providerTimeoutMs)
+      || providerTimeoutMs < 1
+      || !Number.isSafeInteger(claimLeaseMs)
+      || claimLeaseMs <= providerTimeoutMs
+      || !Number.isSafeInteger(refreshCooldownMs)
+      || refreshCooldownMs < 1
+    ) {
+      throw new TypeError(
+        'Refresh claim lease must outlive the provider timeout'
+      );
+    }
     this.sequelize = sequelize;
     this.provider = provider;
     this.encryptionKey = encryptionKey;
     this.clock = clock;
     this.wait = wait;
-    this.claimTtlMs = claimTtlMs;
+    this.claimLeaseMs = claimLeaseMs;
+    this.refreshCooldownMs = refreshCooldownMs;
     this.maxClaimWaits = maxClaimWaits;
   }
 
@@ -90,12 +105,15 @@ class BaiduConnectionService {
 
   async claim(connection) {
     const claimToken = crypto.randomBytes(32).toString('hex');
-    const claimUntil = new Date(this.clock() + this.claimTtlMs).toISOString();
+    const claimUntil = new Date(
+      this.clock() + this.claimLeaseMs
+    ).toISOString();
     const now = new Date(this.clock()).toISOString();
     const [, affected] = await this.sequelize.query(
       `UPDATE baidu_marketing_connections
        SET refresh_claim_token = :claimToken,
            refresh_claim_until = :claimUntil,
+           last_error_code = NULL,
            updated_at = :now
        WHERE id = :connectionId
          AND status = 'CONNECTED'
@@ -153,6 +171,28 @@ class BaiduConnectionService {
     return response;
   }
 
+  refreshCooldownError(connection) {
+    const remainingMs = new Date(connection.refresh_claim_until).getTime()
+      - this.clock();
+    if (
+      !connection.refresh_claim_token
+      || !Number.isFinite(remainingMs)
+      || remainingMs <= 0
+      || !['REFRESH_OUTCOME_UNKNOWN', 'REFRESH_FAILED'].includes(
+        connection.last_error_code
+      )
+    ) {
+      return null;
+    }
+    const error = new MarketingAuthorizationError(
+      '百度 Token 刷新暂时失败，请稍后重试',
+      connection.last_error_code,
+      503
+    );
+    error.retryAfterSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    return error;
+  }
+
   async requireReauthorization(connection, claimToken, code) {
     const now = new Date(this.clock()).toISOString();
     return this.sequelize.transaction(async (transaction) => {
@@ -188,7 +228,8 @@ class BaiduConnectionService {
             code,
             now
           },
-          transaction
+          transaction,
+          type: QueryTypes.UPDATE
         }
       );
       if (affected !== 1) return false;
@@ -207,6 +248,37 @@ class BaiduConnectionService {
       );
       return true;
     });
+  }
+
+  async recordRefreshCooldown(connection, claimToken, code) {
+    const now = new Date(this.clock()).toISOString();
+    const cooldownUntil = new Date(
+      this.clock() + this.refreshCooldownMs
+    ).toISOString();
+    const [, affected] = await this.sequelize.query(
+      `UPDATE baidu_marketing_connections
+       SET refresh_claim_until = :cooldownUntil,
+           last_error_code = :code,
+           updated_at = :now
+       WHERE id = :connectionId
+         AND status = 'CONNECTED'
+         AND auth_generation = :authGeneration
+         AND token_version = :tokenVersion
+         AND refresh_claim_token = :claimToken`,
+      {
+        replacements: {
+          connectionId: connection.id,
+          authGeneration: connection.auth_generation,
+          tokenVersion: connection.token_version,
+          claimToken,
+          cooldownUntil,
+          code,
+          now
+        },
+        type: QueryTypes.UPDATE
+      }
+    );
+    return affected === 1;
   }
 
   async refreshClaimed(connection, claimToken) {
@@ -238,19 +310,36 @@ class BaiduConnectionService {
         })
       );
     } catch (error) {
-      const code = error?.code === 'OUTCOME_UNKNOWN'
-        ? 'REFRESH_OUTCOME_UNKNOWN'
-        : (error?.code || 'REFRESH_FAILED');
-      const changed = await this.requireReauthorization(
-        connection,
-        claimToken,
-        code
-      );
-      throw new MarketingAuthorizationError(
-        changed ? '百度连接需要重新授权' : '晚到的 Token 刷新结果已拒绝',
+      const terminalCode = error?.code === 'BAIDU_REAUTHORIZATION_REQUIRED'
+        ? error.code
+        : error?.code === 'BAIDU_TOKEN_PRINCIPAL_MISMATCH'
+          ? 'REFRESH_PRINCIPAL_MISMATCH'
+          : null;
+      const requiresReauthorization = terminalCode !== null;
+      const code = requiresReauthorization
+        ? terminalCode
+        : error?.code === 'OUTCOME_UNKNOWN'
+          ? 'REFRESH_OUTCOME_UNKNOWN'
+          : 'REFRESH_FAILED';
+      const changed = requiresReauthorization
+        ? await this.requireReauthorization(connection, claimToken, code)
+        : await this.recordRefreshCooldown(connection, claimToken, code);
+      const authorizationError = new MarketingAuthorizationError(
+        changed
+          ? requiresReauthorization
+            ? '百度连接需要重新授权'
+            : '百度 Token 刷新暂时失败，请稍后重试'
+          : '晚到的 Token 刷新结果已拒绝',
         changed ? code : 'REFRESH_CAS_REJECTED',
-        409
+        changed && !requiresReauthorization ? 503 : 409
       );
+      if (changed && !requiresReauthorization) {
+        authorizationError.retryAfterSeconds = Math.max(
+          1,
+          Math.ceil(this.refreshCooldownMs / 1000)
+        );
+      }
+      throw authorizationError;
     }
     if (
       response.principalId != null
@@ -371,6 +460,8 @@ class BaiduConnectionService {
           tokenVersion: Number(connection.token_version)
         };
       }
+      const cooldownError = this.refreshCooldownError(connection);
+      if (cooldownError) throw cooldownError;
       const claimToken = await this.claim(connection);
       if (claimToken) {
         return this.refreshClaimed(connection, claimToken);
@@ -378,11 +469,16 @@ class BaiduConnectionService {
       if (attempt === this.maxClaimWaits) break;
       await this.wait();
     }
-    throw new MarketingAuthorizationError(
+    const timeoutError = new MarketingAuthorizationError(
       '等待 Token 刷新超时',
       'REFRESH_CLAIM_TIMEOUT',
       503
     );
+    timeoutError.retryAfterSeconds = Math.max(
+      1,
+      Math.ceil(this.claimLeaseMs / 1000)
+    );
+    throw timeoutError;
   }
 
   async getAccessToken(connectionId) {

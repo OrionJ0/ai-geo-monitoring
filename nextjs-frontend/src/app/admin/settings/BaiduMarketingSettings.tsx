@@ -69,6 +69,7 @@ export default function BaiduMarketingSettings() {
     = useState<Connection | null>(null);
   const [tongjiUserName, setTongjiUserName] = useState('');
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const bindingRequestIdRef = useRef(0);
 
   const load = useCallback(async () => {
     setError('');
@@ -120,6 +121,8 @@ export default function BaiduMarketingSettings() {
   }, [load]);
 
   const loadBindings = useCallback(async (targetProjectId: string) => {
+    const requestId = bindingRequestIdRef.current + 1;
+    bindingRequestIdRef.current = requestId;
     if (!targetProjectId) {
       setBindings([]);
       return;
@@ -128,8 +131,10 @@ export default function BaiduMarketingSettings() {
       const response = await axios.get(
         `/api/marketing/projects/${encodeURIComponent(targetProjectId)}/baidu-bindings`
       );
+      if (bindingRequestIdRef.current !== requestId) return;
       setBindings(response.data);
     } catch (requestError) {
+      if (bindingRequestIdRef.current !== requestId) return;
       setError(getApiErrorMessage(requestError, '无法读取项目绑定'));
     }
   }, []);
@@ -266,7 +271,10 @@ export default function BaiduMarketingSettings() {
         { userName: tongjiUserName }
       );
       closeTongjiContext();
-      await load();
+      await Promise.all([
+        load(),
+        loadBindings(projectId),
+      ]);
     } catch (requestError) {
       setError(getApiErrorMessage(
         requestError,

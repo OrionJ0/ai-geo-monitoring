@@ -8,7 +8,8 @@ const { Sequelize } = require('sequelize');
 
 const {
   createMarketingMigrationRunner,
-  ledgerChecksumConstraint
+  ledgerChecksumConstraint,
+  lockLegacyCredentialContractTables
 } = require('../../modules/marketing/migrations/MarketingMigrationRunner');
 const {
   loadMarketingMigrations
@@ -159,6 +160,47 @@ test('migration ledger uses a checksum constraint supported by each dialect', ()
   );
   assert.match(ledgerChecksumConstraint('sqlite'), /GLOB/u);
   assert.doesNotMatch(ledgerChecksumConstraint('postgres'), /GLOB/u);
+});
+
+test('PostgreSQL locks every 015 contract table against concurrent business writes', async () => {
+  const calls = [];
+  const transaction = { id: 'migration-transaction' };
+  await lockLegacyCredentialContractTables({
+    async query(sql, options) {
+      calls.push({ sql, options });
+    }
+  }, transaction);
+
+  assert.deepEqual(calls, [
+    {
+      sql: "SET LOCAL lock_timeout = '5s'",
+      options: { transaction }
+    },
+    {
+      sql: 'LOCK TABLE baidu_marketing_connections IN ACCESS EXCLUSIVE MODE',
+      options: { transaction }
+    },
+    {
+      sql: 'LOCK TABLE baidu_project_bindings, baidu_authorization_attempts IN SHARE MODE',
+      options: { transaction }
+    }
+  ]);
+});
+
+test('PostgreSQL 015 contract lock timeout fails with a stable code', async () => {
+  const transaction = { id: 'migration-transaction' };
+  await assert.rejects(
+    lockLegacyCredentialContractTables({
+      async query(sql) {
+        if (sql.startsWith('LOCK TABLE')) {
+          throw Object.assign(new Error('canceling statement due to lock timeout'), {
+            original: { code: '55P03' }
+          });
+        }
+      }
+    }, transaction),
+    { code: 'MARKETING_MIGRATION_LOCK_TIMEOUT' }
+  );
 });
 
 test('marketing migration audit is read-only and applies its source tables idempotently', async (t) => {

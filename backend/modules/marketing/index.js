@@ -232,7 +232,8 @@ function createMarketingModule({
     const connectionService = new BaiduConnectionService({
       sequelize,
       provider: baiduProvider,
-      encryptionKey: env.CONFIG_ENCRYPTION_KEY
+      encryptionKey: env.CONFIG_ENCRYPTION_KEY,
+      providerTimeoutMs: Number(env.BAIDU_MARKETING_HTTP_TIMEOUT_MS)
     });
     const tongjiContextService = new BaiduTongjiContextService({
       sequelize,
@@ -252,14 +253,34 @@ function createMarketingModule({
               accessToken: accessContext.accessToken
             })
           );
-          await connectionService.recordProductAccess({
+          const recorded = await connectionService.recordProductAccess({
             connectionId: connection.id,
             product: 'marketing',
             state: 'VERIFIED',
             authGeneration: accessContext.authGeneration,
             tokenVersion: accessContext.tokenVersion
           });
-          return accounts;
+          if (!recorded) {
+            throw Object.assign(
+              new Error('百度账户目录验证上下文已变化'),
+              {
+                code: 'MARKETING_ACCESS_CONTEXT_CHANGED',
+                status: 409
+              }
+            );
+          }
+          return {
+            accounts: accounts.map((account) => ({
+              ...account,
+              product: 'SEARCH',
+              readOnly: true
+            })),
+            validationContext: {
+              authGeneration: accessContext.authGeneration,
+              tokenVersion: accessContext.tokenVersion,
+              marketingVerified: true
+            }
+          };
         } catch (error) {
           const state = error?.code === 'BAIDU_REAUTHORIZATION_REQUIRED'
             ? 'REAUTH_REQUIRED'
@@ -280,7 +301,7 @@ function createMarketingModule({
     };
     const siteDirectory = {
       async listSites({ connection }) {
-        return tongjiContextService.listSites(connection.id);
+        return tongjiContextService.listSitesWithContext(connection.id);
       }
     };
     const reportProvider = {

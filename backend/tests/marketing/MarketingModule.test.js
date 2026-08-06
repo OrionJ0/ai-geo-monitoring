@@ -331,6 +331,103 @@ test('pilot data module mounts allowlisted binding and dashboard routes', async 
   await module.shutdown();
 });
 
+test('account directory rejects a result from an obsolete Access Context', async (t) => {
+  const database = await createMarketingTestDatabase(
+    'marketing-account-context-module-'
+  );
+  t.after(database.close);
+  await seedConnectionAndBinding(database.sequelize, { projectId: 11 });
+  const env = enabledConfig({
+    MARKETING_MONITORING_PILOT_MODE: 'true',
+    MARKETING_MONITORING_ALLOWED_PROJECT_IDS: '11',
+    BAIDU_MARKETING_SCOPE: '67,71,1004606,1002161',
+    BAIDU_MARKETING_CONTRACT_VERSION:
+      'baidu-marketing-pilot-2026-07-30'
+  });
+  await database.sequelize.query(
+    `UPDATE baidu_marketing_connections
+     SET access_token_ciphertext = :ciphertext,
+         access_token_expires_at = '2099-01-01T00:00:00.000Z'
+     WHERE id = 'connection-1'`,
+    {
+      replacements: {
+        ciphertext: encryptSecret(
+          'account-directory-token',
+          env.CONFIG_ENCRYPTION_KEY
+        )
+      }
+    }
+  );
+  let releaseDirectory;
+  let markStarted;
+  const started = new Promise((resolve) => {
+    markStarted = resolve;
+  });
+  const module = createMarketingModule({
+    env,
+    sequelize: database.sequelize,
+    provider: {
+      async listAccounts() {
+        markStarted();
+        await new Promise((resolve) => {
+          releaseDirectory = resolve;
+        });
+        return [{
+          accountId: 'stale-account',
+          accountName: '过期目录账户',
+          product: 'SEARCH',
+          readOnly: true
+        }];
+      }
+    }
+  });
+  const layers = [...module.authorizationRouter.stack];
+  let accountLayer = null;
+  while (layers.length && !accountLayer) {
+    const candidate = layers.shift();
+    if (candidate.route?.path === '/connections/:connectionId/accounts') {
+      accountLayer = candidate;
+    } else if (candidate.handle?.stack) {
+      layers.push(...candidate.handle.stack);
+    }
+  }
+  assert.ok(accountLayer);
+  const response = {
+    statusCode: 200,
+    payload: null,
+    headers: {},
+    set(name, value) {
+      this.headers[String(name).toLowerCase()] = value;
+      return this;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return this;
+    }
+  };
+  const responsePromise = accountLayer.route.stack.at(-1).handle(
+    { params: { connectionId: 'connection-1' } },
+    response
+  );
+  await started;
+  await database.sequelize.query(
+    `UPDATE baidu_marketing_connections
+     SET token_version = token_version + 1
+     WHERE id = 'connection-1'`
+  );
+  releaseDirectory();
+  await responsePromise;
+  assert.equal(response.statusCode, 409);
+  assert.equal(
+    response.payload.error.code,
+    'MARKETING_ACCESS_CONTEXT_CHANGED'
+  );
+});
+
 test('pilot data module requests advertising on dashboard access instead of a timer', async (t) => {
   const database = await createMarketingTestDatabase(
     'marketing-on-demand-module-'

@@ -51,6 +51,31 @@ function ledgerChecksumConstraint(dialect) {
       );
 }
 
+async function lockLegacyCredentialContractTables(sequelize, transaction) {
+  await sequelize.query("SET LOCAL lock_timeout = '5s'", { transaction });
+  try {
+    await sequelize.query(
+      'LOCK TABLE baidu_marketing_connections IN ACCESS EXCLUSIVE MODE',
+      { transaction }
+    );
+    await sequelize.query(
+      'LOCK TABLE baidu_project_bindings, baidu_authorization_attempts IN SHARE MODE',
+      { transaction }
+    );
+  } catch (error) {
+    const databaseCode = error?.original?.code
+      || error?.parent?.code
+      || error?.code;
+    if (databaseCode === '55P03') {
+      throw migrationError(
+        '等待统一 OAuth 迁移合同锁超时',
+        'MARKETING_MIGRATION_LOCK_TIMEOUT'
+      );
+    }
+    throw error;
+  }
+}
+
 function createMarketingMigrationRunner({
   sequelize,
   migrations = loadMarketingMigrations()
@@ -184,6 +209,12 @@ function createMarketingMigrationRunner({
     const applied = new Set(rows.map((row) => row.version));
     for (const migration of orderedMigrations) {
       if (applied.has(migration.version)) continue;
+      if (
+        sequelize.getDialect() === 'postgres'
+        && migration.version === '015-drop-legacy-tongji-credentials'
+      ) {
+        await lockLegacyCredentialContractTables(sequelize, transaction);
+      }
       await migration.up({
         sequelize,
         queryInterface: sequelize.getQueryInterface(),
@@ -245,5 +276,6 @@ function createMarketingMigrationRunner({
 module.exports = {
   LEDGER_TABLE,
   createMarketingMigrationRunner,
-  ledgerChecksumConstraint
+  ledgerChecksumConstraint,
+  lockLegacyCredentialContractTables
 };

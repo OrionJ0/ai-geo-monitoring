@@ -247,16 +247,30 @@ class BaiduTongjiContextService {
   }
 
   async listSites(connectionId) {
+    return (await this.listSitesWithContext(connectionId)).sites;
+  }
+
+  async listSitesWithContext(connectionId) {
     const stored = await this.readStoredContext(connectionId);
     const userName = normalizeUserName(stored.tongji_user_name, {
       code: 'TONGJI_ACCOUNT_NOT_AVAILABLE',
       status: 422
     });
-    return (await this.verify({
+    const result = await this.verify({
       connectionId,
       userName,
       pauseOnChange: false
-    })).sites;
+    });
+    return {
+      sites: result.sites,
+      validationContext: {
+        authGeneration: result.accessContext.authGeneration,
+        tokenVersion: result.accessContext.tokenVersion,
+        tongjiUserName: userName,
+        tongjiUserNameVerifiedAt: result.verifiedAt,
+        tongjiVerified: true
+      }
+    };
   }
 
   verificationFresh(value) {
