@@ -22,8 +22,12 @@ const {
   verifyRequestAudits,
   verifySchedulerBacklog,
   cleanupAcceptanceProjects,
+  acceptanceProjectMarker,
+  acceptanceProjectWebsite,
+  isMarkedAcceptanceProject,
   writeSecureEvidence
 } = require('../scripts/geo010Acceptance');
+const projectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
 
 test('production preflight rejects due or actively leased scheduler backlog', async () => {
   const repository = (value) => ({ count: async () => value });
@@ -48,6 +52,17 @@ test('production preflight rejects due or actively leased scheduler backlog', as
 
 test('preflight janitor atomically archives only known acceptance projects', async () => {
   const calls = [];
+  const markerKey = 'test-only-marker-key';
+  const markedName = '010-v5-acceptance-1720000000000-42';
+  const markedWebsite = acceptanceProjectWebsite(markedName, markerKey);
+  const normalizedWebsite = projectFieldNormalizationService.normalizeWebsite(markedWebsite);
+  assert.equal(normalizedWebsite, markedWebsite);
+  assert.equal(isMarkedAcceptanceProject({
+    name: markedName,
+    website: normalizedWebsite,
+    industry: 'GEO 验收',
+    aliases: []
+  }, markerKey), true);
   const result = await cleanupAcceptanceProjects({
     sequelize: {
       transaction: async (work) => work({ LOCK: { UPDATE: 'UPDATE' } })
@@ -55,7 +70,24 @@ test('preflight janitor atomically archives only known acceptance projects', asy
     BrandProject: {
       findAll: async (options) => {
         calls.push(['find', options]);
-        return [{ id: 41 }];
+        return [
+          {
+            id: 41,
+            user_id: 7,
+            name: markedName,
+            website: markedWebsite,
+            industry: 'GEO 验收',
+            aliases: []
+          },
+          {
+            id: 42,
+            user_id: 7,
+            name: '010-v5-acceptance-ordinary-project',
+            website: 'https://customer.example.com',
+            industry: 'GEO 验收',
+            aliases: []
+          }
+        ];
       },
       update: async (values, options) => {
         calls.push(['archive', values, options]);
@@ -68,10 +100,14 @@ test('preflight janitor atomically archives only known acceptance projects', asy
         return [2];
       }
     }
-  });
+  }, { acceptanceUserId: 7, markerKey });
   assert.deepEqual(result, { archived_projects: 1, disabled_schedules: 2 });
   assert.equal(calls[0][0], 'find');
+  assert.equal(calls[0][1].where.user_id, 7);
   assert.equal(calls[1][0], 'disable');
+  assert.deepEqual(calls[1][2].where.project_id[Object.getOwnPropertySymbols(
+    calls[1][2].where.project_id
+  )[0]], [41]);
   assert.equal(calls[2][0], 'archive');
 });
 

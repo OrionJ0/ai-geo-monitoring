@@ -14,6 +14,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 const scriptDirectory = path.dirname(scriptPath);
 const OFFICIAL_BASE_URL = 'https://insight.guangtuo.com';
 const BOOTSTRAP_MAX_RUNTIME_MS = 345 * 60 * 1000;
+const ACTIVATION_RESERVE_MS = 70 * 60 * 1000;
 
 function remainingTimeout(deadline) {
   const remaining = deadline - Date.now();
@@ -21,7 +22,15 @@ function remainingTimeout(deadline) {
   return remaining;
 }
 
-function runManagedCommand(command, args, {
+export function assertActivationBudget(deadline, now = Date.now()) {
+  const remaining = deadline - now;
+  if (remaining < ACTIVATION_RESERVE_MS) {
+    throw new Error('Bundle 停服门禁失败：必须保留至少 70 分钟部署与清理预算');
+  }
+  return remaining;
+}
+
+export function runManagedCommand(command, args, {
   cwd,
   env = process.env,
   signal,
@@ -29,6 +38,12 @@ function runManagedCommand(command, args, {
   terminationGraceMs = 5_000
 } = {}) {
   if (signal?.aborted) return Promise.reject(signal.reason);
+  let timeoutMs;
+  try {
+    timeoutMs = remainingTimeout(deadline);
+  } catch (error) {
+    return Promise.reject(error);
+  }
   return new Promise((resolve, reject) => {
     const detached = process.platform !== 'win32';
     const child = spawn(command, args, {
@@ -41,7 +56,7 @@ function runManagedCommand(command, args, {
     let killTimer = null;
     const timeout = setTimeout(() => interrupt(
       new Error('Bundle 发布超过服务器侧 345 分钟总 deadline')
-    ), remainingTimeout(deadline));
+    ), timeoutMs);
     timeout.unref?.();
     const signalTree = (killSignal) => {
       try {
@@ -291,9 +306,6 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
       signal,
       deadline
     });
-    if (!contractChanged && !releaseState.recovery) {
-      return { requireGeo010Acceptance: false, dependenciesPreflighted: false };
-    }
     await runManagedCommand('npm', ['ci', '--include=dev'], {
       cwd: path.join(checkout, 'backend'),
       signal,
@@ -304,6 +316,9 @@ async function runProductionPreflight({ projectRoot, prepared, signal, deadline 
       signal,
       deadline
     });
+    if (!contractChanged && !releaseState.recovery) {
+      return { requireGeo010Acceptance: false, dependenciesPreflighted: true };
+    }
 
     const backendConfig = parseEnvFile(path.join(projectRoot, 'backend', '.env'));
     const environment = {
@@ -369,6 +384,7 @@ export async function activatePreparedRelease({
   try {
     // 先在现役服务运行期间完成候选只读门禁和依赖缓存，再停服；停服后才
     // 快进 live worktree，杜绝旧进程延迟 require 候选文件形成混合版本。
+    assertActivationBudget(deadline);
     stopAttempted = true;
     await stopProduction({ projectRoot, signal, deadline });
     await fastForward({ projectRoot, ...prepared, signal, deadline });
@@ -388,11 +404,19 @@ export async function activatePreparedRelease({
   } catch (error) {
     if (stopAttempted) {
       const cleanupController = new AbortController();
-      await stopProduction({
-        projectRoot,
-        signal: cleanupController.signal,
-        deadline: Date.now() + 90_000
-      }).catch(() => {});
+      try {
+        await stopProduction({
+          projectRoot,
+          signal: cleanupController.signal,
+          deadline: Date.now() + 90_000
+        });
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `候选发布失败：${error.message}；且 systemd 清理停服未能确认：${cleanupError.message}`,
+          { cause: error }
+        );
+      }
     }
     throw error;
   }

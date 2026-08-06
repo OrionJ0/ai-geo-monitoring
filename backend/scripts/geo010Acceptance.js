@@ -597,19 +597,52 @@ async function verifySchedulerBacklog(models, now = new Date()) {
   return snapshot;
 }
 
-async function cleanupAcceptanceProjects(models) {
+function acceptanceProjectMarker(name, markerKey = process.env.CONFIG_ENCRYPTION_KEY) {
+  const normalizedKey = String(markerKey || '').trim();
+  if (!normalizedKey) throw new Error('缺少验收项目 system marker 密钥');
+  return crypto.createHmac('sha256', normalizedKey)
+    .update(String(name), 'utf8')
+    .digest('hex');
+}
+
+function acceptanceProjectWebsite(name, markerKey = process.env.CONFIG_ENCRYPTION_KEY) {
+  const nonce = /^010-v5-acceptance-(\d+-\d+)$/u.exec(String(name))?.[1];
+  if (!nonce) throw new Error('验收项目名称格式无效');
+  const marker = acceptanceProjectMarker(name, markerKey);
+  return `https://acceptance-${nonce}.geo010-${marker.slice(0, 32)}.${
+    marker.slice(32)
+  }.example.com`;
+}
+
+function isMarkedAcceptanceProject(project, markerKey) {
+  const name = String(project?.name || '');
+  if (!/^010-v5-acceptance-(\d+-\d+)$/u.test(name)) return false;
+  return project?.website === acceptanceProjectWebsite(name, markerKey)
+    && project?.industry === 'GEO 验收'
+    && Array.isArray(project?.aliases)
+    && project.aliases.length === 0;
+}
+
+async function cleanupAcceptanceProjects(models, {
+  acceptanceUserId,
+  markerKey = process.env.CONFIG_ENCRYPTION_KEY
+} = {}) {
   const { Op } = require('sequelize');
+  acceptanceProjectMarker('marker-preflight', markerKey);
   return models.sequelize.transaction(async (transaction) => {
     const projects = await models.BrandProject.findAll({
       where: {
         name: { [Op.like]: '010-v5-acceptance-%' },
-        status: { [Op.ne]: 'archived' }
+        status: { [Op.ne]: 'archived' },
+        ...(Number.isInteger(acceptanceUserId) ? { user_id: acceptanceUserId } : {})
       },
-      attributes: ['id'],
+      attributes: ['id', 'user_id', 'name', 'aliases', 'website', 'industry'],
       transaction,
       lock: transaction.LOCK.UPDATE
     });
-    const projectIds = projects.map((project) => project.id);
+    const projectIds = projects
+      .filter((project) => isMarkedAcceptanceProject(project, markerKey))
+      .map((project) => project.id);
     if (!projectIds.length) return { archived_projects: 0, disabled_schedules: 0 };
     const [disabledSchedules] = await models.DetectionSchedule.update(
       { enabled: false },
@@ -795,7 +828,9 @@ async function runPreflight() {
 
   const models = require('../models');
   try {
-    const acceptanceCleanup = await cleanupAcceptanceProjects(models);
+    const acceptanceCleanup = await cleanupAcceptanceProjects(models, {
+      acceptanceUserId: userId
+    });
     const acceptanceBudget = process.env.AI_GEO_REQUIRE_FULL_ACCEPTANCE === 'true'
       ? await buildAcceptanceBudget(platformResponse?.data)
       : { required: false };
@@ -940,6 +975,7 @@ async function main() {
   });
   const nonce = `${Date.now()}-${process.pid}`;
   const projectName = `010-v5-acceptance-${nonce}`;
+  const projectWebsite = acceptanceProjectWebsite(projectName);
   let projectId = null;
   let cleanup = {
     monitoring_disabled: false,
@@ -954,7 +990,7 @@ async function main() {
       body: {
         name: projectName,
         aliases: [],
-        website: `https://acceptance-${nonce}.example.com`,
+        website: projectWebsite,
         industry: 'GEO 验收',
         primary_keywords: ['GEO 监测'],
         monitoring_enabled: false,
@@ -967,7 +1003,7 @@ async function main() {
         id: projectId,
         user_id: userId,
         name: projectName,
-        website: `https://acceptance-${nonce}.example.com`
+        website: projectWebsite
       }
     });
     if (!project) throw new Error('验收项目未落入当前 ORM 指向的同一数据库');
@@ -1290,6 +1326,9 @@ module.exports = {
   verifyDeepSeekFlashCredential,
   verifySchedulerBacklog,
   cleanupAcceptanceProjects,
+  acceptanceProjectMarker,
+  acceptanceProjectWebsite,
+  isMarkedAcceptanceProject,
   runPreflight,
   runRecoveryPreflight,
   toEvidence,

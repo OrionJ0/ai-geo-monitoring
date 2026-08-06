@@ -14,7 +14,7 @@ const {
   MembershipPlan,
   UsageCounter
 } = require('../models');
-const { consumeQuotaDirect } = require('../middleware/quota');
+const { consumeQuotaDirect, resolveQuotaLimit } = require('../middleware/quota');
 
 let user;
 
@@ -24,6 +24,10 @@ test.before(async () => {
     level: 'free',
     detection_daily_limit: 100
   });
+  await MembershipPlan.create({
+    level: 'pro',
+    detection_daily_limit: 1000
+  });
   user = await User.create({
     username: 'quota-concurrency-user',
     email: 'quota-concurrency@example.com',
@@ -32,6 +36,15 @@ test.before(async () => {
     role: 'user',
     status: 'active'
   });
+});
+
+test('管理员代项目所有者运行时按所有者套餐解析配额', async () => {
+  assert.equal(await resolveQuotaLimit({
+    user: { id: 999, level: 'pro' }
+  }, user.id, 'detection'), 100);
+  assert.equal(await resolveQuotaLimit({
+    user: { id: user.id, level: 'pro' }
+  }, user.id, 'detection'), 1000);
 });
 
 test.after(async () => {

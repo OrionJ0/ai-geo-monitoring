@@ -184,6 +184,13 @@ function resolveQuotaUserId(req, opts = {}) {
   return opts.userId || (req.user && req.user.id) || req.userId;
 }
 
+function resolveQuotaLimit(req, userId, feature) {
+  const requestUserId = req.user?.id || req.userId;
+  return req.user?.level && String(requestUserId) === String(userId)
+    ? getLimitFromUser(req, feature)
+    : getLimitForUser(userId, feature);
+}
+
 // 批量消耗配额（在路由内部按需调用）
 async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
   try {
@@ -212,9 +219,7 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
     const period = getPeriodForFeature(feature);
 
     // 优先使用 req.user.level（JWT 路径），降级到查 DB
-    const limit = req.user?.level
-      ? await getLimitFromUser(req, feature)
-      : await getLimitForUser(userId, feature);
+    const limit = await resolveQuotaLimit(req, userId, feature);
 
     if (!limit || limit <= 0) {
       if (opts.sse) {
@@ -298,6 +303,7 @@ async function bulkConsumeQuota(req, res, feature, amount, opts = {}) {
 
 module.exports.bulkConsumeQuota = bulkConsumeQuota;
 module.exports.resolveQuotaUserId = resolveQuotaUserId;
+module.exports.resolveQuotaLimit = resolveQuotaLimit;
 module.exports.quotaBatchTransactionOptions = quotaBatchTransactionOptions;
 module.exports.atomicConsumeQuotaCounter = atomicConsumeQuotaCounter;
 module.exports.ensureQuotaCounter = ensureQuotaCounter;
