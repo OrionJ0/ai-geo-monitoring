@@ -25,6 +25,13 @@ blocked_by:
 
 - [x] 015 按冻结门槛（推荐 F1≥0.95、关系 precision≥0.95）确实 FAIL，历史不改写；发布合同经数据所有者裁决修订——**v5 上线硬门槛**（完成率 100%、target_fact 100%/FP=0、grounding/证据合法性 0、Token 中位≤A×1.5/P95≤A×2）015 实测全部 PASS；**最佳努力指标**（推荐 F1 83.69%、关系 precision 92.39%、情绪 100%、排名证据不足）公布实测水平不宣称达标；数据所有者（OrionJ0）已给出硬切方向授权。
 - [x] 两个确定性问题已修复并通过定向回归（21 次真实调用）：S53 target_mapping=conflicting_identity 3/3（法律主体冲突不映射为目标，语义轨 unavailable 与 truth 对齐）；排名链路中文数字名次/首选提取/梯队 unavailable（S49/S50/S02 rank=1 正确提取，S01/S46 诚实 unavailable）。
+- [x] **本地硬切代码验收完成（2026-08-06，数据所有者指示不部署、本地收尾）**：
+  - 后端全量 1100/1100、前端 tsc --noEmit / eslint / next build 全绿。
+  - 代码搜索：生产引用无 v4 分析器调用（唯一残留为评测对照臂错误类映射，已注释）、v4 provider 默认 0、`deepseek-v4-pro` 生产引用 0。
+  - 真实 Flash + v5 契约：015 全量 324 次 + 定向回归 21 次真实调用（`analysis_method=ai_structured_v5`、`metric_semantics_version=contextual_competitor_mentions_sov_v2_scoped`、`analysis_model=deepseek-v4-flash`），同一生产分析器 AIResponseAnalysisV5Service。
+  - 四入口分派默认 v5（集成测试证明）：单问题/问题集（V5ProjectRunIntegration"默认调用 v5"、QuestionSetRunStart v5 契约断言）、自动监测（SchedulerService 测试写入 ai_structured_v5）、analysis-only（resolveFrozenSnapshot 复用冻结快照不随实时竞品漂移 + detection analysis_only 租约不采集）。
+  - 历史 v4 数据只读兼容：V5ReportCompatibility 测试（v1 透传、v4 CSV 往返）、presentSov v1 分支、CSV 白名单含 v1。
+  - **阻塞项（系统资源，非代码）**：本地 HTTP 四入口现场验收（验收脚本 `backend/scripts/geo010Acceptance.js` 已就绪）因本机 swap 23.6/24GB 内存压力无法启动验收服务器，未执行；Git Bundle 部署按数据所有者指示未执行。四入口现场验收与部署留待服务器/系统环境允许时执行。
 - [ ] 正式 v5 写入 `three_track_partial_v2 / semantic_evidence_v2`，目标映射歧义不清空 `target_fact`，语义证据区分程序 occurrence 与模型 semantic context。
 - [ ] 所有新记录和运行默认写 `ai_structured_v5 / geo_metric_input_v5`，模型固定为 `deepseek-v4-flash`，不存在 Pro 或其他模型 fallback。
 - [ ] 单问题、问题集、自动监测和 analysis-only 四类公开入口均产生可审计 v5 记录，并证明阶段 1、阶段 2和最终请求策略实际生效。
