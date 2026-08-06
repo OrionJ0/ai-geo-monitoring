@@ -261,6 +261,13 @@ test('keyword analysis page implements the confirmed task-focused visual and int
     path.join(frontendRoot, 'src/lib/marketing/readMarketingDashboard.ts'),
     'utf8'
   );
+  const previousSummaryCacheSource = fs.readFileSync(
+    path.join(
+      frontendRoot,
+      'src/lib/marketing/keywordPreviousSummaryCache.ts'
+    ),
+    'utf8'
+  );
   assert.match(hookSource, /assertMarketingDashboardRootResponse\(response\.data, projectId\)/);
   assert.match(hookSource, /\/keywords/);
   assert.match(hookSource, /const revision = response\.data\.revision/);
@@ -271,6 +278,9 @@ test('keyword analysis page implements the confirmed task-focused visual and int
   assert.match(hookSource, /pageSize:\s*resourceQuery\.pageSize/);
   assert.match(hookSource, /page:\s*1/);
   assert.match(hookSource, /pageSize:\s*1/);
+  assert.match(hookSource, /previousSummaryCache\.read/);
+  assert.match(hookSource, /keywordPreviousSummaryKey/);
+  assert.doesNotMatch(previousSummaryCacheSource, /pageSize|sortBy|sortOrder/);
   assert.match(hookSource, /requestId !== requestSequence\.current/);
   assert.match(hookSource, /assertMarketingKeywordResourceResponse/);
   assert.match(hookSource, /marketingSnapshotWarning\(response\.data\)/);

@@ -21,6 +21,10 @@ import {
   buildAdPeriod,
   marketingSnapshotWarning
 } from '@/lib/marketing/adPerformanceAdapter';
+import {
+  createKeywordPreviousSummaryCache,
+  keywordPreviousSummaryKey
+} from '@/lib/marketing/keywordPreviousSummaryCache';
 import { readMarketingDashboard } from './readMarketingDashboard';
 
 export type KeywordFixtureState = 'ready' | 'loading' | 'empty' | 'error';
@@ -101,6 +105,9 @@ export default function useKeywordAnalysis({
     keys: string[];
     result: Awaited<ReturnType<typeof readMarketingDashboard>>;
   } | null>(null);
+  const [previousSummaryCache] = useState(
+    () => createKeywordPreviousSummaryCache<KeywordPreviousResourceResult>()
+  );
 
   const load = useCallback(async (refreshRoot = false) => {
     const requestId = ++requestSequence.current;
@@ -194,6 +201,57 @@ export default function useKeywordAnalysis({
         campaignId: resourceQuery.campaignId,
         adGroupId: resourceQuery.adGroupId
       };
+      const previousKey = keywordPreviousSummaryKey({
+        projectId,
+        revision,
+        previousFrom: period.previousFrom,
+        previousTo: period.previousTo,
+        ...expectedBusinessFilter
+      });
+      const previousPromise = previousSummaryCache.read(
+        previousKey,
+        async () => {
+          try {
+            const previousResponse = await axios.get<MarketingKeywordResourceResponse>(
+              endpoint,
+              {
+                params: {
+                  ...sharedParams,
+                  from: period.previousFrom,
+                  to: period.previousTo,
+                  page: 1,
+                  pageSize: 1
+                },
+                timeout: 10_000
+              }
+            );
+            try {
+              assertMarketingKeywordResourceResponse(
+                previousResponse.data,
+                projectId,
+                revision,
+                { from: period.previousFrom, to: period.previousTo },
+                coverage,
+                expectedBusinessFilter
+              );
+              return {
+                state: 'READY',
+                resource: previousResponse.data,
+                reason: ''
+              };
+            } catch {
+              return {
+                state: 'ERROR',
+                resource: null,
+                reason: '上一周期关键词响应合同无效，请重试。'
+              };
+            }
+          } catch (previousError) {
+            return classifyKeywordPreviousError(previousError);
+          }
+        },
+        refreshRoot
+      );
       const [currentResult, previousResult] = await Promise.allSettled([
         axios.get<MarketingKeywordResourceResponse>(endpoint, {
           params: {
@@ -205,16 +263,7 @@ export default function useKeywordAnalysis({
           },
           timeout: 10_000
         }),
-        axios.get<MarketingKeywordResourceResponse>(endpoint, {
-          params: {
-            ...sharedParams,
-            from: period.previousFrom,
-            to: period.previousTo,
-            page: 1,
-            pageSize: 1
-          },
-          timeout: 10_000
-        })
+        previousPromise
       ]);
       if (requestId !== requestSequence.current) return;
       if (currentResult.status === 'rejected') throw currentResult.reason;
@@ -230,27 +279,7 @@ export default function useKeywordAnalysis({
       if (previousResult.status === 'rejected') {
         previous = classifyKeywordPreviousError(previousResult.reason);
       } else {
-        try {
-          assertMarketingKeywordResourceResponse(
-            previousResult.value.data,
-            projectId,
-            revision,
-            { from: period.previousFrom, to: period.previousTo },
-            coverage,
-            expectedBusinessFilter
-          );
-          previous = {
-            state: 'READY',
-            resource: previousResult.value.data,
-            reason: ''
-          };
-        } catch {
-          previous = {
-            state: 'ERROR',
-            resource: null,
-            reason: '上一周期关键词响应合同无效，请重试。'
-          };
-        }
+        previous = previousResult.value;
       }
       setData(adaptMarketingKeywordResource(
         currentResult.value.data,
@@ -277,6 +306,7 @@ export default function useKeywordAnalysis({
     fixtureEnabled,
     fixtureState,
     onDateRangeAdjusted,
+    previousSummaryCache,
     projectId,
     projectName,
     resourceQuery.adGroupId,

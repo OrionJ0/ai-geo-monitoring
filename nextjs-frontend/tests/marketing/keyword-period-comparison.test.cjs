@@ -169,3 +169,94 @@ test('关键词上期越界、可重试失败与真实零保持三种独立语�
     assert.deepEqual(model.summary, ready.current.keywords.summary);
   }
 });
+
+test('关键词上期汇总缓存忽略分页排序并在事实身份变化时失效', async () => {
+  const {
+    createKeywordPreviousSummaryCache,
+    keywordPreviousSummaryKey
+  } = loadTypeScriptModule(
+    'lib/marketing/keywordPreviousSummaryCache.ts'
+  );
+  const cache = createKeywordPreviousSummaryCache();
+  const base = {
+    projectId: 'project-1',
+    revision: 'revision-1',
+    previousFrom: '2026-06-01',
+    previousTo: '2026-06-30',
+    query: '防火门',
+    campaignId: 'campaign-1',
+    adGroupId: 'group-1',
+    page: 1,
+    pageSize: 20,
+    sortBy: 'clicks',
+    sortOrder: 'descend'
+  };
+  let loads = 0;
+  const loadSummary = async () => ({ sequence: ++loads });
+
+  const first = cache.read(keywordPreviousSummaryKey(base), loadSummary);
+  const pageOnly = cache.read(keywordPreviousSummaryKey({
+    ...base,
+    page: 3,
+    pageSize: 50,
+    sortBy: 'impressions',
+    sortOrder: 'ascend'
+  }), loadSummary);
+
+  assert.equal(first, pageOnly);
+  assert.deepEqual(await pageOnly, { sequence: 1 });
+  assert.equal(loads, 1);
+
+  for (const changed of [
+    { projectId: 'project-2' },
+    { revision: 'revision-2' },
+    { previousFrom: '2026-05-01' },
+    { previousTo: '2026-05-31' },
+    { query: '配电箱' },
+    { campaignId: 'campaign-2' },
+    { adGroupId: 'group-2' }
+  ]) {
+    await cache.read(
+      keywordPreviousSummaryKey({ ...base, ...changed }),
+      loadSummary
+    );
+  }
+  assert.equal(loads, 8);
+});
+
+test('关键词上期汇总失败只缓存到显式刷新', async () => {
+  const {
+    createKeywordPreviousSummaryCache,
+    keywordPreviousSummaryKey
+  } = loadTypeScriptModule(
+    'lib/marketing/keywordPreviousSummaryCache.ts'
+  );
+  const cache = createKeywordPreviousSummaryCache();
+  const key = keywordPreviousSummaryKey({
+    projectId: 'project-1',
+    revision: 'revision-1',
+    previousFrom: '2026-06-01',
+    previousTo: '2026-06-30'
+  });
+  let loads = 0;
+  const failed = cache.read(key, async () => {
+    loads += 1;
+    throw new Error('temporary failure');
+  });
+
+  await assert.rejects(failed, /temporary failure/);
+  await assert.rejects(
+    cache.read(key, async () => {
+      loads += 1;
+      return 'unexpected';
+    }),
+    /temporary failure/
+  );
+  assert.equal(loads, 1);
+
+  assert.equal(await cache.read(key, async () => {
+    loads += 1;
+    return 'recovered';
+  }, true), 'recovered');
+  assert.equal(loads, 2);
+});
