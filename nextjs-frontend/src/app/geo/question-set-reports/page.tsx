@@ -236,7 +236,14 @@ type ReportRow = {
   analysis_structure?: {
     schema_version?: string;
     target_entity_name?: string | null;
+    target_entity_id?: string | null;
+    target_mapping?: {
+      status?: string;
+      target_entity_id?: string | null;
+      candidate_entity_ids?: string[];
+    };
     entities?: Array<{
+      entity_id?: string;
       name?: string;
       type?: 'brand' | 'company' | 'other_organization';
     }>;
@@ -249,6 +256,12 @@ type ReportRow = {
       evidence?: string[];
     }>;
     candidate_lists?: Array<{
+      ordered?: boolean;
+      entries?: string[];
+      reason?: string;
+      evidence?: string[];
+    }>;
+    candidate_groups?: Array<{
       ordered?: boolean;
       entries?: string[];
       reason?: string;
@@ -399,6 +412,33 @@ function formatCurrentRate(
     return `—（${safeNumerator} / ${safeDenominator}）`;
   }
   return `${percent(value)}%（${safeNumerator} / ${safeDenominator}）`;
+}
+
+function resolveTargetEntityName(row: ReportRow) {
+  const structure = row.analysis_structure;
+  if (!structure) return null;
+  if (structure.target_entity_name) return structure.target_entity_name;
+  const targetId = structure.target_entity_id
+    || structure.target_mapping?.target_entity_id;
+  if (!targetId) return null;
+  return structure.entities?.find((entity) => entity.entity_id === targetId)?.name || null;
+}
+
+function resolveCandidateLists(row: ReportRow) {
+  const structure = row.analysis_structure;
+  if (!structure) return [];
+  if (Array.isArray(structure.candidate_groups)) {
+    const nameById = new Map(
+      (structure.entities || [])
+        .filter((entity) => entity.entity_id && entity.name)
+        .map((entity) => [entity.entity_id as string, entity.name as string])
+    );
+    return structure.candidate_groups.map((group) => ({
+      ...group,
+      entries: (group.entries || []).map((entityId) => nameById.get(entityId) || entityId),
+    }));
+  }
+  return structure.candidate_lists || [];
 }
 
 function safeFilename(value: string) {
@@ -1352,11 +1392,11 @@ export default function QuestionSetReportsPage() {
                             && row.analysis_structure.entities.length ? (
                             <div>
                               <Text className={styles.answerLabel}>识别到的品牌 / 公司 / 其他组织</Text>
-                              <Space wrap size={[4, 4]}>
+                              <Space wrap size={[4, 4]} className={styles.entityTags}>
                                 {row.analysis_structure.entities.map((entity, index) => (
                                   <Tag
                                     key={`${entity.name || 'entity'}-${index}`}
-                                    color={entity.name === row.analysis_structure?.target_entity_name ? 'blue' : undefined}
+                                    color={entity.name === resolveTargetEntityName(row) ? 'blue' : undefined}
                                   >
                                     {entity.name || '—'} · {
                                       entity.type === 'company'
@@ -1371,7 +1411,7 @@ export default function QuestionSetReportsPage() {
                               <div>
                                 <Text type="secondary">
                                   目标品牌映射：
-                                  {row.analysis_structure.target_entity_name || '回答中未识别到'}
+                                  {resolveTargetEntityName(row) || '回答中未识别到'}
                                 </Text>
                               </div>
                             </div>
@@ -1405,12 +1445,11 @@ export default function QuestionSetReportsPage() {
                               </Space>
                             </div>
                           ) : null}
-                          {Array.isArray(row.analysis_structure?.candidate_lists)
-                            && row.analysis_structure.candidate_lists.length ? (
+                          {resolveCandidateLists(row).length ? (
                             <div>
                               <Text className={styles.answerLabel}>候选顺序</Text>
                               <Space orientation="vertical" size={4}>
-                                {row.analysis_structure.candidate_lists.map((list, index) => (
+                                {resolveCandidateLists(row).map((list, index) => (
                                   <div key={`candidate-list-${index}`}>
                                     <Text>
                                       {list.ordered ? '明确排序' : '普通列表'}：

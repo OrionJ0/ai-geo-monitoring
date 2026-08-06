@@ -109,7 +109,8 @@ const v5Report = {
     brand_mentioned_answers: 1,
     recommended_answers: 0,
     ranked_answers: 0,
-    sov_calculable_answers: 0,
+    sov_calculable_answers: 1,
+    avg_answer_competitor_share: 33.33,
     brand_mention_rate: 100,
     recommendation_rate: 0,
     citation_valid_analyses: 1,
@@ -121,10 +122,10 @@ const v5Report = {
     sov_summary: {
       metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
       kind: 'observed_competitor_mentions',
-      scope: 'observed_entities_in_current_answer',
-      completeness: 'observed_only',
-      average: null,
-      calculable_answers: 0
+      scope: 'open_discovery',
+      completeness: 'not_proven',
+      average: 33.33,
+      calculable_answers: 1
     }
   },
   rows: [{
@@ -152,11 +153,11 @@ const v5Report = {
       metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
       kind: 'observed_competitor_mentions',
       status: 'observed_only',
-      scope: 'observed_entities_in_current_answer',
-      completeness: 'observed_only',
-      value: null,
+      scope: 'open_discovery',
+      completeness: 'not_proven',
+      value: 33.33,
       numerator: 1,
-      denominator: 0
+      denominator: 3
     },
     competition_entities: [{
       name: longCompetitorName,
@@ -167,19 +168,25 @@ const v5Report = {
       surface_forms: ['脱敏竞品']
     }],
     analysis_structure: {
-      schema_version: 'ai_structured_v5',
-      target_entity_name: 'GATO',
+      schema_version: 'geo_metric_input_v5',
+      target_mapping: {
+        status: 'resolved',
+        target_entity_id: 'E001',
+        candidate_entity_ids: []
+      },
+      target_entity_id: 'E001',
       entities: [
-        { name: 'GATO', type: 'brand' },
-        { name: longCompetitorName, type: 'company' }
+        { entity_id: 'E001', name: 'GATO', type: 'brand' },
+        { entity_id: 'E002', name: longCompetitorName, type: 'company' }
       ],
-      candidate_lists: [{
+      candidate_groups: [{
         ordered: false,
-        entries: ['GATO', longCompetitorName],
+        entries: ['E001', 'E002'],
         reason: '回答只是并列举例，没有可靠排名。',
         evidence: ['可同时核验两类方案。']
       }],
       sentiment: {
+        status: 'assessed',
         label: 'neutral',
         reason: '中性选型建议',
         evidence: ['建议根据现场工况核验。'],
@@ -441,6 +448,7 @@ test('question-set report entry stays usable on desktop, mobile, and narrow zoom
   await page.setViewportSize({ width: 1440, height: 1024 });
   await page.goto('/geo/question-set-reports');
   await expect(page.getByText('暂无报告')).toBeVisible();
+  await expect(page.getByRole('button', { name: /历史报告/u })).toBeEnabled();
   expect(seriousViolations(await new AxeBuilder({ page }).analyze())).toEqual([]);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -465,6 +473,7 @@ test('v5 scoped report renders observed-only facts and long identities accessibl
   await page.goto('/geo/question-set-reports?run_id=501');
   await expect(page.getByRole('heading', { name: v5Report.question_set_name })).toBeVisible();
   await expect(page.getByText('开放发现 SOV（仅基于本次已发现实体）', { exact: false })).toBeVisible();
+  await expect(page.getByText('33.33%（1/3）', { exact: false })).toBeVisible();
   await expect(page.getByText('这份历史报告包含旧规则指标')).toHaveCount(0);
 
   const expand = page.locator('button.ant-table-row-expand-icon').first();
@@ -472,6 +481,10 @@ test('v5 scoped report renders observed-only facts and long identities accessibl
   await expand.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByText('AI 结构化 v5', { exact: true })).toBeVisible();
+  await expect(page.getByText('目标品牌映射：GATO', { exact: true })).toBeVisible();
+  await expect(page.getByText(`普通列表：GATO → ${longCompetitorName}`, { exact: false })).toBeVisible();
+  const entityTag = page.locator('.ant-tag').filter({ hasText: `${longCompetitorName} · 公司` }).last();
+  await expect(entityTag).toBeVisible();
   const longIdentity = page.getByText(longCompetitorName, { exact: true }).last();
   await expect(longIdentity).toBeVisible();
   expect(seriousViolations(await new AxeBuilder({ page }).analyze())).toEqual([]);
@@ -484,6 +497,12 @@ test('v5 scoped report renders observed-only facts and long identities accessibl
   expect(await table.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
 
   await page.setViewportSize({ width: 320, height: 800 });
+  await entityTag.evaluate((node) => node.scrollIntoView({ block: 'center', inline: 'center' }));
+  expect(await entityTag.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  const tagBounds = await entityTag.boundingBox();
+  expect(tagBounds).not.toBeNull();
+  expect(tagBounds?.x).toBeGreaterThanOrEqual(0);
+  expect((tagBounds?.x || 0) + (tagBounds?.width || 0)).toBeLessThanOrEqual(320);
   await longIdentity.evaluate((node) => node.scrollIntoView({ block: 'center', inline: 'center' }));
   expect(await longIdentity.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
   const bounds = await longIdentity.boundingBox();

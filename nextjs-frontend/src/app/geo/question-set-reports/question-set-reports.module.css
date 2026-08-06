@@ -197,6 +197,18 @@
   overflow-wrap: anywhere;
 }
 
+.entityTags,
+.entityTags :global(.ant-space-item) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.entityTags :global(.ant-tag) {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .answerLabel {
   display: block;
   margin: 14px 0 6px;
