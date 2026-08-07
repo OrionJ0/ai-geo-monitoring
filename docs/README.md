@@ -60,9 +60,9 @@
 | 需求 | 当前主题 |
 | --- | --- |
 | [营销数据 AI 分析报告](active-2026-08-04-001-marketing-ai-analysis-report/prd.md) | 只读证据包、异步生成和不可变历史；当前仅完成前端壳层 |
-| [Flash 结构化分析可靠性](active-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 数据所有者裁决、v5 两阶段实现、四入口硬切、冻结快照字段与 schema-only 生产前置迁移均已完成；当前唯一剩余门禁是将统一候选正式发布并在同一不可变 revision 上完成四入口、systemd 请求审计、历史 v4 报告/CSV 和真实浏览器验收。生产启动桥 `387ae45` 仍运行 v4/Pro，不能据本地完成宣称生产已切换。 |
+| [Flash 结构化分析可靠性](closed-2026-08-05-002-flash-structured-analysis-reliability/prd.md) | 2026-08-07 统一候选 `c95866f` 经正式 Git Bundle 部署上线，四入口 v5/Flash 线上验收、v4/Pro 零调用、历史 v4 只读兼容与数据真实性全部通过；目录已关闭，详见 [DEPLOYMENT.md](DEPLOYMENT.md) |
 | [官网表单生产接入与首页性能优化](active-2026-08-05-004-website-form-production-home-performance/prd.md) | 官网 503 会话级短路与百度旧快照异步刷新已随 `98467f0` 推送到 GitHub，尚未部署或生产验收；官网生产启用仍须专用最小权限只读凭据，当前生产继续 `DISABLED` |
-| [营销工作线主分支集成与治理收尾](active-2026-08-06-008-marketing-main-integration-closeout/prd.md) | 003→006→007→005 已安全重放，营销治理缺口已修复；`competitor_snapshot` 前置迁移已独立发布并验收，当前正在最终统一候选上迁移官方 DeepSeek Pro 配置到 Flash、重跑全量门禁并准备四入口生产验收 |
+| [营销工作线主分支集成与治理收尾](closed-2026-08-06-008-marketing-main-integration-closeout/prd.md) | 003→006→007→005 已安全重放并随统一候选 `c95866f` 正式发布上线；营销页面、真实浏览器交互、revision 钉扎与数据真实性线上验收通过；目录已关闭 |
 
 ## 阻塞需求
 

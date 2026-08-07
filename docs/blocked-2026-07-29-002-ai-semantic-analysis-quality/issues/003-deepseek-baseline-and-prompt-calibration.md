@@ -10,7 +10,7 @@ blocked_reason:
 
 # DeepSeek Pro 离线基线与提示词校准
 
-> 处置（2026-08-05）：取消把 DeepSeek Pro v4 的 SOV 轻微偏差与 12 条情绪预标确认作为未来发布门禁。当前正式分析仍是 v4，但已确认的 Flash 结构化失败由[Flash v5 可靠性改造](../../active-2026-08-05-002-flash-structured-analysis-reliability/prd.md)承接，并以冻结语料 A/B/C、分阶段事实抽取和正式入口硬切重新验收。下方未勾选项保留为历史结果，不代表已经达标。
+> 处置（2026-08-05）：取消把 DeepSeek Pro v4 的 SOV 轻微偏差与 12 条情绪预标确认作为未来发布门禁。当前正式分析仍是 v4，但已确认的 Flash 结构化失败由[Flash v5 可靠性改造](../../closed-2026-08-05-002-flash-structured-analysis-reliability/prd.md)承接，并以冻结语料 A/B/C、分阶段事实抽取和正式入口硬切重新验收。下方未勾选项保留为历史结果，不代表已经达标。
 
 ## Parent
 

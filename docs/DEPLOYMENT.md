@@ -2,7 +2,7 @@
 
 ## 当前正式单机实例
 
-> 本节记录截至 2026-08-07 00:34 CST 现场复核的生产真值。运行状态会变化；
+> 本节记录截至 2026-08-07 15:00 CST 现场复核的生产真值。运行状态会变化；
 > 回答“现在是否正常”或“服务器是否最新”前，仍需按本节命令重新检查。
 
 | 项目 | 当前值与边界 |
@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-07 00:34 CST 现场确认：服务器 `HEAD`、公开后端与前端 revision 均为数据库前置/统一发布桥 `a2c1fa15800314adc7f4bcf888964e6e355d3599`，工作区变更数为 0，两个 systemd 服务均为 `active`，`/api/ready` 为 `ready`。v5 快照审计返回 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`；该版本仍运行 v4/Pro，尚未切换统一 v5 候选。服务器 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629` 只是落后的远端跟踪引用，不是运行真值；是否仍为最新必须现场复核 |
+| 当前已验证源码版本 | 2026-08-07 15:00 CST 现场确认：服务器 `HEAD`、公开后端与前端 revision 均为统一 v5 最终发布 `c95866fa8a316e71045b4810f8385acde916752c`，工作区变更数为 0，两个 systemd 服务均为 `active` 且各只有一个 MainPID、`NRestarts=0`，`/api/ready` 为 `ready`。营销迁移 `001`–`016`、官网迁移 `001`–`003`、咨询审计迁移 `001` 全部 applied 且无 pending；v5 快照审计返回 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`；DeepSeek Flash 配置 `ready`（deepseek-v4-flash enabled、credential_present=true）。该版本已硬切统一 v5：四类入口（单问题/问题集/自动监测/analysis-only）均写入 `ai_structured_v5` 并使用 `deepseek-v4-flash`，部署后 v4/Pro 调用为零。服务器 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629` 只是落后的远端跟踪引用，不是运行真值；是否仍为最新必须现场复核 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -47,6 +47,17 @@ ssh ubuntu@182.254.140.163 'cd /opt/ai-geo-monitoring && git status --short --br
 百度开发者控制台中的 callback 属于外部人工配置。截至本次文档收敛，服务器
 环境已经切换，但控制台新地址尚未得到人工确认；完成确认前，现有服务器密文
 Token 应继续保留，但不得宣称在新域名上重新授权已经通过。
+
+### 2026-08-07 统一 v5 正式发布与线上全面验收
+
+- 正式 Git Bundle 将服务器从数据库前置 `a2c1fa15800314adc7f4bcf888964e6e355d3599` 快进到最终 main `c95866fa8a316e71045b4810f8385acde916752c`，部署日志 `logs/deployments.log` 记录 `2026-08-07T06:55:28.685Z SUCCESS c95866fa8a31`。此前 010 四入口验收曾 7 次 FAILED（02:50–06:18 UTC），每次失败后在本地修复验收脚本并重新正式发布，最终一次 SUCCESS；修复提交（`175662d`、`794b278`、`e15018b`、`91f94d4`、`c95866f`）全部在最终发布树内。服务器工作区干净、部署锁不存在、没有直接编辑服务器源码。
+- 发布前数据库备份为 `/opt/ai-geo-monitoring/backend/releases/database.pre-<发布前revision>.sqlite`（权限 600，含 manifest）。营销迁移 `001`–`016`、官网 `001`–`003`、咨询 `001` 全部 applied 且无 pending；run-ownership 审计 0 冲突/0 重复；v5 快照审计 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`。
+- 010 正式验收证据 `/tmp/geo010-acceptance-wkhFPH/evidence-c95866fa8a316e71045b4810f8385acde916752c.json`：`pass=true`、`server_head=revision=c95866f`、三个公开检查全部 200/ready；四入口 `single_question/question_set/automatic_monitoring/analysis_only` 全部 `completed`，全部 `analysis_platform=deepseek`、`analysis_model=deepseek-v4-flash`、`analysis_contract_version=ai_structured_v5`、`metric_semantics_version=contextual_competitor_mentions_sov_v2_scoped`；请求审计 `total=13、correlated=13、pro_requests=0`；历史 v4 报告与 CSV `readable=true`（`ai_structured_v4`、文件级签名合同）。
+- 发布后两个 systemd 单元各只有一个 MainPID（后端 64583、前端 64641，14:52:40/41 CST 启动），`NRestarts=0`；发布窗口后 journal 无真实错误（仅 `error_code: null` 收敛审计字段），敏感模式零命中；Nginx error.log 最后一条错误为 14:07:03（上一发布停机窗口）。
+- 登录态 Chrome（admin）从 `https://insight.guangtuo.com` 验收：登录、市场总览、广告表现、广告关键词、网站流量、咨询、订单、AI 平台设置（分析平台 DeepSeek 官方内置、模型 `deepseek-v4-flash`、两阶段提示词 `grounded_entity_catalog_v1+closed_entity_semantics_v4_evidence_roles_rev2`）、运行报告、历史 v4 报告（运行 #8 查看与 CSV 导出成功，15 行全部 `ai_structured_v4` 且带完整性签名）。浏览器发起真实单问题运行 #35（`deepseek-v4-flash`/`ai_structured_v5`/completed）与问题集运行 #36（5/5 全部 `deepseek-v4-flash`/completed）。浏览器 Network 全部同源 `/api/*`（营销 dashboard/ad-hierarchy/keywords/website-traffic、分析 API、问题集 API），无 fixture/mock、无浏览器直连百度。
+- 市场总览/网站流量按既有生产配置诚实显示 `PARTIAL / SOURCE_TOTAL_UNAVAILABLE`（全站访问暂不可用、已分类 152/222）；ROAS、订单、表单咨询、53KF 均诚实显示暂无数据（销售系统未接入、官网模块 `DISABLED`、53KF 未验证），不伪造为零；唯一 503 为既有 `DISABLED` 官网区间/逐日接口。
+- 线上验收结论：无 P0；P1 一项为**凭据轮换未闭环验证**（`passwd -S ubuntu` 显示密码最后修改 2026-07-29，本地无带时间戳的轮换记录，需人工确认暴露事件与轮换关系）；P2 四项为发布日志字段缺失、`.env` 残留 `DEFAULT_ADMIN_*` 键、Nginx sites-enabled 的 test 站点残留、发布窗口可观测性缺口。002/008 关闭与分支清理只在 P0/P1/P2 清零或人工闭环后执行。
+- 关闭处理（2026-08-07）：P1 凭据轮换经数据所有者明确授权继续关闭（未轮换但授权）；P2 四项中 Nginx test 站点确认属其他项目不处理，其余三项已处理——发布日志失败上下文（revision/阶段/停服状态）与成功停机时长随 `119ca37` 修复、`.env` 的 `DEFAULT_ADMIN_*` 残留键已备份删除（备份 `.env.bak-20260807-p2`）且服务重启后健康 200、发布窗口可观测性由失败日志补强。002（Flash v5 可靠性）与 008（营销 main 集成）目录关闭，详见 docs/closed-* 目录。
 
 ### 2026-08-05 公开运行态复核
 

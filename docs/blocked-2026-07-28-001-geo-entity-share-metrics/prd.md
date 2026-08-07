@@ -345,4 +345,4 @@
 
 - PRD path: `docs/blocked-2026-07-28-001-geo-entity-share-metrics/prd.md`
 - Current state: Issue 001–008 已关闭；Issue 009 仍需从真实入口覆盖看板、项目报告、问题集报告、PDF、CSV、告警和洞察，不能用单元测试或后继 v5 隔离基准替代。
-- Recommended next step: 完成 Issue 009 的真实入口消费者证据后关闭本目录；Flash v5 的实现与硬切独立由 `docs/active-2026-08-05-002-flash-structured-analysis-reliability/` 跟踪。
+- Recommended next step: 完成 Issue 009 的真实入口消费者证据后关闭本目录；Flash v5 的实现与硬切独立由 `docs/closed-2026-08-05-002-flash-structured-analysis-reliability/` 跟踪。

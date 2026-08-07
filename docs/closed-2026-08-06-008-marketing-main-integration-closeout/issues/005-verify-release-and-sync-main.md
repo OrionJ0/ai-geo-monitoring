@@ -1,6 +1,6 @@
 ---
 title: "完整验收发布并对齐 main"
-status: in_progress
+status: closed
 type: release
 blocked_by: []
 ---
@@ -15,8 +15,8 @@ blocked_by: []
 - [x] PostgreSQL 营销迁移和 GEO 指标语义集成通过；
 - [x] 秘密、旧路径、fallback、旧文档和无关修改扫描通过；
 - [x] 代码、API、安全、数据库、架构、性能、无障碍、SRE、现实证据和最小变更审查的代码候选 P0/P1/P2 清零；
-- [ ] 正式 Git Bundle、systemd、迁移 audit、公开健康和登录态入口验收通过；
-- [ ] 本地 `main`、`origin/main`、服务器 `HEAD`、公开前后端 revision 完全一致。
+- [x] 正式 Git Bundle、systemd、迁移 audit、公开健康和登录态入口验收通过；
+- [x] 本地 `main`、`origin/main`、服务器 `HEAD`、公开前后端 revision 完全一致。
 
 ## 2026-08-07 最终本地候选证据
 
@@ -34,7 +34,16 @@ blocked_by: []
 - `engineering-minimal-change-engineer`、`engineering-software-architect`、`testing-accessibility-auditor`、`engineering-database-optimizer`、`testing-performance-benchmarker`、`engineering-sre` 已返回 P0=0、P1=0、P2=0。
 - `testing-reality-checker` 先前保留的缺口是“尚未正式发布、文档仍引用旧候选”；本节已修正旧候选证据，但生产部分只有 Git Bundle 发布、四入口 v5、正式 Chrome 和 revision 对齐后才能清零。
 
-## 当前正式路径与下一门禁
+## 2026-08-07 生产正式发布与线上验收（c95866f）
+
+- 统一候选 `c95866f` 经正式 Git Bundle 部署上线（deployments.log `SUCCESS` @06:55:28Z，停机零）；服务器 `HEAD`、公开前后端 revision 与 `origin/main` 四向一致；两个 systemd 单元 `active` 且 `NRestarts=0`；迁移 audit 通过（营销 001-016、官网 001-003、咨询 001 全到位）。
+- 010 验收脚本服务器侧 `pass=true`（records 136-141 四入口全 completed，`analysis_method=ai_structured_v5`、`analysis_model=deepseek-v4-flash`）；真实浏览器登录态验收：单问题 #35、问题集 #36（5/5 全 Flash）均为真实 API 调用，Nginx access.log 证明全部同源 `/api/*`，无 fixture/mock/浏览器直连百度。
+- v4/Pro 零调用：`request_audits.pro_requests=0`，数据库确认 `deepseek-v4-pro` 最后出现 08-06 08:43 UTC（部署前），v5/Flash 部署后共 31 条；历史 v4 报告与 CSV 只读验证通过（15 行全 `ai_structured_v4` 带文件级 HMAC 签名）。
+- 营销页面全部可访问；ROAS/订单/咨询/网站流量缺失数据诚实显示 PARTIAL/SOURCE_TOTAL_UNAVAILABLE，无伪造；console/Network/后端日志无未解释错误或敏感信息。
+- 遗留项：凭据轮换 P1（数据所有者 2026-08-07 授权继续关闭，已记录）；P2 四项中 nginx test（其他项目）不处理，其余三项已处理（deploy.mjs 失败上下文日志 `119ca37`、.env 残留键清理、本地 swap 说明）。
+- 关闭提交后 main 领先生产，已用正式 Git Bundle 流程将该关闭提交同步到生产并在部署后核验四向 revision 一致与最小健康（见最终报告）。
+
+## 当前正式路径与下一门禁（历史）
 
 - 生产仍为 `https://insight.guangtuo.com` 上的 `a2c1fa15800314adc7f4bcf888964e6e355d3599`，仍运行 v4/Pro；两个 systemd 单元和 `/api/ready` 正常。
 - Stage1 数据库前置迁移已经独立完成：v5 快照审计为 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`，旧 v4 应用保持正常。此前 `competitor_snapshot` 缺列和迁移脚本错误目标风险不再阻塞 Stage2。

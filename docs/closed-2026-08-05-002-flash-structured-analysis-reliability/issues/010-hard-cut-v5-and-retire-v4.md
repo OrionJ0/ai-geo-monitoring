@@ -1,8 +1,8 @@
 ---
 title: "硬切 v5、退役 v4 并完成生产入口验收"
-status: in_progress
+status: closed
 type: HITL
-note: "2026-08-06 数据所有者发布合同裁决：015 按冻结门槛（推荐/关系 95%）确实 FAIL，历史不改写；改为产品目标导向切换——核心事实必须准确（硬门槛）、开放语义最佳努力（公布实测，不宣称 95%）。015 新硬门槛全部通过；两个确定性问题（S53 法律主体冲突、排名 0/6 链路）已修复并通过 21 次定向回归。v5 硬切获方向授权，实施中。"
+note: "2026-08-06 数据所有者发布合同裁决：015 按冻结门槛（推荐/关系 95%）确实 FAIL，历史不改写；改为产品目标导向切换——核心事实必须准确（硬门槛）、开放语义最佳努力（公布实测，不宣称 95%）。015 新硬门槛全部通过；两个确定性问题（S53 法律主体冲突、排名 0/6 链路）已修复并通过 21 次定向回归。v5 硬切获方向授权。2026-08-07 统一候选 c95866f 经正式 Git Bundle 部署上线，四入口线上验收、v4/Pro 零调用审计、历史 v4 只读兼容、营销页面与数据真实性全部通过，P2 卫生项已处理；凭据轮换 P1 经数据所有者授权继续关闭。目录于 2026-08-07 关闭。"
 blocked_by:
   - "015-v51-41x3-comparison-gate.md"
 ---
@@ -32,22 +32,14 @@ blocked_by:
   - 四入口分派默认 v5（集成测试证明）：单问题/问题集（V5ProjectRunIntegration"默认调用 v5"、QuestionSetRunStart v5 契约断言）、自动监测（SchedulerService 测试写入 ai_structured_v5）、analysis-only（resolveFrozenSnapshot 复用冻结快照不随实时竞品漂移 + detection analysis_only 租约不采集）。
   - 历史 v4 数据只读兼容：V5ReportCompatibility 测试（v1 透传、v4 CSV 往返）、presentSov v1 分支、CSV 白名单含 v1。
   - **阻塞项（系统资源，非代码）**：本地 HTTP 四入口现场验收（验收脚本 `backend/scripts/geo010Acceptance.js` 已就绪）因本机 swap 23.6/24GB 内存压力无法启动验收服务器，未执行；Git Bundle 部署按数据所有者指示未执行。四入口现场验收与部署留待服务器/系统环境允许时执行。
-- [ ] 正式 v5 写入 `three_track_partial_v2 / semantic_evidence_v2`，目标映射歧义不清空 `target_fact`，语义证据区分程序 occurrence 与模型 semantic context。
-- [ ] 所有新记录和运行默认写 `ai_structured_v5 / geo_metric_input_v5`，模型固定为 `deepseek-v4-flash`，不存在 Pro 或其他模型 fallback。
-- [ ] 单问题、问题集、自动监测和 analysis-only 四类公开入口均产生可审计 v5 记录，并证明阶段 1、阶段 2和最终请求策略实际生效。
-- [ ] v5 失败路径的 v4、Pro 和隐藏备用提示调用数均为 0；analysis-only 不重新访问监测平台。
-- [ ] v4 运行时、专属 adapter、repair 分支、默认配置、feature flag、fallback 和误导性当前文档全部删除；历史 v4 报告与 CSV 仍可只读。
-- [ ] 代码搜索、调用链检查和入口回归证明不存在仍指向 v4 的生产引用或默认值。
-- [ ] 按正式发布流程完成部署，并验证生产 revision、systemd、公开就绪检查和登录后报告；服务器源码没有被直接编辑。
-- [ ] 需求目录只有在生产入口验收、旧路径清理和文档收敛全部完成后才改为 `closed`；需要版本级回滚时使用显式发布回滚并记录重新切回条件。
-- [ ] 正式 v5 写入 `three_track_partial_v2 / semantic_evidence_v2`，目标映射歧义不清空 `target_fact`，语义证据区分程序 occurrence 与模型 semantic context。
-- [ ] 所有新记录和运行默认写 `ai_structured_v5 / geo_metric_input_v5`，模型固定为 `deepseek-v4-flash`，不存在 Pro 或其他模型 fallback。
-- [ ] 单问题、问题集、自动监测和 analysis-only 四类公开入口均产生可审计 v5 记录，并证明阶段 1、阶段 2和最终请求策略实际生效。
-- [ ] v5 失败路径的 v4、Pro 和隐藏备用提示调用数均为 0；analysis-only 不重新访问监测平台。
-- [ ] v4 运行时、专属 adapter、repair 分支、默认配置、feature flag、fallback 和误导性当前文档全部删除；历史 v4 报告与 CSV 仍可只读。
-- [ ] 代码搜索、调用链检查和入口回归证明不存在仍指向 v4 的生产引用或默认值。
-- [ ] 按正式发布流程完成部署，并验证生产 revision、systemd、公开就绪检查和登录后报告；服务器源码没有被直接编辑。
-- [ ] 需求目录只有在生产入口验收、旧路径清理和文档收敛全部完成后才改为 `closed`；需要版本级回滚时使用显式发布回滚并记录重新切回条件。
+- [x] 正式 v5 写入 `three_track_partial_v2 / semantic_evidence_v2`，目标映射歧义不清空 `target_fact`，语义证据区分程序 occurrence 与模型 semantic context。
+- [x] 所有新记录和运行默认写 `ai_structured_v5 / geo_metric_input_v5`，模型固定为 `deepseek-v4-flash`，不存在 Pro 或其他模型 fallback。
+- [x] 单问题、问题集、自动监测和 analysis-only 四类公开入口均产生可审计 v5 记录，并证明阶段 1、阶段 2和最终请求策略实际生效。
+- [x] v5 失败路径的 v4、Pro 和隐藏备用提示调用数均为 0；analysis-only 不重新访问监测平台。
+- [x] v4 运行时、专属 adapter、repair 分支、默认配置、feature flag、fallback 和误导性当前文档全部删除；历史 v4 报告与 CSV 仍可只读。
+- [x] 代码搜索、调用链检查和入口回归证明不存在仍指向 v4 的生产引用或默认值。
+- [x] 按正式发布流程完成部署，并验证生产 revision、systemd、公开就绪检查和登录后报告；服务器源码没有被直接编辑。
+- [x] 需求目录只有在生产入口验收、旧路径清理和文档收敛全部完成后才改为 `closed`；需要版本级回滚时使用显式发布回滚并记录重新切回条件。
 
 ## Blocked by
 
