@@ -657,6 +657,9 @@ export async function deploy(preparedRevision = '', {
   let enteredDowntime = servicesAlreadyStopped;
   let databaseBackupReference = '';
   let databaseBackupManifest = '';
+  let currentStage = 'precondition';
+  let deployRevision = '';
+  let downtimeStartedAt = null;
 
   try {
     const deploymentCommandOptions = {
@@ -673,6 +676,7 @@ export async function deploy(preparedRevision = '', {
     if (preparedRevision) {
       console.log('1/14 校验已上传的预置版本');
       revision = await git(['rev-parse', 'HEAD'], deploymentCommandOptions);
+      deployRevision = revision;
       assertPreparedRevision(preparedRevision, revision);
     } else {
       console.log('1/14 拉取 origin/main');
@@ -680,6 +684,7 @@ export async function deploy(preparedRevision = '', {
         label: 'git pull',
       });
       revision = await git(['rev-parse', 'HEAD'], deploymentCommandOptions);
+      deployRevision = revision;
       const remoteRevision = await git(['rev-parse', 'origin/main'], deploymentCommandOptions);
       if (revision !== remoteRevision) {
         throw new Error('HEAD 与 origin/main 不一致，拒绝部署服务器本地提交');
@@ -693,6 +698,8 @@ export async function deploy(preparedRevision = '', {
     } else {
       console.log('2/14 停止受管生产进程');
       enteredDowntime = true;
+      currentStage = 'stop';
+      downtimeStartedAt = Date.now();
       await run(process.execPath, [productionScript, 'stop'], {
         label: '停止生产进程',
       });
@@ -824,6 +831,7 @@ export async function deploy(preparedRevision = '', {
       migrationEnvironment.DATABASE_URL = backendConfig.DATABASE_URL;
     }
     console.log('8/14 迁移并复审 v5 快照字段');
+    currentStage = 'migrate';
     const v5SnapshotTargetArguments = checked.databaseType === 'sqlite'
       ? [`--db=${checked.databasePath}`]
       : [];
@@ -959,11 +967,13 @@ export async function deploy(preparedRevision = '', {
     await fs.promises.writeFile(releaseRevisionPath, `${revision}\n`, {
       mode: 0o600
     });
+    currentStage = 'start';
     await run(process.execPath, [productionScript, 'start'], {
       label: '启动生产进程',
     });
     servicesStopped = false;
 
+    currentStage = 'acceptance';
     if (requireGeo010Acceptance || await isGeo010ContractChanged({
       previousRevision,
       revision,
@@ -987,10 +997,15 @@ export async function deploy(preparedRevision = '', {
 
     if (controller.signal.aborted) throw controller.signal.reason;
     const shortRevision = revision.slice(0, 12);
-    await appendDeploymentLog(`SUCCESS ${shortRevision}`);
-    console.log(`部署成功: ${shortRevision}`);
+    const downtimeMs = downtimeStartedAt ? Date.now() - downtimeStartedAt : 0;
+    await appendDeploymentLog(`SUCCESS ${shortRevision} | downtime_ms=${downtimeMs} | stage=${currentStage}`);
+    console.log(`部署成功: ${shortRevision}（停机 ${downtimeMs} ms）`);
   } catch (error) {
-    await appendDeploymentLog(`FAILED ${error.message}`).catch(() => {});
+    const failureContext =
+      `revision=${deployRevision || 'unknown'}` +
+      ` | stage=${currentStage}` +
+      ` | downtime=${enteredDowntime ? 'stopped' : 'running'}`;
+    await appendDeploymentLog(`FAILED ${error.message} | ${failureContext}`).catch(() => {});
     if (enteredDowntime) {
       try {
         const cleanupController = new AbortController();

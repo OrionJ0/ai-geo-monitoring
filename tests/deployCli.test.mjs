@@ -696,3 +696,28 @@ test('Stage2 requires four-entry acceptance for a changed contract before SUCCES
   assert.doesNotMatch(source, /AI_GEO_RUN_GEO010_ACCEPTANCE/u);
   assert.match(source, /requireGeo010Acceptance \|\| await isGeo010ContractChanged/u);
 });
+
+test('deployment log records failure context (revision/stage/downtime) and success downtime', () => {
+  const source = fs.readFileSync(deployScript, 'utf8');
+  // 失败记录必须包含可观测字段：目标 revision、失败阶段、停服状态
+  assert.match(
+    source,
+    /appendDeploymentLog\(`FAILED \$\{error\.message\} \| \$\{failureContext\}`\)/u
+  );
+  assert.match(
+    source,
+    /revision=\$\{deployRevision \|\| 'unknown'\}[\s\S]*stage=\$\{currentStage\}[\s\S]*downtime=\$\{enteredDowntime \? 'stopped' : 'running'\}/u
+  );
+  // 成功记录必须包含停机时长
+  assert.match(
+    source,
+    /appendDeploymentLog\(`SUCCESS \$\{shortRevision\} \| downtime_ms=\$\{downtimeMs\} \| stage=\$\{currentStage\}`\)/u
+  );
+  // 阶段标记必须在关键步骤前更新
+  const startIndex = source.indexOf("currentStage = 'start';");
+  const migrateIndex = source.indexOf("currentStage = 'migrate';");
+  const acceptanceIndex = source.indexOf("currentStage = 'acceptance';");
+  assert.ok(startIndex > 0, 'start 阶段标记存在');
+  assert.ok(migrateIndex > 0, 'migrate 阶段标记存在');
+  assert.ok(acceptanceIndex > startIndex, 'acceptance 阶段标记在 start 之后');
+});
