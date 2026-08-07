@@ -2431,7 +2431,12 @@ class ProjectRunService {
           runtimeSettings,
           purpose: 'project_monitoring',
           correlationId: `record-${record.id}`,
-          signal: this.shutdownController.signal
+          signal: this.shutdownController.signal,
+          // 生产实测（2026-08-07，record 117/119）：deepseek-v4-flash 推理
+          // 模型对监测 prompt 需约 5500 推理 token 才收敛，4096 预算耗尽时
+          // 返回 HTTP 200 且 content 为空（finish_reason: length）。显式给足
+          // 16384 预算，实测 8192 即可正常收敛产出回答。
+          maxTokens: 16384
         };
         if (WebPlatformRegistry.hasDefinition(target.platform)) {
           queryOptions.capture_owner = {

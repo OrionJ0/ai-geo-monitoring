@@ -1258,6 +1258,9 @@ test('project executor passes bounded owner context and persists Doubao Web text
     });
     assert.equal(Object.hasOwn(result, 'share_of_voice'), false);
     assert.equal(queryOptions.purpose, 'project_monitoring');
+    // 监测请求必须给推理模型充足输出预算：4096 耗尽时 deepseek-v4-flash
+    // 返回空 content（record 117/119 实测），16384 保证推理收敛后仍有回答。
+    assert.equal(queryOptions.maxTokens, 16384);
     assert.deepEqual(queryOptions.capture_owner, {
       record_id: 88,
       user_id: 9,
