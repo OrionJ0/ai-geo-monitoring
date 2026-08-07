@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-07 16:10 CST 现场确认：服务器 `HEAD`、公开后端与前端 revision 均为 `1e1d9fc34e705a7e0a4a0a2b64a8a9fb23b9376d`（v5 主发布 `c95866f` 之后的 P2 日志修复 `119ca37` 与 002/008 关闭记录 `1e1d9fc`），工作区变更数为 0，两个 systemd 服务均为 `active` 且 `NRestarts=0`，`/api/ready` 为 `ready`。营销迁移 `001`–`016`、官网迁移 `001`–`003`、咨询审计迁移 `001` 全部 applied 且无 pending；v5 快照审计返回 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`；DeepSeek Flash 配置 `ready`（deepseek-v4-flash enabled、credential_present=true）。该版本已硬切统一 v5：四类入口（单问题/问题集/自动监测/analysis-only）均写入 `ai_structured_v5` 并使用 `deepseek-v4-flash`，部署后 v4/Pro 调用为零。`1e1d9fc` 同步部署时因 `deploy.mjs` 属 010 合同文件触发 Stage2 完整四入口验收（`pass=true`、停机 0 ms），本地 `main`、`origin/main`、服务器 `HEAD`、公开前后端 revision 四向一致；是否仍为最新必须现场复核 |
+| 当前已验证源码版本 | 2026-08-07 17:25 CST 现场复核：服务器 `HEAD`、`.runtime/release-revision`、公开后端与前端 revision 均为 `c4cafb271a7579510084695e00c7c39582283e63`（GEO 010 指纹最小化发布），工作区变更数为 0、部署锁不存在，两个 systemd 服务均为 `active`，`/api/ready` 为 `ready`（scheduler 已启动、WAL）。该版本已硬切统一 v5：四类入口（单问题/问题集/自动监测/analysis-only）均写入 `ai_structured_v5` 并使用 `deepseek-v4-flash`，部署后 v4/Pro 调用为零。`c4cafb2` 部署因两个部署脚本已移出 010 合同受控路径，日志明确输出“Stage2 门禁：相邻版本的 v5 运行合同未变化，无需重复四入口验收”，停机 0 ms，四入口真实 AI 调用为 0；服务器侧耗时约 7.5 分钟（对比 `1e1d9fc` 因 `deploy.mjs` 属 010 合同文件触发完整四入口验收的约 50 分钟）。部署前曾发现 `health=1e1d9fc` 与 `frontend=e5a05b7` 不一致（`1e1d9fc` 部署残留），经数据所有者授权 SSH 将 release-revision 覆写为 `e5a05b7` 并正规重启后端恢复一致后才部署；本地 `main`、`origin/main`、服务器 `HEAD`、公开前后端 revision 四向一致；是否仍为最新必须现场复核 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
@@ -58,6 +58,14 @@ Token 应继续保留，但不得宣称在新域名上重新授权已经通过�
 - 市场总览/网站流量按既有生产配置诚实显示 `PARTIAL / SOURCE_TOTAL_UNAVAILABLE`（全站访问暂不可用、已分类 152/222）；ROAS、订单、表单咨询、53KF 均诚实显示暂无数据（销售系统未接入、官网模块 `DISABLED`、53KF 未验证），不伪造为零；唯一 503 为既有 `DISABLED` 官网区间/逐日接口。
 - 线上验收结论：无 P0；P1 一项为**凭据轮换未闭环验证**（`passwd -S ubuntu` 显示密码最后修改 2026-07-29，本地无带时间戳的轮换记录，需人工确认暴露事件与轮换关系）；P2 四项为发布日志字段缺失、`.env` 残留 `DEFAULT_ADMIN_*` 键、Nginx sites-enabled 的 test 站点残留、发布窗口可观测性缺口。002/008 关闭与分支清理只在 P0/P1/P2 清零或人工闭环后执行。
 - 关闭处理（2026-08-07）：P1 凭据轮换经数据所有者明确授权继续关闭（未轮换但授权）；P2 四项中 Nginx test 站点确认属其他项目不处理，其余三项已处理——发布日志失败上下文（revision/阶段/停服状态）与成功停机时长随 `119ca37` 修复、`.env` 的 `DEFAULT_ADMIN_*` 残留键已备份删除（备份 `.env.bak-20260807-p2`）且服务重启后健康 200、发布窗口可观测性由失败日志补强。002（Flash v5 可靠性）与 008（营销 main 集成）目录关闭，详见 docs/closed-* 目录。
+
+### 2026-08-07 GEO 正式验收误触发优化正式发布与耗时对比
+
+- 正式 Git Bundle 将服务器从 `e5a05b7` 快进到 `c4cafb2`（GEO 010 指纹最小化：`scripts/deploy.mjs` 与 `scripts/deploy-from-bundle.mjs` 移出 `GEO010_CONTRACT_PATHS` / `GEO010_CONTRACT_LEAF_PATHS`）。部署前一致性修复：`/api/health=1e1d9fc`、`/api/frontend-health=e5a05b7`（`1e1d9fc` 部署残留，后端 marker 未随快进更新），经数据所有者授权 SSH 将 `.runtime/release-revision` 覆写为 `e5a05b7` 并以 `sudo -n systemctl restart ai-geo-backend.service` 正规重启后端，三个公开端点恢复一致后触发正式 workflow（run 31163895394）。
+- 服务器侧关键日志：`Stage2 门禁：相邻版本的 v5 运行合同未变化，无需重复四入口验收`（09:20:04.986Z）、`部署成功: c4cafb271a75（停机 0 ms）`（09:20:04.987Z）；四入口真实 AI 调用为 0，v4/Pro 调用为零不变。
+- 耗时对比：本次 deploy job 全程 09:03:36→09:20:08Z（约 16.5 分钟，含 scp 与 bundle 校验），服务器侧 deploy-from-bundle 约 7.5 分钟（09:12:33 SSH 开始→09:20:08）；对比 `1e1d9fc` 部署（`deploy.mjs` 属 010 合同文件触发完整四入口验收）服务器侧约 50 分钟，同类部署回到不含真实 AI 验收的基线，达成 PRD Metrics 目标（服务器侧不超过 15 分钟）。
+- 服务器侧回归：后端完整测试与营销 Playwright 65 项全部通过；迁移五类全部 `migration_complete ready=true`、`pendingVersions=[]`，v5 快照审计无缺失列、无 schema 偏差。
+- 发布后：服务器 `HEAD`、`.runtime/release-revision`、公开 `/api/health` 与 `/api/frontend-health` 四向一致为 `c4cafb271a7579510084695e00c7c39582283e63`，`/api/ready` 为 `ready`（scheduler 已启动、WAL），工作区干净、部署锁不存在、`ai-geo-backend.service` 与 `ai-geo-frontend.service` 均为 `active`。
 
 ### 2026-08-05 公开运行态复核
 
