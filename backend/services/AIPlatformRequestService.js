@@ -552,7 +552,14 @@ class AIPlatformRequestService {
               ? JSON.stringify(responseData.error).slice(0, 300)
               : null
           });
-          return this.failure(platform, 'invalid_provider_response');
+          lastFailure = this.failure(platform, 'invalid_provider_response');
+          // 生产部署两次验收失败均源于 deepseek API 偶发返回 HTTP 200 且
+          // 结构完整但 content 为空的响应（record 109/117，同配置 9 秒前
+          // 成功）。空文本属于外部瞬时故障，在有限重试次数内重新请求；
+          // 合同永久变化时重试后仍失败，最终记录照常 failed。
+          if (attempt >= retryCount) break;
+          await this.waitForRetry(Math.min(5000, 1000 * (2 ** attempt)), options.signal);
+          continue;
         }
         const headerTime = Number(response?.headers?.['x-response-time']);
         const webSearchEvidence = detectWebSearchEvidence(config.adapter_type, response?.data);
@@ -593,7 +600,17 @@ class AIPlatformRequestService {
           provider_code: providerError.code || undefined,
           network_code: String(error?.code || '').slice(0, 40) || undefined
         });
-        const retryable = ['rate_limited', 'timeout', 'network_error', 'provider_error'].includes(errorCode);
+        // 生产部署两次验收失败均源于 deepseek API 偶发返回 HTTP 200 但
+        // content 为空的响应（record 109/117，同配置 9 秒前成功）。结构
+        // 完整但文本缺失属于外部瞬时故障，应走有限重试；合同永久变化时
+        // 重试后仍失败，最终记录照常 failed，不会掩盖真实错误。
+        const retryable = [
+          'rate_limited',
+          'timeout',
+          'network_error',
+          'provider_error',
+          'invalid_provider_response'
+        ].includes(errorCode);
         if (!retryable || attempt >= retryCount) break;
         const retryAfter = Number.parseInt(error?.response?.headers?.['retry-after'] || '0', 10);
         const delay = retryAfter > 0 ? retryAfter * 1000 : Math.min(5000, 1000 * (2 ** attempt));

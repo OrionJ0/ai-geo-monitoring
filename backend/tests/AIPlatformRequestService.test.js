@@ -944,6 +944,86 @@ test('classifies exhausted provider quota without retrying or exposing the provi
   assert.equal(JSON.stringify(result).includes('private diagnostic details'), false);
 });
 
+test('retries a structurally complete but empty completion once instead of failing the run', async () => {
+  let calls = 0;
+  const row = {
+    id: 4,
+    code: 'deepseek',
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async () => {
+      calls += 1;
+      if (calls === 1) {
+        // 生产实测：deepseek API 偶发返回 HTTP 200、choices 存在但 content
+        // 为空字符串（record 109/117 同款），结构完整所以 extractResponseText
+        // 仍返回 null → invalid_provider_response。首次应触发重试而非直接失败。
+        return {
+          data: {
+            id: 'chatcmpl-empty',
+            object: 'chat.completion',
+            created: 1,
+            model: 'deepseek-v4-flash',
+            choices: [{ index: 0, message: { role: 'assistant', content: '' } }],
+            usage: { prompt_tokens: 1, completion_tokens: 0 }
+          },
+          headers: {}
+        };
+      }
+      return {
+        data: { choices: [{ message: { content: '{"ok":true}' } }] },
+        headers: {}
+      };
+    }
+  });
+
+  const result = await service.queryConfig(row, '测试问题', { retryCount: 2 });
+
+  assert.equal(calls, 2);
+  assert.equal(result.success, true);
+  assert.match(result.text, /\{"ok":true\}/u);
+});
+
+test('still fails a persistent empty completion after exhausting retries', async () => {
+  let calls = 0;
+  const row = {
+    id: 4,
+    code: 'deepseek',
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.example.com/v1',
+    encrypted_api_key: 'encrypted',
+    default_model: 'deepseek-v4-flash',
+    enabled: true,
+    archived_at: null
+  };
+  const service = createService({
+    row,
+    post: async () => {
+      calls += 1;
+      return {
+        data: {
+          choices: [{ index: 0, message: { role: 'assistant', content: '' } }]
+        },
+        headers: {}
+      };
+    }
+  });
+
+  const result = await service.queryConfig(row, '测试问题', { retryCount: 2 });
+
+  assert.equal(calls, 3);
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'invalid_provider_response');
+});
+
 test('tests disabled platforms without changing their enabled state', async () => {
   const savedResults = [];
   const row = {
