@@ -88,6 +88,25 @@ function extractRecordIds(payload) {
   return [...new Set(candidates.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
 }
 
+/**
+ * 从 run 入口响应解析记录 ID。
+ *
+ * 单问题/问题集 run 接口按 API.md 契约只返回 question_set_run_id，不返回
+ * record_ids；retry-failed 接口才返回 record_ids。因此先尝试响应内字段，
+ * 缺失时用 question_set_run_id 直接查库解析，保证四类入口用同一解析路径。
+ */
+async function resolveRunRecordIds(QuestionRecord, payload, projectId) {
+  const direct = extractRecordIds(payload);
+  if (direct.length) return direct;
+  const runId = Number(payload?.data?.question_set_run_id);
+  if (!Number.isInteger(runId) || runId <= 0 || !QuestionRecord?.findAll) return [];
+  const rows = await QuestionRecord.findAll({
+    where: { question_set_run_id: runId, project_id: projectId },
+    order: [['id', 'ASC']]
+  });
+  return rows.map((row) => Number(row.id)).filter((id) => Number.isInteger(id) && id > 0);
+}
+
 function extractRecordId(payload) {
   return extractRecordIds(payload)[0] || null;
 }
@@ -1156,7 +1175,7 @@ async function main() {
       `/geo-projects/${projectId}/prompts/${singlePrompt.id}/run`,
       { token, idempotency: singleKey, body: { idempotency_key: singleKey } }
     );
-    const singleIds = extractRecordIds(singleResponse);
+    const singleIds = await resolveRunRecordIds(QuestionRecord, singleResponse, projectId);
     const singleRecords = await waitRecords(QuestionRecord, VisibilityMetric, singleIds, projectId, {
       concurrency: runConcurrency,
       recordLeaseMs,
@@ -1174,7 +1193,7 @@ async function main() {
       `/geo-projects/${projectId}/question-sets/${questionSetId}/run`,
       { token, idempotency: setKey, body: { idempotency_key: setKey } }
     );
-    const setIds = extractRecordIds(setRunResponse);
+    const setIds = await resolveRunRecordIds(QuestionRecord, setRunResponse, projectId);
     const setRecords = await waitRecords(QuestionRecord, VisibilityMetric, setIds, projectId, {
       concurrency: runConcurrency,
       recordLeaseMs,
@@ -1277,7 +1296,7 @@ async function main() {
     ) {
       throw new Error('analysis-only 正式入口未保持 1/0/0 重试边界');
     }
-    const retryIds = extractRecordIds(retryResponse);
+    const retryIds = await resolveRunRecordIds(QuestionRecord, retryResponse, projectId);
     const retryRecords = await waitRecords(QuestionRecord, VisibilityMetric, retryIds, projectId, {
       concurrency: runConcurrency,
       recordLeaseMs,
@@ -1414,6 +1433,7 @@ module.exports = {
   evaluateEvidence,
   extractRecordId,
   extractRecordIds,
+  resolveRunRecordIds,
   historicalV4Query,
   evaluateHistoricalV4Evidence,
   readRequiredRevision,

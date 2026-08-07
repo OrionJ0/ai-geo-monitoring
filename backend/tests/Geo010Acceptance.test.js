@@ -12,6 +12,7 @@ const {
   evaluateEvidence,
   extractRecordId,
   extractRecordIds,
+  resolveRunRecordIds,
   historicalV4Query,
   readRequiredRevision,
   acceptanceRequiredTimeoutMs,
@@ -379,6 +380,43 @@ test('extracts current single and question-set response record ids', () => {
     extractRecordIds({ data: { record_ids: [11, 12, 11], results: [{ record_id: 13 }] } }),
     [11, 12, 13]
   );
+});
+
+test('resolves run record ids from question_set_run_id when the response omits record_ids', async () => {
+  const queried = [];
+  const QuestionRecord = {
+    findAll: async (options) => {
+      queried.push(options);
+      return [{ id: 21 }, { id: 22 }];
+    }
+  };
+  const payload = { data: { question_set_run_id: 7 } };
+  const ids = await resolveRunRecordIds(QuestionRecord, payload, 3);
+  assert.deepEqual(ids, [21, 22]);
+  assert.deepEqual(queried, [{
+    where: { question_set_run_id: 7, project_id: 3 },
+    order: [['id', 'ASC']]
+  }]);
+});
+
+test('resolveRunRecordIds prefers inline record_ids and returns empty for a missing run id', async () => {
+  let called = false;
+  const QuestionRecord = {
+    findAll: async () => {
+      called = true;
+      return [];
+    }
+  };
+  assert.deepEqual(
+    await resolveRunRecordIds(QuestionRecord, { data: { record_ids: [31] } }, 3),
+    [31]
+  );
+  assert.equal(called, false);
+  assert.deepEqual(
+    await resolveRunRecordIds(QuestionRecord, { data: {} }, 3),
+    []
+  );
+  assert.equal(called, false);
 });
 
 test('requires one explicit immutable 40-character revision argument', () => {
