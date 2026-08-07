@@ -797,8 +797,18 @@ export async function deploy(preparedRevision = '', {
     console.log('7/14 构建并验收前端生产产物');
     await run('npm', ['run', 'build'], {
       cwd: frontendDirectory,
-      env: { ...process.env, AI_GEO_BUILD_REVISION: revision },
+      env: {
+        ...process.env,
+        AI_GEO_BUILD_REVISION: revision,
+        // 2026-08-07 第七次部署实测：next build 在 3.6G 内存的服务器上
+        // 用尽 RAM+swap 陷入换页风暴（44 分钟无输出、sshd 无法响应新连接）。
+        // 限制 V8 堆上限避免越界换页；该前端生产构建 2G 堆实测充足。
+        NODE_OPTIONS: '--max-old-space-size=2048'
+      },
       label: '前端生产构建',
+      // 构建超时兜底：历史基线 10-15 分钟，卡死时 30 分钟自动中断，
+      // 避免部署无限期挂起（失败后重新执行部署命令即可恢复）。
+      deadline: Date.now() + 30 * 60 * 1000
     });
     await run('npm', ['run', 'test:marketing:browser'], {
       cwd: frontendDirectory,
