@@ -1267,7 +1267,7 @@ async function main() {
     cleanup.monitoring_disabled = true;
 
     const retryRun = await prepareAnalysisOnlyRetry(
-      { sequelize, QuestionSetRun, QuestionRecord, ResultDetail },
+      { sequelize: models.sequelize, QuestionSetRun, QuestionRecord, ResultDetail },
       setRecord,
       project,
       setPrompt,
