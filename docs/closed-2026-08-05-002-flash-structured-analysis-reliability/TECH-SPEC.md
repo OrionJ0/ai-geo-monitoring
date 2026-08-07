@@ -2,7 +2,7 @@
 title: DeepSeek Flash 分阶段结构化分析可靠性技术方案
 date: 2026-08-05
 status: active
-source: docs/active-2026-08-05-002-flash-structured-analysis-reliability/prd.md、2026-08-05 真实 Flash 复现与资料调研
+source: docs/closed-2026-08-05-002-flash-structured-analysis-reliability/prd.md、2026-08-05 真实 Flash 复现与资料调研
 scope: deep
 ---
 
@@ -1496,8 +1496,8 @@ assessed 幸存样本中的推荐 21/21、情绪 21/21 和排名 4/4 不能证�
 
 ## 15. 后续衔接
 
-- Tech Spec path: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/TECH-SPEC.md`
-- Validation report: `docs/active-2026-08-05-002-flash-structured-analysis-reliability/validation-report.md`
+- Tech Spec path: `docs/closed-2026-08-05-002-flash-structured-analysis-reliability/TECH-SPEC.md`
+- Validation report: `docs/closed-2026-08-05-002-flash-structured-analysis-reliability/validation-report.md`
 - 可拆 issue：U1–U7 已由 001–009 承接；U9–U12 对应 011–015。010/U8 只能在 015 的 `three_track_partial_v2` 全部门槛通过并人工批准后开始。
 - 建议下一步：发布统一候选并完成单问题、问题集、自动监测、analysis-only 四入口验收，同时核对 systemd 请求审计、历史 v4 报告/CSV 只读兼容和正式 Chrome 页面；生产证据全部成立后关闭 010 与本需求。
 - 是否适合 TDD：适合。source map、ID 合同、验证器、指标计算、请求体和报告兼容均应先写失败测试；真实 Flash 基线作为单元测试之外的独立验收层。

@@ -2,7 +2,7 @@
 
 ## 当前正式单机实例
 
-> 本节记录截至 2026-08-07 15:00 CST 现场复核的生产真值。运行状态会变化；
+> 本节记录截至 2026-08-07 16:10 CST 现场复核的生产真值。运行状态会变化；
 > 回答“现在是否正常”或“服务器是否最新”前，仍需按本节命令重新检查。
 
 | 项目 | 当前值与边界 |
@@ -18,7 +18,7 @@
 | 后端生产环境 | `/opt/ai-geo-monitoring/backend/.env`：`HOST=127.0.0.1`；同机同源代理下 `ALLOWED_ORIGINS` 可留空 |
 | 百度 callback | 服务器期望 `https://insight.guangtuo.com/api/admin/marketing/baidu/oauth/callback`；百度开发者控制台也必须登记完全相同的地址 |
 | 进程入口 | `ai-geo-backend.service` 与 `ai-geo-frontend.service`；正式服务不从 SSH 或远程桌面手工启动 |
-| 当前已验证源码版本 | 2026-08-07 15:00 CST 现场确认：服务器 `HEAD`、公开后端与前端 revision 均为统一 v5 最终发布 `c95866fa8a316e71045b4810f8385acde916752c`，工作区变更数为 0，两个 systemd 服务均为 `active` 且各只有一个 MainPID、`NRestarts=0`，`/api/ready` 为 `ready`。营销迁移 `001`–`016`、官网迁移 `001`–`003`、咨询审计迁移 `001` 全部 applied 且无 pending；v5 快照审计返回 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`；DeepSeek Flash 配置 `ready`（deepseek-v4-flash enabled、credential_present=true）。该版本已硬切统一 v5：四类入口（单问题/问题集/自动监测/analysis-only）均写入 `ai_structured_v5` 并使用 `deepseek-v4-flash`，部署后 v4/Pro 调用为零。服务器 `origin/main=e2197d453c44073c69a87c80f90c2e5f569ad629` 只是落后的远端跟踪引用，不是运行真值；是否仍为最新必须现场复核 |
+| 当前已验证源码版本 | 2026-08-07 16:10 CST 现场确认：服务器 `HEAD`、公开后端与前端 revision 均为 `1e1d9fc34e705a7e0a4a0a2b64a8a9fb23b9376d`（v5 主发布 `c95866f` 之后的 P2 日志修复 `119ca37` 与 002/008 关闭记录 `1e1d9fc`），工作区变更数为 0，两个 systemd 服务均为 `active` 且 `NRestarts=0`，`/api/ready` 为 `ready`。营销迁移 `001`–`016`、官网迁移 `001`–`003`、咨询审计迁移 `001` 全部 applied 且无 pending；v5 快照审计返回 `missing_columns=[]`、`schema_mismatches=[]`、`migration_required=false`；DeepSeek Flash 配置 `ready`（deepseek-v4-flash enabled、credential_present=true）。该版本已硬切统一 v5：四类入口（单问题/问题集/自动监测/analysis-only）均写入 `ai_structured_v5` 并使用 `deepseek-v4-flash`，部署后 v4/Pro 调用为零。`1e1d9fc` 同步部署时因 `deploy.mjs` 属 010 合同文件触发 Stage2 完整四入口验收（`pass=true`、停机 0 ms），本地 `main`、`origin/main`、服务器 `HEAD`、公开前后端 revision 四向一致；是否仍为最新必须现场复核 |
 
 2026-07-31 切换时，公网首页返回 HTTP 200，`/api/ready` 返回 `ready`，证书校验
 通过，两个 systemd 服务均为 `active/running`。该结论是带时间的验收证据，不是
