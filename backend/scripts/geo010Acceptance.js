@@ -591,7 +591,10 @@ async function verifyDeepSeekFlashCredential(models) {
       retryCount: 0,
       purpose: 'connection_test',
       timeoutSeconds: 30,
-      maxTokens: 8,
+      // deepseek-v4-flash 是推理模型：过小的 max_tokens 会全部消耗在
+      // reasoning_content，导致 content 为空而被误判 invalid_provider_response
+      // （生产实测 8 tokens 全用于推理）。256 保证最终回答有预算。
+      maxTokens: 256,
       requestOptions: {},
       disableWebSearch: true
     }

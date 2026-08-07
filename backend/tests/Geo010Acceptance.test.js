@@ -23,6 +23,7 @@ const {
   toEvidence,
   verifyRequestAudits,
   verifySchedulerBacklog,
+  verifyDeepSeekFlashCredential,
   cleanupAcceptanceProjects,
   acceptanceProjectMarker,
   acceptanceProjectWebsite,
@@ -544,6 +545,72 @@ test('writes production evidence into a private directory without overwriting', 
   } finally {
     fs.unlinkSync(filename);
     fs.rmdirSync(directory);
+  }
+});
+
+function deepSeekFlashConfigRow(overrides = {}) {
+  return {
+    code: 'deepseek',
+    name: 'DeepSeek',
+    adapter_type: 'openai_chat_completions',
+    base_url: 'https://api.deepseek.com/v1/chat/completions',
+    encrypted_api_key: 'v1:test-credential',
+    default_model: 'deepseek-v4-pro',
+    request_options: {},
+    enabled: true,
+    builtin: true,
+    archived_at: null,
+    ...overrides,
+    toJSON() {
+      const { toJSON, ...plain } = this;
+      return plain;
+    }
+  };
+}
+
+test('Flash credential preflight reserves a reasoning-safe maxTokens budget', async () => {
+  const service = require('../services/AIPlatformRequestService');
+  const originalQuery = service.queryConfig;
+  let capturedOptions = null;
+  service.queryConfig = async (candidate, question, options) => {
+    capturedOptions = options;
+    return {
+      success: true,
+      data: {},
+      text: 'OK',
+      platform: candidate.code,
+      model_name: candidate.default_model,
+      citation_observation_status: 'unavailable',
+      responseTime: 1
+    };
+  };
+  try {
+    const models = { AIPlatformConfig: { findOne: async () => deepSeekFlashConfigRow() } };
+    const result = await verifyDeepSeekFlashCredential(models);
+    assert.equal(result.callable, true);
+    // deepseek-v4-flash 是推理模型：生产实测 8 个 token 全部消耗在 reasoning，
+    // content 为空会被误判 invalid_provider_response；预算必须保留回答空间。
+    assert.ok(
+      capturedOptions.maxTokens >= 256,
+      `预检 maxTokens 必须为推理模型保留最终回答预算，实际 ${capturedOptions.maxTokens}`
+    );
+  } finally {
+    service.queryConfig = originalQuery;
+  }
+});
+
+test('Flash credential preflight surfaces invalid_provider_response without masking', async () => {
+  const service = require('../services/AIPlatformRequestService');
+  const originalQuery = service.queryConfig;
+  service.queryConfig = async () => ({ success: false, error_code: 'invalid_provider_response' });
+  try {
+    const models = { AIPlatformConfig: { findOne: async () => deepSeekFlashConfigRow() } };
+    await assert.rejects(
+      () => verifyDeepSeekFlashCredential(models),
+      /DeepSeek Flash 凭据预检失败 \(invalid_provider_response\)/u
+    );
+  } finally {
+    service.queryConfig = originalQuery;
   }
 });
 
