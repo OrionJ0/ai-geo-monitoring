@@ -343,6 +343,7 @@ function validEntry(overrides = {}) {
     analysis_model: 'deepseek-v4-flash',
     structure_version: 'geo_metric_input_v5',
     contract_revision: 'three_track_partial_v2',
+    competition_analysis_status: 'complete',
     diagnostic_stages: [
       { stage: 'entity_extract', platform: 'deepseek', model: 'deepseek-v4-flash', degraded: false },
       { stage: 'semantic_judge', platform: 'deepseek', model: 'deepseek-v4-flash', degraded: false }
@@ -467,6 +468,7 @@ test('builds evidence from the record and its persisted visibility metric', () =
       analysis_structure: {
         schema_version: 'geo_metric_input_v5',
         contract_revision: 'three_track_partial_v2',
+        competition_analysis_status: 'complete',
         diagnostics: {
           stages: [
             { stage: 'entity_extract', platform: 'deepseek', model: 'deepseek-v4-flash' },
@@ -570,6 +572,62 @@ test('request audit proof requires both Flash stages and forbids monitoring on a
     ], entryIds, [4]),
     /非正式上游请求/u
   );
+});
+
+test('request audit proof waives semantic judge for legally downgraded records', () => {
+  const policyFingerprint = 'd'.repeat(64);
+  const entryIds = {
+    single_question: [1, 2],
+    question_set: [],
+    automatic_monitoring: [],
+    analysis_only: []
+  };
+  const extractAudit = (id) => ({
+    event: 'ai_platform_request',
+    platform: 'deepseek',
+    model: 'deepseek-v4-flash',
+    purpose: 'analysis_entity_extract',
+    policy_revision: 'grounded_entity_catalog_v1+fixed_json_no_web_v1',
+    policy_fingerprint: policyFingerprint,
+    policy_valid: true,
+    prompt_fingerprint: 'e'.repeat(64),
+    prompt_template_fingerprint: '43508380a32708aab5f3815e114dbfbd19af21ec52018f58f055e2bc76ff93af',
+    prompt_variant: 'base',
+    attempt: 1,
+    correlation_id: `record-${id}`
+  });
+  const audits = [
+    extractAudit(1),
+    extractAudit(2),
+    {
+      event: 'ai_platform_request',
+      platform: 'deepseek',
+      model: 'deepseek-v4-flash',
+      purpose: 'project_monitoring',
+      attempt: 1,
+      correlation_id: 'record-1'
+    },
+    {
+      event: 'ai_platform_request',
+      platform: 'deepseek',
+      model: 'deepseek-v4-flash',
+      purpose: 'project_monitoring',
+      attempt: 1,
+      correlation_id: 'record-2'
+    }
+  ];
+  // record 1 合法降级（competition unavailable）→ 豁免 judge 审计；
+  // record 2 未声明降级仍缺 judge 审计 → 必须失败
+  assert.throws(
+    () => verifyRequestAudits(audits, entryIds, [], [1]),
+    /record 2 缺少语义判断请求审计/u
+  );
+  // 两个 record 均豁免 → 通过
+  assert.deepEqual(verifyRequestAudits(audits, entryIds, [], [1, 2]), {
+    total: 4,
+    correlated: 4,
+    pro_requests: 0
+  });
 });
 
 test('writes production evidence into a private directory without overwriting', () => {

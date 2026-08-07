@@ -136,6 +136,12 @@ function toEvidence(record) {
     analysis_model: metric?.analysis_model || null,
     structure_version: structure?.schema_version || null,
     contract_revision: structure?.contract_revision || null,
+    // 阶段 1 成功但原回答无品牌/竞品实体时，系统合法跳过阶段 2
+    // （AIResponseAnalysisV5Service:734 catalog.entities.length 为假），
+    // 该轨输出 unavailable 且不产生 semantic_judge 请求审计。
+    // 验收据此豁免：unavailable 的 record 不要求 judge 审计（合同 prd.md:155
+    // "没有发现某个竞品……不是结构错误，不触发整条失败"）。
+    competition_analysis_status: structure?.competition_analysis_status || null,
     diagnostic_stages: stages
   };
 }
@@ -742,7 +748,7 @@ function collectRequestAudits(sinceIso, runner = execFileSync) {
   });
 }
 
-function verifyRequestAudits(audits, entryRecordIds, analysisOnlyIds) {
+function verifyRequestAudits(audits, entryRecordIds, analysisOnlyIds, legitDowngradeIds = []) {
   const requiredPolicyRevisions = new Map([
     ['analysis_entity_extract', 'grounded_entity_catalog_v1+fixed_json_no_web_v1'],
     ['analysis_semantic_judge', 'closed_entity_semantics_v4_evidence_roles_rev2+fixed_json_no_web_v1']
@@ -795,7 +801,8 @@ function verifyRequestAudits(audits, entryRecordIds, analysisOnlyIds) {
     if (!analysisRows.some((row) => row.purpose === 'analysis_entity_extract')) {
       throw new Error(`record ${id} 缺少实体抽取请求审计`);
     }
-    if (!analysisRows.some((row) => row.purpose === 'analysis_semantic_judge')) {
+    if (!analysisRows.some((row) => row.purpose === 'analysis_semantic_judge')
+      && !legitDowngradeIds.includes(id)) {
       throw new Error(`record ${id} 缺少语义判断请求审计`);
     }
     if (analysisRows.some((row) => row.platform !== 'deepseek' || row.model !== FLASH_MODEL)) {
@@ -1344,7 +1351,10 @@ async function main() {
       analysis_only: retryIds
     };
     const audits = collectRequestAudits(auditSince);
-    const auditEvidence = verifyRequestAudits(audits, entryRecordIds, retryIds);
+    const legitDowngradeIds = Object.values(entries).flat()
+      .filter((row) => row.competition_analysis_status === 'unavailable')
+      .map((row) => row.id);
+    const auditEvidence = verifyRequestAudits(audits, entryRecordIds, retryIds, legitDowngradeIds);
     finalEvidence = {
       generated_at: new Date().toISOString(),
       base_url: OFFICIAL_BASE,
