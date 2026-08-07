@@ -539,7 +539,21 @@ class AIPlatformRequestService {
         });
         const response = await this.httpClient.post(requestUrl, requestBody, requestOptions);
         const text = extractResponseText(config.adapter_type, response?.data);
-        if (!text) return this.failure(platform, 'invalid_provider_response');
+        if (!text) {
+          const responseData = response?.data;
+          console.error('AI 平台返回格式异常:', {
+            platform,
+            adapter_type: config.adapter_type,
+            status: Number(response?.status || 0) || null,
+            response_keys: responseData && typeof responseData === 'object' ? Object.keys(responseData).slice(0, 20) : typeof responseData,
+            choices: Array.isArray(responseData?.choices) ? responseData.choices.length : null,
+            content_type: typeof responseData?.choices?.[0]?.message?.content,
+            provider_error: responseData?.error && typeof responseData.error === 'object'
+              ? JSON.stringify(responseData.error).slice(0, 300)
+              : null
+          });
+          return this.failure(platform, 'invalid_provider_response');
+        }
         const headerTime = Number(response?.headers?.['x-response-time']);
         const webSearchEvidence = detectWebSearchEvidence(config.adapter_type, response?.data);
         return {

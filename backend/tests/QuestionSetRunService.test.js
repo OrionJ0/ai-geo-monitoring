@@ -252,10 +252,11 @@ test('一次问题集运行只聚合本次关联任务并保留逐条回答', as
 });
 
 test('单问题报告返回 v5 排名、SOV 和可复核语义证据', async () => {
-  // 010 硬切后 v5 为唯一当前契约。native v5 记录的报告读取目前被服务缺陷阻断
-  // （VisibilityMetric 模型无 sov_status 列，presentScopedSov 读取时必然抛错，
-  // 见 010 报告），因此本测试用 imported 快照行（question_set_id 为 null 的
-  // 单问题报告等价形态）验证 v5 行数据读取、汇总与 CSV 往返。
+  // 010 硬切后 v5 为唯一当前契约。native v5 记录的报告读取已由 P0 修复
+  // （normalizeNativeRow 从 metric.analysis_structure.sov 恢复 observed_only，
+  // 见"native v5 报告从 metric.analysis_structure.sov 恢复 observed_only 状态"）。
+  // 本测试用 imported 快照行（question_set_id 为 null 的单问题报告等价形态）
+  // 验证 v5 行数据读取、汇总与 CSV 往返。
   const v5Structure = {
     schema_version: 'geo_metric_input_v5',
     target_fact: {
@@ -549,6 +550,90 @@ test('单问题报告返回 v5 排名、SOV 和可复核语义证据', async () 
   );
   await imported.destroy();
   await run.destroy();
+});
+
+test('native v5 报告从 metric.analysis_structure.sov 恢复 observed_only 状态', async (t) => {
+  // 010 硬切后 VisibilityMetric 模型无 sov_status 扁平列（observed_only 仅存于
+  // analysis_structure.sov.status）。回归：normalizeNativeRow 必须从 metric 的
+  // analysis_structure 兜底恢复，否则 getReport 对 native v5 记录抛
+  // "开放发现 SOV 状态必须为 observed_only"，导致单问题/问题集父运行无法收敛。
+  const run = await createNativeRun(1);
+  const record = await QuestionRecord.create({
+    user_id: user.id,
+    project_id: project.id,
+    tracked_prompt_id: prompt.id,
+    question_set_run_id: run.id,
+    run_slot_index: 0,
+    platform: 'deepseek',
+    platform_name: 'DeepSeek',
+    model_name: 'deepseek-v4-flash',
+    question: 'native v5 报告如何读取 SOV？',
+    brand: project.name,
+    brand_keywords: project.name,
+    status: 'completed',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+    analysis_contract_version: 'ai_structured_v5'
+  });
+  t.after(async () => {
+    await VisibilityMetric.destroy({ where: { question_record_id: record.id } });
+    await ResultDetail.destroy({ where: { question_record_id: record.id } });
+    await record.destroy();
+    await run.destroy();
+  });
+  await ResultDetail.create({
+    question_record_id: record.id,
+    ai_response_original: 'native v5 回答正文。',
+    parsing_status: 'completed'
+  });
+  await VisibilityMetric.create({
+    project_id: project.id,
+    prompt_id: prompt.id,
+    question_record_id: record.id,
+    user_id: user.id,
+    platform: 'deepseek',
+    brand_mentioned: true,
+    brand_mentions: 1,
+    brand_rank: 1,
+    brand_recommended: false,
+    visibility_score: 1,
+    sov_numerator: 1,
+    sov_denominator: 2,
+    answer_competitor_share: 50,
+    analysis_method: 'structured_v5',
+    metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped',
+    analysis_platform: 'deepseek',
+    analysis_model: 'deepseek-v4-flash',
+    analysis_structure: {
+      schema_version: 'geo_metric_input_v5',
+      contract_revision: 'three_track_partial_v2',
+      target_fact: { status: 'complete', brand_mentioned: true, brand_mentions: 1, mentions: [] },
+      target_mapping: { status: 'resolved', target_entity_id: 'E001', candidate_entity_ids: [] },
+      target_semantics: {
+        status: 'complete',
+        recommendation: { status: 'assessed', value: false, evidence: { entity_occurrence_source_ids: [], semantic_context_source_ids: [] } },
+        rank: { status: 'assessed', value: 1, evidence: { entity_occurrence_source_ids: [], semantic_context_source_ids: [] } },
+        sentiment: { status: 'assessed', value: 'neutral', evidence: { entity_occurrence_source_ids: [], semantic_context_source_ids: [] } }
+      },
+      sov: { status: 'observed_only', scope: 'open_discovery', completeness: 'not_proven', numerator: 1, denominator: 2, value: 50 },
+      diagnostics: {
+        entity_prompt_revision: 'geo-entity-extract-v2',
+        semantic_prompt_revision: 'geo-semantic-v5',
+        model: 'deepseek-v4-flash',
+        attempt_count: 1,
+        usage: { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200 },
+        stages: [{ stage: 'entity_extract', status: 'completed', attempt_count: 1 }]
+      }
+    }
+  });
+
+  const report = await QuestionSetRunService.getReport({ projectId: project.id, runId: run.id });
+
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].metric_semantics_version, 'contextual_competitor_mentions_sov_v2_scoped');
+  assert.equal(report.rows[0].sov.status, 'observed_only');
+  assert.equal(report.rows[0].sov.numerator, 1);
+  assert.equal(report.rows[0].sov.denominator, 2);
+  assert.equal(report.rows[0].sov.value, 50);
 });
 
 test('单问题失败运行不依赖持久化问题集也能生成可重试报告', async () => {
