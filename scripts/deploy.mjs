@@ -89,14 +89,10 @@ export const GEO010_CONTRACT_PATHS = Object.freeze([
   'backend/services/DeepSeekFlashConfigMigrationService.js',
   'backend/services/GeoMetricSemanticsMigrationService.js',
   'backend/services/ProjectRunService.js',
-  'backend/services/SchedulerService.js',
-  'scripts/deploy.mjs',
-  'scripts/deploy-from-bundle.mjs'
+  'backend/services/SchedulerService.js'
 ]);
 const GEO010_CONTRACT_LEAF_PATHS = new Set([
-  'backend/app.js',
-  'scripts/deploy.mjs',
-  'scripts/deploy-from-bundle.mjs'
+  'backend/app.js'
 ]);
 const releaseRevisionPath = path.join(runtimeDirectory, 'release-revision');
 const deploymentGateSource = path.join(

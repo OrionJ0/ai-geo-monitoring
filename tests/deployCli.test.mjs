@@ -38,6 +38,14 @@ test('GEO 010 acceptance is required only when the immutable runtime contract ch
     fs.mkdirSync(path.dirname(path.join(directory, filename)), { recursive: true });
     fs.writeFileSync(path.join(directory, filename), `${filename}\n`);
   }
+  // 部署脚本不属于 GEO 010 运行合同，但 fixture 仍显式创建它们，
+  // 以便验证部署脚本变化不再触发指纹变化。
+  fs.mkdirSync(path.join(directory, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'scripts', 'deploy.mjs'), 'fixture:deployer\n');
+  fs.writeFileSync(
+    path.join(directory, 'scripts', 'deploy-from-bundle.mjs'),
+    'fixture:bridge\n'
+  );
   fs.writeFileSync(
     path.join(directory, 'backend', 'package-lock.json'),
     JSON.stringify({
@@ -153,7 +161,31 @@ test('GEO 010 acceptance is required only when the immutable runtime contract ch
   ]);
   const bridgeRevision = (await git(directory, ['rev-parse', 'HEAD'])).stdout.trim();
   const bridgeFingerprint = await computeGeo010ContractFingerprint(bridgeRevision, { root: directory });
-  assert.notEqual(bridgeFingerprint, lockFingerprint);
+  assert.equal(bridgeFingerprint, lockFingerprint);
+
+  fs.appendFileSync(path.join(directory, 'scripts/deploy.mjs'), 'deployer-v2\n');
+  await git(directory, ['add', 'scripts/deploy.mjs']);
+  await git(directory, [
+    '-c', 'user.name=Deployment Test',
+    '-c', 'user.email=deployment-test@example.com',
+    'commit', '-m', 'deployer change'
+  ]);
+  const deployerRevision = (await git(directory, ['rev-parse', 'HEAD'])).stdout.trim();
+  const deployerFingerprint = await computeGeo010ContractFingerprint(deployerRevision, { root: directory });
+  assert.equal(deployerFingerprint, bridgeFingerprint);
+
+  fs.appendFileSync(path.join(directory, 'backend/scripts/geo010Acceptance.js'), 'acceptance-v2\n');
+  await git(directory, ['add', 'backend/scripts/geo010Acceptance.js']);
+  await git(directory, [
+    '-c', 'user.name=Deployment Test',
+    '-c', 'user.email=deployment-test@example.com',
+    'commit', '-m', 'acceptance script change'
+  ]);
+  const acceptanceRevision = (await git(directory, ['rev-parse', 'HEAD'])).stdout.trim();
+  assert.notEqual(
+    await computeGeo010ContractFingerprint(acceptanceRevision, { root: directory }),
+    deployerFingerprint
+  );
 
   fs.appendFileSync(path.join(directory, 'backend/routes/settings.js'), 'settings-v2\n');
   await git(directory, ['add', 'backend/routes/settings.js']);
@@ -172,6 +204,53 @@ test('GEO 010 acceptance is required only when the immutable runtime contract ch
 async function git(cwd, args) {
   return execFileAsync('git', args, { cwd });
 }
+
+test('GEO 010 contract comparison stays fail-closed for invalid or incomplete previous revisions', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-contract-failclosed-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+  for (const filename of GEO010_CONTRACT_PATHS) {
+    fs.mkdirSync(path.dirname(path.join(directory, filename)), { recursive: true });
+    fs.writeFileSync(path.join(directory, filename), `${filename}\n`);
+  }
+  fs.writeFileSync(
+    path.join(directory, 'backend', 'package-lock.json'),
+    JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': {},
+        'node_modules/sequelize': { version: '6.37.8' }
+      }
+    })
+  );
+  await git(directory, ['init', '-b', 'main']);
+  await git(directory, ['add', '.']);
+  await git(directory, [
+    '-c', 'user.name=Deployment Test',
+    '-c', 'user.email=deployment-test@example.com',
+    'commit', '-m', 'complete contract'
+  ]);
+  const completeRevision = (await git(directory, ['rev-parse', 'HEAD'])).stdout.trim();
+
+  assert.equal(await isGeo010ContractChanged({
+    previousRevision: 'not-a-commit',
+    revision: completeRevision,
+    root: directory
+  }), true);
+
+  await git(directory, ['rm', 'backend/routes/settings.js']);
+  await git(directory, [
+    '-c', 'user.name=Deployment Test',
+    '-c', 'user.email=deployment-test@example.com',
+    'commit', '-m', 'remove a contract file'
+  ]);
+  const missingFileRevision = (await git(directory, ['rev-parse', 'HEAD'])).stdout.trim();
+  assert.equal(await isGeo010ContractChanged({
+    previousRevision: missingFileRevision,
+    revision: completeRevision,
+    root: directory
+  }), true);
+});
 
 test('deployment check accepts a clean main checkout and rejects local changes', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-geo-deploy-'));
