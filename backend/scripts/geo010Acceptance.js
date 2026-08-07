@@ -500,6 +500,36 @@ function historicalV4Query(QuestionSetRun, userId) {
   };
 }
 
+function evaluateHistoricalV4Evidence({
+  reportData,
+  reportRow,
+  databaseRow,
+  csv,
+  csvRow,
+  contentType,
+  contentDisposition
+}) {
+  const semantics = String(
+    reportRow?.metric_semantics_version || databaseRow.metric_semantics_version || ''
+  );
+  const readable = reportData.analysis_contract_version === 'ai_structured_v4'
+    && reportRow?.analysis_contract_version === 'ai_structured_v4'
+    && /_v1$/u.test(semantics)
+    && csv.analysisContractVersion === 'ai_structured_v4'
+    && Boolean(csvRow)
+    && csvRow.metric_semantics_version === semantics
+    && contentType.includes('text/csv')
+    && contentDisposition.includes('attachment');
+  return {
+    readable,
+    analysis_contract_version: 'ai_structured_v4',
+    metric_semantics_version: semantics,
+    csv_contract_level: 'file',
+    csv_content_type_valid: contentType.includes('text/csv'),
+    csv_attachment: contentDisposition.includes('attachment')
+  };
+}
+
 async function verifyHistoricalV4(QuestionRecord, QuestionSetRun, token, userId) {
   const { parseCsv } = require('../services/QuestionSetRunCsvService');
   // 显式投影旧合同字段，确保停服前预检仍可读取尚未执行 v5 schema
@@ -519,26 +549,19 @@ async function verifyHistoricalV4(QuestionRecord, QuestionSetRun, token, userId)
     `/geo-projects/${row.project_id}/question-set-runs/${row.question_set_run_id}/export`,
     { token }
   );
-  const semantics = String(reportRow?.metric_semantics_version || row.metric_semantics_version || '');
   const csv = parseCsv(exported.text);
   const csvRow = csv.rows.find((item) => Number(item.record_id) === Number(row.id));
   const contentType = String(exported.headers['content-type'] || '').toLowerCase();
   const contentDisposition = String(exported.headers['content-disposition'] || '').toLowerCase();
-  const readable = reportData.analysis_contract_version === 'ai_structured_v4'
-    && reportRow?.analysis_contract_version === 'ai_structured_v4'
-    && /_v1$/u.test(semantics)
-    && csv.analysisContractVersion === 'ai_structured_v4'
-    && csvRow?.analysis_contract_version === 'ai_structured_v4'
-    && csvRow?.metric_semantics_version === semantics
-    && contentType.includes('text/csv')
-    && contentDisposition.includes('attachment');
-  return {
-    readable,
-    analysis_contract_version: 'ai_structured_v4',
-    metric_semantics_version: semantics,
-    csv_content_type_valid: contentType.includes('text/csv'),
-    csv_attachment: contentDisposition.includes('attachment')
-  };
+  return evaluateHistoricalV4Evidence({
+    reportData,
+    reportRow,
+    databaseRow: row,
+    csv,
+    csvRow,
+    contentType,
+    contentDisposition
+  });
 }
 
 async function verifyDeepSeekFlashCredential(models) {
@@ -1389,6 +1412,7 @@ module.exports = {
   extractRecordId,
   extractRecordIds,
   historicalV4Query,
+  evaluateHistoricalV4Evidence,
   readRequiredRevision,
   acceptanceAvailableTimeoutMs,
   acceptanceRequiredTimeoutMs,

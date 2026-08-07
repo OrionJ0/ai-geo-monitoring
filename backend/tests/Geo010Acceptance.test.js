@@ -30,7 +30,8 @@ const {
   writePreflightBudgetResult,
   writeSecureEvidence,
   createAcceptanceSession,
-  withAcceptanceModels
+  withAcceptanceModels,
+  evaluateHistoricalV4Evidence
 } = require('../scripts/geo010Acceptance');
 const projectFieldNormalizationService = require('../services/ProjectFieldNormalizationService');
 
@@ -203,6 +204,42 @@ test('historical v4 preflight explicitly projects only old-schema columns', () =
   ]);
   assert.equal(query.attributes.includes('competitor_snapshot'), false);
   assert.equal(Object.hasOwn(historicalV4Query(QuestionSetRun).where, 'user_id'), false);
+});
+
+test('historical v4 evidence uses the file-level CSV contract and row-level semantics', () => {
+  const valid = {
+    reportData: { analysis_contract_version: 'ai_structured_v4' },
+    reportRow: {
+      analysis_contract_version: 'ai_structured_v4',
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
+    },
+    databaseRow: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
+    },
+    csv: { analysisContractVersion: 'ai_structured_v4' },
+    csvRow: {
+      metric_semantics_version: 'contextual_competitor_mentions_sov_v1'
+    },
+    contentType: 'text/csv; charset=utf-8',
+    contentDisposition: 'attachment; filename="history.csv"'
+  };
+  const evidence = evaluateHistoricalV4Evidence(valid);
+  assert.equal(evidence.readable, true);
+  assert.equal(evidence.csv_contract_level, 'file');
+
+  const invalid = [
+    { ...valid, csv: { analysisContractVersion: 'ai_structured_v5' } },
+    { ...valid, csvRow: null },
+    {
+      ...valid,
+      csvRow: { metric_semantics_version: 'contextual_competitor_mentions_sov_v2_scoped' }
+    },
+    { ...valid, contentType: 'application/json' },
+    { ...valid, contentDisposition: 'inline' }
+  ];
+  invalid.forEach((input) => {
+    assert.equal(evaluateHistoricalV4Evidence(input).readable, false);
+  });
 });
 
 test('derives record wait budgets from queue waves, concurrency and execution lease', () => {
